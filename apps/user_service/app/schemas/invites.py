@@ -89,12 +89,17 @@ class InviteCreateRequest(BaseModel):
     phone_number: str | None = None
     phone_isd_code: str | None = None
     role_id: uuid.UUID = Field(default="member", description="Role: owner, admin, or member")
+    team_id: uuid.UUID | None = Field(
+        None,
+        description="Optional team to add the invitee to when the invitation is accepted",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
+                "team_id": "660e8400-e29b-41d4-a716-446655440001",
                 "expires_in_days": 7,
             }
         }
@@ -172,6 +177,10 @@ class InviteListItem(BaseModel):
     first_name: str | None = Field(None, min_length=2)
     last_name: str | None = Field(None, min_length=1)
     phone: str | None = None
+    team_id: uuid.UUID | None = Field(
+        None,
+        description="Team the invitee will be added to on acceptance, if set at invite time",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
