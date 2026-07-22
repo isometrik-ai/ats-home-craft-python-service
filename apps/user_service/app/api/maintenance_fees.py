@@ -10,6 +10,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.fee_configuration import (
     PayMaintenanceFeeInvoiceRequest,
@@ -18,6 +19,7 @@ from apps.user_service.app.services.fee_calculation_service import (
     convert_major_to_minor,
 )
 from apps.user_service.app.services.fee_invoice_service import FeeInvoiceService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     extract_onboarding_contact_context,
     handle_api_exceptions,
@@ -88,6 +90,13 @@ async def list_my_fee_invoices(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="maintenance_fee_invoices",
+    category="FINANCE",
+)
 async def pay_fee_invoice(
     request: Request,
     invoice_id: str = Path(...),
@@ -119,6 +128,15 @@ async def pay_fee_invoice(
         invoice_id=invoice_id,
         amount_minor=amount_minor,
         actor_user_id=user_context.user_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="maintenance_fee_invoices",
+        requested_id=invoice_id,
+        description=f"Recorded maintenance fee payment: {invoice_id}",
+        risk_level="high",
+        new_data=data,
     )
     return success_response(
         request=request,

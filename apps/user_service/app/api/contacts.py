@@ -50,6 +50,7 @@ from apps.user_service.app.services.typesense_index_service import (
     delete_contact_background,
 )
 from apps.user_service.app.services.vehicles_service import VehiclesService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -156,14 +157,6 @@ async def create_contact(
             db_connection=db_connection,
             permission_codes=CONTACTS_MANAGEMENT_CREATE,
         )
-        request.state.audit_table = "contacts"
-        request.state.audit_description = "Created contact"
-        request.state.audit_risk_level = "high"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
         service = ContactsService(
             db_connection=db_connection,
             user_context=user_context,
@@ -172,10 +165,16 @@ async def create_contact(
         event_service = EventService(db_connection=db_connection)
         result = await service.create_contact(body)
         contact_id = result["contact_id"]
-        request.state.audit_requested_id = str(contact_id)
-        request.state.audit_description = f"Created contact: {contact_id}"
-        request.state.raw_audit_old_data = result.get("old_data")
-        request.state.raw_audit_new_data = result.get("new_data")
+        set_audit_context(
+            request,
+            user_context,
+            table="contacts",
+            requested_id=str(contact_id),
+            description=f"Created contact: {contact_id}",
+            risk_level="high",
+            old_data=result.get("old_data"),
+            new_data=result.get("new_data"),
+        )
         created_events = await ContactsService.create_lifecycle_events_for_created_entities(
             event_service=event_service,
             created_entities=result.get("created_entities"),
@@ -614,19 +613,18 @@ async def update_contact(
         )
         service = ContactsService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
-        request.state.audit_table = "contacts"
-        request.state.audit_requested_id = contact_id
-        request.state.audit_description = f"Updated contact: {contact_id}"
-        request.state.audit_risk_level = "medium"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
         result = await service.update_contact(contact_id=contact_id, body=body)
+        set_audit_context(
+            request,
+            user_context,
+            table="contacts",
+            requested_id=contact_id,
+            description=f"Updated contact: {contact_id}",
+            risk_level="medium",
+            old_data=result.get("old_data"),
+            new_data=result.get("new_data"),
+        )
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
-        request.state.raw_audit_old_data = result.get("old_data")
-        request.state.raw_audit_new_data = result.get("new_data")
         companies_delta = (result.get("companies_delta") or {}) if isinstance(result, dict) else {}
         raw_affected = companies_delta.get("affected_company_ids") or []
         affected_company_ids = list(dict.fromkeys(str(cid) for cid in raw_affected))
@@ -737,15 +735,14 @@ async def enrich_contact(
             db_connection=db_connection,
             permission_codes=CONTACTS_MANAGEMENT_EDIT,
         )
-        request.state.audit_table = "contacts"
-        request.state.audit_requested_id = contact_id
-        request.state.audit_description = f"Triggered enrichment for contact: {contact_id}"
-        request.state.audit_risk_level = "medium"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
+        set_audit_context(
+            request,
+            user_context,
+            table="contacts",
+            requested_id=contact_id,
+            description=f"Triggered enrichment for contact: {contact_id}",
+            risk_level="medium",
+        )
         organization_id = user_context.organization_id
         event_service = EventService(db_connection=db_connection)
         enrich_event = await event_service.create_lifecycle_event(
@@ -910,14 +907,6 @@ async def create_contact_vehicle(
         db_connection=db_connection,
         permission_codes=CONTACTS_MANAGEMENT_EDIT,
     )
-    request.state.audit_table = "vehicles"
-    request.state.audit_requested_id = contact_id
-    request.state.audit_description = f"Added vehicle for contact: {contact_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     contacts_service = ContactsService(
         db_connection=db_connection,
         user_context=user_context,
@@ -929,7 +918,15 @@ async def create_contact_vehicle(
         user_context=user_context,
     )
     data = await vehicles_service.create_vehicle(contact_id=contact_id, body=body)
-    request.state.raw_audit_new_data = data
+    set_audit_context(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=contact_id,
+        description=f"Added vehicle for contact: {contact_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contacts.success.contact_vehicle_created",
@@ -1023,14 +1020,6 @@ async def add_contact_household_member(
         db_connection=db_connection,
         permission_codes=CONTACTS_MANAGEMENT_EDIT,
     )
-    request.state.audit_table = "contacts"
-    request.state.audit_requested_id = contact_id
-    request.state.audit_description = f"Added household member for contact: {contact_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     contacts_service = ContactsService(
         db_connection=db_connection,
         user_context=user_context,
@@ -1046,7 +1035,15 @@ async def add_contact_household_member(
         primary_contact_id=contact_id,
         body=body,
     )
-    request.state.raw_audit_new_data = data
+    set_audit_context(
+        request,
+        user_context,
+        table="contacts",
+        requested_id=contact_id,
+        description=f"Added household member for contact: {contact_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contacts.success.contact_household_member_added",
@@ -1085,19 +1082,20 @@ async def assign_unit_to_contact(
         db_connection=db_connection,
         permission_codes=CONTACTS_MANAGEMENT_EDIT,
     )
-    request.state.audit_table = "contact_units"
-    request.state.audit_requested_id = contact_id
-    request.state.audit_description = f"Assigned unit to contact: {contact_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     units_service = ContactUnitsService(
         db_connection=db_connection,
         user_context=user_context,
     )
     data = await units_service.admin_assign_unit(contact_id=contact_id, body=body)
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_units",
+        requested_id=contact_id,
+        description=f"Assigned unit to contact: {contact_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.unit_assigned",
@@ -1168,18 +1166,17 @@ async def delete_contact(
         )
         service = ContactsService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
-        request.state.audit_table = "contacts"
-        request.state.audit_requested_id = contact_id
-        request.state.audit_description = f"Deleted contact: {contact_id}"
-        request.state.audit_risk_level = "high"
-        request.state.audit_user_context = {
-            "user_id": user_context.user_id,
-            "user_email": user_context.email,
-            "organization_id": user_context.organization_id,
-        }
         deleted = await service.soft_delete_contact(contact_id=contact_id)
-        request.state.raw_audit_old_data = deleted.get("old_data")
-        request.state.raw_audit_new_data = deleted.get("new_data")
+        set_audit_context(
+            request,
+            user_context,
+            table="contacts",
+            requested_id=contact_id,
+            description=f"Deleted contact: {contact_id}",
+            risk_level="high",
+            old_data=deleted.get("old_data"),
+            new_data=deleted.get("new_data"),
+        )
         event = await event_service.create_lifecycle_event(
             event_type=ContactEventType.DELETED.value,
             aggregate_id=contact_id,

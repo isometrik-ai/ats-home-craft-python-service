@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.gate_passes import (
 from apps.user_service.app.services.pass_verification_service import (
     PassVerificationService,
 )
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -101,22 +102,20 @@ async def check_in_pass(
         permission_codes=VISITOR_MANAGEMENT_VERIFY,
         request=request,
     )
-    request.state.audit_table = "pass_events"
-    request.state.audit_description = f"Checked in visitor pass: {pass_id}"
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    request.state.audit_requested_id = pass_id
-
     service = PassVerificationService(
         db_connection=db_connection,
         user_context=user_context,
     )
     result = await service.check_in(pass_id=pass_id, body=body)
-    request.state.raw_audit_new_data = result
+    set_audit_context(
+        request,
+        user_context,
+        table="pass_events",
+        requested_id=pass_id,
+        description=f"Checked in visitor pass: {pass_id}",
+        risk_level="medium",
+        new_data=result,
+    )
     return success_response(
         request=request,
         message_key="passes.success.checked_in",
@@ -154,22 +153,20 @@ async def check_out_pass(
         permission_codes=VISITOR_MANAGEMENT_VERIFY,
         request=request,
     )
-    request.state.audit_table = "pass_events"
-    request.state.audit_description = f"Checked out visitor pass: {pass_id}"
-    request.state.audit_risk_level = "medium"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    request.state.audit_requested_id = pass_id
-
     service = PassVerificationService(
         db_connection=db_connection,
         user_context=user_context,
     )
     result = await service.check_out(pass_id=pass_id, body=body)
-    request.state.raw_audit_new_data = result
+    set_audit_context(
+        request,
+        user_context,
+        table="pass_events",
+        requested_id=pass_id,
+        description=f"Checked out visitor pass: {pass_id}",
+        risk_level="medium",
+        new_data=result,
+    )
     return success_response(
         request=request,
         message_key="passes.success.checked_out",

@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.passes import (
     UpdatePassRequest,
 )
 from apps.user_service.app.services.passes_service import PassesService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     extract_onboarding_contact_context,
     handle_api_exceptions,
@@ -106,6 +107,15 @@ async def create_pass(
     )
     service = _service(db_connection=db_connection, user_context=user_context)
     data = await service.create_pass(contact_id=str(contact["id"]), body=body)
+    set_audit_context(
+        request,
+        user_context,
+        table="passes",
+        requested_id=str(data.get("id", "")),
+        description=f"Created visitor pass for contact: {contact['id']}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="passes.success.pass_created",
@@ -175,6 +185,15 @@ async def update_pass(
         pass_id=pass_id,
         body=body,
     )
+    set_audit_context(
+        request,
+        user_context,
+        table="passes",
+        requested_id=pass_id,
+        description=f"Updated visitor pass: {pass_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="passes.success.pass_updated",
@@ -210,6 +229,15 @@ async def cancel_pass(
     )
     service = _service(db_connection=db_connection, user_context=user_context)
     data = await service.cancel_pass(contact_id=str(contact["id"]), pass_id=pass_id)
+    set_audit_context(
+        request,
+        user_context,
+        table="passes",
+        requested_id=pass_id,
+        description=f"Cancelled visitor pass: {pass_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="passes.success.pass_cancelled",

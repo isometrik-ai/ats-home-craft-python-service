@@ -36,7 +36,9 @@ from apps.user_service.app.services.household_invitation_service import (
 )
 from apps.user_service.app.services.vehicle_catalog_service import VehicleCatalogService
 from apps.user_service.app.services.vehicles_service import VehiclesService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
+    UserContext,
     extract_onboarding_contact_context,
     handle_api_exceptions,
 )
@@ -173,6 +175,15 @@ async def confirm_properties(
         contact_unit_ids=body.contact_unit_ids,
         default_contact_unit_id=body.default_contact_unit_id,
     )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_units",
+        requested_id=str(contact["id"]),
+        description=f"Confirmed properties for contact: {contact['id']}",
+        risk_level="high",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.properties_confirmed",
@@ -217,6 +228,15 @@ async def claim_properties(
     data = await units_service.claim_properties(
         contact_id=str(contact["id"]),
         contact_unit_ids=body.contact_unit_ids,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_units",
+        requested_id=str(contact["id"]),
+        description=f"Claimed properties for contact: {contact['id']}",
+        risk_level="high",
+        new_data=data,
     )
     payload = ClaimPropertiesResponse.model_validate(data).model_dump(exclude_none=True)
     return success_response(
@@ -290,6 +310,15 @@ async def complete_profile(
         sb_client=sb_client,
     )
     data = await service.complete_profile(contact_id=str(contact["id"]), body=body)
+    set_audit_context(
+        request,
+        user_context,
+        table="contacts",
+        requested_id=str(contact["id"]),
+        description=f"Completed profile for contact: {contact['id']}",
+        risk_level="high",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.profile_updated",
@@ -410,6 +439,15 @@ async def create_vehicle(
         user_context=user_context,
     )
     data = await vehicles_service.create_vehicle(contact_id=str(contact["id"]), body=body)
+    set_audit_context(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=str(contact["id"]),
+        description=f"Created vehicle for contact: {contact['id']}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.vehicle_created",
@@ -454,6 +492,15 @@ async def update_vehicle(
         vehicle_id=vehicle_id,
         body=body,
     )
+    set_audit_context(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Updated vehicle: {vehicle_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.vehicle_updated",
@@ -486,6 +533,14 @@ async def withdraw_vehicle(
     """Withdraw a pending vehicle request (hard-delete before admin approval)."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Withdrew vehicle request: {vehicle_id}",
+        risk_level="medium",
     )
     vehicles_service = VehiclesService(
         db_connection=db_connection,
@@ -535,6 +590,15 @@ async def remove_vehicle(
         contact_id=str(contact["id"]),
         vehicle_id=vehicle_id,
     )
+    set_audit_context(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Removed vehicle: {vehicle_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.vehicle_removed",
@@ -551,6 +615,13 @@ async def remove_vehicle(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="contact_unit_onboarding_steps",
+    category="CONTACT_ONBOARDING",
+)
 async def complete_vehicles_step(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
@@ -560,6 +631,14 @@ async def complete_vehicles_step(
     """Mark the vehicles onboarding step complete for one unit."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_unit_onboarding_steps",
+        requested_id=body.contact_unit_id,
+        description=f"Completed vehicles step for contact: {contact['id']}",
+        risk_level="medium",
     )
     vehicles_service = VehiclesService(
         db_connection=db_connection,
@@ -584,6 +663,13 @@ async def complete_vehicles_step(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contact_onboarding_steps",
+    category="CONTACT_ONBOARDING",
+)
 async def skip_onboarding_step(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
@@ -593,6 +679,14 @@ async def skip_onboarding_step(
     """Skip an optional onboarding step."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_onboarding_steps",
+        requested_id=str(contact["id"]),
+        description=f"Skipped onboarding step for contact: {contact['id']}",
+        risk_level="medium",
     )
     service = _service(
         db_connection=db_connection,
@@ -685,6 +779,15 @@ async def add_household_member(
         primary_contact_id=str(contact["id"]),
         body=body,
     )
+    set_audit_context(
+        request,
+        user_context,
+        table="contacts",
+        requested_id=str(contact["id"]),
+        description=f"Added household member for contact: {contact['id']}",
+        risk_level="high",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.household_member_added",
@@ -730,6 +833,15 @@ async def update_household_member(
         primary_contact_id=str(contact["id"]),
         contact_unit_id=contact_unit_id,
         body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contacts",
+        requested_id=contact_unit_id,
+        description=f"Updated household member: {contact_unit_id}",
+        risk_level="medium",
+        new_data=data,
     )
     return success_response(
         request=request,
@@ -808,6 +920,22 @@ async def accept_household_invitation(
     )
     data = await service.accept(token=body.token, password=body.password)
 
+    contact_id = str(data.get("contact_id", ""))
+    audit_user_context = UserContext(
+        user_id=str(data.get("user", {}).get("id") or contact_id),
+        email=data.get("user", {}).get("email") or f"contact-{contact_id}@household-invite",
+        organization_id=data.get("organization_id"),
+    )
+    set_audit_context(
+        request,
+        audit_user_context,
+        table="household_invitations",
+        requested_id=contact_id,
+        description=f"Accepted household invitation for contact: {contact_id}",
+        risk_level="medium",
+        new_data=data,
+    )
+
     session_id = extract_session_id_from_access_token(data.get("access_token"))
     if session_id:
         await warm_session_context_after_auth(
@@ -846,6 +974,23 @@ async def decline_household_invitation(
     """Decline a phone invitation; removes the pending link and orphan contact."""
     service = _invitation_service(db_connection=db_connection)
     data = await service.decline(token=body.token)
+
+    contact_id = str(data.get("contact_id", ""))
+    audit_user_context = UserContext(
+        user_id=contact_id,
+        email=data.get("user", {}).get("email") or f"contact-{contact_id}@household-invite",
+        organization_id=data.get("organization_id"),
+    )
+    set_audit_context(
+        request,
+        audit_user_context,
+        table="household_invitations",
+        requested_id=contact_id,
+        description=f"Declined household invitation for contact: {contact_id}",
+        risk_level="medium",
+        new_data=data,
+    )
+
     return success_response(
         request=request,
         message_key="contact_onboarding.success.invitation_declined",
@@ -888,6 +1033,15 @@ async def revoke_household_invitation(
         primary_contact_id=str(contact["id"]),
         contact_unit_id=contact_unit_id,
     )
+    set_audit_context(
+        request,
+        user_context,
+        table="household_invitations",
+        requested_id=contact_unit_id,
+        description=f"Revoked household invitation: {contact_unit_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.invitation_revoked",
@@ -904,6 +1058,13 @@ async def revoke_household_invitation(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="household_invitations",
+    category="CONTACT_ONBOARDING",
+)
 async def resend_household_invitation(
     request: Request,
     contact_unit_id: str = Path(..., description="Household member's contact_unit id"),
@@ -922,6 +1083,15 @@ async def resend_household_invitation(
     data = await service.resend_household_invitation(
         primary_contact_id=str(contact["id"]),
         contact_unit_id=contact_unit_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="household_invitations",
+        requested_id=contact_unit_id,
+        description=f"Resent household invitation: {contact_unit_id}",
+        risk_level="medium",
+        new_data=data,
     )
     return success_response(
         request=request,
@@ -965,6 +1135,15 @@ async def remove_household_member(
         primary_contact_id=str(contact["id"]),
         contact_unit_id=contact_unit_id,
     )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_units",
+        requested_id=contact_unit_id,
+        description=f"Removed household member: {contact_unit_id}",
+        risk_level="medium",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.household_member_removed",
@@ -981,6 +1160,13 @@ async def remove_household_member(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="contact_unit_onboarding_steps",
+    category="CONTACT_ONBOARDING",
+)
 async def complete_household_step(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
@@ -990,6 +1176,14 @@ async def complete_household_step(
     """Mark the household onboarding step complete for one unit."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_unit_onboarding_steps",
+        requested_id=body.contact_unit_id,
+        description=f"Completed household step for contact: {contact['id']}",
+        risk_level="medium",
     )
     service = _service(
         db_connection=db_connection,
@@ -1039,6 +1233,15 @@ async def set_default_unit(
     data = await units_service.set_default_unit(
         contact_id=str(contact["id"]),
         contact_unit_id=body.contact_unit_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_units",
+        requested_id=body.contact_unit_id,
+        description=f"Set default unit for contact: {contact['id']}",
+        risk_level="medium",
+        new_data=data,
     )
     return success_response(
         request=request,
@@ -1110,6 +1313,15 @@ async def complete_onboarding(
         sb_client=None,
     )
     data = await service.complete_onboarding(contact_id=str(contact["id"]))
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_onboarding_steps",
+        requested_id=str(contact["id"]),
+        description=f"Completed onboarding for contact: {contact['id']}",
+        risk_level="high",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="contact_onboarding.success.onboarding_completed",

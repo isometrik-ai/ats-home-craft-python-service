@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.move_events import (
     UpdateMoveEventRequest,
 )
 from apps.user_service.app.services.move_events_service import MoveEventsService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -118,7 +119,15 @@ async def create_move_event(
         user_context=user_context,
     )
     created = await service.create_move_event(body)
-    request.state.raw_audit_new_data = created.model_dump()
+    set_audit_context(
+        request,
+        user_context,
+        table="move_events",
+        requested_id=str(created.id),
+        description=f"Created move event: {created.id}",
+        risk_level="high",
+        new_data=created.model_dump(),
+    )
     return success_response(
         request=request,
         data=created.model_dump(),
@@ -196,7 +205,15 @@ async def update_move_event(
         user_context=user_context,
     )
     updated = await service.update_move_event(move_event_id, body)
-    request.state.raw_audit_new_data = updated.model_dump()
+    set_audit_context(
+        request,
+        user_context,
+        table="move_events",
+        requested_id=move_event_id,
+        description=f"Updated move event: {move_event_id}",
+        risk_level="medium",
+        new_data=updated.model_dump(),
+    )
     return success_response(
         request=request,
         data=updated.model_dump(),
@@ -238,7 +255,15 @@ async def delete_move_event(
         user_context=user_context,
     )
     deleted = await service.delete_move_event(move_event_id)
-    request.state.raw_audit_old_data = deleted.model_dump()
+    set_audit_context(
+        request,
+        user_context,
+        table="move_events",
+        requested_id=move_event_id,
+        description=f"Deleted move event: {move_event_id}",
+        risk_level="high",
+        old_data=deleted.model_dump(),
+    )
     return success_response(
         request=request,
         data=deleted.model_dump(),

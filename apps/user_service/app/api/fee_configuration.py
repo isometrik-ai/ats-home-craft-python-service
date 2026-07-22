@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
@@ -16,6 +18,7 @@ from apps.user_service.app.schemas.fee_configuration import (
 from apps.user_service.app.services.fee_configuration_service import (
     FeeConfigurationService,
 )
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     check_permissions,
@@ -48,13 +51,19 @@ def _set_audit(
     table: str,
     requested_id: str,
     description: str,
+    old_data: Any | None = None,
+    new_data: Any | None = None,
 ) -> None:
     """Populate request.state audit fields for the audit decorator."""
-    request.state.audit_table = table
-    request.state.audit_requested_id = requested_id
-    request.state.audit_description = description
-    request.state.audit_user_id = user_context.user_id
-    request.state.audit_organization_id = user_context.organization_id
+    set_audit_context(
+        request,
+        user_context,
+        table=table,
+        requested_id=requested_id,
+        description=description,
+        old_data=old_data,
+        new_data=new_data,
+    )
 
 
 @handle_api_exceptions("get fee configuration")
@@ -123,8 +132,8 @@ async def upsert_fee_configuration(
         table="project_fee_settings",
         requested_id=project_id,
         description="Updated project fee configuration",
+        new_data=data,
     )
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         data=data,
