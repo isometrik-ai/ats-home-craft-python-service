@@ -46,6 +46,10 @@ from apps.user_service.app.api.superadmin_organizations import (
     router as superadmin_organizations_router,
 )
 from apps.user_service.app.api.teams import router as teams_router
+from apps.user_service.app.api.tenant_requests import router as tenant_requests_router
+from apps.user_service.app.api.tenant_requests_owner import (
+    router as tenant_requests_owner_router,
+)
 from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
@@ -70,6 +74,8 @@ router.include_router(verification_codes_router)
 router.include_router(teams_router)
 router.include_router(contacts_router)
 router.include_router(contact_onboarding_router)
+router.include_router(tenant_requests_owner_router)
+router.include_router(tenant_requests_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
 router.include_router(visitor_logs_router)
@@ -111,6 +117,8 @@ async def api_status():
             "/teams",
             "/contacts",
             "/contact-onboarding",
+            "/contact-onboarding/tenant-requests",
+            "/tenant-requests",
             "/passes",
             "/visitor-logs",
             "/move-events",

@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
-from apps.user_service.app.schemas.enums import ContactUnitStatus
+from apps.user_service.app.schemas.enums import (
+    ContactUnitRelationship,
+    ContactUnitStatus,
+)
 
 _HOUSEHOLD_INVITATION_LATERAL_JOIN = """
 LEFT JOIN LATERAL (
@@ -143,6 +146,77 @@ class ContactUnitsRepository(BaseRepository):
             ContactUnitStatus.ACTIVE.value,
         )
         return row is not None
+
+    async def owner_has_active_unit(
+        self,
+        *,
+        organization_id: str,
+        owner_contact_id: str,
+        unit_id: str,
+    ) -> bool:
+        """True when an Owner contact has an active link to the unit."""
+        row = await self.db_connection.fetchval(
+            """
+            SELECT 1
+            FROM contact_units cu
+            JOIN contacts c ON c.id = cu.contact_id
+            WHERE cu.organization_id = $1::uuid
+              AND cu.contact_id = $2::uuid
+              AND cu.unit_id = $3::uuid
+              AND cu.status = $4::contact_unit_status
+              AND c.contact_type = 'Owner'
+            LIMIT 1
+            """,
+            organization_id,
+            owner_contact_id,
+            unit_id,
+            ContactUnitStatus.ACTIVE.value,
+        )
+        return row is not None
+
+    async def insert_primary_occupant_link(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        contact_id: str,
+    ) -> dict[str, Any]:
+        """Link a tenant as the primary active occupant, clearing other primaries on the unit."""
+        await self.db_connection.execute(
+            """
+            UPDATE contact_units
+            SET is_primary = false,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND status = $3::contact_unit_status
+              AND is_primary = true
+            """,
+            organization_id,
+            unit_id,
+            ContactUnitStatus.ACTIVE.value,
+        )
+        row = await self.db_connection.fetchrow(
+            """
+            INSERT INTO contact_units (
+                organization_id, project_id, unit_id, contact_id,
+                status, relationship, is_primary, activated_at
+            )
+            VALUES (
+                $1::uuid, $2::uuid, $3::uuid, $4::uuid,
+                $5::contact_unit_status, $6::contact_unit_relationship, true, now()
+            )
+            RETURNING id::text AS id
+            """,
+            organization_id,
+            project_id,
+            unit_id,
+            contact_id,
+            ContactUnitStatus.ACTIVE.value,
+            ContactUnitRelationship.SELF.value,
+        )
+        return dict(row)
 
     async def get_by_unit_and_contact(
         self,

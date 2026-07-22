@@ -758,5 +758,28 @@
       "scheduler_run": "Fee billing scheduler completed successfully.",
       "payment_recorded": "Payment recorded successfully."
     }
+  },
+  "tenant_requests": {
+    "errors": {
+      "request_not_found": "The tenant request could not be found.",
+      "document_not_found": "The tenant request document could not be found.",
+      "unit_not_owned": "You do not have an active owner assignment for this unit.",
+      "inflight_request_exists": "This unit already has a tenant request in progress.",
+      "documents_incomplete": "All required documents must be uploaded before submitting.",
+      "not_ready_to_approve": "All documents must be verified before approving this request.",
+      "invalid_status_transition": "This action is not allowed for the current request status.",
+      "document_not_rejected": "Only rejected documents can be re-uploaded."
+    },
+    "success": {
+      "list_retrieved": "Tenant requests retrieved successfully.",
+      "summary_retrieved": "Tenant request summary retrieved successfully.",
+      "retrieved": "Tenant request retrieved successfully.",
+      "created": "Tenant request submitted successfully.",
+      "cancelled": "Tenant request cancelled successfully.",
+      "document_reuploaded": "Document re-uploaded successfully.",
+      "document_verified": "Document verified successfully.",
+      "document_rejected": "Document rejected successfully.",
+      "approved": "Tenant request approved successfully."
+    }
   }
 }
