@@ -186,6 +186,10 @@ class _FakeContactUnitsRepo:
         """Return configured confirm result."""
         return self.confirm_result
 
+    async def find_active_primary_conflicts(self, **_kwargs):
+        """Return no primary conflicts by default."""
+        return []
+
 
 def _service(
     onboarding_repo: _FakeOnboardingRepo | None = None,
@@ -481,6 +485,7 @@ async def test_confirm_properties_validates_selection_count():
         user_context=_user_context(),
     )
     svc.repo = MagicMock()
+    svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
     svc.repo.confirm_selection = AsyncMock(return_value=[{"id": "cu-1", "status": "active"}])
     svc.onboarding_repo = MagicMock()
     svc.onboarding_repo.list_steps = AsyncMock(return_value=_completed_profile_steps())

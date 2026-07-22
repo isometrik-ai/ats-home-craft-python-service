@@ -729,5 +729,34 @@
       "list_retrieved": "Move events retrieved successfully.",
       "detail_retrieved": "Move event details retrieved successfully."
     }
+  },
+  "fee_configuration": {
+    "errors": {
+      "project_not_found": "The project could not be found.",
+      "rate_tab_not_applicable": "This fee rate tab does not apply to the project's property types.",
+      "start_offset_required": "Start offset days are required when fee starts after a number of days.",
+      "configuration_incomplete": "Fee configuration is incomplete for this project.",
+      "invalid_retry_count": "Retry count must be between 2 and 5.",
+      "invalid_interval": "Interval days must be one of 1, 2, 3, or 7."
+    },
+    "success": {
+      "retrieved": "Fee configuration retrieved successfully.",
+      "updated": "Fee configuration saved successfully.",
+      "preview": "Fee preview calculated successfully."
+    }
+  },
+  "fee_invoices": {
+    "errors": {
+      "invoice_not_found": "The maintenance fee invoice could not be found.",
+      "invoice_already_paid": "This invoice has already been paid in full.",
+      "invalid_payment_amount": "The payment amount is invalid for this invoice."
+    },
+    "success": {
+      "list_retrieved": "Maintenance fee invoices retrieved successfully.",
+      "retrieved": "Maintenance fee invoice retrieved successfully.",
+      "generated": "Maintenance fee invoices generated successfully.",
+      "scheduler_run": "Fee billing scheduler completed successfully.",
+      "payment_recorded": "Payment recorded successfully."
+    }
   }
 }

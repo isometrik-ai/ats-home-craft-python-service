@@ -61,6 +61,10 @@ AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM = "audit_logs_management.view_system"
 VISITOR_MANAGEMENT_VIEW = "visitor_management.view"
 VISITOR_MANAGEMENT_VERIFY = "visitor_management.verify"
 
+FINANCE_MANAGEMENT_VIEW = "finance_management.view"
+FINANCE_MANAGEMENT_EDIT = "finance_management.edit"
+FINANCE_MANAGEMENT_ADMIN = "finance_management.admin"
+
 DEFAULT_PERMISSIONS = [
     # User Management
     (
@@ -362,6 +366,25 @@ DEFAULT_PERMISSIONS = [
         "Verify Visitor Passes",
         "Verify passes and record check-in/check-out at the gate",
         "visitor_logs",
+    ),
+    # Finance / maintenance fees
+    (
+        FINANCE_MANAGEMENT_VIEW,
+        "View Finance",
+        "View fee configuration and maintenance fee invoices",
+        "finance",
+    ),
+    (
+        FINANCE_MANAGEMENT_EDIT,
+        "Edit Finance Settings",
+        "Create and update project fee configuration",
+        "finance",
+    ),
+    (
+        FINANCE_MANAGEMENT_ADMIN,
+        "Administer Finance",
+        "Generate invoices, run billing scheduler, and manage escalations",
+        "finance",
     ),
 ]
 

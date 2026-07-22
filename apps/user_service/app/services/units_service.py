@@ -7,6 +7,9 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
+from apps.user_service.app.db.repositories.maintenance_fee_invoices_repository import (
+    MaintenanceFeeInvoicesRepository,
+)
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import ProjectSetupStep
@@ -14,6 +17,9 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateParkingZoneRequest,
     CreateUnitRequest,
     UpdateUnitRequest,
+)
+from apps.user_service.app.services.fee_calculation_service import (
+    convert_minor_to_major,
 )
 from apps.user_service.app.services.inventory_service import is_sold_status
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
@@ -116,6 +122,7 @@ class UnitsService:
         self.user_context = user_context
         self.units_repo = UnitsRepository(db_connection)
         self.projects_repo = ProjectsRepository(db_connection)
+        self.invoices_repo = MaintenanceFeeInvoicesRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection, user_context=user_context
         )
@@ -273,8 +280,17 @@ class UnitsService:
             }
 
         parking_entitlement = int(row.get("parking_entitlement") or 0)
+        unit_id = str(row["id"])
+        outstanding_minor = await self.invoices_repo.sum_outstanding_by_unit(
+            organization_id=self._org_id,
+            unit_id=unit_id,
+        )
+        latest_fee_minor = await self.invoices_repo.latest_monthly_fee_by_unit(
+            organization_id=self._org_id,
+            unit_id=unit_id,
+        )
         return {
-            "id": str(row["id"]),
+            "id": unit_id,
             "project_id": str(row["project_id"]),
             "code": row.get("code") or "",
             "unit_label": row.get("unit_label"),
@@ -300,8 +316,16 @@ class UnitsService:
             "residents": residents,
             "vehicles_count": vehicles_count,
             "financials": {
-                "base_fee_monthly": None,
-                "outstanding_amount": None,
+                "base_fee_monthly": (
+                    convert_minor_to_major(latest_fee_minor)
+                    if latest_fee_minor is not None
+                    else None
+                ),
+                "outstanding_amount": (
+                    convert_minor_to_major(outstanding_minor)
+                    if outstanding_minor > 0
+                    else (0.0 if latest_fee_minor is not None else None)
+                ),
                 "currency": "INR",
             },
             "created_at": serialize_row(row)["created_at"],
