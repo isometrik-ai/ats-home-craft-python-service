@@ -1,6 +1,8 @@
 """Project Setup API (project basics, media, wizard status/steps)."""
 # pylint: disable=too-many-lines
 
+from typing import Any
+
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
@@ -58,6 +60,7 @@ from apps.user_service.app.services.towers_service import TowersService
 from apps.user_service.app.services.unit_configs_service import UnitConfigsService
 from apps.user_service.app.services.units_service import UnitsService
 from apps.user_service.app.services.vehicles_service import VehiclesService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     check_permissions,
@@ -93,16 +96,21 @@ def _set_audit(
     table: str,
     requested_id: str,
     description: str,
+    risk_level: str = "low",
+    old_data: Any | None = None,
+    new_data: Any | None = None,
 ) -> None:
     """Populate request.state audit fields for the audit decorator."""
-    request.state.audit_table = table
-    request.state.audit_requested_id = requested_id
-    request.state.audit_description = description
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
+    set_audit_context(
+        request,
+        user_context,
+        table=table,
+        requested_id=requested_id,
+        description=description,
+        risk_level=risk_level,
+        old_data=old_data,
+        new_data=new_data,
+    )
 
 
 @handle_api_exceptions("create project")
@@ -136,16 +144,15 @@ async def create_project(
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
     result = await service.create_project(body)
     project_id = result["project_id"]
-    request.state.audit_table = "projects"
-    request.state.audit_requested_id = str(project_id)
-    request.state.audit_description = f"Created project: {project_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
-    request.state.raw_audit_old_data = result.get("old_data")
-    request.state.raw_audit_new_data = result.get("new_data")
+    _set_audit(
+        request,
+        user_context,
+        table="projects",
+        requested_id=str(project_id),
+        description=f"Created project: {project_id}",
+        old_data=result.get("old_data"),
+        new_data=result.get("new_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.project_created",
@@ -377,17 +384,16 @@ async def update_project(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
-    request.state.audit_table = "projects"
-    request.state.audit_requested_id = project_id
-    request.state.audit_description = f"Updated project: {project_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     result = await service.update_project(project_id=project_id, body=body)
-    request.state.raw_audit_old_data = result.get("old_data")
-    request.state.raw_audit_new_data = result.get("new_data")
+    _set_audit(
+        request,
+        user_context,
+        table="projects",
+        requested_id=project_id,
+        description=f"Updated project: {project_id}",
+        old_data=result.get("old_data"),
+        new_data=result.get("new_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.project_updated",
@@ -426,17 +432,17 @@ async def delete_project(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
-    request.state.audit_table = "projects"
-    request.state.audit_requested_id = project_id
-    request.state.audit_description = f"Deleted project: {project_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     result = await service.delete_project(project_id=project_id)
-    request.state.raw_audit_old_data = result.get("old_data")
-    request.state.raw_audit_new_data = result.get("new_data")
+    _set_audit(
+        request,
+        user_context,
+        table="projects",
+        requested_id=project_id,
+        description=f"Deleted project: {project_id}",
+        risk_level="high",
+        old_data=result.get("old_data"),
+        new_data=result.get("new_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.project_deleted",
@@ -454,6 +460,13 @@ async def delete_project(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="project_setup_steps",
+    category="PROJECT_SETUP",
+)
 async def complete_setup_step(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -470,6 +483,14 @@ async def complete_setup_step(
     )
     service = ProjectSetupService(db_connection=db_connection, user_context=user_context)
     data = await service.complete_step(project_id=project_id, step_key=step_key, data=body.data)
+    _set_audit(
+        request,
+        user_context,
+        table="project_setup_steps",
+        requested_id=step_key,
+        description=f"Completed setup step {step_key} for project: {project_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.step_completed",
@@ -508,15 +529,15 @@ async def complete_project_setup(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectSetupService(db_connection=db_connection, user_context=user_context)
-    request.state.audit_table = "projects"
-    request.state.audit_requested_id = project_id
-    request.state.audit_description = f"Completed project setup: {project_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     data = await service.complete_wizard(project_id=project_id)
+    _set_audit(
+        request,
+        user_context,
+        table="projects",
+        requested_id=project_id,
+        description=f"Completed project setup: {project_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.setup_completed",
@@ -556,16 +577,15 @@ async def add_project_media(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
-    request.state.audit_table = "project_media"
-    request.state.audit_requested_id = project_id
-    request.state.audit_description = f"Added media to project: {project_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     data = await service.add_media(project_id=project_id, body=body)
-    request.state.raw_audit_new_data = data
+    _set_audit(
+        request,
+        user_context,
+        table="project_media",
+        requested_id=project_id,
+        description=f"Added media to project: {project_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.media_added",
@@ -641,16 +661,15 @@ async def delete_project_media(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
-    request.state.audit_table = "project_media"
-    request.state.audit_requested_id = media_id
-    request.state.audit_description = f"Deleted project media: {media_id}"
-    request.state.audit_user_context = {
-        "user_id": user_context.user_id,
-        "user_email": user_context.email,
-        "organization_id": user_context.organization_id,
-    }
     result = await service.remove_media(project_id=project_id, media_id=media_id)
-    request.state.raw_audit_old_data = result.get("old_data")
+    _set_audit(
+        request,
+        user_context,
+        table="project_media",
+        requested_id=media_id,
+        description=f"Deleted project media: {media_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.media_deleted",
@@ -700,8 +719,8 @@ async def create_tower(
         table="towers",
         requested_id=str(data.get("id")),
         description=f"Created tower in project: {project_id}",
+        new_data=data,
     )
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.tower_created",
@@ -775,15 +794,15 @@ async def update_tower(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
+    data = await service.update_tower(project_id=project_id, tower_id=tower_id, body=body)
     _set_audit(
         request,
         user_context,
         table="towers",
         requested_id=tower_id,
         description=f"Updated tower: {tower_id}",
+        new_data=data,
     )
-    data = await service.update_tower(project_id=project_id, tower_id=tower_id, body=body)
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.tower_updated",
@@ -822,15 +841,15 @@ async def delete_tower(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
+    result = await service.delete_tower(project_id=project_id, tower_id=tower_id)
     _set_audit(
         request,
         user_context,
         table="towers",
         requested_id=tower_id,
         description=f"Deleted tower: {tower_id}",
+        old_data=result.get("old_data"),
     )
-    result = await service.delete_tower(project_id=project_id, tower_id=tower_id)
-    request.state.raw_audit_old_data = result.get("old_data")
     return success_response(
         request=request,
         message_key="project_setup.success.tower_deleted",
@@ -847,6 +866,13 @@ async def delete_tower(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="tower_wings",
+    category="PROJECT_SETUP",
+)
 async def create_tower_wing(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -863,6 +889,14 @@ async def create_tower_wing(
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_wing(project_id=project_id, tower_id=tower_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="tower_wings",
+        requested_id=str(data.get("id")),
+        description=f"Created wing in tower: {tower_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.wing_created",
@@ -915,6 +949,13 @@ async def list_tower_wings(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="tower_wings",
+    category="PROJECT_SETUP",
+)
 async def delete_tower_wing(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -930,7 +971,15 @@ async def delete_tower_wing(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
-    await service.delete_wing(project_id=project_id, tower_id=tower_id, wing_id=wing_id)
+    result = await service.delete_wing(project_id=project_id, tower_id=tower_id, wing_id=wing_id)
+    _set_audit(
+        request,
+        user_context,
+        table="tower_wings",
+        requested_id=wing_id,
+        description=f"Deleted wing: {wing_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.wing_deleted",
@@ -947,6 +996,13 @@ async def delete_tower_wing(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="tower_gates",
+    category="PROJECT_SETUP",
+)
 async def create_tower_gate(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -963,6 +1019,14 @@ async def create_tower_gate(
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_gate(project_id=project_id, tower_id=tower_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="tower_gates",
+        requested_id=str(data.get("id")),
+        description=f"Created gate in tower: {tower_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.gate_created",
@@ -1015,6 +1079,13 @@ async def list_tower_gates(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="tower_gates",
+    category="PROJECT_SETUP",
+)
 async def delete_tower_gate(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1030,7 +1101,15 @@ async def delete_tower_gate(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
-    await service.delete_gate(project_id=project_id, tower_id=tower_id, gate_id=gate_id)
+    result = await service.delete_gate(project_id=project_id, tower_id=tower_id, gate_id=gate_id)
+    _set_audit(
+        request,
+        user_context,
+        table="tower_gates",
+        requested_id=gate_id,
+        description=f"Deleted gate: {gate_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.gate_deleted",
@@ -1047,6 +1126,13 @@ async def delete_tower_gate(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="tower_lifts",
+    category="PROJECT_SETUP",
+)
 async def create_tower_lift(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1063,6 +1149,14 @@ async def create_tower_lift(
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_lift(project_id=project_id, tower_id=tower_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="tower_lifts",
+        requested_id=str(data.get("id")),
+        description=f"Created lift in tower: {tower_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.lift_created",
@@ -1115,6 +1209,13 @@ async def list_tower_lifts(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="tower_lifts",
+    category="PROJECT_SETUP",
+)
 async def delete_tower_lift(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1130,7 +1231,15 @@ async def delete_tower_lift(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
-    await service.delete_lift(project_id=project_id, tower_id=tower_id, lift_id=lift_id)
+    result = await service.delete_lift(project_id=project_id, tower_id=tower_id, lift_id=lift_id)
+    _set_audit(
+        request,
+        user_context,
+        table="tower_lifts",
+        requested_id=lift_id,
+        description=f"Deleted lift: {lift_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.lift_deleted",
@@ -1147,6 +1256,13 @@ async def delete_tower_lift(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="floors",
+    category="PROJECT_SETUP",
+)
 async def create_floor(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1163,6 +1279,14 @@ async def create_floor(
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_floor(project_id=project_id, tower_id=tower_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="floors",
+        requested_id=str(data.get("id")),
+        description=f"Created floor in tower: {tower_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.floor_created",
@@ -1215,6 +1339,13 @@ async def list_floors(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="floors",
+    category="PROJECT_SETUP",
+)
 async def delete_floor(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1230,7 +1361,15 @@ async def delete_floor(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
-    await service.delete_floor(project_id=project_id, tower_id=tower_id, floor_id=floor_id)
+    result = await service.delete_floor(project_id=project_id, tower_id=tower_id, floor_id=floor_id)
+    _set_audit(
+        request,
+        user_context,
+        table="floors",
+        requested_id=floor_id,
+        description=f"Deleted floor: {floor_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.floor_deleted",
@@ -1280,8 +1419,8 @@ async def create_unit_config(
         table="unit_configs",
         requested_id=str(data.get("id")),
         description=f"Created config in project: {project_id}",
+        new_data=data,
     )
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.config_created",
@@ -1356,15 +1495,15 @@ async def update_unit_config(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
+    data = await service.update_config(project_id=project_id, config_id=config_id, body=body)
     _set_audit(
         request,
         user_context,
         table="unit_configs",
         requested_id=config_id,
         description=f"Updated config: {config_id}",
+        new_data=data,
     )
-    data = await service.update_config(project_id=project_id, config_id=config_id, body=body)
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.config_updated",
@@ -1403,15 +1542,15 @@ async def delete_unit_config(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
+    result = await service.delete_config(project_id=project_id, config_id=config_id)
     _set_audit(
         request,
         user_context,
         table="unit_configs",
         requested_id=config_id,
         description=f"Deleted config: {config_id}",
+        old_data=result.get("old_data"),
     )
-    result = await service.delete_config(project_id=project_id, config_id=config_id)
-    request.state.raw_audit_old_data = result.get("old_data")
     return success_response(
         request=request,
         message_key="project_setup.success.config_deleted",
@@ -1428,6 +1567,13 @@ async def delete_unit_config(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="plot_config_items",
+    category="PROJECT_SETUP",
+)
 async def create_plot_item(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1444,6 +1590,14 @@ async def create_plot_item(
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     data = await service.create_plot_item(project_id=project_id, config_id=config_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="plot_config_items",
+        requested_id=str(data.get("id")),
+        description=f"Created plot item in config: {config_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.plot_item_created",
@@ -1496,6 +1650,13 @@ async def list_plot_items(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="plot_config_items",
+    category="PROJECT_SETUP",
+)
 async def delete_plot_item(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1511,7 +1672,17 @@ async def delete_plot_item(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
-    await service.delete_plot_item(project_id=project_id, config_id=config_id, item_id=item_id)
+    result = await service.delete_plot_item(
+        project_id=project_id, config_id=config_id, item_id=item_id
+    )
+    _set_audit(
+        request,
+        user_context,
+        table="plot_config_items",
+        requested_id=item_id,
+        description=f"Deleted plot item: {item_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.plot_item_deleted",
@@ -1528,6 +1699,13 @@ async def delete_plot_item(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="config_media",
+    category="PROJECT_SETUP",
+)
 async def add_config_media(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1544,6 +1722,14 @@ async def add_config_media(
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     data = await service.add_media(project_id=project_id, config_id=config_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="config_media",
+        requested_id=str(data.get("id")),
+        description=f"Added media to config: {config_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.config_media_added",
@@ -1596,6 +1782,13 @@ async def list_config_media(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="config_media",
+    category="PROJECT_SETUP",
+)
 async def delete_config_media(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -1611,7 +1804,17 @@ async def delete_config_media(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
-    await service.delete_media(project_id=project_id, config_id=config_id, media_id=media_id)
+    result = await service.delete_media(
+        project_id=project_id, config_id=config_id, media_id=media_id
+    )
+    _set_audit(
+        request,
+        user_context,
+        table="config_media",
+        requested_id=media_id,
+        description=f"Deleted config media: {media_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.config_media_deleted",
@@ -1654,15 +1857,15 @@ async def upsert_floor_inventory(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = InventoryService(db_connection=db_connection, user_context=user_context)
+    items = await service.upsert_inventory(project_id=project_id, body=body)
     _set_audit(
         request,
         user_context,
         table="floor_inventory",
         requested_id=project_id,
         description=f"Updated inventory for project: {project_id}",
+        new_data={"items": items},
     )
-    items = await service.upsert_inventory(project_id=project_id, body=body)
-    request.state.raw_audit_new_data = {"items": items}
     return success_response(
         request=request,
         message_key="project_setup.success.inventory_updated",
@@ -1800,8 +2003,8 @@ async def create_facility(
         table="facilities",
         requested_id=str(data.get("id")),
         description=f"Created facility in project: {project_id}",
+        new_data=data,
     )
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.facility_created",
@@ -1918,15 +2121,15 @@ async def update_facility(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
+    data = await service.update_facility(project_id=project_id, facility_id=facility_id, body=body)
     _set_audit(
         request,
         user_context,
         table="facilities",
         requested_id=facility_id,
         description=f"Updated facility: {facility_id}",
+        new_data=data,
     )
-    data = await service.update_facility(project_id=project_id, facility_id=facility_id, body=body)
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.facility_updated",
@@ -1965,15 +2168,15 @@ async def delete_facility(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
+    result = await service.delete_facility(project_id=project_id, facility_id=facility_id)
     _set_audit(
         request,
         user_context,
         table="facilities",
         requested_id=facility_id,
         description=f"Deleted facility: {facility_id}",
+        old_data=result.get("old_data"),
     )
-    result = await service.delete_facility(project_id=project_id, facility_id=facility_id)
-    request.state.raw_audit_old_data = result.get("old_data")
     return success_response(
         request=request,
         message_key="project_setup.success.facility_deleted",
@@ -2023,8 +2226,8 @@ async def create_unit(
         table="units",
         requested_id=str(data.get("id")),
         description=f"Created unit in project: {project_id}",
+        new_data=data,
     )
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.unit_created",
@@ -2134,15 +2337,15 @@ async def update_unit(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
+    data = await service.update_unit(project_id=project_id, unit_id=unit_id, body=body)
     _set_audit(
         request,
         user_context,
         table="units",
         requested_id=unit_id,
         description=f"Updated unit: {unit_id}",
+        new_data=data,
     )
-    data = await service.update_unit(project_id=project_id, unit_id=unit_id, body=body)
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.unit_updated",
@@ -2181,15 +2384,15 @@ async def delete_unit(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
+    result = await service.delete_unit(project_id=project_id, unit_id=unit_id)
     _set_audit(
         request,
         user_context,
         table="units",
         requested_id=unit_id,
         description=f"Deleted unit: {unit_id}",
+        old_data=result.get("old_data"),
     )
-    result = await service.delete_unit(project_id=project_id, unit_id=unit_id)
-    request.state.raw_audit_old_data = result.get("old_data")
     return success_response(
         request=request,
         message_key="project_setup.success.unit_deleted",
@@ -2206,6 +2409,13 @@ async def delete_unit(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="parking_zones",
+    category="PROJECT_SETUP",
+)
 async def create_parking_zone(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -2221,6 +2431,14 @@ async def create_parking_zone(
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.create_parking_zone(project_id=project_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="parking_zones",
+        requested_id=str(data.get("id")),
+        description=f"Created parking zone in project: {project_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.parking_zone_created",
@@ -2272,6 +2490,13 @@ async def list_parking_zones(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="parking_zones",
+    category="PROJECT_SETUP",
+)
 async def delete_parking_zone(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -2286,7 +2511,15 @@ async def delete_parking_zone(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
-    await service.delete_parking_zone(project_id=project_id, zone_id=zone_id)
+    result = await service.delete_parking_zone(project_id=project_id, zone_id=zone_id)
+    _set_audit(
+        request,
+        user_context,
+        table="parking_zones",
+        requested_id=zone_id,
+        description=f"Deleted parking zone: {zone_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.parking_zone_deleted",
@@ -2308,6 +2541,13 @@ async def delete_parking_zone(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="projects",
+    category="PROJECT_SETUP",
+)
 async def update_project_location(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -2323,6 +2563,14 @@ async def update_project_location(
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
     data = await service.update_location(project_id=project_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="projects",
+        requested_id=project_id,
+        description=f"Updated project location: {project_id}",
+        new_data=data,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.project_updated",
@@ -2341,6 +2589,13 @@ async def update_project_location(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="site_map_overlays",
+    category="PROJECT_SETUP",
+)
 async def create_site_map_overlays(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -2356,6 +2611,14 @@ async def create_site_map_overlays(
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
     items = await service.create_overlays(project_id=project_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="site_map_overlays",
+        requested_id=project_id,
+        description=f"Created site map overlays in project: {project_id}",
+        new_data=items,
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.overlay_created",
@@ -2407,6 +2670,13 @@ async def list_site_map_overlays(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="site_map_overlays",
+    category="PROJECT_SETUP",
+)
 async def delete_site_map_overlay(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
@@ -2421,7 +2691,15 @@ async def delete_site_map_overlay(
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
-    await service.delete_overlay(project_id=project_id, overlay_id=overlay_id)
+    result = await service.delete_overlay(project_id=project_id, overlay_id=overlay_id)
+    _set_audit(
+        request,
+        user_context,
+        table="site_map_overlays",
+        requested_id=overlay_id,
+        description=f"Deleted site map overlay: {overlay_id}",
+        old_data=result.get("old_data"),
+    )
     return success_response(
         request=request,
         message_key="project_setup.success.overlay_deleted",
@@ -2507,19 +2785,19 @@ async def review_project_vehicle_request(
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
+    data = await service.review_vehicle(
+        project_id=project_id,
+        vehicle_id=vehicle_id,
+        body=body,
+    )
     _set_audit(
         request,
         user_context,
         table="vehicles",
         requested_id=vehicle_id,
         description=f"Reviewed vehicle request: {vehicle_id}",
+        new_data=data,
     )
-    data = await service.review_vehicle(
-        project_id=project_id,
-        vehicle_id=vehicle_id,
-        body=body,
-    )
-    request.state.raw_audit_new_data = data
     return success_response(
         request=request,
         message_key="project_setup.success.vehicle_request_reviewed",

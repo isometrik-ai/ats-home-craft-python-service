@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.services.fee_invoice_service import FeeInvoiceService
 from apps.user_service.app.services.fee_scheduler_service import FeeSchedulerService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
@@ -114,6 +116,13 @@ async def get_fee_invoice(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("10/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="maintenance_fee_invoices",
+    category="FINANCE",
+)
 async def generate_fee_invoices(
     request: Request,
     project_id: str = Path(...),
@@ -128,6 +137,15 @@ async def generate_fee_invoices(
     )
     service = FeeInvoiceService(db_connection=db_connection, user_context=user_context)
     data = await service.generate_invoices_for_project(project_id=project_id)
+    set_audit_context(
+        request,
+        user_context,
+        table="maintenance_fee_invoices",
+        requested_id=project_id,
+        description=f"Generated maintenance fee invoices for project: {project_id}",
+        risk_level="high",
+        new_data=data,
+    )
     return success_response(
         request=request,
         data=data,
@@ -144,6 +162,13 @@ async def generate_fee_invoices(
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("5/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="maintenance_fee_invoices",
+    category="FINANCE",
+)
 async def run_fee_billing_scheduler(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
@@ -157,6 +182,15 @@ async def run_fee_billing_scheduler(
     )
     service = FeeSchedulerService(db_connection=db_connection, user_context=user_context)
     data = await service.run_billing_cycle()
+    set_audit_context(
+        request,
+        user_context,
+        table="maintenance_fee_invoices",
+        requested_id=str(user_context.organization_id or ""),
+        description="Ran maintenance fee billing scheduler",
+        risk_level="high",
+        new_data=data,
+    )
     return success_response(
         request=request,
         data=data,

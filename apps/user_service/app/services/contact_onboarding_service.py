@@ -471,11 +471,6 @@ class ContactOnboardingService:
             return
 
         if portal_access:
-            if member_row.get("user_id"):
-                raise ValidationException(
-                    message_key="contact_onboarding.errors.household_portal_access_already_enabled",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
-                )
             invitations_repo = self.household_invitation_service.invitations_repo
             pending_invitation = await invitations_repo.get_pending_by_contact_unit(
                 organization_id=org_id,
@@ -486,6 +481,16 @@ class ContactOnboardingService:
                     message_key="contact_onboarding.errors.household_portal_access_invite_pending",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
+
+            if member_row.get("user_id"):
+                # Member already has Supabase auth (e.g. created with portal_access=false).
+                # Flip the flag only — no SMS invite or pending unit link.
+                await self.contacts_repo.update_contact(
+                    contact_id=family_contact_id,
+                    organization_id=org_id,
+                    update_data={"portal_access": True},
+                )
+                return
 
             contact = await self.contacts_repo.get_contact_details(
                 contact_id=family_contact_id,
