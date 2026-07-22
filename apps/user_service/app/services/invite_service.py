@@ -16,6 +16,7 @@ from apps.user_service.app.db.repositories import (
     OrganizationRepository,
     PatchPendingInviteResult,
     RoleRepository,
+    TeamRepository,
     UserRepository,
 )
 from apps.user_service.app.schemas.auth import SignupRequest
@@ -33,6 +34,7 @@ from apps.user_service.app.schemas.invites import (
     InvitedUserInfo,
     PatchInviteRequest,
 )
+from apps.user_service.app.schemas.teams import MemberData
 from apps.user_service.app.services.session_management_service import (
     SessionManagementService,
 )
@@ -120,6 +122,7 @@ class InviteService:
             db_connection=db_connection
         )
         self.user_repository = UserRepository(db_connection=db_connection)
+        self.team_repository = TeamRepository(db_connection=db_connection)
         self.session_management_service = SessionManagementService(db_connection=db_connection)
         self.supabase_admin_client = sb_admin_client
         self.supabase_anon_client = sb_anon_client
@@ -198,6 +201,55 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return dict(role_row)
+
+    async def _validate_team_in_org(self, team_id: str, organization_id: str) -> None:
+        """Ensure the team exists and belongs to the organization.
+
+        Raises:
+            NotFoundException: If the team is missing or not in the organization.
+        """
+        validate_uuid_format(team_id, "team ID")
+        team_data, _ = await self.team_repository.get_team_detail(team_id, organization_id)
+        if not team_data:
+            raise NotFoundException(
+                message_key="teams.errors.team_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    def _build_invite_metadata(self, body: InviteCreateRequest) -> dict[str, Any]:
+        """Build invitation metadata from the create request."""
+        metadata: dict[str, Any] = {
+            "first_name": body.first_name,
+            "last_name": body.last_name,
+            "phone_number": body.phone_number,
+            "phone_isd_code": body.phone_isd_code,
+            "salutation": body.salutation,
+        }
+        if body.team_id:
+            metadata["team_id"] = str(body.team_id)
+        return metadata
+
+    async def _add_invitee_to_team(
+        self,
+        *,
+        team_id: str | None,
+        organization_id: str,
+        user_id: str,
+        added_by: str,
+    ) -> None:
+        """Add an accepted invitee to a team when team_id was set on the invitation."""
+        if not team_id:
+            return
+
+        team_data, _ = await self.team_repository.get_team_detail(team_id, organization_id)
+        if not team_data:
+            return
+
+        await self.team_repository._insert_team_members(  # pylint: disable=protected-access
+            team_id=team_id,
+            member_data=[MemberData(member_id=user_id, additional_data=None)],
+            added_by=added_by,
+        )
 
     def _validate_invitation_for_acceptance(
         self, invitation_data: dict[str, Any] | None
@@ -536,6 +588,14 @@ class InviteService:
             invited_by=invitation_data["invited_by"],
             isometrik_credentials=isometrik_credentials,
         )
+
+        await self._add_invitee_to_team(
+            team_id=inv_meta.get("team_id"),
+            organization_id=str(invitation_data["organization_id"]),
+            user_id=str(user.id),
+            added_by=str(invitation_data["invited_by"]),
+        )
+
         # Update invitation status
         await self.invite_repository.update_invite_status(
             invitation_data["id"], InviteStatus.ACCEPTED.value, user.id
@@ -651,17 +711,14 @@ class InviteService:
         # Validate the role exists for this organization before inserting the invite
         role_data = await self._get_role_data(str(body.role_id), organization_id)
 
+        if body.team_id:
+            await self._validate_team_in_org(str(body.team_id), organization_id)
+
         # Generate invite token
         invite_token, token_hash = self._generate_invite_token()
         expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
 
-        metadata = {
-            "first_name": body.first_name,
-            "last_name": body.last_name,
-            "phone_number": body.phone_number,
-            "phone_isd_code": body.phone_isd_code,
-            "salutation": body.salutation,
-        }
+        metadata = self._build_invite_metadata(body)
 
         if pending_invite:
             created_invite = await self.invite_repository.renew_expired_invite(
@@ -1034,6 +1091,8 @@ class InviteService:
         if phone_number_db and phone_isd_code:
             phone_full = f"{phone_isd_code}{phone_number_db}"
 
+        team_id = metadata.get("team_id")
+
         return {
             "invite_id": str(invite_data.get("id")),
             "email": invite_data.get("email"),
@@ -1047,4 +1106,5 @@ class InviteService:
             "first_name": metadata.get("first_name", None),
             "last_name": metadata.get("last_name", None),
             "phone": phone_full,
+            "team_id": team_id,
         }

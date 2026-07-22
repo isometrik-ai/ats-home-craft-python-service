@@ -101,6 +101,7 @@ async def test_create_invitation(monkeypatch, client):
             "role_id": "550e8400-e29b-41d4-a716-446655440000",
             "first_name": "Test",
             "last_name": "User",
+            "team_id": "660e8400-e29b-41d4-a716-446655440001",
         },
     )
     body = assert_success(res, 201)
