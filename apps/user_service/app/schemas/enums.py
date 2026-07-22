@@ -1430,6 +1430,69 @@ class MoveEventListBucket(str, Enum):
     MOVE_OUT = "move_out"
 
 
+class TenantRequestStatus(str, Enum):
+    """Tenant request header status (Postgres tenant_request_status enum)."""
+
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    PENDING_REVIEW = "pending_review"
+    AWAITING_RESUBMISSION = "awaiting_resubmission"
+    READY_TO_APPROVE = "ready_to_approve"
+    APPROVED = "approved"
+    CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
+
+
+class TenantRequestDocumentType(str, Enum):
+    """Required document slots on a tenant request."""
+
+    ID_PROOF = "id_proof"
+    RENTAL_AGREEMENT = "rental_agreement"
+    POLICE_VERIFICATION = "police_verification"
+
+
+class TenantRequestDocumentStatus(str, Enum):
+    """Per-document review status."""
+
+    PENDING = "pending"
+    VERIFIED = "verified"
+    REJECTED = "rejected"
+
+
+class TenantRequestEventType(str, Enum):
+    """Append-only tenant request timeline events."""
+
+    CREATED = "created"
+    SUBMITTED = "submitted"
+    DOCUMENT_UPLOADED = "document_uploaded"
+    DOCUMENT_VERIFIED = "document_verified"
+    DOCUMENT_REJECTED = "document_rejected"
+    RESUBMITTED = "resubmitted"
+    READY_TO_APPROVE = "ready_to_approve"
+    APPROVED = "approved"
+    CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
+    TENANT_INVITE_SENT = "tenant_invite_sent"
+
+
+class TenantRequestListBucket(str, Enum):
+    """Admin list filter buckets for GET /tenant-requests."""
+
+    PENDING_REVIEW = "pending_review"
+    AWAITING_RESUBMISSION = "awaiting_resubmission"
+    READY_TO_APPROVE = "ready_to_approve"
+    APPROVED = "approved"
+    CANCELLED = "cancelled"
+    SUPERSEDED = "superseded"
+
+
+TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES: tuple[TenantRequestDocumentType, ...] = (
+    TenantRequestDocumentType.ID_PROOF,
+    TenantRequestDocumentType.RENTAL_AGREEMENT,
+    TenantRequestDocumentType.POLICE_VERIFICATION,
+)
+
+
 # ============================================================================
 # FEE CONFIGURATION ENUMS — mirror Postgres project_fee enums
 # ============================================================================
