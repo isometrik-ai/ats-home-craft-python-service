@@ -273,3 +273,202 @@ async def test_delete_organization(monkeypatch, client):
 
     res = await client.delete("/v1/organization/550e8400-e29b-41d4-a716-446655440000")
     assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_get_delete_request_list(monkeypatch, client):
+    """GET /organization/delete-request-list lists delete requests."""
+
+    async def fake_require_super_admin(current_user):
+        del current_user
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_list_delete_requests(_self, **kwargs):
+        del _self, kwargs
+        return {"data": [{"id": "req-1", "status": "pending"}], "total_count": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.require_super_admin",
+        fake_require_super_admin,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service."
+        "OrganizationService.list_delete_requests",
+        fake_list_delete_requests,
+    )
+
+    res = await client.get("/v1/organization/delete-request-list")
+    body = assert_success(res, 200)
+    assert body["data"][0]["id"] == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_refetch_ai_overview_settings(monkeypatch, client):
+    """POST /organization/ai-overview-settings/refetch."""
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        del current_user, db_connection, permission_codes, organization_id
+        return _ctx()
+
+    async def fake_refetch(_self, fields):
+        del _self
+        assert fields == ["lead"]
+        return {"overview_prompts": {"lead": "Updated prompt"}}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service."
+        "OrganizationService.refetch_ai_overview_settings",
+        fake_refetch,
+    )
+
+    res = await client.post(
+        "/v1/organization/ai-overview-settings/refetch",
+        json={"fields": ["lead"]},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["overview_prompts"]["lead"] == "Updated prompt"
+
+
+@pytest.mark.asyncio
+async def test_request_organization_deletion(monkeypatch, client):
+    """POST /organization/request-to-delete/{id} creates request."""
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_require_creator(user_context, organization_id, db_connection):
+        del user_context, organization_id, db_connection
+
+    async def fake_create_delete_request(_self, *, organization_id: str):
+        del _self
+        assert organization_id == "550e8400-e29b-41d4-a716-446655440000"
+        return {
+            "id": "req-1",
+            "organization_id": organization_id,
+            "status": "pending",
+            "requested_at": "2026-01-01T00:00:00Z",
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.require_organization_creator",
+        fake_require_creator,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service."
+        "OrganizationService.create_delete_request",
+        fake_create_delete_request,
+    )
+
+    res = await client.post(
+        "/v1/organization/request-to-delete/550e8400-e29b-41d4-a716-446655440000"
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["request_id"] == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_process_delete_request(monkeypatch, client):
+    """PATCH /organization/delete-request/{id} approves request."""
+
+    async def fake_require_super_admin(current_user):
+        del current_user
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_process(_self, *, request_id: str, is_accepted: bool, reason=None):
+        del _self, reason
+        assert request_id == "req-1"
+        assert is_accepted is True
+        return {"request_id": request_id, "status": "approved"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.require_super_admin",
+        fake_require_super_admin,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service."
+        "OrganizationService.process_delete_request",
+        fake_process,
+    )
+
+    res = await client.patch(
+        "/v1/organization/delete-request/req-1",
+        json={"is_accepted": True, "reason": "Approved"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_delete_organization_member(monkeypatch, client):
+    """DELETE /organization/member/{user_id} removes member."""
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_require_permission(
+        permission_code, user_context, db_connection, organization_id=None
+    ):
+        del permission_code, user_context, db_connection, organization_id
+
+    async def fake_delete_member(_self, member_user_id: str):
+        del _self
+        assert member_user_id == "550e8400-e29b-41d4-a716-446655440099"
+        return {
+            "current_user_data": {
+                "user_id": member_user_id,
+                "email": "member@example.com",
+                "organization_id": "org-1",
+            },
+            "audit_new": {"status": "removed"},
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.organization.require_permission",
+        fake_require_permission,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service."
+        "OrganizationService.delete_organization_member",
+        fake_delete_member,
+    )
+
+    res = await client.delete("/v1/organization/member/550e8400-e29b-41d4-a716-446655440099")
+    assert_success(res, 200)

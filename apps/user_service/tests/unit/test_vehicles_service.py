@@ -113,3 +113,169 @@ async def test_remove_not_found():
 
     with pytest.raises(NotFoundException):
         await svc.remove_vehicle(contact_id="c1", vehicle_id="v1")
+
+
+@pytest.mark.asyncio
+async def test_list_vehicles_for_contact():
+    """List vehicles normalizes repository rows."""
+    svc = _service()
+    svc.repo.list_by_contact.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "MH12AB1234",
+            "photo_paths": [],
+            "status": VehicleStatus.APPROVED.value,
+            "status_updated_at": "2026-07-16T10:00:00Z",
+            "created_at": "2026-07-16T09:00:00Z",
+            "updated_at": "2026-07-16T10:00:00Z",
+            "sort_order": 0,
+        }
+    ]
+
+    rows = await svc.list_vehicles(contact_id="c1")
+
+    assert rows[0]["registration_number"] == "MH12AB1234"
+
+
+@pytest.mark.asyncio
+async def test_create_vehicle_validates_unit():
+    """Create vehicle requires active unit assignment."""
+    from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=False)
+
+    body = CreateVehicleRequest(
+        unit_id="u1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        registration_number="mh12ab1234",
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.create_vehicle(contact_id="c1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_create_vehicle_success():
+    """Create vehicle uppercases registration and links project."""
+    from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
+    svc.repo.create.return_value = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": VehicleType.FOUR_WHEELER.value,
+        "registration_number": "MH12AB1234",
+        "photo_paths": [],
+        "status": VehicleStatus.PENDING.value,
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+
+    body = CreateVehicleRequest(
+        unit_id="u1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        registration_number="mh12ab1234",
+    )
+    result = await svc.create_vehicle(contact_id="c1", body=body)
+
+    create_kwargs = svc.repo.create.await_args.kwargs
+    assert create_kwargs["registration_number"] == "MH12AB1234"
+    assert result["project_id"] == "p1"
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_approves_and_assigns_slot():
+    """Approve assigns parking slot and updates vehicle."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+        "project_id": "p1",
+    }
+    svc.parking_slots_repo.get_slot.return_value = {"id": "slot-1", "status": "available"}
+    svc.parking_slots_repo.assign_slot.return_value = True
+    svc.repo.update_by_project.return_value = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "MH12AB1234",
+        "photo_paths": [],
+        "status": VehicleStatus.APPROVED.value,
+        "parking_slot_id": "slot-1",
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+
+    body = ReviewVehicleRequest(status=VehicleStatus.APPROVED, parking_slot_id="slot-1")
+    result = await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+    svc.parking_slots_repo.assign_slot.assert_awaited_once()
+    assert result["status"] == VehicleStatus.APPROVED.value
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_rejects_pending_only():
+    """Review rejects when vehicle is not pending."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.APPROVED.value,
+    }
+    body = ReviewVehicleRequest(status=VehicleStatus.REJECTED, rejection_reason="Invalid docs")
+
+    with pytest.raises(ValidationException):
+        await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_list_project_vehicles_filters_status():
+    """Admin list passes status filter to repository."""
+    svc = _service()
+    svc.repo.list_by_project.return_value = []
+
+    await svc.list_project_vehicles(project_id="p1", status=VehicleStatus.PENDING)
+
+    svc.repo.list_by_project.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        status=VehicleStatus.PENDING.value,
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_vehicles_step():
+    """Complete vehicles step marks onboarding step done."""
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.unit_onboarding_repo = AsyncMock()
+    svc.contact_units_repo.get_owned_by_contact.return_value = {"id": "cu-1"}
+
+    await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")
+
+    svc.unit_onboarding_repo.complete_step.assert_awaited_once()

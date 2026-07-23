@@ -182,3 +182,126 @@ async def test_complete_pass():
     query, args = conn.fetchrow_calls[0]
     assert "status = $3::pass_status" in query
     assert args[-1] == PassStatus.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_list_bucket_upcoming_and_expired():
+    """Upcoming and expired buckets add distinct predicates."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        bucket=PassListBucket.UPCOMING.value,
+        page=1,
+        page_size=20,
+    )
+    assert "p.valid_from > now()" in conn.fetchval_calls[0][0]
+
+    conn.fetchval_calls.clear()
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        bucket=PassListBucket.EXPIRED.value,
+        page=1,
+        page_size=20,
+    )
+    assert "p.valid_until < now()" in conn.fetchval_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_list_display_status_expired_and_active():
+    """Expired and active display filters compose not-used guard."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        display_status=PassDisplayStatus.EXPIRED.value,
+        page=1,
+        page_size=20,
+    )
+    assert "p.valid_until < now()" in conn.fetchval_calls[0][0]
+
+    conn.fetchval_calls.clear()
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        display_status=PassDisplayStatus.ACTIVE.value,
+        page=1,
+        page_size=20,
+    )
+    assert "p.valid_from <= now()" in conn.fetchval_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_list_by_contact_unit_and_pass_type_filters():
+    """Optional unit_id and pass_type filters append predicates."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+
+    await repo.list_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        unit_id="unit-1",
+        pass_type="guest",
+        page=1,
+        page_size=20,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "p.unit_id = $3::uuid" in count_query
+    assert "p.pass_type = $4::pass_type" in count_query
+
+
+@pytest.mark.asyncio
+async def test_get_owned_by_contact_and_get_by_id():
+    """Owned and gate lookups return joined rows."""
+    conn = _FakeConn(row={"id": "pass-1", "code": "4821"})
+    repo = PassesRepository(db_connection=conn)
+
+    owned = await repo.get_owned_by_contact(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        pass_id="pass-1",
+    )
+    assert owned["code"] == "4821"
+
+    by_id = await repo.get_by_id(organization_id="org-1", pass_id="pass-1")
+    assert by_id["code"] == "4821"
+    assert "host.first_name" in conn.fetchrow_calls[1][0]
+
+
+@pytest.mark.asyncio
+async def test_update_and_cancel_pass():
+    """Update re-fetches owned pass; cancel scopes to active status."""
+    conn = _FakeConn(
+        row={"id": "pass-1", "code": "4821", "guest_name": "Guest"},
+    )
+    repo = PassesRepository(db_connection=conn)
+
+    updated = await repo.update(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        pass_id="pass-1",
+        update_data={"guest_name": "Guest", "status": PassStatus.ACTIVE.value},
+    )
+    assert updated["guest_name"] == "Guest"
+    assert "UPDATE passes p" in conn.fetchrow_calls[0][0]
+
+    conn.row = {"id": "pass-1", "status": PassStatus.CANCELLED.value}
+    cancelled = await repo.cancel(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        pass_id="pass-1",
+    )
+    assert cancelled["status"] == PassStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_bucket_predicate_unknown_returns_empty():
+    """Unknown bucket yields no extra SQL fragment."""
+    sql, args = PassesRepository._bucket_predicate("unknown", param_index=3)
+    assert sql == ""
+    assert args == []

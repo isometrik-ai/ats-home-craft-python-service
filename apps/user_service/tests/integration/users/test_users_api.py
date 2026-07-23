@@ -252,3 +252,125 @@ async def test_ban_unban_user(monkeypatch, client):
 
     res_unban = await client.post("/v1/users/unban/u2")
     assert_success(res_unban, 200)
+
+
+@pytest.mark.asyncio
+async def test_get_users_list_empty(monkeypatch, client):
+    """GET /users/list returns empty collection."""
+
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        del current_user, db_connection, permission_codes
+        return _ctx()
+
+    async def fake_list(self, organization_id, search=None, limit=20, offset=0):
+        del self, organization_id, search, limit, offset
+        return {"users": [], "total_count": 0}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.users.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.UserService.get_users_list",
+        fake_list,
+    )
+
+    res = await client.get("/v1/users/list?page=1&page_size=10")
+    body = assert_success(res, 200)
+    assert body["data"] == []
+    assert body["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_patch_user(monkeypatch, client):
+    """PATCH /users/{user_id} updates organization member role."""
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_patch(self, user_id, body):
+        del self
+        assert user_id == "u2"
+        assert body.role_id == "role-123"
+        return {
+            "audit_data": {"user_id": "u2", "role_id": "role-123"},
+            "current_user_data": {
+                "user_id": "u2",
+                "email": "user@example.com",
+                "full_name": "User Two",
+                "first_name": "User",
+                "last_name": "Two",
+                "phone": None,
+                "timezone": "UTC",
+                "avatar_url": None,
+                "status": OrganizationMemberStatus.ACTIVE.value,
+                "role_id": "",
+                "organization_id": "org-1",
+            },
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.users.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.UserService.patch_organization_member",
+        fake_patch,
+    )
+
+    res = await client.patch("/v1/users/u2", json={"role_id": "role-123"})
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_get_user_organizations(monkeypatch, client):
+    """GET /users/organizations/lists returns user organizations."""
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_get_orgs(self, user_id):
+        del self
+        assert user_id == "u1"
+        return [{"organization_id": "org-1", "name": "Org One"}]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.users.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.UserService.get_user_organizations",
+        fake_get_orgs,
+    )
+
+    res = await client.get("/v1/users/organizations/lists")
+    body = assert_success(res, 200)
+    assert body["data"][0]["organization_id"] == "org-1"
+
+
+@pytest.mark.asyncio
+async def test_get_user_organizations_empty(monkeypatch, client):
+    """GET /users/organizations/lists returns empty collection."""
+
+    async def fake_extract(current_user, db_connection):
+        del current_user, db_connection
+        return _ctx()
+
+    async def fake_get_orgs(self, user_id):
+        del self, user_id
+        return []
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.users.extract_user_context",
+        fake_extract,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.UserService.get_user_organizations",
+        fake_get_orgs,
+    )
+
+    res = await client.get("/v1/users/organizations/lists")
+    body = assert_success(res, 200)
+    assert body["data"] == []
