@@ -1,5 +1,7 @@
 """Integration tests for companies endpoints."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from apps.user_service.tests.integration.helpers import patch_check_permissions
@@ -69,9 +71,36 @@ async def test_create_company(monkeypatch, client):
         fake_create_company,
     )
     monkeypatch.setattr(
+        "apps.user_service.app.api.companies.CompaniesService.create_company",
+        fake_create_company,
+    )
+    monkeypatch.setattr(
         "apps.user_service.app.services.companies_service."
         "CompaniesService.create_lifecycle_events_for_created_entities",
         fake_create_lifecycle_events,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.companies."
+        "CompaniesService.create_lifecycle_events_for_created_entities",
+        fake_create_lifecycle_events,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service."
+        "CompaniesService.schedule_lifecycle_event_publishes",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service."
+        "CompaniesService.schedule_typesense_indexing_for_created_entities",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.CompaniesService.schedule_enrichment",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.dependencies.audit_logs.audit_logger.audit_logger.log_audit_event",
+        AsyncMock(return_value=None),
     )
 
     res = await client.post(
