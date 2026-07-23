@@ -2180,6 +2180,12 @@ async def test_create_property_contact_success(monkeypatch):
         "apps.user_service.app.services.contacts_service.generate_random_password",
         lambda: "TempPass@123",
     )
+    mock_user_repo = MagicMock()
+    mock_user_repo.get_auth_users_by_phone_or_email = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.UserRepository",
+        lambda db_connection: mock_user_repo,
+    )
 
     result = await svc._create_property_contact(_property_contact_body(), provision_auth=True)
 
@@ -2287,6 +2293,12 @@ async def test_create_property_contact_user_org_conflict():
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.create_isometrik_user",
         AsyncMock(return_value={"userId": "iso-new"}),
+    )
+    mock_user_repo = MagicMock()
+    mock_user_repo.get_auth_users_by_phone_or_email = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.UserRepository",
+        lambda db_connection: mock_user_repo,
     )
     try:
         with pytest.raises(ConflictException):

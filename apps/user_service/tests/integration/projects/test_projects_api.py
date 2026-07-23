@@ -763,7 +763,7 @@ async def test_delete_tower_wing(monkeypatch, client):
         assert project_id == PROJECT_ID
         assert tower_id == TOWER_ID
         assert wing_id == WING_ID
-        return None
+        return {"old_data": _FAKE_WING}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.towers_service.TowersService.delete_wing",
@@ -827,7 +827,7 @@ async def test_delete_tower_gate(monkeypatch, client):
     async def fake_delete_gate(_self, *, project_id: str, tower_id: str, gate_id: str):
         del _self
         assert gate_id == GATE_ID
-        return None
+        return {"old_data": _FAKE_GATE}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.towers_service.TowersService.delete_gate",
@@ -890,7 +890,7 @@ async def test_delete_tower_lift(monkeypatch, client):
     async def fake_delete_lift(_self, *, project_id: str, tower_id: str, lift_id: str):
         del _self
         assert lift_id == LIFT_ID
-        return None
+        return {"old_data": _FAKE_LIFT}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.towers_service.TowersService.delete_lift",
@@ -953,7 +953,7 @@ async def test_delete_floor(monkeypatch, client):
     async def fake_delete_floor(_self, *, project_id: str, tower_id: str, floor_id: str):
         del _self
         assert floor_id == FLOOR_ID
-        return None
+        return {"old_data": _FAKE_FLOOR}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.towers_service.TowersService.delete_floor",
@@ -1118,7 +1118,7 @@ async def test_delete_plot_item(monkeypatch, client):
     async def fake_delete_plot_item(_self, *, project_id: str, config_id: str, item_id: str):
         del _self
         assert item_id == PLOT_ITEM_ID
-        return None
+        return {"old_data": _FAKE_PLOT_ITEM}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.unit_configs_service.UnitConfigsService.delete_plot_item",
@@ -1207,7 +1207,14 @@ async def test_delete_config_media(monkeypatch, client):
     async def fake_delete_media(_self, *, project_id: str, config_id: str, media_id: str):
         del _self
         assert media_id == MEDIA_ID
-        return None
+        return {
+            "old_data": {
+                "id": MEDIA_ID,
+                "config_id": CONFIG_ID,
+                "kind": "floor_plan",
+                "path": "/media/floor-plan.pdf",
+            }
+        }
 
     monkeypatch.setattr(
         "apps.user_service.app.services.unit_configs_service.UnitConfigsService.delete_media",
@@ -1599,7 +1606,7 @@ async def test_delete_parking_zone(monkeypatch, client):
     async def fake_delete_zone(_self, *, project_id: str, zone_id: str):
         del _self
         assert zone_id == ZONE_ID
-        return None
+        return {"old_data": _FAKE_PARKING_ZONE}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.units_service.UnitsService.delete_parking_zone",
@@ -1700,7 +1707,7 @@ async def test_delete_site_map_overlay(monkeypatch, client):
     async def fake_delete_overlay(_self, *, project_id: str, overlay_id: str):
         del _self
         assert overlay_id == OVERLAY_ID
-        return None
+        return {"old_data": _FAKE_OVERLAY}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.site_map_service.SiteMapService.delete_overlay",

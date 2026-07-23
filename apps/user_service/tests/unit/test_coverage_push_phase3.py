@@ -244,6 +244,12 @@ async def test_create_property_contact_auth_user_failure(monkeypatch) -> None:
         "apps.user_service.app.services.contacts_service.create_user",
         AsyncMock(return_value=None),
     )
+    mock_user_repo = MagicMock()
+    mock_user_repo.get_auth_users_by_phone_or_email = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.UserRepository",
+        lambda db_connection: mock_user_repo,
+    )
 
     with pytest.raises(ServiceUnavailableException):
         await svc._create_property_contact(
