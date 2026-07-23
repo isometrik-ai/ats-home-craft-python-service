@@ -208,6 +208,26 @@ class ContactsImportService:
             page_size=page_size,
         )
 
+    async def list_job_error_rows(
+        self,
+        *,
+        job_id: str,
+        organization_id: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List row-ledger error entries for a job (paginated)."""
+        rows_repo = ImportJobRowsRepository(db_connection=self.db_connection)
+        job = await self.get_job(job_id=job_id, organization_id=organization_id)
+        if job is None:
+            return ([], 0)
+        return await rows_repo.list_error_rows(
+            organization_id=organization_id,
+            job_id=str(job.get("id") or ""),
+            page=page,
+            page_size=page_size,
+        )
+
     async def list_job_logs(
         self,
         *,

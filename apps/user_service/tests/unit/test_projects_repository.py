@@ -12,9 +12,11 @@ class _FakeConn:
         self.rows = rows or []
         self.row = row
         self.val = val
+        self.execute_result = "DELETE 1"
         self.fetch_calls = []
         self.fetchrow_calls = []
         self.fetchval_calls = []
+        self.execute_calls = []
 
     async def fetch(self, query, *args):
         """Record fetch call and return configured rows."""
@@ -30,6 +32,11 @@ class _FakeConn:
         """Record fetchval call and return configured value."""
         self.fetchval_calls.append((query.strip(), args))
         return self.val
+
+    async def execute(self, query, *args):
+        """Record execute call."""
+        self.execute_calls.append((query.strip(), args))
+        return self.execute_result
 
 
 @pytest.mark.asyncio
@@ -156,3 +163,85 @@ async def test_recompute_units_count_returns_int():
     count = await repo.recompute_units_count(organization_id="org-1", project_id="p1")
 
     assert count == 5
+
+
+@pytest.mark.asyncio
+async def test_get_update_delete_project():
+    """Get, patch, and delete project rows."""
+    conn = _FakeConn(row={"id": "p1", "name": "Alpha"})
+    repo = ProjectsRepository(db_connection=conn)
+
+    project = await repo.get_project(organization_id="org-1", project_id="p1")
+    assert project["name"] == "Alpha"
+
+    conn.row = {"id": "p1", "name": "Beta"}
+    updated = await repo.update_project(
+        organization_id="org-1",
+        project_id="p1",
+        update_data={"name": "Beta", "id": "ignored"},
+    )
+    assert updated["name"] == "Beta"
+    update_query, _ = conn.fetchrow_calls[1]
+    assert "UPDATE projects" in update_query
+    assert "name = $1" in update_query
+    assert "id = $1" not in update_query.split("SET")[1].split("WHERE")[0]
+
+    conn.row = {"id": "p1"}
+    unchanged = await repo.update_project(organization_id="org-1", project_id="p1", update_data={})
+    assert unchanged["id"] == "p1"
+
+    assert await repo.delete_project(organization_id="org-1", project_id="p1")
+
+
+@pytest.mark.asyncio
+async def test_set_setup_current_step_and_status():
+    """Wizard step and status updates cast enums."""
+    conn = _FakeConn(row={"id": "p1", "status": "active"})
+    repo = ProjectsRepository(db_connection=conn)
+
+    await repo.set_setup_current_step(organization_id="org-1", project_id="p1", step_key="units")
+    assert "::project_setup_step" in conn.execute_calls[0][0]
+
+    status_row = await repo.set_status(organization_id="org-1", project_id="p1", status="active")
+    assert status_row["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_project_media_and_members():
+    """Media CRUD and member upsert/list."""
+    conn = _FakeConn(row={"id": "m1"}, rows=[{"id": "mem1"}])
+    repo = ProjectsRepository(db_connection=conn)
+
+    media = await repo.insert_media(
+        {
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "kind": "brochure",
+            "path": "/media/b.pdf",
+            "mime": "application/pdf",
+            "size_bytes": 2048,
+        }
+    )
+    assert media["id"] == "m1"
+
+    conn.rows = [{"id": "m1"}]
+    listed = await repo.list_media(organization_id="org-1", project_id="p1")
+    assert len(listed) == 1
+
+    conn.row = {"id": "m1"}
+    fetched = await repo.get_media(organization_id="org-1", project_id="p1", media_id="m1")
+    assert fetched["id"] == "m1"
+
+    assert await repo.delete_media(organization_id="org-1", project_id="p1", media_id="m1")
+
+    conn.row = {"id": "mem1", "role": "community_admin"}
+    member = await repo.upsert_member(
+        organization_id="org-1",
+        project_id="p1",
+        user_id="user-1",
+        role="community_admin",
+    )
+    assert member["role"] == "community_admin"
+
+    members = await repo.list_members(organization_id="org-1", project_id="p1")
+    assert len(members) == 1

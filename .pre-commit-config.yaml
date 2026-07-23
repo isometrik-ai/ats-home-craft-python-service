@@ -83,6 +83,7 @@ repos:
           [
             "--rcfile=.pylintrc",
             "--output-format=colorized",
+            "--fail-under=9.5",
             "apps",
             "libs",
             "--disable=E0401",

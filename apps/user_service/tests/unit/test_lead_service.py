@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -24,7 +25,7 @@ from apps.user_service.app.schemas.leads import (
 )
 from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 
 ORG_ID = "org-1"
 CTX_USER_ID = "33333333-3333-3333-3333-333333333333"
@@ -963,6 +964,137 @@ async def test_get_lead_missing_raises():
     assert exc_info.value.message_key == "leads.errors.not_found"
     assert not stage_repo.calls
     assert not user_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_create_lead_duplicate_contacts_raises():
+    """Duplicate contact ids in create payload raise ValidationException."""
+    service, _, _, _ = _service_with_fakes()
+    body = CreateLeadRequest(
+        name="Lead",
+        stage_id=STAGE_ID_1,
+        contacts=[
+            LeadContactCreate(contact_id=POINT_OF_CONTACT_ID),
+            LeadContactCreate(contact_id=POINT_OF_CONTACT_ID),
+        ],
+    )
+
+    with pytest.raises(ValidationException):
+        await service.create_lead(body)
+
+
+@pytest.mark.asyncio
+async def test_create_lead_missing_stage_raises(monkeypatch):
+    """Missing pipeline stage raises NotFoundException."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (False, set(), set())
+    _patch_custom_field_service(monkeypatch, {})
+
+    with pytest.raises(NotFoundException):
+        await service.create_lead(
+            CreateLeadRequest(name="Lead", stage_id=STAGE_ID_1),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_lead_missing_contact_raises(monkeypatch):
+    """Missing linked contact raises NotFoundException."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (True, set(), set())
+    _patch_custom_field_service(monkeypatch, {})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.lead_service.ContactCompaniesRepository",
+        lambda db_connection=None: type(
+            "CCRepo",
+            (),
+            {
+                "list_distinct_company_ids_for_contacts": AsyncMock(return_value=[]),
+            },
+        )(),
+    )
+
+    with pytest.raises(NotFoundException):
+        await service.create_lead(
+            CreateLeadRequest(
+                name="Lead",
+                stage_id=STAGE_ID_1,
+                contacts=[LeadContactCreate(contact_id=POINT_OF_CONTACT_ID)],
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_lead_contact_delta_not_linked_raises():
+    """Updating label for unlinked contact raises ValidationException."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    lead_repo.get_lead_detail_by_id_result = {
+        "id": LEAD_ID,
+        "contacts": [],
+        "companies": [],
+        "custom_fields": [],
+    }
+
+    with pytest.raises(ValidationException):
+        await service.update_lead(
+            LEAD_ID,
+            UpdateLeadRequest(
+                contacts_update=LeadContactsUpdate(
+                    update_associations=[{"contact_id": POINT_OF_CONTACT_ID, "label": "primary"}]
+                )
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_lead_noop_returns_current(monkeypatch):
+    """PATCH that resolves to no scalar/association changes returns current row."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    current = {
+        "id": LEAD_ID,
+        "contacts": [],
+        "companies": [],
+        "custom_fields": [],
+    }
+    lead_repo.get_lead_detail_by_id_result = current
+    _patch_custom_field_service(monkeypatch, {})
+
+    before, after = await service.update_lead(LEAD_ID, UpdateLeadRequest(custom_fields=[]))
+
+    assert before == current
+    assert after == current
+
+
+def test_build_ordered_link_map_skips_invalid_rows():
+    """Invalid association rows are ignored when building link maps."""
+    ordered, by_id = LeadService._build_ordered_link_map(  # pylint: disable=protected-access
+        existing=[{"contact_id": POINT_OF_CONTACT_ID, "label": "a"}, "bad", {}],
+        id_key="contact_id",
+    )
+    assert ordered == [POINT_OF_CONTACT_ID]
+    assert by_id[POINT_OF_CONTACT_ID]["label"] == "a"
+
+
+def test_append_missing_company_links_dedupes():
+    """Auto-linked companies skip ids already on the lead."""
+    payload, new_ids = LeadService._append_missing_company_links(  # pylint: disable=protected-access
+        [{"company_id": CLIENT_ID, "label": ""}],
+        [CLIENT_ID, "77777777-7777-7777-7777-777777777777"],
+    )
+    assert new_ids == ["77777777-7777-7777-7777-777777777777"]
+    assert len(payload) == 2
+
+
+def test_normalize_notes_for_detail_filters_incomplete():
+    """Notes without title/content are dropped from detail payload."""
+    notes = LeadService._normalize_notes_for_detail(  # pylint: disable=protected-access
+        [
+            {"title": "A", "content": ""},
+            {"title": "", "content": "B"},
+            {"title": "T", "content": "C"},
+        ]
+    )
+    assert len(notes) == 1
+    assert notes[0].title == "T"
 
 
 @pytest.mark.asyncio
