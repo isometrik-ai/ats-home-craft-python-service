@@ -336,6 +336,28 @@ class UnitsRepository(BaseRepository):
             organization_id,
         )
 
+    async def mark_unit_vacant(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> None:
+        """Set unit inventory status to vacant (e.g. after owner unassign)."""
+        await self.db_connection.execute(
+            """
+            UPDATE units
+            SET status = 'vacant'::unit_status,
+                updated_at = now()
+            WHERE id = $1::uuid
+              AND project_id = $2::uuid
+              AND organization_id = $3::uuid
+            """,
+            unit_id,
+            project_id,
+            organization_id,
+        )
+
     async def update_unit(
         self,
         *,

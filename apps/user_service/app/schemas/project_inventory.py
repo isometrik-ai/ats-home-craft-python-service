@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from apps.user_service.app.schemas.enums import (
     CommercialUnitType,
     ConfigMediaKind,
+    ContactUnitRelationship,
     FacilityLocationType,
     FacilityStatus,
     Facing,
@@ -245,6 +246,29 @@ class UnitListOwner(BaseModel):
     display_name: str | None = None
     phone: str | None = None
     email: str | None = None
+
+
+class ReassignUnitOwnerRequest(BaseModel):
+    """Replace the Owner on a unit with another contact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str
+    is_primary: bool = True
+    relationship: ContactUnitRelationship = ContactUnitRelationship.SELF
+
+
+class UnitOwnerChangeResponse(BaseModel):
+    """Result of unassigning or reassigning a unit owner."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    status: str | None = None
+    contact_id: str | None = None
+    previous_contact_id: str | None = None
+    released_contact_unit_ids: list[str] = Field(default_factory=list)
+    unit_status: str
 
 
 class UnitListItemResponse(BaseModel):

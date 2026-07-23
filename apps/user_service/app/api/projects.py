@@ -29,9 +29,11 @@ from apps.user_service.app.schemas.project_inventory import (
     InventorySummaryResponse,
     ListProjectUnitsFilterQuery,
     ListProjectUnitsQuery,
+    ReassignUnitOwnerRequest,
     UnitDetailResponse,
     UnitListItemResponse,
     UnitListSummary,
+    UnitOwnerChangeResponse,
     UpdateFacilityRequest,
     UpdateProjectLocationRequest,
     UpdateUnitConfigRequest,
@@ -55,6 +57,7 @@ from apps.user_service.app.schemas.project_setup import (
     UpdateProjectRequest,
     UpdateTowerRequest,
 )
+from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.facilities_service import FacilitiesService
 from apps.user_service.app.services.inventory_service import InventoryService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
@@ -2383,6 +2386,115 @@ async def get_unit_detail(
     return success_response(
         request=request,
         message_key="project_setup.success.unit_detail_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=payload,
+    )
+
+
+@handle_api_exceptions("unassign unit owner")
+@router.delete(
+    "/{project_id}/units/{unit_id}/owner",
+    status_code=http_status.HTTP_200_OK,
+    summary="Unassign owner from a unit",
+    description=(
+        "Marks the current Owner contact_units link as moved_out and sets "
+        "the unit inventory status to vacant."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contact_units",
+    category="PROJECT_SETUP",
+)
+async def unassign_unit_owner(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(..., description="Unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Remove the current owner allotment from a unit."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = ContactUnitsService(db_connection=db_connection, user_context=user_context)
+    data = await service.unassign_unit_owner(project_id=project_id, unit_id=unit_id)
+    payload = UnitOwnerChangeResponse.model_validate(data).model_dump(exclude_none=True)
+    _set_audit(
+        request,
+        user_context,
+        table="contact_units",
+        requested_id=unit_id,
+        description=f"Unassigned owner from unit: {unit_id}",
+        new_data=payload,
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.unit_owner_unassigned",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=payload,
+    )
+
+
+@handle_api_exceptions("reassign unit owner")
+@router.post(
+    "/{project_id}/units/{unit_id}/reassign",
+    status_code=http_status.HTTP_200_OK,
+    summary="Reassign unit owner",
+    description=(
+        "Replaces the current Owner on a unit with another contact in one step. "
+        "Works for pending or active allotments and sets the unit to occupied."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contact_units",
+    category="PROJECT_SETUP",
+)
+async def reassign_unit_owner(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(..., description="Unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: ReassignUnitOwnerRequest = Body(...),
+):
+    """Replace the owner on a unit with a new contact."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = ContactUnitsService(db_connection=db_connection, user_context=user_context)
+    data = await service.reassign_unit_owner(
+        project_id=project_id,
+        unit_id=unit_id,
+        contact_id=body.contact_id,
+        is_primary=body.is_primary,
+        relationship=body.relationship.value,
+    )
+    payload = UnitOwnerChangeResponse.model_validate(data).model_dump(exclude_none=True)
+    _set_audit(
+        request,
+        user_context,
+        table="contact_units",
+        requested_id=unit_id,
+        description=f"Reassigned owner on unit: {unit_id}",
+        new_data=payload,
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.unit_owner_reassigned",
         custom_code=CustomStatusCode.SUCCESS,
         data=payload,
     )

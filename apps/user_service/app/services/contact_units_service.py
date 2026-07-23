@@ -20,6 +20,7 @@ from apps.user_service.app.db.repositories.units_repository import UnitsReposito
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
+    ContactUnitRelationship,
     ContactUnitStatus,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
@@ -279,27 +280,65 @@ class ContactUnitsService:
         )
         return row
 
-    async def admin_assign_unit(
+    async def _ensure_project_unit(
         self,
         *,
-        contact_id: str,
-        body: AdminAssignUnitRequest,
+        project_id: str,
+        unit_id: str,
     ) -> dict[str, Any]:
-        """Admin pre-allotment: link a unit to a contact as pending."""
+        """Return the unit row when it belongs to the project."""
         org_id = self.user_context.organization_id
         assert org_id
         unit = await self.repo.get_unit_project(
             organization_id=org_id,
-            unit_id=body.unit_id,
+            unit_id=unit_id,
+        )
+        if not unit or str(unit["project_id"]) != project_id:
+            raise NotFoundException(
+                message_key="project_setup.errors.unit_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return unit
+
+    async def _create_unit_allotment(
+        self,
+        *,
+        unit_id: str,
+        contact_id: str,
+        is_primary: bool,
+        relationship: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Assign or re-open a pending owner allotment and mark the unit occupied."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await self.repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=unit_id,
         )
         if not unit:
             raise NotFoundException(
                 message_key="contact_onboarding.errors.unit_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        if project_id and str(unit["project_id"]) != project_id:
+            raise NotFoundException(
+                message_key="project_setup.errors.unit_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        if not await self.repo.contact_exists(
+            organization_id=org_id,
+            contact_id=contact_id,
+        ):
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
         existing = await self.repo.get_by_unit_and_contact(
             organization_id=org_id,
-            unit_id=body.unit_id,
+            unit_id=unit_id,
             contact_id=contact_id,
         )
         if existing and existing.get("status") in {
@@ -312,24 +351,122 @@ class ContactUnitsService:
             )
         if await self.repo.unit_has_primary_occupant(
             organization_id=org_id,
-            unit_id=body.unit_id,
+            unit_id=unit_id,
             exclude_contact_id=contact_id,
         ):
             raise ValidationException(
                 message_key="contact_onboarding.errors.unit_already_assigned",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        row = await self.repo.insert_allotment(
+
+        if existing and existing.get("status") == ContactUnitStatus.MOVED_OUT.value:
+            row = await self.repo.reactivate_allotment(
+                organization_id=org_id,
+                contact_unit_id=str(existing["id"]),
+                is_primary=is_primary,
+                relationship=relationship,
+            )
+            if not row:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.contact_unit_not_found",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        else:
+            row = await self.repo.insert_allotment(
+                organization_id=org_id,
+                project_id=unit["project_id"],
+                unit_id=unit_id,
+                contact_id=contact_id,
+                is_primary=is_primary,
+                relationship=relationship,
+            )
+
+        await self.units_repo.mark_unit_occupied(
             organization_id=org_id,
-            project_id=unit["project_id"],
+            project_id=str(unit["project_id"]),
+            unit_id=unit_id,
+        )
+        return row
+
+    async def unassign_unit_owner(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+    ) -> dict[str, Any]:
+        """Remove the current Owner allotment from a unit and mark it vacant."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
+
+        async with self.db_connection.transaction():
+            released = await self.repo.release_unit_owner_links(
+                organization_id=org_id,
+                unit_id=unit_id,
+            )
+            if not released:
+                raise NotFoundException(
+                    message_key="project_setup.errors.unit_owner_not_assigned",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+
+            await self.units_repo.mark_unit_vacant(
+                organization_id=org_id,
+                project_id=str(unit["project_id"]),
+                unit_id=unit_id,
+            )
+        previous = released[0]
+        return {
+            "released_contact_unit_ids": [row["id"] for row in released],
+            "previous_contact_id": previous.get("contact_id"),
+            "unit_status": "vacant",
+        }
+
+    async def reassign_unit_owner(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+        contact_id: str,
+        is_primary: bool = True,
+        relationship: str = ContactUnitRelationship.SELF.value,
+    ) -> dict[str, Any]:
+        """Replace the current Owner on a unit with a new contact."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
+
+        async with self.db_connection.transaction():
+            released = await self.repo.release_unit_owner_links(
+                organization_id=org_id,
+                unit_id=unit_id,
+            )
+            row = await self._create_unit_allotment(
+                project_id=project_id,
+                unit_id=unit_id,
+                contact_id=contact_id,
+                is_primary=is_primary,
+                relationship=relationship,
+            )
+        return {
+            "id": row["id"],
+            "status": row["status"],
+            "contact_id": contact_id,
+            "previous_contact_id": released[0]["contact_id"] if released else None,
+            "released_contact_unit_ids": [item["id"] for item in released],
+            "unit_status": "occupied",
+        }
+
+    async def admin_assign_unit(
+        self,
+        *,
+        contact_id: str,
+        body: AdminAssignUnitRequest,
+    ) -> dict[str, Any]:
+        """Admin pre-allotment: link a unit to a contact as pending."""
+        return await self._create_unit_allotment(
             unit_id=body.unit_id,
             contact_id=contact_id,
             is_primary=body.is_primary,
             relationship=body.relationship.value,
         )
-        await self.units_repo.mark_unit_occupied(
-            organization_id=org_id,
-            project_id=str(unit["project_id"]),
-            unit_id=body.unit_id,
-        )
-        return row
