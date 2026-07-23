@@ -34,7 +34,7 @@ async def test_create_team(monkeypatch, client):
 
     res = await client.post(
         "/v1/teams",
-        json={"name": "Team A", "description": "desc", "member_ids": []},
+        json={"name": "Team A", "description": "desc", "members": []},
     )
     assert_success(res, 201)
 

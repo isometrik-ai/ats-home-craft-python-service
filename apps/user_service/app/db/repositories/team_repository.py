@@ -14,7 +14,6 @@ from apps.user_service.app.schemas.teams import (
     TeamDbDelete,
     TeamDbIn,
     TeamDbUpdate,
-    TeamRoles,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.logger import get_logger
@@ -110,13 +109,7 @@ class TeamRepository:
 
         for member in member_data:
             member_ids.append(member.member_id)
-            # Extract role from additional_data if present, otherwise use default
-            role = (
-                member.additional_data.get("role")
-                if member.additional_data and "role" in member.additional_data
-                else TeamRoles.MEMBER
-            )
-            roles.append(role)
+            roles.append(member.role.value)
 
             # Serialize additional_data to JSON string, or use NULL
             additional_data_json = (
@@ -158,6 +151,44 @@ class TeamRepository:
             [added_by] * count,
             additional_data_list,
         )
+
+    async def _update_team_member_roles(
+        self,
+        team_id: str,
+        member_data: list[MemberData],
+    ) -> None:
+        """Update roles for existing team members."""
+        if not member_data:
+            return
+
+        user_ids = [member.member_id for member in member_data]
+        roles = [member.role.value for member in member_data]
+
+        update_query = """
+            UPDATE team_members AS tm
+            SET role = v.role
+            FROM UNNEST($2::uuid[], $3::text[]) AS v(user_id, role)
+            WHERE tm.team_id = $1::uuid
+              AND tm.user_id = v.user_id
+        """
+        await self.db_connection.execute(update_query, team_id, user_ids, roles)
+
+    async def _touch_team_updated_at(self, team_id: str, organization_id: str) -> None:
+        """Bump teams.updated_at when only membership changed."""
+        query = """
+            UPDATE teams
+            SET updated_at = NOW()
+            WHERE id = $1::uuid
+              AND organization_id = $2::uuid
+              AND deleted_at IS NULL
+            RETURNING id
+        """
+        result = await self.db_connection.fetchrow(query, team_id, organization_id)
+        if not result:
+            raise NotFoundException(
+                message_key="teams.errors.team_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
     # READ OPERATIONS
     def _build_team_filters(
@@ -442,10 +473,14 @@ class TeamRepository:
         if team_input.description is not None:
             fields_to_update["description"] = team_input.description
 
-        # Check if we need to update the team (either fields or members)
-        needs_update = bool(
-            fields_to_update or team_input.members_to_add or team_input.members_to_remove
+        member_changes = bool(
+            team_input.members_to_add
+            or team_input.members_to_remove
+            or team_input.members_to_update
         )
+
+        # Check if we need to update the team (either fields or members)
+        needs_update = bool(fields_to_update or member_changes)
 
         # Execute team update if there are field changes
         if needs_update:
@@ -482,17 +517,21 @@ class TeamRepository:
                     custom_code=CustomStatusCode.NOT_FOUND,
                 )
 
+        elif member_changes:
+            await self._touch_team_updated_at(team_input.team_id, team_input.organization_id)
+
         # Add new members
         if team_input.members_to_add:
-            # Convert member IDs to MemberData format (with minimal additional_data)
-            member_data = [
-                MemberData(member_id=member_id, additional_data=None)
-                for member_id in team_input.members_to_add
-            ]
             await self._insert_team_members(
                 team_id=team_input.team_id,
-                member_data=member_data,
+                member_data=team_input.members_to_add,
                 added_by=team_input.added_by,
+            )
+
+        if team_input.members_to_update:
+            await self._update_team_member_roles(
+                team_id=team_input.team_id,
+                member_data=team_input.members_to_update,
             )
 
         # Remove members
