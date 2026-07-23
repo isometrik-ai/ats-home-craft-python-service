@@ -14,6 +14,8 @@ from apps.user_service.app.services.units_service import (
     resolve_carpet_area_sqft,
     resolve_occupancy_label,
     resolve_unit_facing,
+    resolve_unit_property_type,
+    serialize_unit_list_item,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
 
@@ -76,6 +78,138 @@ def test_pick_unit_owner_prefers_primary():
         },
     ]
     assert pick_unit_owner(residents)["contact_id"] == "c2"
+
+
+def test_resolve_unit_property_type_from_config_kind():
+    """Property type follows unit config kind mapping."""
+    assert resolve_unit_property_type({"config_kind": "apartment"}) == "residential"
+    assert resolve_unit_property_type({"config_kind": "commercial"}) == "commercial"
+    assert resolve_unit_property_type({"config_kind": "plot"}) == "plots"
+    assert resolve_unit_property_type({"plot_item_id": "plot-1"}) == "plots"
+
+
+def test_serialize_unit_list_item_builds_registry_row():
+    """Registry list row includes UI fields and owner summary."""
+    item = serialize_unit_list_item(
+        {
+            "id": "unit-1",
+            "project_id": "proj-1",
+            "tower_id": "tower-1",
+            "config_id": "cfg-1",
+            "code": "A-1802",
+            "unit_label": None,
+            "status": "occupied",
+            "sort_order": 1,
+            "tower_name": "Tower A",
+            "floor_display_name": "F18",
+            "floor_level_number": 18,
+            "resolved_property_type": "residential",
+            "resolved_config_kind": "apartment",
+            "config_display_label": "2BHK Standard",
+            "owner_contact_id": "c-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+        }
+    )
+
+    assert item["code"] == "A-1802"
+    assert item["location_label"] == "Tower A · F18"
+    assert item["property_type"] == "residential"
+    assert item["config_kind"] == "apartment"
+    assert item["config_display_label"] == "2BHK Standard"
+    assert item["floor_level_number"] == 18
+    assert item["status"] == "occupied"
+    assert item["owner"]["display_name"] == "Mr. Rajesh Kapoor"
+
+
+def test_list_item_hides_owner_when_vacant():
+    """Vacant units do not expose owner even when an Owner link exists in DB."""
+    item = serialize_unit_list_item(
+        {
+            "id": "unit-1",
+            "code": "A-1001",
+            "status": "vacant",
+            "sort_order": 0,
+            "owner_contact_id": "c-1",
+            "owner_first_name": "Ajay",
+        }
+    )
+
+    assert item["status"] == "vacant"
+    assert item["owner"] is None
+
+
+def test_list_item_occupied_without_owner():
+    """Sold units without an Owner contact return a null owner."""
+    item = serialize_unit_list_item(
+        {
+            "id": "unit-1",
+            "code": "A-1004",
+            "status": "occupied",
+            "sort_order": 3,
+        }
+    )
+
+    assert item["status"] == "occupied"
+    assert item["owner"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_units_returns_paginated_payload():
+    """List units returns items, total, and summary counts."""
+    service = UnitsService(db_connection=MagicMock(), user_context=MagicMock())
+    service.user_context.organization_id = "org-1"
+    service.setup_service = AsyncMock()
+    service.units_repo = AsyncMock()
+    service.units_repo.list_units.return_value = (
+        [
+            {
+                "id": "unit-1",
+                "project_id": "proj-1",
+                "tower_id": "tower-1",
+                "config_id": "cfg-1",
+                "code": "A-1802",
+                "unit_label": None,
+                "status": "vacant",
+                "sort_order": 1,
+                "tower_name": "Tower A",
+                "floor_display_name": "F18",
+                "floor_level_number": 18,
+                "resolved_property_type": "residential",
+                "resolved_config_kind": "apartment",
+                "config_display_label": "2BHK Standard",
+                "owner_contact_id": None,
+            }
+        ],
+        1,
+    )
+
+    result = await service.list_units(project_id="proj-1", page=1, page_size=20)
+
+    assert result["total"] == 1
+    assert result["items"][0]["property_type"] == "residential"
+    assert "summary" not in result
+    service.units_repo.list_units.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_units_registry_summary():
+    """Summary endpoint delegates to repository aggregate query."""
+    service = UnitsService(db_connection=MagicMock(), user_context=MagicMock())
+    service.user_context.organization_id = "org-1"
+    service.setup_service = AsyncMock()
+    service.units_repo = AsyncMock()
+    service.units_repo.get_units_registry_summary.return_value = {
+        "total": 75,
+        "sold_count": 51,
+        "unsold_count": 24,
+    }
+
+    summary = await service.get_units_registry_summary(project_id="proj-1")
+
+    assert summary["sold_count"] == 51
+    service.units_repo.get_units_registry_summary.assert_awaited_once()
 
 
 @pytest.mark.asyncio

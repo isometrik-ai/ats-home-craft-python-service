@@ -427,6 +427,7 @@
       "unit_updated": "Unit updated successfully.",
       "unit_deleted": "Unit deleted successfully.",
       "units_retrieved": "Units retrieved successfully.",
+      "units_summary_retrieved": "Unit summary retrieved successfully.",
       "unit_detail_retrieved": "Unit detail retrieved successfully.",
       "parking_zone_created": "Parking zone created successfully.",
       "parking_zones_retrieved": "Parking zones retrieved successfully.",

@@ -40,6 +40,8 @@ def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService
     """Build ContactUnitsService with mocked repositories."""
     svc = ContactUnitsService(db_connection=MagicMock(), user_context=_user_context())
     svc.repo = AsyncMock()
+    svc.units_repo = AsyncMock()
+    svc.units_repo.mark_unit_occupied = AsyncMock()
     svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
     svc.onboarding_repo = onboarding_repo or AsyncMock()
     svc.unit_onboarding_repo = AsyncMock()
@@ -207,6 +209,11 @@ async def test_admin_assign_unit_creates_pending_allotment():
         contact_id="contact-1",
         is_primary=True,
         relationship="self",
+    )
+    svc.units_repo.mark_unit_occupied.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="proj-1",
+        unit_id="unit-1",
     )
     assert result == {"id": "cu-1", "status": "pending"}
 

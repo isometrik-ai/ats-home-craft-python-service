@@ -12,7 +12,7 @@ from apps.user_service.app.db.repositories.maintenance_fee_invoices_repository i
 )
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
-from apps.user_service.app.schemas.enums import ProjectSetupStep
+from apps.user_service.app.schemas.enums import ProjectSetupStep, PropertyType
 from apps.user_service.app.schemas.project_inventory import (
     CreateParkingZoneRequest,
     CreateUnitRequest,
@@ -21,7 +21,13 @@ from apps.user_service.app.schemas.project_inventory import (
 from apps.user_service.app.services.fee_calculation_service import (
     convert_minor_to_major,
 )
-from apps.user_service.app.services.inventory_service import is_sold_status
+from apps.user_service.app.services.fee_property_types import (
+    property_type_for_unit_config_kind,
+)
+from apps.user_service.app.services.inventory_service import (
+    is_sold_status,
+    resolve_unit_kind,
+)
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.project_serialization import serialize_row
@@ -91,6 +97,65 @@ def build_location_label(
     if tower_part and floor_part:
         return f"{tower_part} · {floor_part}"
     return tower_part or floor_part or None
+
+
+def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a unit registry list row from a repository join row."""
+    location_label = build_location_label(
+        tower_name=row.get("tower_name"),
+        floor_display_name=row.get("floor_display_name"),
+        floor_level_number=row.get("floor_level_number"),
+    )
+    owner_display_name = format_contact_display_name(
+        prefix=row.get("owner_prefix"),
+        first_name=row.get("owner_first_name"),
+        last_name=row.get("owner_last_name"),
+    )
+    status = str(row.get("status") or "")
+    owner = None
+    if row.get("owner_contact_id") and is_sold_status(status):
+        owner = {
+            "contact_id": str(row["owner_contact_id"]),
+            "display_name": owner_display_name or None,
+        }
+
+    config_display_label = (
+        row.get("config_display_label") or row.get("config_name") or row.get("plot_description")
+    )
+    floor_level_number = row.get("floor_level_number")
+
+    return {
+        "id": str(row["id"]),
+        "code": row.get("code") or "",
+        "unit_label": row.get("unit_label"),
+        "location_label": location_label,
+        "property_type": row.get("resolved_property_type") or resolve_unit_property_type(row),
+        "config_kind": row.get("resolved_config_kind"),
+        "floor_level_number": int(floor_level_number) if floor_level_number is not None else None,
+        "floor_display_name": row.get("floor_display_name"),
+        "config_display_label": config_display_label,
+        "tower_id": str(row["tower_id"]) if row.get("tower_id") else None,
+        "config_id": str(row["config_id"]) if row.get("config_id") else None,
+        "owner": owner,
+        "status": status,
+        "sort_order": int(row.get("sort_order") or 0),
+    }
+
+
+def resolve_unit_property_type(row: dict[str, Any]) -> str | None:
+    """Resolve property type for a unit: residential, commercial, or plots."""
+    config_kind = row.get("config_kind")
+    tower_type = row.get("tower_type")
+    resolved_kind = resolve_unit_kind(
+        config_kind=str(config_kind) if config_kind is not None else None,
+        tower_type=str(tower_type) if tower_type is not None else None,
+    )
+    property_type = property_type_for_unit_config_kind(resolved_kind)
+    if property_type:
+        return property_type
+    if row.get("plot_item_id"):
+        return PropertyType.PLOTS.value
+    return None
 
 
 def pick_unit_owner(residents: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -168,11 +233,55 @@ class UnitsService:
         await self._recount(project_id=project_id)
         return serialize_row(inserted)
 
-    async def list_units(self, *, project_id: str) -> list[dict[str, Any]]:
-        """List units for a project."""
+    async def list_units(
+        self,
+        *,
+        project_id: str,
+        search: str | None = None,
+        property_type: str | None = None,
+        tower_id: str | None = None,
+        config_id: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """List units for the registry table with filters and pagination."""
         await self.setup_service.ensure_project(project_id=project_id)
-        rows = await self.units_repo.list_units(organization_id=self._org_id, project_id=project_id)
-        return [serialize_row(row) for row in rows]
+        rows, total = await self.units_repo.list_units(
+            organization_id=self._org_id,
+            project_id=project_id,
+            search=search,
+            property_type=property_type,
+            tower_id=tower_id,
+            config_id=config_id,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
+        items = [serialize_unit_list_item(row) for row in rows]
+        return {"items": items, "total": total}
+
+    async def get_units_registry_summary(
+        self,
+        *,
+        project_id: str,
+        search: str | None = None,
+        property_type: str | None = None,
+        tower_id: str | None = None,
+        config_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, int]:
+        """Return sold/unsold header counts for the unit registry."""
+        await self.setup_service.ensure_project(project_id=project_id)
+        return await self.units_repo.get_units_registry_summary(
+            organization_id=self._org_id,
+            project_id=project_id,
+            search=search,
+            property_type=property_type,
+            tower_id=tower_id,
+            config_id=config_id,
+            status=status,
+        )
 
     async def get_unit_detail(self, *, project_id: str, unit_id: str) -> dict[str, Any]:
         """Return full unit detail for inventory slide-out and registry screens."""

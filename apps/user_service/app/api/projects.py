@@ -27,7 +27,11 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateUnitConfigRequest,
     CreateUnitRequest,
     InventorySummaryResponse,
+    ListProjectUnitsFilterQuery,
+    ListProjectUnitsQuery,
     UnitDetailResponse,
+    UnitListItemResponse,
+    UnitListSummary,
     UpdateFacilityRequest,
     UpdateProjectLocationRequest,
     UpdateUnitConfigRequest,
@@ -2242,32 +2246,106 @@ async def create_unit(
     "/{project_id}/units",
     status_code=http_status.HTTP_200_OK,
     summary="List units",
+    description=(
+        "Returns paginated non-parking units for the unit registry table. "
+        "Supports search by unit code/label/owner name and filters for property type, "
+        "tower, config, and unit status."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_units(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
+    query: ListProjectUnitsQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """List units for a project."""
+    """List units for a project with filters and pagination."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
-    items = await service.list_units(project_id=project_id)
+    result = await service.list_units(
+        project_id=project_id,
+        search=query.search,
+        property_type=query.property_type.value if query.property_type else None,
+        tower_id=query.tower_id,
+        config_id=query.config_id,
+        status=query.status.value if query.status else None,
+        page=query.page,
+        page_size=query.page_size,
+    )
+    items = [
+        UnitListItemResponse.model_validate(row).model_dump(exclude_none=True)
+        for row in result["items"]
+    ]
+    total = int(result["total"])
+    if not items:
+        return list_response(
+            request=request,
+            items=[],
+            total=total,
+            page=query.page,
+            page_size=query.page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
     return list_response(
         request=request,
         items=items,
-        total=len(items),
-        page=1,
-        page_size=max(len(items), 1),
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
         message_key="project_setup.success.units_retrieved",
-        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("get units registry summary")
+@router.get(
+    "/{project_id}/units/summary",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get unit registry summary",
+    description=(
+        "Returns total, sold, and unsold counts for the unit registry header cards. "
+        "Accepts the same filters as the unit list endpoint."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_units_registry_summary(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    query: ListProjectUnitsFilterQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return aggregate unit counts for the registry header."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+    )
+    service = UnitsService(db_connection=db_connection, user_context=user_context)
+    summary = await service.get_units_registry_summary(
+        project_id=project_id,
+        search=query.search,
+        property_type=query.property_type.value if query.property_type else None,
+        tower_id=query.tower_id,
+        config_id=query.config_id,
+        status=query.status.value if query.status else None,
+    )
+    data = UnitListSummary.model_validate(summary).model_dump()
+    return success_response(
+        request=request,
+        message_key="project_setup.success.units_summary_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
     )
 
 

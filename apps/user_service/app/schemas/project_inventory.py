@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingUserType,
     PlotItemStatus,
     PlotType,
+    PropertyType,
     UnitConfigKind,
     UnitStatus,
 )
@@ -233,6 +234,65 @@ class UpdateUnitRequest(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
     is_parking: bool | None = None
     plot_item_id: str | None = None
+
+
+class UnitListOwner(BaseModel):
+    """Owner summary on a unit list row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str | None = None
+    display_name: str | None = None
+
+
+class UnitListItemResponse(BaseModel):
+    """Unit row for the project unit registry table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    code: str
+    unit_label: str | None = None
+    location_label: str | None = None
+    property_type: str | None = None
+    config_kind: str | None = None
+    floor_level_number: int | None = None
+    floor_display_name: str | None = None
+    config_display_label: str | None = None
+    tower_id: str | None = None
+    config_id: str | None = None
+    owner: UnitListOwner | None = None
+    status: UnitStatus
+    sort_order: int = Field(default=0, ge=0)
+
+
+class UnitListSummary(BaseModel):
+    """Aggregate counts for the unit registry header cards."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total: int = Field(..., ge=0)
+    sold_count: int = Field(..., ge=0)
+    unsold_count: int = Field(..., ge=0)
+
+
+class ListProjectUnitsFilterQuery(BaseModel):
+    """Shared filter params for unit registry list and summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search: str | None = Field(default=None, min_length=1)
+    property_type: PropertyType | None = None
+    tower_id: str | None = None
+    config_id: str | None = None
+    status: UnitStatus | None = None
+
+
+class ListProjectUnitsQuery(ListProjectUnitsFilterQuery):
+    """Query params for the project unit registry list."""
+
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 
 
 class CreateParkingZoneRequest(BaseModel):

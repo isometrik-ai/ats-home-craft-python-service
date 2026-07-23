@@ -16,6 +16,7 @@ from apps.user_service.app.db.repositories.contact_unit_onboarding_repository im
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
@@ -33,6 +34,7 @@ class ContactUnitsService:
         self.db_connection = db_connection
         self.user_context = user_context
         self.repo = ContactUnitsRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
         self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
 
@@ -324,5 +326,10 @@ class ContactUnitsService:
             contact_id=contact_id,
             is_primary=body.is_primary,
             relationship=body.relationship.value,
+        )
+        await self.units_repo.mark_unit_occupied(
+            organization_id=org_id,
+            project_id=str(unit["project_id"]),
+            unit_id=body.unit_id,
         )
         return row
