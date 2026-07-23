@@ -277,7 +277,7 @@ async def approve_tenant_request(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
-    body: ApproveTenantRequestRequest = Body(default_factory=ApproveTenantRequestRequest),
+    body: ApproveTenantRequestRequest = Body(...),
 ):
     """Approve a ready tenant request and create the tenant contact + unit link."""
     user_context = await check_permissions(

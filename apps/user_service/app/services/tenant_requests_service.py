@@ -715,6 +715,7 @@ class TenantRequestsService:
             approved_at=now,
             approved_by_user_id=str(user_id),
             admin_notes=body.admin_notes,
+            move_in_date=body.move_in_date,
         )
         await self.repo.insert_event(
             organization_id=org_id,

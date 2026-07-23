@@ -12,18 +12,27 @@ from apps.user_service.app.db.repositories.maintenance_fee_invoices_repository i
 )
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
-from apps.user_service.app.schemas.enums import ProjectSetupStep
+from apps.user_service.app.schemas.enums import ProjectSetupStep, PropertyType
 from apps.user_service.app.schemas.project_inventory import (
     CreateParkingZoneRequest,
     CreateUnitRequest,
     UpdateUnitRequest,
 )
+from apps.user_service.app.services.contact_unit_documents_service import (
+    ContactUnitDocumentsService,
+)
 from apps.user_service.app.services.fee_calculation_service import (
     convert_minor_to_major,
 )
-from apps.user_service.app.services.inventory_service import is_sold_status
+from apps.user_service.app.services.fee_property_types import (
+    property_type_for_unit_config_kind,
+)
+from apps.user_service.app.services.inventory_service import (
+    is_sold_status,
+    resolve_unit_kind,
+)
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.project_serialization import serialize_row
 from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -45,6 +54,40 @@ def format_contact_display_name(
         ]
         if part
     ).strip()
+
+
+def _select_primary_jsonb_item(items: Any) -> dict[str, Any] | None:
+    """Return the primary JSONB list item, or the first item when none is primary."""
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and item.get("is_primary"):
+            return item
+    for item in items:
+        if isinstance(item, dict):
+            return item
+    return None
+
+
+def format_primary_contact_phone(phones: Any) -> str | None:
+    """Return the primary phone number from a contact phones JSONB list."""
+    phone = _select_primary_jsonb_item(phones)
+    if not phone:
+        return None
+    isd_code = str(phone.get("phone_isd_code") or "").strip()
+    number = str(phone.get("phone_number") or "").strip()
+    if not number:
+        return None
+    return f"{isd_code}{number}".strip() if isd_code else number
+
+
+def format_primary_contact_email(emails: Any) -> str | None:
+    """Return the primary email address from a contact emails JSONB list."""
+    email_item = _select_primary_jsonb_item(emails)
+    if not email_item:
+        return None
+    email = str(email_item.get("email") or "").strip()
+    return email or None
 
 
 def resolve_occupancy_label(status: str) -> str:
@@ -93,6 +136,67 @@ def build_location_label(
     return tower_part or floor_part or None
 
 
+def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a unit registry list row from a repository join row."""
+    location_label = build_location_label(
+        tower_name=row.get("tower_name"),
+        floor_display_name=row.get("floor_display_name"),
+        floor_level_number=row.get("floor_level_number"),
+    )
+    owner_display_name = format_contact_display_name(
+        prefix=row.get("owner_prefix"),
+        first_name=row.get("owner_first_name"),
+        last_name=row.get("owner_last_name"),
+    )
+    status = str(row.get("status") or "")
+    owner = None
+    if row.get("owner_contact_id") and is_sold_status(status):
+        owner = {
+            "contact_id": str(row["owner_contact_id"]),
+            "display_name": owner_display_name or None,
+            "phone": format_primary_contact_phone(row.get("owner_phones")),
+            "email": format_primary_contact_email(row.get("owner_emails")),
+        }
+
+    config_display_label = (
+        row.get("config_display_label") or row.get("config_name") or row.get("plot_description")
+    )
+    floor_level_number = row.get("floor_level_number")
+
+    return {
+        "id": str(row["id"]),
+        "code": row.get("code") or "",
+        "unit_label": row.get("unit_label"),
+        "location_label": location_label,
+        "property_type": row.get("resolved_property_type") or resolve_unit_property_type(row),
+        "config_kind": row.get("resolved_config_kind"),
+        "floor_level_number": int(floor_level_number) if floor_level_number is not None else None,
+        "floor_display_name": row.get("floor_display_name"),
+        "config_display_label": config_display_label,
+        "tower_id": str(row["tower_id"]) if row.get("tower_id") else None,
+        "config_id": str(row["config_id"]) if row.get("config_id") else None,
+        "owner": owner,
+        "status": status,
+        "sort_order": int(row.get("sort_order") or 0),
+    }
+
+
+def resolve_unit_property_type(row: dict[str, Any]) -> str | None:
+    """Resolve property type for a unit: residential, commercial, or plots."""
+    config_kind = row.get("config_kind")
+    tower_type = row.get("tower_type")
+    resolved_kind = resolve_unit_kind(
+        config_kind=str(config_kind) if config_kind is not None else None,
+        tower_type=str(tower_type) if tower_type is not None else None,
+    )
+    property_type = property_type_for_unit_config_kind(resolved_kind)
+    if property_type:
+        return property_type
+    if row.get("plot_item_id"):
+        return PropertyType.PLOTS.value
+    return None
+
+
 def pick_unit_owner(residents: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Choose the owner row from active unit residents."""
     if not residents:
@@ -107,6 +211,34 @@ def pick_unit_owner(residents: list[dict[str, Any]]) -> dict[str, Any] | None:
         if row.get("contact_type") != "Family":
             return row
     return residents[0]
+
+
+def build_unit_detail_person(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a unit detail person payload from a contact_units join row."""
+    return {
+        "contact_id": str(row["contact_id"]),
+        "contact_unit_id": str(row["contact_unit_id"]),
+        "display_name": format_contact_display_name(
+            prefix=row.get("prefix"),
+            first_name=row.get("first_name"),
+            last_name=row.get("last_name"),
+        ),
+        "contact_type": row.get("contact_type") or "",
+        "relationship": row.get("relationship") or "",
+        "is_primary": bool(row.get("is_primary")),
+    }
+
+
+def build_unit_owner_detail(row: dict[str, Any]) -> dict[str, Any]:
+    """Build owner detail including primary phone and email."""
+    owner = build_unit_detail_person(row)
+    phone = row.get("primary_phone") or format_primary_contact_phone(row.get("phones"))
+    email = row.get("primary_email") or format_primary_contact_email(row.get("emails"))
+    owner["phone"] = str(phone).strip() if phone else None
+    owner["email"] = str(email).strip() if email else None
+    owner["assigned_at"] = format_iso_datetime(row.get("created_at"))
+    owner["contact_unit_status"] = row.get("status")
+    return owner
 
 
 class UnitsService:
@@ -168,11 +300,55 @@ class UnitsService:
         await self._recount(project_id=project_id)
         return serialize_row(inserted)
 
-    async def list_units(self, *, project_id: str) -> list[dict[str, Any]]:
-        """List units for a project."""
+    async def list_units(
+        self,
+        *,
+        project_id: str,
+        search: str | None = None,
+        property_type: str | None = None,
+        tower_id: str | None = None,
+        config_id: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """List units for the registry table with filters and pagination."""
         await self.setup_service.ensure_project(project_id=project_id)
-        rows = await self.units_repo.list_units(organization_id=self._org_id, project_id=project_id)
-        return [serialize_row(row) for row in rows]
+        rows, total = await self.units_repo.list_units(
+            organization_id=self._org_id,
+            project_id=project_id,
+            search=search,
+            property_type=property_type,
+            tower_id=tower_id,
+            config_id=config_id,
+            status=status,
+            page=page,
+            page_size=page_size,
+        )
+        items = [serialize_unit_list_item(row) for row in rows]
+        return {"items": items, "total": total}
+
+    async def get_units_registry_summary(
+        self,
+        *,
+        project_id: str,
+        search: str | None = None,
+        property_type: str | None = None,
+        tower_id: str | None = None,
+        config_id: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, int]:
+        """Return sold/unsold header counts for the unit registry."""
+        await self.setup_service.ensure_project(project_id=project_id)
+        return await self.units_repo.get_units_registry_summary(
+            organization_id=self._org_id,
+            project_id=project_id,
+            search=search,
+            property_type=property_type,
+            tower_id=tower_id,
+            config_id=config_id,
+            status=status,
+        )
 
     async def get_unit_detail(self, *, project_id: str, unit_id: str) -> dict[str, Any]:
         """Return full unit detail for inventory slide-out and registry screens."""
@@ -197,38 +373,28 @@ class UnitsService:
             unit_id=unit_id,
         )
 
-        residents = [
-            {
-                "contact_id": str(resident["contact_id"]),
-                "contact_unit_id": str(resident["contact_unit_id"]),
-                "display_name": format_contact_display_name(
-                    prefix=resident.get("prefix"),
-                    first_name=resident.get("first_name"),
-                    last_name=resident.get("last_name"),
-                ),
-                "contact_type": resident.get("contact_type") or "",
-                "relationship": resident.get("relationship") or "",
-                "is_primary": bool(resident.get("is_primary")),
-            }
-            for resident in residents_raw
-        ]
-        owner_row = pick_unit_owner(residents_raw)
-        owner = None
-        if owner_row:
-            owner = {
-                "contact_id": str(owner_row["contact_id"]),
-                "contact_unit_id": str(owner_row["contact_unit_id"]),
-                "display_name": format_contact_display_name(
-                    prefix=owner_row.get("prefix"),
-                    first_name=owner_row.get("first_name"),
-                    last_name=owner_row.get("last_name"),
-                ),
-                "contact_type": owner_row.get("contact_type") or "",
-                "relationship": owner_row.get("relationship") or "",
-                "is_primary": bool(owner_row.get("is_primary")),
-            }
-
         status = str(row.get("status") or "")
+        residents = [build_unit_detail_person(resident) for resident in residents_raw]
+        owner = None
+        owner_row = None
+        if is_sold_status(status):
+            owner_row = await self.units_repo.get_unit_owner_contact(
+                organization_id=self._org_id,
+                unit_id=unit_id,
+            )
+            if owner_row:
+                owner = build_unit_owner_detail(owner_row)
+
+        documents: list[dict[str, Any]] = []
+        if owner_row:
+            docs_service = ContactUnitDocumentsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            documents = await docs_service.list_documents_for_owner_contact_unit(
+                contact_unit_id=str(owner_row["contact_unit_id"]),
+            )
+
         tower = None
         if row.get("tower_id"):
             tower = {
@@ -313,6 +479,7 @@ class UnitsService:
             "config": config,
             "plot_item": plot_item,
             "owner": owner,
+            "documents": documents,
             "residents": residents,
             "vehicles_count": vehicles_count,
             "financials": {

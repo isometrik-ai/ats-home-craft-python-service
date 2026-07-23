@@ -14,7 +14,15 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+
+def _mock_transaction(svc: ContactUnitsService) -> None:
+    """Mock asyncpg transaction context manager."""
+    transaction = AsyncMock()
+    transaction.__aenter__.return_value = None
+    transaction.__aexit__.return_value = None
+    svc.db_connection.transaction.return_value = transaction
 
 
 def _user_context() -> UserContext:
@@ -40,6 +48,8 @@ def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService
     """Build ContactUnitsService with mocked repositories."""
     svc = ContactUnitsService(db_connection=MagicMock(), user_context=_user_context())
     svc.repo = AsyncMock()
+    svc.units_repo = AsyncMock()
+    svc.units_repo.mark_unit_occupied = AsyncMock()
     svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
     svc.onboarding_repo = onboarding_repo or AsyncMock()
     svc.unit_onboarding_repo = AsyncMock()
@@ -157,6 +167,7 @@ async def test_admin_assign_rejects_other_contact():
     """Admin assign fails when another contact already holds the unit."""
     svc = _service()
     svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.contact_exists = AsyncMock(return_value=True)
     svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
     svc.repo.unit_has_primary_occupant = AsyncMock(return_value=True)
     svc.repo.insert_allotment = AsyncMock()
@@ -173,6 +184,7 @@ async def test_admin_assign_rejects_same_contact():
     """Admin assign fails when the contact already has a pending or active link."""
     svc = _service()
     svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.contact_exists = AsyncMock(return_value=True)
     svc.repo.get_by_unit_and_contact = AsyncMock(return_value={"id": "cu-1", "status": "pending"})
     svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
     svc.repo.insert_allotment = AsyncMock()
@@ -189,6 +201,7 @@ async def test_admin_assign_unit_creates_pending_allotment():
     """Admin assign inserts a pending contact_units row when the unit is free."""
     svc = _service()
     svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.contact_exists = AsyncMock(return_value=True)
     svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
     svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
     svc.repo.insert_allotment = AsyncMock(return_value={"id": "cu-1", "status": "pending"})
@@ -208,7 +221,75 @@ async def test_admin_assign_unit_creates_pending_allotment():
         is_primary=True,
         relationship="self",
     )
+    svc.units_repo.mark_unit_occupied.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="proj-1",
+        unit_id="unit-1",
+    )
     assert result == {"id": "cu-1", "status": "pending"}
+
+
+@pytest.mark.asyncio
+async def test_unassign_unit_owner_marks_vacant():
+    """Unassign releases owner links and marks the unit vacant."""
+    svc = _service()
+    _mock_transaction(svc)
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.release_unit_owner_links = AsyncMock(
+        return_value=[{"id": "cu-1", "contact_id": "contact-1", "status": "moved_out"}]
+    )
+    svc.units_repo.mark_unit_vacant = AsyncMock()
+
+    result = await svc.unassign_unit_owner(project_id="proj-1", unit_id="unit-1")
+
+    svc.repo.release_unit_owner_links.assert_awaited_once()
+    svc.units_repo.mark_unit_vacant.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="proj-1",
+        unit_id="unit-1",
+    )
+    assert result["unit_status"] == "vacant"
+    assert result["previous_contact_id"] == "contact-1"
+
+
+@pytest.mark.asyncio
+async def test_unassign_unit_owner_not_found():
+    """Unassign fails when the unit has no owner allotment."""
+    svc = _service()
+    _mock_transaction(svc)
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.release_unit_owner_links = AsyncMock(return_value=[])
+
+    with pytest.raises(NotFoundException):
+        await svc.unassign_unit_owner(project_id="proj-1", unit_id="unit-1")
+
+
+@pytest.mark.asyncio
+async def test_reassign_unit_owner_replaces_owner():
+    """Reassign releases the current owner and creates a new allotment."""
+    svc = _service()
+    _mock_transaction(svc)
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.release_unit_owner_links = AsyncMock(
+        return_value=[{"id": "cu-1", "contact_id": "contact-old", "status": "moved_out"}]
+    )
+    svc.repo.contact_exists = AsyncMock(return_value=True)
+    svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
+    svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
+    svc.repo.insert_allotment = AsyncMock(return_value={"id": "cu-2", "status": "pending"})
+
+    result = await svc.reassign_unit_owner(
+        project_id="proj-1",
+        unit_id="unit-1",
+        contact_id="contact-new",
+    )
+
+    svc.repo.release_unit_owner_links.assert_awaited_once()
+    svc.repo.insert_allotment.assert_awaited_once()
+    svc.units_repo.mark_unit_occupied.assert_awaited_once()
+    assert result["contact_id"] == "contact-new"
+    assert result["previous_contact_id"] == "contact-old"
+    assert result["unit_status"] == "occupied"
 
 
 @pytest.mark.asyncio

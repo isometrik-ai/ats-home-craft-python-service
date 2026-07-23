@@ -87,6 +87,7 @@ class ApproveTenantRequestRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    move_in_date: date
     admin_notes: str | None = Field(None, max_length=2000)
 
 

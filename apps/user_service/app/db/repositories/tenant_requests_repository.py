@@ -387,6 +387,7 @@ class TenantRequestsRepository(BaseRepository):
             "superseded_at": "timestamptz",
             "superseded_by_request_id": "uuid",
             "admin_notes": "text",
+            "move_in_date": "date",
         }
         for key, cast in allowed.items():
             if key not in fields:

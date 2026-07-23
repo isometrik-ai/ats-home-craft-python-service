@@ -274,8 +274,13 @@ After each action, service recomputes header status and appends `document_verifi
 
 ```http
 POST /v1/tenant-requests/{id}/approve
-{ "admin_notes": "optional" }
+{
+  "move_in_date": "2026-08-01",
+  "admin_notes": "optional"
+}
 ```
+
+`move_in_date` is **required** at approval (admin confirms or sets the tenant move-in date).
 
 Transactional steps:
 
@@ -283,7 +288,7 @@ Transactional steps:
 1. If unit has current approved request → supersede old + `moved_out` old tenant link.
 1. `ContactsService.create_contact` (`contact_type = Tenant`, `provision_auth = !portal_access`).
 1. `contact_units` insert (tenant, `is_primary = true`, `status = active`).
-1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`.
+1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`, **`move_in_date`** (from request body).
 1. Append `approved` + `tenant_added` events.
 
 Returns created tenant summary + request snapshot.
