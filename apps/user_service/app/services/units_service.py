@@ -53,6 +53,40 @@ def format_contact_display_name(
     ).strip()
 
 
+def _select_primary_jsonb_item(items: Any) -> dict[str, Any] | None:
+    """Return the primary JSONB list item, or the first item when none is primary."""
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and item.get("is_primary"):
+            return item
+    for item in items:
+        if isinstance(item, dict):
+            return item
+    return None
+
+
+def format_primary_contact_phone(phones: Any) -> str | None:
+    """Return the primary phone number from a contact phones JSONB list."""
+    phone = _select_primary_jsonb_item(phones)
+    if not phone:
+        return None
+    isd_code = str(phone.get("phone_isd_code") or "").strip()
+    number = str(phone.get("phone_number") or "").strip()
+    if not number:
+        return None
+    return f"{isd_code}{number}".strip() if isd_code else number
+
+
+def format_primary_contact_email(emails: Any) -> str | None:
+    """Return the primary email address from a contact emails JSONB list."""
+    email_item = _select_primary_jsonb_item(emails)
+    if not email_item:
+        return None
+    email = str(email_item.get("email") or "").strip()
+    return email or None
+
+
 def resolve_occupancy_label(status: str) -> str:
     """Map raw unit status to inventory occupancy label."""
     if is_sold_status(status):
@@ -117,6 +151,8 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
         owner = {
             "contact_id": str(row["owner_contact_id"]),
             "display_name": owner_display_name or None,
+            "phone": format_primary_contact_phone(row.get("owner_phones")),
+            "email": format_primary_contact_email(row.get("owner_emails")),
         }
 
     config_display_label = (
@@ -172,6 +208,32 @@ def pick_unit_owner(residents: list[dict[str, Any]]) -> dict[str, Any] | None:
         if row.get("contact_type") != "Family":
             return row
     return residents[0]
+
+
+def build_unit_detail_person(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a unit detail person payload from a contact_units join row."""
+    return {
+        "contact_id": str(row["contact_id"]),
+        "contact_unit_id": str(row["contact_unit_id"]),
+        "display_name": format_contact_display_name(
+            prefix=row.get("prefix"),
+            first_name=row.get("first_name"),
+            last_name=row.get("last_name"),
+        ),
+        "contact_type": row.get("contact_type") or "",
+        "relationship": row.get("relationship") or "",
+        "is_primary": bool(row.get("is_primary")),
+    }
+
+
+def build_unit_owner_detail(row: dict[str, Any]) -> dict[str, Any]:
+    """Build owner detail including primary phone and email."""
+    owner = build_unit_detail_person(row)
+    phone = row.get("primary_phone") or format_primary_contact_phone(row.get("phones"))
+    email = row.get("primary_email") or format_primary_contact_email(row.get("emails"))
+    owner["phone"] = str(phone).strip() if phone else None
+    owner["email"] = str(email).strip() if email else None
+    return owner
 
 
 class UnitsService:
@@ -306,38 +368,17 @@ class UnitsService:
             unit_id=unit_id,
         )
 
-        residents = [
-            {
-                "contact_id": str(resident["contact_id"]),
-                "contact_unit_id": str(resident["contact_unit_id"]),
-                "display_name": format_contact_display_name(
-                    prefix=resident.get("prefix"),
-                    first_name=resident.get("first_name"),
-                    last_name=resident.get("last_name"),
-                ),
-                "contact_type": resident.get("contact_type") or "",
-                "relationship": resident.get("relationship") or "",
-                "is_primary": bool(resident.get("is_primary")),
-            }
-            for resident in residents_raw
-        ]
-        owner_row = pick_unit_owner(residents_raw)
-        owner = None
-        if owner_row:
-            owner = {
-                "contact_id": str(owner_row["contact_id"]),
-                "contact_unit_id": str(owner_row["contact_unit_id"]),
-                "display_name": format_contact_display_name(
-                    prefix=owner_row.get("prefix"),
-                    first_name=owner_row.get("first_name"),
-                    last_name=owner_row.get("last_name"),
-                ),
-                "contact_type": owner_row.get("contact_type") or "",
-                "relationship": owner_row.get("relationship") or "",
-                "is_primary": bool(owner_row.get("is_primary")),
-            }
-
         status = str(row.get("status") or "")
+        residents = [build_unit_detail_person(resident) for resident in residents_raw]
+        owner = None
+        if is_sold_status(status):
+            owner_row = await self.units_repo.get_unit_owner_contact(
+                organization_id=self._org_id,
+                unit_id=unit_id,
+            )
+            if owner_row:
+                owner = build_unit_owner_detail(owner_row)
+
         tower = None
         if row.get("tower_id"):
             tower = {

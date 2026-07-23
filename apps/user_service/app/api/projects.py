@@ -2376,7 +2376,10 @@ async def get_unit_detail(
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.get_unit_detail(project_id=project_id, unit_id=unit_id)
-    payload = UnitDetailResponse.model_validate(data).model_dump(exclude_none=True)
+    validated = UnitDetailResponse.model_validate(data)
+    payload = validated.model_dump(exclude_none=True)
+    if validated.owner is not None:
+        payload["owner"] = validated.owner.model_dump()
     return success_response(
         request=request,
         message_key="project_setup.success.unit_detail_retrieved",

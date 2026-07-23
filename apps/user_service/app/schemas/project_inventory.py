@@ -243,6 +243,8 @@ class UnitListOwner(BaseModel):
 
     contact_id: str | None = None
     display_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
 
 
 class UnitListItemResponse(BaseModel):
@@ -517,6 +519,8 @@ class UnitDetailPerson(BaseModel):
     contact_type: str
     relationship: str
     is_primary: bool = False
+    phone: str | None = None
+    email: str | None = None
 
 
 class UnitDetailFinancials(BaseModel):

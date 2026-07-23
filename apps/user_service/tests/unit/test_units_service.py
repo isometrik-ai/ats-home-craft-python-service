@@ -10,6 +10,8 @@ from apps.user_service.app.services.units_service import (
     UnitsService,
     build_location_label,
     format_contact_display_name,
+    format_primary_contact_email,
+    format_primary_contact_phone,
     pick_unit_owner,
     resolve_carpet_area_sqft,
     resolve_occupancy_label,
@@ -110,6 +112,16 @@ def test_serialize_unit_list_item_builds_registry_row():
             "owner_prefix": "Mr.",
             "owner_first_name": "Rajesh",
             "owner_last_name": "Kapoor",
+            "owner_phones": [
+                {
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "is_primary": True,
+                }
+            ],
+            "owner_emails": [
+                {"email": "rajesh@example.com", "is_primary": True},
+            ],
         }
     )
 
@@ -121,6 +133,23 @@ def test_serialize_unit_list_item_builds_registry_row():
     assert item["floor_level_number"] == 18
     assert item["status"] == "occupied"
     assert item["owner"]["display_name"] == "Mr. Rajesh Kapoor"
+    assert item["owner"]["phone"] == "+919876543210"
+    assert item["owner"]["email"] == "rajesh@example.com"
+
+
+def test_format_primary_contact_phone_and_email():
+    """Primary phone/email helpers prefer is_primary entries."""
+    phones = [
+        {"phone_isd_code": "+1", "phone_number": "1111111111", "is_primary": False},
+        {"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True},
+    ]
+    emails = [
+        {"email": "other@example.com", "is_primary": False},
+        {"email": "owner@example.com", "is_primary": True},
+    ]
+
+    assert format_primary_contact_phone(phones) == "+919876543210"
+    assert format_primary_contact_email(emails) == "owner@example.com"
 
 
 def test_list_item_hides_owner_when_vacant():
@@ -277,6 +306,27 @@ async def test_get_unit_detail_builds_payload():
             "last_name": "Kapoor",
         }
     ]
+    service.units_repo.get_unit_owner_contact.return_value = {
+        "contact_unit_id": "cu-1",
+        "contact_id": "c-1",
+        "is_primary": True,
+        "relationship": "self",
+        "status": "active",
+        "contact_type": "Owner",
+        "prefix": "Mr.",
+        "first_name": "Rajesh",
+        "last_name": "Kapoor",
+        "phones": [
+            {
+                "phone_isd_code": "+91",
+                "phone_number": "9876543210",
+                "is_primary": True,
+            }
+        ],
+        "emails": [{"email": "rajesh@example.com", "is_primary": True}],
+        "primary_phone": "+919876543210",
+        "primary_email": "rajesh@example.com",
+    }
     service.units_repo.count_unit_vehicles.return_value = (1, 1)
     service.invoices_repo = AsyncMock()
     service.invoices_repo.sum_outstanding_by_unit.return_value = 0
@@ -287,6 +337,8 @@ async def test_get_unit_detail_builds_payload():
     assert data["code"] == "A-1802"
     assert data["occupancy_label"] == "sold"
     assert data["owner"]["display_name"] == "Mr. Rajesh Kapoor"
+    assert data["owner"]["phone"] == "+919876543210"
+    assert data["owner"]["email"] == "rajesh@example.com"
     assert data["location_label"] == "Tower A · F18"
     assert data["carpet_area_sqft"] == 1080.0
     assert data["parking_entitlement"] == 2

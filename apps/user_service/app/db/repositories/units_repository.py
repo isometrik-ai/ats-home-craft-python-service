@@ -48,7 +48,9 @@ LEFT JOIN LATERAL (
         c.id AS owner_contact_id,
         c.prefix AS owner_prefix,
         c.first_name AS owner_first_name,
-        c.last_name AS owner_last_name
+        c.last_name AS owner_last_name,
+        c.phones AS owner_phones,
+        c.emails AS owner_emails
     FROM contact_units cu
     JOIN contacts c
         ON c.id = cu.contact_id
@@ -67,6 +69,34 @@ LEFT JOIN LATERAL (
         cu.created_at
     LIMIT 1
 ) owner_row ON TRUE
+"""
+
+_OWNER_PRIMARY_PHONE_SQL = """
+(
+    SELECT NULLIF(
+        trim(
+            COALESCE(p.phone->>'phone_isd_code', '')
+            || COALESCE(p.phone->>'phone_number', '')
+        ),
+        ''
+    )
+    FROM jsonb_array_elements(COALESCE(c.phones, '[]'::jsonb)) WITH ORDINALITY AS p(phone, ord)
+    ORDER BY
+        CASE WHEN COALESCE((p.phone->>'is_primary')::boolean, false) THEN 0 ELSE 1 END,
+        p.ord
+    LIMIT 1
+)
+"""
+
+_OWNER_PRIMARY_EMAIL_SQL = """
+(
+    SELECT NULLIF(trim(p.email->>'email'), '')
+    FROM jsonb_array_elements(COALESCE(c.emails, '[]'::jsonb)) WITH ORDINALITY AS p(email, ord)
+    ORDER BY
+        CASE WHEN COALESCE((p.email->>'is_primary')::boolean, false) THEN 0 ELSE 1 END,
+        p.ord
+    LIMIT 1
+)
 """
 
 _UNIT_INSERT_COLUMNS: tuple[str, ...] = (
@@ -271,6 +301,8 @@ class UnitsRepository(BaseRepository):
                 owner_row.owner_prefix,
                 owner_row.owner_first_name,
                 owner_row.owner_last_name,
+                owner_row.owner_phones,
+                owner_row.owner_emails,
                 {_RESOLVED_PROPERTY_TYPE_SQL} AS resolved_property_type,
                 {_RESOLVED_CONFIG_KIND_SQL} AS resolved_config_kind
             {_LIST_UNITS_FROM_SQL}
@@ -456,6 +488,49 @@ class UnitsRepository(BaseRepository):
             unit_id,
         )
         return [dict(row) for row in rows]
+
+    async def get_unit_owner_contact(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the Owner contact linked to a unit (pending or active allotment)."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+                cu.id AS contact_unit_id,
+                cu.contact_id,
+                cu.is_primary,
+                cu.relationship::text AS relationship,
+                cu.status::text AS status,
+                c.contact_type,
+                c.prefix,
+                c.first_name,
+                c.last_name,
+                c.phones,
+                c.emails,
+                {_OWNER_PRIMARY_PHONE_SQL} AS primary_phone,
+                {_OWNER_PRIMARY_EMAIL_SQL} AS primary_email
+            FROM contact_units cu
+            JOIN contacts c
+                ON c.id = cu.contact_id
+               AND c.organization_id = cu.organization_id
+            WHERE cu.organization_id = $1::uuid
+              AND cu.unit_id = $2::uuid
+              AND cu.status IN (
+                  'active'::contact_unit_status,
+                  'pending'::contact_unit_status
+              )
+              AND c.status = 'active'
+              AND c.contact_type = 'Owner'
+            ORDER BY cu.is_primary DESC, cu.sort_order, cu.created_at
+            LIMIT 1
+            """,
+            organization_id,
+            unit_id,
+        )
+        return dict(row) if row else None
 
     async def count_unit_vehicles(
         self,
