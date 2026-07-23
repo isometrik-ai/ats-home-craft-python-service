@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from apps.user_service.app.schemas.enums import (
     CommercialUnitType,
     ConfigMediaKind,
+    ContactUnitDocumentType,
     ContactUnitRelationship,
     FacilityLocationType,
     FacilityStatus,
@@ -269,6 +270,31 @@ class UnitOwnerChangeResponse(BaseModel):
     previous_contact_id: str | None = None
     released_contact_unit_ids: list[str] = Field(default_factory=list)
     unit_status: str
+
+
+class CreateUnitDocumentRequest(BaseModel):
+    """Add an ownership document to the current owner allotment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_type: ContactUnitDocumentType
+    file_path: str = Field(..., min_length=1, max_length=500)
+    file_name: str | None = Field(default=None, max_length=255)
+
+
+class UnitDocumentResponse(BaseModel):
+    """Ownership document on a contact-unit allotment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    contact_unit_id: str
+    document_type: ContactUnitDocumentType
+    file_path: str
+    file_name: str | None = None
+    uploaded_by_user_id: str | None = None
+    created_at: str
+    updated_at: str
 
 
 class UnitListItemResponse(BaseModel):
@@ -545,6 +571,8 @@ class UnitDetailPerson(BaseModel):
     is_primary: bool = False
     phone: str | None = None
     email: str | None = None
+    assigned_at: str | None = None
+    contact_unit_status: str | None = None
 
 
 class UnitDetailFinancials(BaseModel):
@@ -581,6 +609,7 @@ class UnitDetailResponse(BaseModel):
     config: UnitDetailConfig | None = None
     plot_item: UnitDetailPlotItem | None = None
     owner: UnitDetailPerson | None = None
+    documents: list[UnitDocumentResponse] = Field(default_factory=list)
     residents: list[UnitDetailPerson] = Field(default_factory=list)
     vehicles_count: int = Field(default=0, ge=0)
     financials: UnitDetailFinancials = Field(default_factory=UnitDetailFinancials)

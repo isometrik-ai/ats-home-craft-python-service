@@ -25,12 +25,14 @@ from apps.user_service.app.schemas.project_inventory import (
     CreatePlotConfigItemRequest,
     CreateSiteMapOverlaysRequest,
     CreateUnitConfigRequest,
+    CreateUnitDocumentRequest,
     CreateUnitRequest,
     InventorySummaryResponse,
     ListProjectUnitsFilterQuery,
     ListProjectUnitsQuery,
     ReassignUnitOwnerRequest,
     UnitDetailResponse,
+    UnitDocumentResponse,
     UnitListItemResponse,
     UnitListSummary,
     UnitOwnerChangeResponse,
@@ -56,6 +58,9 @@ from apps.user_service.app.schemas.project_setup import (
     ProjectSummaryResponse,
     UpdateProjectRequest,
     UpdateTowerRequest,
+)
+from apps.user_service.app.services.contact_unit_documents_service import (
+    ContactUnitDocumentsService,
 )
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.facilities_service import FacilitiesService
@@ -2497,6 +2502,160 @@ async def reassign_unit_owner(
         message_key="project_setup.success.unit_owner_reassigned",
         custom_code=CustomStatusCode.SUCCESS,
         data=payload,
+    )
+
+
+@handle_api_exceptions("list unit documents")
+@router.get(
+    "/{project_id}/units/{unit_id}/documents",
+    status_code=http_status.HTTP_200_OK,
+    summary="List owner documents for a unit",
+    description=(
+        "Returns ownership documents (lease, tax receipt, etc.) for the "
+        "current Owner contact_units allotment on this unit."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_unit_documents(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(..., description="Unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List documents for the current owner allotment on a unit."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+    )
+    service = ContactUnitDocumentsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    items = await service.list_unit_documents(project_id=project_id, unit_id=unit_id)
+    payload = [UnitDocumentResponse.model_validate(item).model_dump() for item in items]
+    return list_response(
+        request=request,
+        items=payload,
+        total=len(payload),
+        page=1,
+        page_size=max(len(payload), 1),
+        message_key="project_setup.success.unit_documents_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if payload else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("add unit document")
+@router.post(
+    "/{project_id}/units/{unit_id}/documents",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Add an owner document to a unit",
+    description=(
+        "Registers a storage path for an ownership document on the current "
+        "Owner allotment. Upload the file separately, then pass file_path here."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="contact_unit_documents",
+    category="PROJECT_SETUP",
+)
+async def add_unit_document(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(..., description="Unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: CreateUnitDocumentRequest = Body(...),
+):
+    """Add a document to the current owner allotment on a unit."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = ContactUnitDocumentsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await service.add_unit_document(
+        project_id=project_id,
+        unit_id=unit_id,
+        body=body,
+    )
+    payload = UnitDocumentResponse.model_validate(data).model_dump()
+    _set_audit(
+        request,
+        user_context,
+        table="contact_unit_documents",
+        requested_id=payload["id"],
+        description=f"Added unit document: {payload['id']}",
+        new_data=payload,
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.unit_document_added",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=payload,
+    )
+
+
+@handle_api_exceptions("delete unit document")
+@router.delete(
+    "/{project_id}/units/{unit_id}/documents/{document_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Delete an owner document from a unit",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="contact_unit_documents",
+    category="PROJECT_SETUP",
+)
+async def delete_unit_document(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(..., description="Unit identifier (UUID string)."),
+    document_id: str = Path(..., description="Document identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Delete one document from the current owner allotment on a unit."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = ContactUnitDocumentsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    await service.delete_unit_document(
+        project_id=project_id,
+        unit_id=unit_id,
+        document_id=document_id,
+    )
+    _set_audit(
+        request,
+        user_context,
+        table="contact_unit_documents",
+        requested_id=document_id,
+        description=f"Deleted unit document: {document_id}",
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.unit_document_deleted",
+        custom_code=CustomStatusCode.SUCCESS,
     )
 
 

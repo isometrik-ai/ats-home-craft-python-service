@@ -1451,6 +1451,19 @@ class TenantRequestDocumentType(str, Enum):
     POLICE_VERIFICATION = "police_verification"
 
 
+class ContactUnitDocumentType(str, Enum):
+    """Ownership documents linked to a contact-unit allotment.
+
+    Validated in the API; persisted as text in contact_unit_documents.document_type.
+    To add a type: extend this enum and migrate the CHECK constraint on the column.
+    """
+
+    LEASE = "lease"
+    TAX_RECEIPT = "tax_receipt"
+    OWNERSHIP_CERTIFICATE = "ownership_certificate"
+    OTHER = "other"
+
+
 class TenantRequestDocumentStatus(str, Enum):
     """Per-document review status."""
 

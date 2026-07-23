@@ -18,6 +18,9 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateUnitRequest,
     UpdateUnitRequest,
 )
+from apps.user_service.app.services.contact_unit_documents_service import (
+    ContactUnitDocumentsService,
+)
 from apps.user_service.app.services.fee_calculation_service import (
     convert_minor_to_major,
 )
@@ -29,7 +32,7 @@ from apps.user_service.app.services.inventory_service import (
     resolve_unit_kind,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.project_serialization import serialize_row
 from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -233,6 +236,8 @@ def build_unit_owner_detail(row: dict[str, Any]) -> dict[str, Any]:
     email = row.get("primary_email") or format_primary_contact_email(row.get("emails"))
     owner["phone"] = str(phone).strip() if phone else None
     owner["email"] = str(email).strip() if email else None
+    owner["assigned_at"] = format_iso_datetime(row.get("created_at"))
+    owner["contact_unit_status"] = row.get("status")
     return owner
 
 
@@ -371,6 +376,7 @@ class UnitsService:
         status = str(row.get("status") or "")
         residents = [build_unit_detail_person(resident) for resident in residents_raw]
         owner = None
+        owner_row = None
         if is_sold_status(status):
             owner_row = await self.units_repo.get_unit_owner_contact(
                 organization_id=self._org_id,
@@ -378,6 +384,16 @@ class UnitsService:
             )
             if owner_row:
                 owner = build_unit_owner_detail(owner_row)
+
+        documents: list[dict[str, Any]] = []
+        if owner_row:
+            docs_service = ContactUnitDocumentsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            documents = await docs_service.list_documents_for_owner_contact_unit(
+                contact_unit_id=str(owner_row["contact_unit_id"]),
+            )
 
         tower = None
         if row.get("tower_id"):
@@ -463,6 +479,7 @@ class UnitsService:
             "config": config,
             "plot_item": plot_item,
             "owner": owner,
+            "documents": documents,
             "residents": residents,
             "vehicles_count": vehicles_count,
             "financials": {
