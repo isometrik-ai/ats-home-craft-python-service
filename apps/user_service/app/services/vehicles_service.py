@@ -31,7 +31,17 @@ from apps.user_service.app.schemas.enums import (
     VehicleStatus,
     VehicleType,
 )
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.services.units_service import (
+    format_contact_display_name,
+    format_primary_contact_email,
+    format_primary_contact_phone,
+    serialize_unit_list_item,
+)
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_any,
+)
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -70,6 +80,101 @@ class VehiclesService:
         out["created_at"] = format_iso_datetime(out.get("created_at"))
         out["updated_at"] = format_iso_datetime(out.get("updated_at"))
         out["status_updated_at"] = format_iso_datetime(out.get("status_updated_at"))
+        return out
+
+    _OWNER_ROW_KEYS = (
+        "owner_contact_id",
+        "owner_prefix",
+        "owner_first_name",
+        "owner_last_name",
+        "owner_phones",
+        "owner_emails",
+        "owner_primary_phone",
+        "owner_primary_email",
+        "owner_profile_photo_url",
+    )
+
+    _UNIT_ROW_KEYS = (
+        "unit_code",
+        "unit_label",
+        "unit_status",
+        "unit_tower_id",
+        "unit_config_id",
+        "unit_plot_item_id",
+        "unit_sort_order",
+        "unit_tower_name",
+        "unit_tower_type",
+        "unit_floor_display_name",
+        "unit_floor_level_number",
+        "unit_config_kind",
+        "unit_config_display_label",
+        "unit_config_name",
+        "unit_plot_description",
+        "unit_resolved_property_type",
+        "unit_resolved_config_kind",
+    )
+
+    def _build_unit_owner(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build owner summary for a vehicle's unit."""
+        if not row.get("owner_contact_id"):
+            return None
+        phone = row.get("owner_primary_phone") or format_primary_contact_phone(
+            parse_json_any(row.get("owner_phones"), default=[])
+        )
+        email = row.get("owner_primary_email") or format_primary_contact_email(
+            parse_json_any(row.get("owner_emails"), default=[])
+        )
+        profile_photo_url = row.get("owner_profile_photo_url")
+        return {
+            "contact_id": str(row["owner_contact_id"]),
+            "display_name": format_contact_display_name(
+                prefix=row.get("owner_prefix"),
+                first_name=row.get("owner_first_name"),
+                last_name=row.get("owner_last_name"),
+            )
+            or None,
+            "phone": str(phone).strip() if phone else None,
+            "email": str(email).strip() if email else None,
+            "profile_photo_url": str(profile_photo_url).strip() if profile_photo_url else None,
+        }
+
+    def _build_vehicle_unit(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build unit summary for the vehicle's assigned unit."""
+        unit_id = row.get("unit_id")
+        if not unit_id:
+            return None
+        unit_item = serialize_unit_list_item(
+            {
+                "id": unit_id,
+                "code": row.get("unit_code") or "",
+                "unit_label": row.get("unit_label"),
+                "status": row.get("unit_status") or "",
+                "sort_order": row.get("unit_sort_order") or 0,
+                "tower_id": row.get("unit_tower_id"),
+                "config_id": row.get("unit_config_id"),
+                "plot_item_id": row.get("unit_plot_item_id"),
+                "tower_name": row.get("unit_tower_name"),
+                "tower_type": row.get("unit_tower_type"),
+                "floor_display_name": row.get("unit_floor_display_name"),
+                "floor_level_number": row.get("unit_floor_level_number"),
+                "config_kind": row.get("unit_config_kind"),
+                "config_display_label": row.get("unit_config_display_label"),
+                "config_name": row.get("unit_config_name"),
+                "plot_description": row.get("unit_plot_description"),
+                "resolved_property_type": row.get("unit_resolved_property_type"),
+                "resolved_config_kind": row.get("unit_resolved_config_kind"),
+            }
+        )
+        unit_item.pop("owner", None)
+        return unit_item
+
+    def _normalize_project_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Map a project vehicle row to admin list response shape."""
+        out = self._normalize_vehicle(row)
+        out["owner"] = self._build_unit_owner(row)
+        out["unit"] = self._build_vehicle_unit(row)
+        for key in (*self._OWNER_ROW_KEYS, *self._UNIT_ROW_KEYS):
+            out.pop(key, None)
         return out
 
     async def _validate_unit_for_contact(self, *, contact_id: str, unit_id: str) -> str:
@@ -274,7 +379,7 @@ class VehiclesService:
             project_id=project_id,
             status=status.value if status else None,
         )
-        return [self._normalize_vehicle(row) for row in rows]
+        return [self._normalize_project_vehicle(row) for row in rows]
 
     async def review_vehicle(
         self,
