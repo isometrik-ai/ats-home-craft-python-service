@@ -47,14 +47,17 @@ def _ctx() -> UserContext:
     )
 
 
-def _create_body(*, team_id: UUID | None = None) -> InviteCreateRequest:
-    """Build InviteCreateRequest with optional team_id."""
+def _create_body(
+    *, team_id: UUID | None = None, tags: list[str] | None = None
+) -> InviteCreateRequest:
+    """Build InviteCreateRequest with optional team_id and tags."""
     return InviteCreateRequest(
         email="invitee@example.com",
         first_name="Jane",
         last_name="Doe",
         role_id=UUID(ROLE_ID),
         team_id=team_id,
+        tags=tags,
     )
 
 
@@ -107,6 +110,27 @@ async def test_metadata_omits_team_id():
     metadata = service._build_invite_metadata(_create_body())  # pylint: disable=protected-access
 
     assert "team_id" not in metadata
+    assert "tags" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_tags():
+    """Metadata stores tags when provided on create request."""
+    service = InviteService(user_context=None, db_connection=None)
+    metadata = service._build_invite_metadata(  # pylint: disable=protected-access
+        _create_body(tags=[" sales ", "onboarding", ""])
+    )
+
+    assert metadata["tags"] == ["sales", "onboarding"]
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_empty_tags():
+    """Metadata stores an empty tags list when explicitly provided."""
+    service = InviteService(user_context=None, db_connection=None)
+    metadata = service._build_invite_metadata(_create_body(tags=[]))  # pylint: disable=protected-access
+
+    assert metadata["tags"] == []
 
 
 @pytest.mark.asyncio
