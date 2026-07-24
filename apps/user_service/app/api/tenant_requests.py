@@ -1,4 +1,4 @@
-"""Admin tenant requests API."""
+"""Admin tenant requests API (project-scoped)."""
 
 from __future__ import annotations
 
@@ -24,13 +24,13 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    CONTACTS_MANAGEMENT_EDIT,
-    CONTACTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_EDIT,
+    PROJECTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
-router = APIRouter(prefix="/tenant-requests", tags=["Tenant Requests"])
+router = APIRouter(prefix="/projects", tags=["Tenant Requests"])
 
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     401: {"description": "Unauthorized (missing/invalid JWT)."},
@@ -42,16 +42,17 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 }
 
 
-@handle_api_exceptions("get tenant request summary")
+@handle_api_exceptions("get project tenant request summary")
 @router.get(
-    "/summary",
+    "/{project_id}/tenant-requests/summary",
     status_code=http_status.HTTP_200_OK,
-    summary="Tenant request dashboard summary",
+    summary="Tenant request dashboard summary for a project",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def get_tenant_request_summary(
+async def get_project_tenant_request_summary(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -59,14 +60,14 @@ async def get_tenant_request_summary(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = TenantRequestsService(
         db_connection=db_connection,
         user_context=user_context,
     )
-    data = await service.get_admin_summary()
+    data = await service.get_admin_summary(project_id=project_id)
     return success_response(
         request=request,
         message_key="tenant_requests.success.summary_retrieved",
@@ -75,32 +76,37 @@ async def get_tenant_request_summary(
     )
 
 
-@handle_api_exceptions("list tenant requests")
+@handle_api_exceptions("list project tenant requests")
 @router.get(
-    "",
+    "/{project_id}/tenant-requests",
     status_code=http_status.HTTP_200_OK,
-    summary="List tenant requests",
+    summary="List tenant requests for a project",
+    description=(
+        "Each item includes nested `owner` (submitter contact) and `unit` "
+        "(code, location_label, property_type, config, floor, status)."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def list_tenant_requests(
+async def list_project_tenant_requests(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     query: TenantRequestListQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return paginated tenant requests for admin review."""
+    """Return paginated tenant requests for admin review within a project."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = TenantRequestsService(
         db_connection=db_connection,
         user_context=user_context,
     )
-    items, total = await service.list_admin_requests(query=query)
+    items, total = await service.list_admin_requests(project_id=project_id, query=query)
     return list_response(
         request=request,
         items=[item.model_dump() for item in items],
@@ -112,16 +118,17 @@ async def list_tenant_requests(
     )
 
 
-@handle_api_exceptions("get tenant request")
+@handle_api_exceptions("get project tenant request")
 @router.get(
-    "/{tenant_request_id}",
+    "/{project_id}/tenant-requests/{tenant_request_id}",
     status_code=http_status.HTTP_200_OK,
-    summary="Get tenant request detail",
+    summary="Get tenant request detail for a project",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def get_tenant_request(
+async def get_project_tenant_request(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     tenant_request_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -130,14 +137,17 @@ async def get_tenant_request(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = TenantRequestsService(
         db_connection=db_connection,
         user_context=user_context,
     )
-    data = await service.get_admin_request(tenant_request_id=tenant_request_id)
+    data = await service.get_admin_request(
+        project_id=project_id,
+        tenant_request_id=tenant_request_id,
+    )
     return success_response(
         request=request,
         message_key="tenant_requests.success.retrieved",
@@ -148,7 +158,7 @@ async def get_tenant_request(
 
 @handle_api_exceptions("verify tenant document")
 @router.post(
-    "/{tenant_request_id}/documents/{document_id}/verify",
+    "/{project_id}/tenant-requests/{tenant_request_id}/documents/{document_id}/verify",
     status_code=http_status.HTTP_200_OK,
     summary="Verify a tenant request document",
     responses=COMMON_ERROR_RESPONSES,
@@ -163,6 +173,7 @@ async def get_tenant_request(
 )
 async def verify_tenant_document(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     tenant_request_id: str = Path(...),
     document_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
@@ -172,7 +183,7 @@ async def verify_tenant_document(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = TenantRequestsService(
@@ -180,6 +191,7 @@ async def verify_tenant_document(
         user_context=user_context,
     )
     data = await service.verify_document(
+        project_id=project_id,
         tenant_request_id=tenant_request_id,
         document_id=document_id,
     )
@@ -202,7 +214,7 @@ async def verify_tenant_document(
 
 @handle_api_exceptions("reject tenant document")
 @router.post(
-    "/{tenant_request_id}/documents/{document_id}/reject",
+    "/{project_id}/tenant-requests/{tenant_request_id}/documents/{document_id}/reject",
     status_code=http_status.HTTP_200_OK,
     summary="Reject a tenant request document",
     responses=COMMON_ERROR_RESPONSES,
@@ -217,6 +229,7 @@ async def verify_tenant_document(
 )
 async def reject_tenant_document(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     tenant_request_id: str = Path(...),
     document_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
@@ -227,7 +240,7 @@ async def reject_tenant_document(
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = TenantRequestsService(
@@ -235,6 +248,7 @@ async def reject_tenant_document(
         user_context=user_context,
     )
     data = await service.reject_document(
+        project_id=project_id,
         tenant_request_id=tenant_request_id,
         document_id=document_id,
         body=body,
@@ -258,7 +272,7 @@ async def reject_tenant_document(
 
 @handle_api_exceptions("approve tenant request")
 @router.post(
-    "/{tenant_request_id}/approve",
+    "/{project_id}/tenant-requests/{tenant_request_id}/approve",
     status_code=http_status.HTTP_200_OK,
     summary="Approve a tenant request",
     responses=COMMON_ERROR_RESPONSES,
@@ -273,17 +287,18 @@ async def reject_tenant_document(
 )
 async def approve_tenant_request(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     tenant_request_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
-    body: ApproveTenantRequestRequest = Body(default_factory=ApproveTenantRequestRequest),
+    body: ApproveTenantRequestRequest = Body(...),
 ):
     """Approve a ready tenant request and create the tenant contact + unit link."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = TenantRequestsService(
@@ -292,6 +307,7 @@ async def approve_tenant_request(
         supabase_client=sb_client,
     )
     data = await service.approve_request(
+        project_id=project_id,
         tenant_request_id=tenant_request_id,
         body=body,
     )

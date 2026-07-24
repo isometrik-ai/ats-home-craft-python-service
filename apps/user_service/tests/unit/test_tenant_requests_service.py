@@ -143,6 +143,13 @@ def _create_body() -> CreateTenantRequestRequest:
     )
 
 
+def _approve_body(**overrides: Any) -> ApproveTenantRequestRequest:
+    """Build a valid approve tenant request payload."""
+    payload: dict[str, Any] = {"move_in_date": date(2026, 8, 1)}
+    payload.update(overrides)
+    return ApproveTenantRequestRequest(**payload)
+
+
 class _FakeTenantRequestsRepo:
     """Configurable fake tenant requests repository."""
 
@@ -265,9 +272,9 @@ class _FakeTenantRequestsRepo:
                 doc["status"] = TenantRequestDocumentStatus.REJECTED.value
         return self.reject_returns
 
-    async def get_summary_counts(self, *, organization_id: str):
+    async def get_summary_counts(self, *, organization_id: str, project_id: str):
         """Return dashboard counts."""
-        del organization_id
+        del organization_id, project_id
         return dict(self.summary)
 
     async def find_active_approved_for_unit(self, *, organization_id: str, unit_id: str):
@@ -312,13 +319,15 @@ def _service(
     contact_units_repo: _FakeContactUnitsRepo | None = None,
 ) -> TenantRequestsService:
     """Build service with fake repositories."""
-    return TenantRequestsService(
+    service = TenantRequestsService(
         db_connection=MagicMock(),
         user_context=_ctx(),
         supabase_client=MagicMock(),
         tenant_requests_repository=repo or _FakeTenantRequestsRepo(),
         contact_units_repository=contact_units_repo or _FakeContactUnitsRepo(),
     )
+    service.setup_service = AsyncMock()
+    return service
 
 
 def test_derive_header_status_ready_when_all_verified() -> None:
@@ -542,7 +551,7 @@ async def test_reupload_document_not_rejected() -> None:
 async def test_get_admin_summary() -> None:
     """Admin summary returns dashboard counts."""
     svc = _service()
-    summary = await svc.get_admin_summary()
+    summary = await svc.get_admin_summary(project_id=PROJECT_ID)
     assert summary.pending_review == 1
 
 
@@ -551,7 +560,8 @@ async def test_list_admin_requests() -> None:
     """Admin list returns paginated requests."""
     svc = _service()
     items, total = await svc.list_admin_requests(
-        TenantRequestListQuery(bucket=TenantRequestListBucket.PENDING_REVIEW)
+        project_id=PROJECT_ID,
+        query=TenantRequestListQuery(bucket=TenantRequestListBucket.PENDING_REVIEW),
     )
     assert total == 1
     assert items[0].status == TenantRequestStatus.SUBMITTED.value
@@ -561,7 +571,10 @@ async def test_list_admin_requests() -> None:
 async def test_get_admin_request() -> None:
     """Admin can fetch one tenant request."""
     svc = _service()
-    response = await svc.get_admin_request(REQUEST_ID)
+    response = await svc.get_admin_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+    )
     assert response.documents_total_count == 3
 
 
@@ -576,6 +589,7 @@ async def test_verify_document_success() -> None:
     svc = _service(repo=repo)
 
     response = await svc.verify_document(
+        project_id=PROJECT_ID,
         tenant_request_id=REQUEST_ID,
         document_id=DOC_ID,
     )
@@ -593,7 +607,11 @@ async def test_verify_document_not_found() -> None:
     repo.verify_returns = None
     svc = _service(repo=repo)
     with pytest.raises(NotFoundException):
-        await svc.verify_document(tenant_request_id=REQUEST_ID, document_id=DOC_ID)
+        await svc.verify_document(
+            project_id=PROJECT_ID,
+            tenant_request_id=REQUEST_ID,
+            document_id=DOC_ID,
+        )
 
 
 @pytest.mark.asyncio
@@ -604,6 +622,7 @@ async def test_reject_document_success() -> None:
     svc = _service(repo=repo)
 
     response = await svc.reject_document(
+        project_id=PROJECT_ID,
         tenant_request_id=REQUEST_ID,
         document_id=DOC_ID,
         body=RejectTenantDocumentRequest(rejection_reason="Blurry image"),
@@ -667,7 +686,11 @@ async def test_verify_document_invalid_status() -> None:
     repo.row = _request_row(status=TenantRequestStatus.APPROVED.value)
     svc = _service(repo=repo)
     with pytest.raises(ValidationException):
-        await svc.verify_document(tenant_request_id=REQUEST_ID, document_id=DOC_ID)
+        await svc.verify_document(
+            project_id=PROJECT_ID,
+            tenant_request_id=REQUEST_ID,
+            document_id=DOC_ID,
+        )
 
 
 @pytest.mark.asyncio
@@ -678,6 +701,7 @@ async def test_reject_document_invalid_status() -> None:
     svc = _service(repo=repo)
     with pytest.raises(ValidationException):
         await svc.reject_document(
+            project_id=PROJECT_ID,
             tenant_request_id=REQUEST_ID,
             document_id=DOC_ID,
             body=RejectTenantDocumentRequest(rejection_reason="Bad"),
@@ -692,6 +716,7 @@ async def test_reject_document_not_found() -> None:
     svc = _service(repo=repo)
     with pytest.raises(NotFoundException):
         await svc.reject_document(
+            project_id=PROJECT_ID,
             tenant_request_id=REQUEST_ID,
             document_id=DOC_ID,
             body=RejectTenantDocumentRequest(rejection_reason="Bad"),
@@ -711,8 +736,9 @@ async def test_approve_request_success(mock_contacts_cls: MagicMock) -> None:
     svc = _service(repo=repo)
 
     response = await svc.approve_request(
+        project_id=PROJECT_ID,
         tenant_request_id=REQUEST_ID,
-        body=ApproveTenantRequestRequest(admin_notes="Approved"),
+        body=_approve_body(admin_notes="Approved"),
     )
 
     assert response.status == TenantRequestStatus.APPROVED.value
@@ -725,8 +751,9 @@ async def test_approve_request_not_ready() -> None:
     svc = _service()
     with pytest.raises(ValidationException):
         await svc.approve_request(
+            project_id=PROJECT_ID,
             tenant_request_id=REQUEST_ID,
-            body=ApproveTenantRequestRequest(),
+            body=_approve_body(),
         )
 
 
@@ -746,11 +773,119 @@ async def test_approve_request_supersedes_existing(mock_contacts_cls: MagicMock)
     svc = _service(repo=repo)
 
     response = await svc.approve_request(
+        project_id=PROJECT_ID,
         tenant_request_id=REQUEST_ID,
-        body=ApproveTenantRequestRequest(),
+        body=_approve_body(),
     )
 
     assert response.status == TenantRequestStatus.APPROVED.value
     assert any(
         event.get("event_type") == TenantRequestEventType.SUPERSEDED.value for event in repo.events
     )
+
+
+@pytest.mark.asyncio
+async def test_serialize_detail_parses_json_string_fields() -> None:
+    """JSONB columns returned as strings must not break response serialization."""
+    service = TenantRequestsService(db_connection=MagicMock(), user_context=MagicMock())
+    service.user_context.organization_id = "org-1"
+    service.repo = AsyncMock()
+    service.repo.list_documents.return_value = []
+    service.repo.list_events.return_value = [
+        {
+            "id": "event-1",
+            "event_type": "created",
+            "occurred_at": "2026-07-24T05:30:00+00:00",
+            "payload": "{}",
+        }
+    ]
+
+    result = await service._serialize_detail(
+        {
+            "id": "req-1",
+            "organization_id": "org-1",
+            "project_id": "proj-1",
+            "unit_id": "unit-1",
+            "submitted_by_contact_id": "owner-1",
+            "tenant_first_name": "Vatsal",
+            "tenant_last_name": "Savaliya",
+            "tenant_phones": (
+                '[{"phone_number": "9967887657", "phone_isd_code": "+91", "is_primary": true}]'
+            ),
+            "tenant_emails": '[{"email": "vatsal@example.com", "is_primary": true}]',
+            "status": TenantRequestStatus.SUBMITTED.value,
+            "portal_access": False,
+            "submitted_at": "2026-07-24T05:30:00+00:00",
+            "created_at": "2026-07-24T05:30:00+00:00",
+            "updated_at": "2026-07-24T05:30:00+00:00",
+        }
+    )
+
+    assert result.events[0].payload == {}
+    assert result.tenant_phones[0]["phone_number"] == "9967887657"
+    assert result.tenant_emails[0]["email"] == "vatsal@example.com"
+
+
+def test_serialize_list_item_includes_owner_and_unit() -> None:
+    """Admin list rows include nested owner and unit summaries."""
+    service = TenantRequestsService(db_connection=MagicMock(), user_context=MagicMock())
+
+    item = service._serialize_list_item(
+        {
+            "id": "req-1",
+            "organization_id": "org-1",
+            "project_id": "proj-1",
+            "unit_id": "unit-1",
+            "submitted_by_contact_id": "owner-1",
+            "tenant_first_name": "Vatsal",
+            "tenant_last_name": "Savaliya",
+            "tenant_phones": [],
+            "tenant_emails": [],
+            "status": TenantRequestStatus.SUBMITTED.value,
+            "portal_access": False,
+            "submitted_at": "2026-07-24T05:30:00+00:00",
+            "created_at": "2026-07-24T05:30:00+00:00",
+            "updated_at": "2026-07-24T05:30:00+00:00",
+            "documents_verified_count": 1,
+            "documents_total_count": 3,
+            "owner_contact_id": "owner-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Raj",
+            "owner_last_name": "Kumar",
+            "owner_phones": [
+                {
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "is_primary": True,
+                }
+            ],
+            "owner_emails": [{"email": "raj@example.com", "is_primary": True}],
+            "owner_profile_photo_url": "https://cdn.example.com/raj.jpg",
+            "unit_code": "A-1802",
+            "unit_label": None,
+            "unit_status": "occupied",
+            "unit_tower_id": "tower-1",
+            "unit_config_id": "cfg-1",
+            "unit_plot_item_id": None,
+            "unit_sort_order": 1,
+            "unit_tower_name": "Tower A",
+            "unit_tower_type": "residential",
+            "unit_floor_display_name": "F18",
+            "unit_floor_level_number": 18,
+            "unit_config_kind": "apartment",
+            "unit_config_display_label": "2BHK Standard",
+            "unit_config_name": "2BHK Standard",
+            "unit_plot_description": None,
+            "unit_resolved_property_type": "residential",
+            "unit_resolved_config_kind": "apartment",
+        }
+    )
+
+    assert item.owner is not None
+    assert item.owner.contact_id == "owner-1"
+    assert item.owner.display_name == "Mr. Raj Kumar"
+    assert item.owner.phone == "+919876543210"
+    assert item.unit is not None
+    assert item.unit.code == "A-1802"
+    assert item.unit.location_label == "Tower A · F18"
+    assert item.documents_verified_count == 1

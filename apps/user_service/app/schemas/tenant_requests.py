@@ -87,11 +87,12 @@ class ApproveTenantRequestRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    move_in_date: date
     admin_notes: str | None = Field(None, max_length=2000)
 
 
 class TenantRequestListQuery(BaseModel):
-    """Query params for admin GET /tenant-requests."""
+    """Query params for admin GET /projects/{project_id}/tenant-requests."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -99,7 +100,6 @@ class TenantRequestListQuery(BaseModel):
     status: TenantRequestStatus | None = None
     search: str | None = Field(None, max_length=200)
     unit_id: str | None = None
-    project_id: str | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
 
@@ -151,6 +151,67 @@ class TenantRequestMilestoneResponse(BaseModel):
     occurred_at: str | None = None
 
 
+class TenantRequestOwnerSummary(BaseModel):
+    """Owner (submitter) summary on admin tenant request rows."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    contact_id: str
+    display_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    profile_photo_url: str | None = None
+
+
+class TenantRequestUnitSummary(BaseModel):
+    """Unit summary on admin tenant request rows."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    code: str
+    unit_label: str | None = None
+    location_label: str | None = None
+    property_type: str | None = None
+    config_kind: str | None = None
+    floor_level_number: int | None = None
+    floor_display_name: str | None = None
+    config_display_label: str | None = None
+    tower_id: str | None = None
+    config_id: str | None = None
+    status: str
+    sort_order: int = 0
+
+
+class TenantRequestListItemResponse(BaseModel):
+    """Tenant request row for the admin project list table."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    project_id: str
+    unit_id: str
+    submitted_by_contact_id: str
+    owner_name: str | None = None
+    tenant_first_name: str
+    tenant_last_name: str | None = None
+    tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
+    tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
+    move_in_date: str | None = None
+    status: str
+    portal_access: bool = False
+    submitted_at: str | None = None
+    approved_at: str | None = None
+    cancelled_at: str | None = None
+    documents_verified_count: int = 0
+    documents_total_count: int = 3
+    owner: TenantRequestOwnerSummary | None = None
+    unit: TenantRequestUnitSummary | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 class TenantRequestResponse(BaseModel):
     """Tenant request detail response."""
 
@@ -183,6 +244,8 @@ class TenantRequestResponse(BaseModel):
     milestones: list[TenantRequestMilestoneResponse] = Field(default_factory=list)
     documents_verified_count: int = 0
     documents_total_count: int = 3
+    owner: TenantRequestOwnerSummary | None = None
+    unit: TenantRequestUnitSummary | None = None
     created_at: str | None = None
     updated_at: str | None = None
 

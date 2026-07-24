@@ -10,7 +10,7 @@
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Owner API prefix:** `/v1/contact-onboarding/tenant-requests`
-- **Admin API prefix:** `/v1/tenant-requests`
+- **Admin API prefix:** `/v1/projects/{project_id}/tenant-requests`
 - **DB schema:** `ats-home-craft-supabase` (migrations `20260722150000_*`, `20260722151000_*`)
 
 ______________________________________________________________________
@@ -54,15 +54,15 @@ On **approval**:
 
 **Admin dashboard**
 
-| Screen element           | Capability                                                          |
-| ------------------------ | ------------------------------------------------------------------- |
-| Summary cards            | `GET /tenant-requests/summary`                                      |
-| Table + filters + search | `GET /tenant-requests?status=&search=`                              |
-| Row detail + documents   | `GET /tenant-requests/{id}`                                         |
-| Verify document          | `POST /tenant-requests/{id}/documents/{doc_id}/verify`              |
-| Reject document          | `POST /tenant-requests/{id}/documents/{doc_id}/reject` `{ reason }` |
-| Approve request          | `POST /tenant-requests/{id}/approve`                                |
-| Export (later)           | `GET /tenant-requests/export`                                       |
+| Screen element           | Capability                                                                                |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| Summary cards            | `GET /projects/{project_id}/tenant-requests/summary`                                      |
+| Table + filters + search | `GET /projects/{project_id}/tenant-requests?status=&search=`                              |
+| Row detail + documents   | `GET /projects/{project_id}/tenant-requests/{id}`                                         |
+| Verify document          | `POST /projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/verify`              |
+| Reject document          | `POST /projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/reject` `{ reason }` |
+| Approve request          | `POST /projects/{project_id}/tenant-requests/{id}/approve`                                |
+| Export (later)           | `GET /projects/{project_id}/tenant-requests/export`                                       |
 
 ______________________________________________________________________
 
@@ -86,7 +86,7 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | Request/response models | `app/schemas/tenant_requests.py`                                                    |
 | Enums (mirror Postgres) | `app/schemas/enums.py`                                                              |
 | Owner context           | `extract_onboarding_contact_context` in `app/utils/common_utils.py`                 |
-| Admin RBAC              | Reuse `contacts_management.*` (same as move events / contacts)                      |
+| Admin RBAC              | Reuse `projects_management.*` (same as vehicle requests / project setup)            |
 | Tenant contact creation | Compose `ContactsService` (same as household member add)                            |
 | Unit link / supersede   | Compose `ContactUnitsRepository`                                                    |
 | Audit logging           | `@audit_api_call` + `set_audit_context` (see contact-onboarding-flow.md)            |
@@ -235,7 +235,7 @@ ______________________________________________________________________
 ### 5.1 Dashboard list
 
 ```http
-GET /v1/tenant-requests?status=pending_review&search=A-2104
+GET /v1/projects/{project_id}/tenant-requests?status=pending_review&search=A-2104
 ```
 
 Response rows match dashboard columns:
@@ -262,8 +262,8 @@ Summary cards:
 ### 5.2 Per-document review
 
 ```http
-POST /v1/tenant-requests/{id}/documents/{doc_id}/verify
-POST /v1/tenant-requests/{id}/documents/{doc_id}/reject
+POST /v1/projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/verify
+POST /v1/projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/reject
 { "rejection_reason": "Rental agreement expired" }
 ```
 
@@ -273,9 +273,14 @@ After each action, service recomputes header status and appends `document_verifi
 ### 5.3 Approve (creates tenant)
 
 ```http
-POST /v1/tenant-requests/{id}/approve
-{ "admin_notes": "optional" }
+POST /v1/projects/{project_id}/tenant-requests/{id}/approve
+{
+  "move_in_date": "2026-08-01",
+  "admin_notes": "optional"
+}
 ```
+
+`move_in_date` is **required** at approval (admin confirms or sets the tenant move-in date).
 
 Transactional steps:
 
@@ -283,7 +288,7 @@ Transactional steps:
 1. If unit has current approved request → supersede old + `moved_out` old tenant link.
 1. `ContactsService.create_contact` (`contact_type = Tenant`, `provision_auth = !portal_access`).
 1. `contact_units` insert (tenant, `is_primary = true`, `status = active`).
-1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`.
+1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`, **`move_in_date`** (from request body).
 1. Append `approved` + `tenant_added` events.
 
 Returns created tenant summary + request snapshot.
@@ -340,11 +345,11 @@ ______________________________________________________________________
 
 ## 9. Where to change things (quick reference)
 
-| Change                       | Location                                               |
-| ---------------------------- | ------------------------------------------------------ |
-| Add document type            | Migration enum + `TenantRequestDocumentType` + UI copy |
-| Change approval side effects | `tenant_requests_service.approve_request`              |
-| Owner ownership rules        | `_assert_owner_can_access_unit` in service             |
-| Timeline copy                | `_derive_milestones` in service                        |
-| Admin RBAC                   | `tenant_requests.py` router permissions                |
-| Supersede behavior           | `approve_request` + partial unique indexes             |
+| Change                       | Location                                                                  |
+| ---------------------------- | ------------------------------------------------------------------------- |
+| Add document type            | Migration enum + `TenantRequestDocumentType` + UI copy                    |
+| Change approval side effects | `tenant_requests_service.approve_request`                                 |
+| Owner ownership rules        | `_assert_owner_can_access_unit` in service                                |
+| Timeline copy                | `_derive_milestones` in service                                           |
+| Admin RBAC                   | `tenant_requests.py` — `PROJECTS_MANAGEMENT_*` (same as vehicle requests) |
+| Supersede behavior           | `approve_request` + partial unique indexes                                |

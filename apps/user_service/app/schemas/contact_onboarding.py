@@ -179,6 +179,38 @@ class UpdateVehicleRequest(BaseModel):
         return photo_paths
 
 
+class VehicleUnitSummary(BaseModel):
+    """Unit summary on admin vehicle request rows."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    code: str
+    unit_label: str | None = None
+    location_label: str | None = None
+    property_type: str | None = None
+    config_kind: str | None = None
+    floor_level_number: int | None = None
+    floor_display_name: str | None = None
+    config_display_label: str | None = None
+    tower_id: str | None = None
+    config_id: str | None = None
+    status: str
+    sort_order: int = 0
+
+
+class VehicleOwnerSummary(BaseModel):
+    """Unit owner summary on admin vehicle request rows."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    contact_id: str
+    display_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    profile_photo_url: str | None = None
+
+
 class VehicleResponse(BaseModel):
     """Vehicle row."""
 
@@ -203,6 +235,8 @@ class VehicleResponse(BaseModel):
     sort_order: int = 0
     created_at: str
     updated_at: str
+    unit: VehicleUnitSummary | None = None
+    owner: VehicleOwnerSummary | None = None
 
 
 class ReviewVehicleRequest(BaseModel):

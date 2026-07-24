@@ -239,6 +239,93 @@ class ContactUnitsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def contact_exists(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> bool:
+        """True if contact exists in the org and is not deleted."""
+        row = await self.db_connection.fetchval(
+            """
+            SELECT 1
+            FROM contacts
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+              AND status <> 'deleted'
+            LIMIT 1
+            """,
+            organization_id,
+            contact_id,
+        )
+        return row is not None
+
+    async def release_unit_owner_links(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """Mark pending/active Owner links on a unit as moved_out."""
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE contact_units cu
+            SET status = $3::contact_unit_status,
+                moved_out_at = COALESCE(cu.moved_out_at, now()),
+                is_default_login = false,
+                updated_at = now()
+            FROM contacts c
+            WHERE cu.organization_id = $1::uuid
+              AND cu.unit_id = $2::uuid
+              AND c.id = cu.contact_id
+              AND c.organization_id = cu.organization_id
+              AND c.contact_type = 'Owner'
+              AND cu.status IN (
+                  'pending'::contact_unit_status,
+                  'active'::contact_unit_status
+              )
+            RETURNING
+                cu.id::text AS id,
+                cu.contact_id::text AS contact_id,
+                cu.status::text AS status
+            """,
+            organization_id,
+            unit_id,
+            ContactUnitStatus.MOVED_OUT.value,
+        )
+        return [dict(row) for row in rows]
+
+    async def reactivate_allotment(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+        is_primary: bool,
+        relationship: str,
+    ) -> dict[str, Any] | None:
+        """Re-open a moved_out contact_units row as pending."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE contact_units
+            SET status = $4::contact_unit_status,
+                is_primary = $5,
+                relationship = $6::contact_unit_relationship,
+                moved_out_at = NULL,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+              AND status = $3::contact_unit_status
+            RETURNING id::text AS id, status::text AS status
+            """,
+            organization_id,
+            contact_unit_id,
+            ContactUnitStatus.MOVED_OUT.value,
+            ContactUnitStatus.PENDING.value,
+            is_primary,
+            relationship,
+        )
+        return dict(row) if row else None
+
     async def sync_move_in(
         self,
         *,

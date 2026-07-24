@@ -106,6 +106,180 @@ async def test_remove_approved_soft_deletes_and_releases_slot():
 
 
 @pytest.mark.asyncio
+async def test_list_project_vehicles_includes_owner_and_unit():
+    """Admin project vehicle list includes nested owner and unit summaries."""
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "ABC123",
+            "photo_paths": [],
+            "status": VehicleStatus.PENDING.value,
+            "status_updated_at": "2026-07-16T10:00:00Z",
+            "created_at": "2026-07-16T09:00:00Z",
+            "updated_at": "2026-07-16T10:00:00Z",
+            "sort_order": 0,
+            "owner_contact_id": "owner-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+            "owner_phones": [
+                {
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "is_primary": True,
+                }
+            ],
+            "owner_emails": [{"email": "rajesh@example.com", "is_primary": True}],
+            "owner_profile_photo_url": "https://cdn.example.com/owners/rajesh.jpg",
+            "unit_code": "A-1802",
+            "unit_label": None,
+            "unit_status": "occupied",
+            "unit_tower_id": "tower-1",
+            "unit_config_id": "cfg-1",
+            "unit_plot_item_id": None,
+            "unit_sort_order": 1,
+            "unit_tower_name": "Tower A",
+            "unit_tower_type": "residential",
+            "unit_floor_display_name": "F18",
+            "unit_floor_level_number": 18,
+            "unit_config_kind": "apartment",
+            "unit_config_display_label": "2BHK Standard",
+            "unit_config_name": "2BHK Standard",
+            "unit_plot_description": None,
+            "unit_resolved_property_type": "residential",
+            "unit_resolved_config_kind": "apartment",
+        }
+    ]
+
+    items = await svc.list_project_vehicles(project_id="p1", status=VehicleStatus.PENDING)
+
+    assert items[0]["owner"]["contact_id"] == "owner-1"
+    assert items[0]["owner"]["display_name"] == "Mr. Rajesh Kapoor"
+    assert items[0]["owner"]["phone"] == "+919876543210"
+    assert items[0]["owner"]["email"] == "rajesh@example.com"
+    assert items[0]["owner"]["profile_photo_url"] == "https://cdn.example.com/owners/rajesh.jpg"
+    assert items[0]["unit"]["id"] == "u1"
+    assert items[0]["unit"]["code"] == "A-1802"
+    assert items[0]["unit"]["location_label"] == "Tower A · F18"
+    assert items[0]["unit"]["property_type"] == "residential"
+    assert items[0]["unit"]["config_display_label"] == "2BHK Standard"
+    assert items[0]["unit"]["status"] == "occupied"
+    assert "owner" in items[0]
+    assert "unit" in items[0]
+    assert "unit_code" not in items[0]
+    assert "owner_contact_id" not in items[0]
+
+
+@pytest.mark.asyncio
+async def test_vehicle_owner_unit_keys_missing():
+    """Owner and unit keys are present even when join data is absent."""
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "ABC123",
+            "photo_paths": [],
+            "status": VehicleStatus.PENDING.value,
+            "status_updated_at": "2026-07-16T10:00:00Z",
+            "created_at": "2026-07-16T09:00:00Z",
+            "updated_at": "2026-07-16T10:00:00Z",
+            "sort_order": 0,
+        }
+    ]
+
+    items = await svc.list_project_vehicles(project_id="p1")
+
+    assert items[0]["owner"] is None
+    assert items[0]["unit"]["id"] == "u1"
+    assert items[0]["unit"]["code"] == ""
+
+
+@pytest.mark.asyncio
+async def test_vehicle_owner_phone_from_json_string():
+    """Owner phone/email resolve when JSONB arrives as a string from the driver."""
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "ABC123",
+            "photo_paths": [],
+            "status": VehicleStatus.PENDING.value,
+            "status_updated_at": "2026-07-16T10:00:00Z",
+            "created_at": "2026-07-16T09:00:00Z",
+            "updated_at": "2026-07-16T10:00:00Z",
+            "sort_order": 0,
+            "owner_contact_id": "owner-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+            "owner_phones": (
+                '[{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": true}]'
+            ),
+            "owner_emails": '[{"email": "rajesh@example.com", "is_primary": true}]',
+            "owner_primary_phone": None,
+            "owner_primary_email": None,
+        }
+    ]
+
+    items = await svc.list_project_vehicles(project_id="p1")
+
+    assert items[0]["owner"]["phone"] == "+919876543210"
+    assert items[0]["owner"]["email"] == "rajesh@example.com"
+
+
+@pytest.mark.asyncio
+async def test_vehicle_owner_phone_from_sql_extract():
+    """Prefer SQL-extracted primary phone/email when present."""
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "ABC123",
+            "photo_paths": [],
+            "status": VehicleStatus.PENDING.value,
+            "status_updated_at": "2026-07-16T10:00:00Z",
+            "created_at": "2026-07-16T09:00:00Z",
+            "updated_at": "2026-07-16T10:00:00Z",
+            "sort_order": 0,
+            "owner_contact_id": "owner-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+            "owner_phones": [],
+            "owner_emails": [],
+            "owner_primary_phone": "+919876543210",
+            "owner_primary_email": "rajesh@example.com",
+        }
+    ]
+
+    items = await svc.list_project_vehicles(project_id="p1")
+
+    assert items[0]["owner"]["phone"] == "+919876543210"
+    assert items[0]["owner"]["email"] == "rajesh@example.com"
+
+
+@pytest.mark.asyncio
 async def test_remove_not_found():
     """Missing vehicle raises not found."""
     svc = _service()

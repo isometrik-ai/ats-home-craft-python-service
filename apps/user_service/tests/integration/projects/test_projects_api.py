@@ -1471,9 +1471,19 @@ async def test_list_units(monkeypatch, client):
 
     _patch_projects_access(monkeypatch)
 
-    async def fake_list_units(_self, *, project_id: str):
-        del _self
-        return [_FAKE_UNIT]
+    async def fake_list_units(_self, *, project_id: str, **kwargs):
+        del _self, kwargs
+        return {
+            "items": [
+                {
+                    "id": UNIT_ID,
+                    "code": "A-101",
+                    "status": "vacant",
+                    "sort_order": 0,
+                }
+            ],
+            "total": 1,
+        }
 
     monkeypatch.setattr(
         "apps.user_service.app.services.units_service.UnitsService.list_units",

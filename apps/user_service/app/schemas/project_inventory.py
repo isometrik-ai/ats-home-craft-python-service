@@ -9,12 +9,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from apps.user_service.app.schemas.enums import (
     CommercialUnitType,
     ConfigMediaKind,
+    ContactUnitDocumentType,
+    ContactUnitRelationship,
     FacilityLocationType,
     FacilityStatus,
     Facing,
     ParkingUserType,
     PlotItemStatus,
     PlotType,
+    PropertyType,
     UnitConfigKind,
     UnitStatus,
 )
@@ -233,6 +236,115 @@ class UpdateUnitRequest(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
     is_parking: bool | None = None
     plot_item_id: str | None = None
+
+
+class UnitListOwner(BaseModel):
+    """Owner summary on a unit list row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str | None = None
+    display_name: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
+class ReassignUnitOwnerRequest(BaseModel):
+    """Replace the Owner on a unit with another contact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str
+    is_primary: bool = True
+    relationship: ContactUnitRelationship = ContactUnitRelationship.SELF
+
+
+class UnitOwnerChangeResponse(BaseModel):
+    """Result of unassigning or reassigning a unit owner."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    status: str | None = None
+    contact_id: str | None = None
+    previous_contact_id: str | None = None
+    released_contact_unit_ids: list[str] = Field(default_factory=list)
+    unit_status: str
+
+
+class CreateUnitDocumentRequest(BaseModel):
+    """Add an ownership document to the current owner allotment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_type: ContactUnitDocumentType
+    file_path: str = Field(..., min_length=1, max_length=500)
+    file_name: str | None = Field(default=None, max_length=255)
+
+
+class UnitDocumentResponse(BaseModel):
+    """Ownership document on a contact-unit allotment."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    contact_unit_id: str
+    document_type: ContactUnitDocumentType
+    file_path: str
+    file_name: str | None = None
+    uploaded_by_user_id: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class UnitListItemResponse(BaseModel):
+    """Unit row for the project unit registry table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    code: str
+    unit_label: str | None = None
+    location_label: str | None = None
+    property_type: str | None = None
+    config_kind: str | None = None
+    floor_level_number: int | None = None
+    floor_display_name: str | None = None
+    config_display_label: str | None = None
+    tower_id: str | None = None
+    config_id: str | None = None
+    owner: UnitListOwner | None = None
+    status: UnitStatus
+    sort_order: int = Field(default=0, ge=0)
+
+
+class UnitListSummary(BaseModel):
+    """Aggregate counts for the unit registry header cards."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    total: int = Field(..., ge=0)
+    sold_count: int = Field(..., ge=0)
+    unsold_count: int = Field(..., ge=0)
+
+
+class ListProjectUnitsFilterQuery(BaseModel):
+    """Shared filter params for unit registry list and summary."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search: str | None = Field(default=None, min_length=1)
+    property_type: PropertyType | None = None
+    tower_id: str | None = None
+    config_id: str | None = None
+    status: UnitStatus | None = None
+
+
+class ListProjectUnitsQuery(ListProjectUnitsFilterQuery):
+    """Query params for the project unit registry list."""
+
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 
 
 class CreateParkingZoneRequest(BaseModel):
@@ -457,6 +569,10 @@ class UnitDetailPerson(BaseModel):
     contact_type: str
     relationship: str
     is_primary: bool = False
+    phone: str | None = None
+    email: str | None = None
+    assigned_at: str | None = None
+    contact_unit_status: str | None = None
 
 
 class UnitDetailFinancials(BaseModel):
@@ -493,6 +609,7 @@ class UnitDetailResponse(BaseModel):
     config: UnitDetailConfig | None = None
     plot_item: UnitDetailPlotItem | None = None
     owner: UnitDetailPerson | None = None
+    documents: list[UnitDocumentResponse] = Field(default_factory=list)
     residents: list[UnitDetailPerson] = Field(default_factory=list)
     vehicles_count: int = Field(default=0, ge=0)
     financials: UnitDetailFinancials = Field(default_factory=UnitDetailFinancials)

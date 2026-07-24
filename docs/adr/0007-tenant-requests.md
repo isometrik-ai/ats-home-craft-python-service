@@ -196,10 +196,10 @@ Exactly **three rows** per request (created at submit). Re-upload updates the sa
 
 ### 7. API surface (two routers)
 
-| Actor | Prefix                                   | Auth                                       |
-| ----- | ---------------------------------------- | ------------------------------------------ |
-| Owner | `/v1/contact-onboarding/tenant-requests` | `extract_onboarding_contact_context`       |
-| Admin | `/v1/tenant-requests`                    | `check_permissions(contacts_management.*)` |
+| Actor | Prefix                                      | Auth                                       |
+| ----- | ------------------------------------------- | ------------------------------------------ |
+| Owner | `/v1/contact-onboarding/tenant-requests`    | `extract_onboarding_contact_context`       |
+| Admin | `/v1/projects/{project_id}/tenant-requests` | `check_permissions(projects_management.*)` |
 
 See [tenant-requests-flow.md](../tenant-requests-flow.md) for endpoint catalogue and file map.
 

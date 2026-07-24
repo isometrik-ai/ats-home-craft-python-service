@@ -7,10 +7,35 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.db.repositories.units_repository import (
+    _RESOLVED_CONFIG_KIND_SQL,
+    _RESOLVED_PROPERTY_TYPE_SQL,
+)
 from apps.user_service.app.schemas.enums import TenantRequestStatus
 
-_TENANT_REQUEST_SELECT_SQL = """
-SELECT
+_TENANT_REQUEST_FROM_SQL = """
+FROM tenant_requests tr
+JOIN units u
+    ON u.id = tr.unit_id
+   AND u.organization_id = tr.organization_id
+JOIN contacts owner
+    ON owner.id = tr.submitted_by_contact_id
+   AND owner.organization_id = tr.organization_id
+LEFT JOIN towers t
+    ON t.id = u.tower_id
+   AND t.organization_id = u.organization_id
+LEFT JOIN floors f
+    ON f.id = u.floor_id
+   AND f.organization_id = u.organization_id
+LEFT JOIN unit_configs uc
+    ON uc.id = u.config_id
+   AND uc.organization_id = u.organization_id
+LEFT JOIN plot_config_items pci
+    ON pci.id = u.plot_item_id
+   AND pci.organization_id = u.organization_id
+"""
+
+_TENANT_REQUEST_SELECT_COLUMNS = f"""
   tr.id::text AS id,
   tr.organization_id::text AS organization_id,
   tr.project_id::text AS project_id,
@@ -36,12 +61,56 @@ SELECT
   tr.updated_at,
   u.code AS unit_code,
   u.unit_label,
+  u.status::text AS unit_status,
+  u.tower_id::text AS unit_tower_id,
+  u.config_id::text AS unit_config_id,
+  u.plot_item_id::text AS unit_plot_item_id,
+  u.sort_order AS unit_sort_order,
+  t.name AS unit_tower_name,
+  t.tower_type AS unit_tower_type,
+  f.display_name AS unit_floor_display_name,
+  f.level_number AS unit_floor_level_number,
+  uc.config_kind::text AS unit_config_kind,
+  uc.display_label AS unit_config_display_label,
+  uc.name AS unit_config_name,
+  pci.description AS unit_plot_description,
+  {_RESOLVED_PROPERTY_TYPE_SQL} AS unit_resolved_property_type,
+  {_RESOLVED_CONFIG_KIND_SQL} AS unit_resolved_config_kind,
+  owner.id::text AS owner_contact_id,
   owner.first_name AS owner_first_name,
   owner.last_name AS owner_last_name,
-  owner.prefix AS owner_prefix
-FROM tenant_requests tr
-JOIN units u ON u.id = tr.unit_id
-JOIN contacts owner ON owner.id = tr.submitted_by_contact_id
+  owner.prefix AS owner_prefix,
+  owner.phones AS owner_phones,
+  owner.emails AS owner_emails,
+  owner.profile_photo_url AS owner_profile_photo_url
+"""
+
+_TENANT_REQUEST_LIST_DOC_COUNTS = """
+  (SELECT COUNT(*)::int
+     FROM tenant_request_documents d
+    WHERE d.organization_id = tr.organization_id
+      AND d.tenant_request_id = tr.id
+      AND d.status = 'verified'::tenant_request_document_status
+  ) AS documents_verified_count,
+  (SELECT COUNT(*)::int
+     FROM tenant_request_documents d
+    WHERE d.organization_id = tr.organization_id
+      AND d.tenant_request_id = tr.id
+  ) AS documents_total_count
+"""
+
+_TENANT_REQUEST_SELECT_SQL = f"""
+SELECT
+{_TENANT_REQUEST_SELECT_COLUMNS}
+{_TENANT_REQUEST_FROM_SQL}
+WHERE tr.organization_id = $1::uuid
+"""
+
+_TENANT_REQUEST_ADMIN_LIST_SELECT_SQL = f"""
+SELECT
+{_TENANT_REQUEST_SELECT_COLUMNS},
+{_TENANT_REQUEST_LIST_DOC_COUNTS}
+{_TENANT_REQUEST_FROM_SQL}
 WHERE tr.organization_id = $1::uuid
 """
 
@@ -387,6 +456,7 @@ class TenantRequestsRepository(BaseRepository):
             "superseded_at": "timestamptz",
             "superseded_by_request_id": "uuid",
             "admin_notes": "text",
+            "move_in_date": "date",
         }
         for key, cast in allowed.items():
             if key not in fields:
@@ -448,22 +518,19 @@ class TenantRequestsRepository(BaseRepository):
         statuses: list[str] | None,
         search: str | None,
         unit_id: str | None,
-        project_id: str | None,
+        project_id: str,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Paginated admin list with optional filters."""
-        filters: list[str] = []
-        args: list[Any] = [organization_id]
+        """Paginated admin list scoped to a project."""
+        filters: list[str] = ["tr.project_id = $2::uuid"]
+        args: list[Any] = [organization_id, project_id]
         if statuses:
             args.append(statuses)
             filters.append(f"tr.status = ANY(${len(args)}::tenant_request_status[])")
         if unit_id:
             args.append(unit_id)
             filters.append(f"tr.unit_id = ${len(args)}::uuid")
-        if project_id:
-            args.append(project_id)
-            filters.append(f"tr.project_id = ${len(args)}::uuid")
         if search:
             args.append(f"%{search.strip()}%")
             idx = len(args)
@@ -485,7 +552,7 @@ class TenantRequestsRepository(BaseRepository):
         args.extend([limit, offset])
         rows = await self.db_connection.fetch(
             f"""
-            {_TENANT_REQUEST_SELECT_SQL}
+            {_TENANT_REQUEST_ADMIN_LIST_SELECT_SQL}
             {where_extra}
             ORDER BY tr.submitted_at DESC NULLS LAST, tr.created_at DESC
             LIMIT ${len(args) - 1}
@@ -495,8 +562,13 @@ class TenantRequestsRepository(BaseRepository):
         )
         return [dict(row) for row in rows], int(count or 0)
 
-    async def get_summary_counts(self, *, organization_id: str) -> dict[str, int]:
-        """Dashboard summary card counts."""
+    async def get_summary_counts(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+    ) -> dict[str, int]:
+        """Dashboard summary card counts for one project."""
         month_start = datetime.now(timezone.utc).replace(
             day=1, hour=0, minute=0, second=0, microsecond=0
         )
@@ -514,13 +586,15 @@ class TenantRequestsRepository(BaseRepository):
               ) AS ready_to_approve,
               COUNT(*) FILTER (
                 WHERE status = 'approved'
-                  AND approved_at >= $2::timestamptz
+                  AND approved_at >= $3::timestamptz
                   AND superseded_at IS NULL
               ) AS approved_this_month
             FROM tenant_requests
             WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
             """,
             organization_id,
+            project_id,
             month_start,
         )
         if not row:

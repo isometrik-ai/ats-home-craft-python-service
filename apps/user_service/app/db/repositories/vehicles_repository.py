@@ -5,6 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.db.repositories.units_repository import (
+    _OWNER_PRIMARY_EMAIL_SQL,
+    _OWNER_PRIMARY_PHONE_SQL,
+    _RESOLVED_CONFIG_KIND_SQL,
+    _RESOLVED_PROPERTY_TYPE_SQL,
+)
 
 _VEHICLE_ENUM_CASTS: dict[str, str] = {
     "vehicle_type": "::vehicle_type",
@@ -13,6 +19,85 @@ _VEHICLE_ENUM_CASTS: dict[str, str] = {
 }
 
 _ACTIVE_VEHICLE_FILTER = "v.deleted_at IS NULL"
+
+_VEHICLE_OWNER_LATERAL_JOIN = f"""
+LEFT JOIN LATERAL (
+    SELECT
+        c.id AS owner_contact_id,
+        c.prefix AS owner_prefix,
+        c.first_name AS owner_first_name,
+        c.last_name AS owner_last_name,
+        c.phones AS owner_phones,
+        c.emails AS owner_emails,
+        c.profile_photo_url AS owner_profile_photo_url,
+        {_OWNER_PRIMARY_PHONE_SQL} AS owner_primary_phone,
+        {_OWNER_PRIMARY_EMAIL_SQL} AS owner_primary_email
+    FROM contact_units cu
+    JOIN contacts c
+        ON c.id = cu.contact_id
+       AND c.organization_id = cu.organization_id
+    WHERE cu.organization_id = v.organization_id
+      AND cu.unit_id = v.unit_id
+      AND cu.status IN (
+          'active'::contact_unit_status,
+          'pending'::contact_unit_status
+      )
+      AND c.status = 'active'
+      AND c.contact_type = 'Owner'
+    ORDER BY cu.is_primary DESC, cu.sort_order, cu.created_at
+    LIMIT 1
+) owner_row ON TRUE
+"""
+
+_VEHICLE_OWNER_SELECT_COLUMNS = """
+              owner_row.owner_contact_id::text AS owner_contact_id,
+              owner_row.owner_prefix,
+              owner_row.owner_first_name,
+              owner_row.owner_last_name,
+              owner_row.owner_phones,
+              owner_row.owner_emails,
+              owner_row.owner_primary_phone,
+              owner_row.owner_primary_email,
+              owner_row.owner_profile_photo_url
+"""
+
+_VEHICLE_UNIT_JOINS = """
+LEFT JOIN units u
+    ON u.id = v.unit_id
+   AND u.organization_id = v.organization_id
+LEFT JOIN towers t
+    ON t.id = u.tower_id
+   AND t.organization_id = u.organization_id
+LEFT JOIN floors f
+    ON f.id = u.floor_id
+   AND f.organization_id = u.organization_id
+LEFT JOIN unit_configs uc
+    ON uc.id = u.config_id
+   AND uc.organization_id = u.organization_id
+LEFT JOIN plot_config_items pci
+    ON pci.id = u.plot_item_id
+   AND pci.organization_id = u.organization_id
+"""
+
+_VEHICLE_UNIT_SELECT_COLUMNS = f"""
+              u.code AS unit_code,
+              u.unit_label,
+              u.status::text AS unit_status,
+              u.tower_id::text AS unit_tower_id,
+              u.config_id::text AS unit_config_id,
+              u.plot_item_id::text AS unit_plot_item_id,
+              u.sort_order AS unit_sort_order,
+              t.name AS unit_tower_name,
+              t.tower_type AS unit_tower_type,
+              f.display_name AS unit_floor_display_name,
+              f.level_number AS unit_floor_level_number,
+              uc.config_kind::text AS unit_config_kind,
+              uc.display_label AS unit_config_display_label,
+              uc.name AS unit_config_name,
+              pci.description AS unit_plot_description,
+              {_RESOLVED_PROPERTY_TYPE_SQL} AS unit_resolved_property_type,
+              {_RESOLVED_CONFIG_KIND_SQL} AS unit_resolved_config_kind
+"""
 
 
 class VehiclesRepository(BaseRepository):
@@ -324,8 +409,12 @@ class VehiclesRepository(BaseRepository):
         rows = await self.db_connection.fetch(
             f"""
             SELECT
-              {self._VEHICLE_SELECT_COLUMNS}
+              {self._VEHICLE_SELECT_COLUMNS},
+              {_VEHICLE_UNIT_SELECT_COLUMNS},
+              {_VEHICLE_OWNER_SELECT_COLUMNS}
             FROM vehicles v
+            {_VEHICLE_UNIT_JOINS}
+            {_VEHICLE_OWNER_LATERAL_JOIN}
             WHERE v.organization_id = $1::uuid
               AND v.project_id = $2::uuid
               AND ($3::vehicle_status IS NULL OR v.status = $3::vehicle_status)

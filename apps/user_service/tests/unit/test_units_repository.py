@@ -10,6 +10,7 @@ ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 PROJECT_ID = "660e8400-e29b-41d4-a716-446655440001"
 UNIT_ID = "770e8400-e29b-41d4-a716-446655440002"
 ZONE_ID = "880e8400-e29b-41d4-a716-446655440003"
+TOWER_ID = "990e8400-e29b-41d4-a716-446655440004"
 
 
 class _FakeConn:
@@ -30,6 +31,10 @@ class _FakeConn:
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query.strip(), args))
         return self.row
+
+    async def fetchval(self, query, *args):
+        self.fetchrow_calls.append((query.strip(), args))
+        return len(self.rows)
 
     async def execute(self, query, *args):
         self.execute_calls.append((query.strip(), args))
@@ -56,8 +61,9 @@ async def test_insert_get_list_update_delete_unit():
     assert found["code"] == "A-101"
 
     conn.rows = [{"id": UNIT_ID}]
-    units = await repo.list_units(organization_id=ORG_ID, project_id=PROJECT_ID)
+    units, total = await repo.list_units(organization_id=ORG_ID, project_id=PROJECT_ID)
     assert len(units) == 1
+    assert total == 1
 
     conn.row = {"id": UNIT_ID, "unit_label": "101A"}
     updated = await repo.update_unit(
@@ -78,6 +84,46 @@ async def test_insert_get_list_update_delete_unit():
     assert unchanged["id"] == UNIT_ID
 
     assert await repo.delete_unit(organization_id=ORG_ID, project_id=PROJECT_ID, unit_id=UNIT_ID)
+
+
+@pytest.mark.asyncio
+async def test_list_units_applies_registry_filters():
+    """List units passes filter params into registry WHERE builder."""
+    conn = _FakeConn(row={"total": 0, "sold_count": 0, "unsold_count": 0})
+    conn.rows = []
+    repo = UnitsRepository(db_connection=conn)
+
+    units, total = await repo.list_units(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        search="A-101",
+        property_type="residential",
+        tower_id=TOWER_ID,
+        config_id="cfg-1",
+        status="vacant",
+    )
+
+    assert units == []
+    assert total == 0
+    list_query = conn.fetch_calls[0][0]
+    assert "ILIKE" in list_query
+    assert "tower_id" in list_query
+    assert "config_id" in list_query
+    assert "::unit_status" in list_query
+
+
+@pytest.mark.asyncio
+async def test_get_units_registry_summary():
+    """Summary query returns sold and unsold counts."""
+    conn = _FakeConn(row={"total": 2, "sold_count": 1, "unsold_count": 1})
+    repo = UnitsRepository(db_connection=conn)
+
+    summary = await repo.get_units_registry_summary(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+    )
+
+    assert summary == {"total": 2, "sold_count": 1, "unsold_count": 1}
 
 
 @pytest.mark.asyncio

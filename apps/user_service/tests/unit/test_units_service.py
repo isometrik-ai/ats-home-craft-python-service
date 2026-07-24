@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,10 +11,14 @@ from apps.user_service.app.services.units_service import (
     UnitsService,
     build_location_label,
     format_contact_display_name,
+    format_primary_contact_email,
+    format_primary_contact_phone,
     pick_unit_owner,
     resolve_carpet_area_sqft,
     resolve_occupancy_label,
     resolve_unit_facing,
+    resolve_unit_property_type,
+    serialize_unit_list_item,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
 
@@ -77,6 +81,165 @@ def test_pick_unit_owner_prefers_primary():
         },
     ]
     assert pick_unit_owner(residents)["contact_id"] == "c2"
+
+
+def test_resolve_unit_property_type_from_config_kind():
+    """Property type follows unit config kind mapping."""
+    assert resolve_unit_property_type({"config_kind": "apartment"}) == "residential"
+    assert resolve_unit_property_type({"config_kind": "commercial"}) == "commercial"
+    assert resolve_unit_property_type({"config_kind": "plot"}) == "plots"
+    assert resolve_unit_property_type({"plot_item_id": "plot-1"}) == "plots"
+
+
+def test_serialize_unit_list_item_builds_registry_row():
+    """Registry list row includes UI fields and owner summary."""
+    item = serialize_unit_list_item(
+        {
+            "id": "unit-1",
+            "project_id": "proj-1",
+            "tower_id": "tower-1",
+            "config_id": "cfg-1",
+            "code": "A-1802",
+            "unit_label": None,
+            "status": "occupied",
+            "sort_order": 1,
+            "tower_name": "Tower A",
+            "floor_display_name": "F18",
+            "floor_level_number": 18,
+            "resolved_property_type": "residential",
+            "resolved_config_kind": "apartment",
+            "config_display_label": "2BHK Standard",
+            "owner_contact_id": "c-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+            "owner_phones": [
+                {
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "is_primary": True,
+                }
+            ],
+            "owner_emails": [
+                {"email": "rajesh@example.com", "is_primary": True},
+            ],
+        }
+    )
+
+    assert item["code"] == "A-1802"
+    assert item["location_label"] == "Tower A · F18"
+    assert item["property_type"] == "residential"
+    assert item["config_kind"] == "apartment"
+    assert item["config_display_label"] == "2BHK Standard"
+    assert item["floor_level_number"] == 18
+    assert item["status"] == "occupied"
+    assert item["owner"]["display_name"] == "Mr. Rajesh Kapoor"
+    assert item["owner"]["phone"] == "+919876543210"
+    assert item["owner"]["email"] == "rajesh@example.com"
+
+
+def test_format_primary_contact_phone_and_email():
+    """Primary phone/email helpers prefer is_primary entries."""
+    phones = [
+        {"phone_isd_code": "+1", "phone_number": "1111111111", "is_primary": False},
+        {"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True},
+    ]
+    emails = [
+        {"email": "other@example.com", "is_primary": False},
+        {"email": "owner@example.com", "is_primary": True},
+    ]
+
+    assert format_primary_contact_phone(phones) == "+919876543210"
+    assert format_primary_contact_email(emails) == "owner@example.com"
+
+
+def test_list_item_hides_owner_when_vacant():
+    """Vacant units do not expose owner even when an Owner link exists in DB."""
+    item = serialize_unit_list_item(
+        {
+            "id": "unit-1",
+            "code": "A-1001",
+            "status": "vacant",
+            "sort_order": 0,
+            "owner_contact_id": "c-1",
+            "owner_first_name": "Ajay",
+        }
+    )
+
+    assert item["status"] == "vacant"
+    assert item["owner"] is None
+
+
+def test_list_item_occupied_without_owner():
+    """Sold units without an Owner contact return a null owner."""
+    item = serialize_unit_list_item(
+        {
+            "id": "unit-1",
+            "code": "A-1004",
+            "status": "occupied",
+            "sort_order": 3,
+        }
+    )
+
+    assert item["status"] == "occupied"
+    assert item["owner"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_units_returns_paginated_payload():
+    """List units returns items, total, and summary counts."""
+    service = UnitsService(db_connection=MagicMock(), user_context=MagicMock())
+    service.user_context.organization_id = "org-1"
+    service.setup_service = AsyncMock()
+    service.units_repo = AsyncMock()
+    service.units_repo.list_units.return_value = (
+        [
+            {
+                "id": "unit-1",
+                "project_id": "proj-1",
+                "tower_id": "tower-1",
+                "config_id": "cfg-1",
+                "code": "A-1802",
+                "unit_label": None,
+                "status": "vacant",
+                "sort_order": 1,
+                "tower_name": "Tower A",
+                "floor_display_name": "F18",
+                "floor_level_number": 18,
+                "resolved_property_type": "residential",
+                "resolved_config_kind": "apartment",
+                "config_display_label": "2BHK Standard",
+                "owner_contact_id": None,
+            }
+        ],
+        1,
+    )
+
+    result = await service.list_units(project_id="proj-1", page=1, page_size=20)
+
+    assert result["total"] == 1
+    assert result["items"][0]["property_type"] == "residential"
+    assert "summary" not in result
+    service.units_repo.list_units.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_units_registry_summary():
+    """Summary endpoint delegates to repository aggregate query."""
+    service = UnitsService(db_connection=MagicMock(), user_context=MagicMock())
+    service.user_context.organization_id = "org-1"
+    service.setup_service = AsyncMock()
+    service.units_repo = AsyncMock()
+    service.units_repo.get_units_registry_summary.return_value = {
+        "total": 75,
+        "sold_count": 51,
+        "unsold_count": 24,
+    }
+
+    summary = await service.get_units_registry_summary(project_id="proj-1")
+
+    assert summary["sold_count"] == 51
+    service.units_repo.get_units_registry_summary.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -144,16 +307,47 @@ async def test_get_unit_detail_builds_payload():
             "last_name": "Kapoor",
         }
     ]
+    service.units_repo.get_unit_owner_contact.return_value = {
+        "contact_unit_id": "cu-1",
+        "contact_id": "c-1",
+        "is_primary": True,
+        "relationship": "self",
+        "status": "active",
+        "contact_type": "Owner",
+        "prefix": "Mr.",
+        "first_name": "Rajesh",
+        "last_name": "Kapoor",
+        "phones": [
+            {
+                "phone_isd_code": "+91",
+                "phone_number": "9876543210",
+                "is_primary": True,
+            }
+        ],
+        "emails": [{"email": "rajesh@example.com", "is_primary": True}],
+        "primary_phone": "+919876543210",
+        "primary_email": "rajesh@example.com",
+    }
     service.units_repo.count_unit_vehicles.return_value = (1, 1)
     service.invoices_repo = AsyncMock()
     service.invoices_repo.sum_outstanding_by_unit.return_value = 0
     service.invoices_repo.latest_monthly_fee_by_unit.return_value = 300000
 
-    data = await service.get_unit_detail(project_id="proj-1", unit_id="unit-1")
+    mock_docs_service = MagicMock()
+    mock_docs_service.list_documents_for_owner_contact_unit = AsyncMock(return_value=[])
+
+    with patch(
+        "apps.user_service.app.services.units_service.ContactUnitDocumentsService",
+        return_value=mock_docs_service,
+    ):
+        data = await service.get_unit_detail(project_id="proj-1", unit_id="unit-1")
 
     assert data["code"] == "A-1802"
+    assert data["documents"] == []
     assert data["occupancy_label"] == "sold"
     assert data["owner"]["display_name"] == "Mr. Rajesh Kapoor"
+    assert data["owner"]["phone"] == "+919876543210"
+    assert data["owner"]["email"] == "rajesh@example.com"
     assert data["location_label"] == "Tower A · F18"
     assert data["carpet_area_sqft"] == 1080.0
     assert data["parking_entitlement"] == 2
@@ -175,9 +369,9 @@ class _FakeUnitsRepo:
         self.units.append(row)
         return row
 
-    async def list_units(self, **_kwargs) -> list[dict[str, Any]]:
-        """Return all units."""
-        return self.units
+    async def list_units(self, **_kwargs) -> tuple[list[dict[str, Any]], int]:
+        """Return all units and total count."""
+        return self.units, len(self.units)
 
     async def get_unit(self, **_kwargs) -> dict[str, Any] | None:
         """Return first unit."""
@@ -266,9 +460,10 @@ async def test_list_units_returns_serialized_rows():
     ]
     service = _units_service(units_repo=repo)
 
-    rows = await service.list_units(project_id="proj-1")
+    result = await service.list_units(project_id="proj-1")
 
-    assert rows[0]["code"] == "A-101"
+    assert result["items"][0]["code"] == "A-101"
+    assert result["total"] == 1
 
 
 @pytest.mark.asyncio
