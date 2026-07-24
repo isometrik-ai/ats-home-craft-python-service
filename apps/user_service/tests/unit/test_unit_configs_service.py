@@ -7,10 +7,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from apps.user_service.app.schemas.enums import ProjectSetupStep, UnitConfigKind
-from apps.user_service.app.schemas.project_inventory import CreateUnitConfigRequest
+from apps.user_service.app.schemas.project_inventory import (
+    CreatePlotConfigItemRequest,
+    CreateUnitConfigRequest,
+    UpdateUnitConfigRequest,
+)
 from apps.user_service.app.services.unit_configs_service import UnitConfigsService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 
 
 def _user_context() -> UserContext:
@@ -97,3 +101,107 @@ async def test_complete_config_step_rejects_invalid_kind():
 
     with pytest.raises(ValidationException):
         await svc.complete_config_step(project_id="p1", config_kind="invalid")
+
+
+@pytest.mark.asyncio
+async def test_ensure_config_not_found():
+    """Missing config raises NotFoundException."""
+    svc = _service()
+    svc.configs_repo.get_config = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.delete_config(project_id="p1", config_id="missing")
+
+
+@pytest.mark.asyncio
+async def test_update_config_success():
+    """update_config merges patch and persists changes."""
+    svc = _service()
+    svc.configs_repo.get_config = AsyncMock(
+        return_value={
+            "id": "c1",
+            "config_kind": UnitConfigKind.APARTMENT.value,
+            "bedrooms": 2,
+            "bathrooms": 2,
+            "area_sqft": 1000,
+            "name": "2BHK",
+        }
+    )
+    svc.configs_repo.update_config = AsyncMock(return_value={"id": "c1", "name": "2BHK Plus"})
+
+    result = await svc.update_config(
+        project_id="p1",
+        config_id="c1",
+        body=UpdateUnitConfigRequest(name="2BHK Plus"),
+    )
+
+    assert result["name"] == "2BHK Plus"
+
+
+@pytest.mark.asyncio
+async def test_create_plot_item_rejects_non_plot_config():
+    """Plot items require a plot config kind."""
+    svc = _service()
+    svc.configs_repo.get_config = AsyncMock(
+        return_value={"id": "c1", "config_kind": UnitConfigKind.APARTMENT.value}
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.create_plot_item(
+            project_id="p1",
+            config_id="c1",
+            body=CreatePlotConfigItemRequest(plot_no="P-1", size_sqft=1000),
+        )
+
+
+@pytest.mark.asyncio
+async def test_plot_item_and_media_crud():
+    """Plot item and media helpers call repo methods after config check."""
+    from apps.user_service.app.schemas.enums import ConfigMediaKind, PlotItemStatus
+    from apps.user_service.app.schemas.project_inventory import ConfigMediaRequest
+
+    svc = _service()
+    svc.configs_repo.get_config = AsyncMock(
+        return_value={"id": "c1", "config_kind": UnitConfigKind.PLOT.value}
+    )
+    svc.configs_repo.insert_plot_item = AsyncMock(return_value={"id": "item-1"})
+    svc.configs_repo.list_plot_items = AsyncMock(return_value=[{"id": "item-1"}])
+    svc.configs_repo.delete_plot_item = AsyncMock(return_value={"id": "item-1"})
+    svc.configs_repo.insert_media = AsyncMock(return_value={"id": "media-1"})
+    svc.configs_repo.list_media = AsyncMock(return_value=[{"id": "media-1"}])
+    svc.configs_repo.delete_media = AsyncMock(return_value={"id": "media-1"})
+
+    item = await svc.create_plot_item(
+        project_id="p1",
+        config_id="c1",
+        body=CreatePlotConfigItemRequest(
+            plot_no="P-1",
+            size_sqft=1200,
+            status=PlotItemStatus.EMPTY,
+        ),
+    )
+    assert item["id"] == "item-1"
+
+    items = await svc.list_plot_items(project_id="p1", config_id="c1")
+    assert len(items) == 1
+
+    deleted_item = await svc.delete_plot_item(project_id="p1", config_id="c1", item_id="item-1")
+    assert deleted_item["old_data"]["id"] == "item-1"
+
+    media = await svc.add_media(
+        project_id="p1",
+        config_id="c1",
+        body=ConfigMediaRequest(
+            kind=ConfigMediaKind.FLOOR_PLAN,
+            path="/media/plan.png",
+            mime="image/png",
+            size_bytes=100,
+        ),
+    )
+    assert media["id"] == "media-1"
+
+    media_rows = await svc.list_media(project_id="p1", config_id="c1")
+    assert media_rows[0]["id"] == "media-1"
+
+    deleted_media = await svc.delete_media(project_id="p1", config_id="c1", media_id="media-1")
+    assert deleted_media["old_data"]["id"] == "media-1"

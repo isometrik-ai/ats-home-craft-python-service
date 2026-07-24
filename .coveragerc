@@ -2,6 +2,7 @@
 branch = true
 source =
     apps
+    libs
 omit =
     */tests/*
     */__init__.py

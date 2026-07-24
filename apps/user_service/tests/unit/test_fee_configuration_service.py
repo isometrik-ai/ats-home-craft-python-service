@@ -23,7 +23,7 @@ from apps.user_service.app.services.fee_property_types import (
     applicable_unit_config_kinds,
 )
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 
 
 def _user_context() -> UserContext:
@@ -173,3 +173,230 @@ async def test_upsert_marks_configured_when_all_tabs_present() -> None:
     await service.upsert_configuration(project_id="proj-1", body=body)
     assert settings_repo.last_upsert is not None
     assert settings_repo.last_upsert["data"]["is_configured"] is True
+
+
+def test_is_configured_false_when_no_applicable_tabs() -> None:
+    """Projects without property types should never be marked configured."""
+    assert FeeConfigurationService._is_configured([], []) is False
+
+
+@pytest.mark.asyncio
+async def test_get_configuration_defaults_and_warnings() -> None:
+    """GET should return defaults and possession warnings."""
+    project = {
+        "id": "proj-1",
+        "property_types": ["residential"],
+        "possession_date": None,
+    }
+    rates = [
+        {
+            "unit_config_kind": "apartment",
+            "rate_amount_minor_per_unit": 100,
+            "measurement_unit": "sq_ft",
+            "billing_frequency": "monthly",
+            "fee_start_trigger": "possession_date",
+            "start_offset_days": None,
+            "minimum_fee_minor": 0,
+        }
+    ]
+    service = _service(
+        projects_repo=_FakeProjectsRepo(project),
+        rates_repo=_FakeRatesRepo(rates),
+    )
+    data = await service.get_configuration(project_id="proj-1")
+    assert data["is_configured"] is False
+    assert data["warnings"]["possession_date_missing"] is True
+    assert len(data["rates"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_preview_raises_when_rate_missing() -> None:
+    """Preview should fail when the requested tab has no saved rate."""
+    project = {
+        "id": "proj-1",
+        "property_types": [PropertyType.RESIDENTIAL.value],
+        "possession_date": None,
+    }
+    service = _service(
+        projects_repo=_FakeProjectsRepo(project),
+        rates_repo=_FakeRatesRepo([]),
+    )
+    with pytest.raises(ValidationException):
+        await service.preview(
+            project_id="proj-1",
+            unit_config_kind=UnitConfigKind.APARTMENT,
+            area=1500,
+            measurement_unit="sq_ft",
+        )
+
+
+@pytest.mark.asyncio
+async def test_preview_loads_area_from_unit_row() -> None:
+    """Preview with unit id should resolve billable area from inventory."""
+    project = {
+        "id": "proj-1",
+        "property_types": [PropertyType.RESIDENTIAL.value],
+        "possession_date": None,
+    }
+    rates = [
+        {
+            "unit_config_kind": "apartment",
+            "rate_amount_minor_per_unit": 100,
+            "measurement_unit": "sq_ft",
+            "billing_frequency": "monthly",
+            "fee_start_trigger": "possession_date",
+            "start_offset_days": None,
+            "minimum_fee_minor": 0,
+        }
+    ]
+
+    class _UnitsWithArea(_FakeUnitsRepo):
+        """Fake units repo that returns a unit row with carpet area."""
+
+        async def get_unit_detail_base(self, **_kwargs):
+            return {"carpet_area_sqft": 1200, "area_sqft": None, "plot_size_sqft": None}
+
+    service = _service(
+        projects_repo=_FakeProjectsRepo(project),
+        rates_repo=_FakeRatesRepo(rates),
+        units_repo=_UnitsWithArea(),
+    )
+    data = await service.preview(
+        project_id="proj-1",
+        unit_config_kind=UnitConfigKind.APARTMENT,
+        unit_id="unit-1",
+    )
+    assert data["area"] == 1200.0
+    assert data["computed_period_fee"] == 1200.0
+
+
+def test_validate_rate_tab_rejects_duplicate_kinds() -> None:
+    """Duplicate rate tabs in one request should fail validation."""
+    service = _service()
+    applicable = [UnitConfigKind.APARTMENT]
+    rate = FeeConfigurationRate(
+        unit_config_kind=UnitConfigKind.APARTMENT,
+        rate_amount=1.0,
+        measurement_unit=MeasurementUnit.SQ_FT,
+    )
+    with pytest.raises(ValidationException):
+        service._validate_rate_tabs(applicable=applicable, rates=[rate, rate])
+
+
+@pytest.mark.asyncio
+async def test_ensure_project_not_found() -> None:
+    """Missing project raises NotFoundException."""
+    service = _service(projects_repo=_FakeProjectsRepo(None))
+    with pytest.raises(NotFoundException):
+        await service.get_configuration(project_id="missing")
+
+
+def test_serialize_settings_row_from_db() -> None:
+    """Saved settings rows map reminder lead days."""
+    service = _service()
+    row = {
+        "currency": "INR",
+        "billing_cycle_type": "calendar_year",
+        "retry_count": 2,
+        "retry_interval_days": 3,
+        "reminder_count": 2,
+        "reminder_interval_days": 7,
+        "exhausted_retry_action": "escalate_to_billing_team",
+    }
+    settings = service._serialize_settings_row(row)
+    assert settings.first_reminder_lead_days == 14
+
+
+def test_validate_rate_tab_requires_start_offset() -> None:
+    """AFTER_DAYS trigger requires start_offset_days."""
+    from apps.user_service.app.schemas.enums import FeeStartTrigger
+
+    service = _service()
+    applicable = [UnitConfigKind.APARTMENT]
+    rate = FeeConfigurationRate.model_construct(
+        unit_config_kind=UnitConfigKind.APARTMENT,
+        rate_amount=1.0,
+        measurement_unit=MeasurementUnit.SQ_FT,
+        fee_start_trigger=FeeStartTrigger.AFTER_DAYS,
+        start_offset_days=None,
+    )
+    with pytest.raises(ValidationException):
+        service._validate_rate_tabs(applicable=applicable, rates=[rate])
+
+
+@pytest.mark.asyncio
+async def test_preview_rejects_inapplicable_kind() -> None:
+    """Preview rejects tabs not applicable to project property types."""
+    project = {
+        "id": "proj-1",
+        "property_types": [PropertyType.COMMERCIAL.value],
+        "possession_date": None,
+    }
+    service = _service(projects_repo=_FakeProjectsRepo(project))
+    with pytest.raises(ValidationException):
+        await service.preview(
+            project_id="proj-1",
+            unit_config_kind=UnitConfigKind.APARTMENT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_preview_unit_not_found() -> None:
+    """Preview with missing unit raises NotFoundException."""
+    project = {
+        "id": "proj-1",
+        "property_types": [PropertyType.RESIDENTIAL.value],
+        "possession_date": None,
+    }
+    rates = [
+        {
+            "unit_config_kind": "apartment",
+            "rate_amount_minor_per_unit": 100,
+            "measurement_unit": "sq_ft",
+            "billing_frequency": "monthly",
+            "fee_start_trigger": "possession_date",
+            "minimum_fee_minor": 0,
+        }
+    ]
+    service = _service(
+        projects_repo=_FakeProjectsRepo(project),
+        rates_repo=_FakeRatesRepo(rates),
+        units_repo=_FakeUnitsRepo(),
+    )
+    with pytest.raises(NotFoundException):
+        await service.preview(
+            project_id="proj-1",
+            unit_config_kind=UnitConfigKind.APARTMENT,
+            unit_id="missing-unit",
+        )
+
+
+@pytest.mark.asyncio
+async def test_preview_uses_area_conversion() -> None:
+    """Preview converts explicit area + measurement unit to sqft."""
+    project = {
+        "id": "proj-1",
+        "property_types": [PropertyType.RESIDENTIAL.value],
+        "possession_date": None,
+    }
+    rates = [
+        {
+            "unit_config_kind": "apartment",
+            "rate_amount_minor_per_unit": 100,
+            "measurement_unit": "sq_ft",
+            "billing_frequency": "monthly",
+            "fee_start_trigger": "possession_date",
+            "minimum_fee_minor": 0,
+        }
+    ]
+    service = _service(
+        projects_repo=_FakeProjectsRepo(project),
+        rates_repo=_FakeRatesRepo(rates),
+    )
+    data = await service.preview(
+        project_id="proj-1",
+        unit_config_kind=UnitConfigKind.APARTMENT,
+        area=1000,
+        measurement_unit="sq_ft",
+    )
+    assert data["area"] == 1000.0

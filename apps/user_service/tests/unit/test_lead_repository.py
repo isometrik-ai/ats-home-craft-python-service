@@ -535,3 +535,47 @@ async def test_update_lead_serializes_custom_fields_as_jsonb():
     serialized_cf = args[3]
     assert isinstance(serialized_cf, str)
     assert json.loads(serialized_cf) == {"x": "y"}
+
+
+@pytest.mark.asyncio
+async def test_update_lead_with_associations_noop():
+    """No scalar or association changes delegates to detail select."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"id": "lead-1", "companies": "[]"}
+    repo = LeadRepository(db_connection=conn)
+
+    result = await repo.update_lead_with_associations(
+        "org-1",
+        "lead-1",
+        {},
+        contacts_payload=None,
+        companies_payload=None,
+    )
+
+    assert result["id"] == "lead-1"
+    assert len(conn.fetchrow_calls) == 1
+    assert "UPDATE leads" not in conn.fetchrow_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_update_lead_and_sync_associations():
+    """Association sync uses CTE query with contacts/companies JSON."""
+    conn = _FakeConn()
+    conn.fetchrow_result = {"id": "lead-1", "companies": "[]", "contacts": "[]"}
+    repo = LeadRepository(db_connection=conn)
+
+    result = await repo.update_lead_and_sync_associations(
+        organization_id="org-1",
+        lead_id="lead-1",
+        update_data={"name": "Renamed"},
+        contacts_payload=[{"contact_id": "c1", "label": "primary"}],
+        companies_payload=[{"company_id": "co1", "label": None}],
+    )
+
+    assert result["id"] == "lead-1"
+    query, args = conn.fetchrow_calls[0]
+    assert "WITH locked AS" in query
+    assert "lead_contacts" in query
+    assert "lead_companies" in query
+    assert args[0] == "org-1"
+    assert args[2] == "Renamed"
