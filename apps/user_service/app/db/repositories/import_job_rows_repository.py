@@ -278,3 +278,65 @@ class ImportJobRowsRepository(BaseRepository):
             for r in fetched
         ]
         return items, int(total or 0)
+
+    async def list_error_rows(
+        self,
+        *,
+        organization_id: str,
+        job_id: str,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List import job rows with error status (paginated; row_number ascending)."""
+        page = max(int(page or 1), 1)
+        page_size = max(int(page_size or 1), 1)
+        offset = (page - 1) * page_size
+
+        total = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM import_job_rows
+            WHERE organization_id = $1::uuid
+              AND job_id = $2::uuid
+              AND status = 'error'
+            """,
+            organization_id,
+            job_id,
+        )
+
+        fetched = await self.db_connection.fetch(
+            """
+            SELECT
+              row_number,
+              status,
+              error_code,
+              error_message,
+              raw_row,
+              created_at,
+              updated_at
+            FROM import_job_rows
+            WHERE organization_id = $1::uuid
+              AND job_id = $2::uuid
+              AND status = 'error'
+            ORDER BY row_number ASC
+            LIMIT $3::int OFFSET $4::int
+            """,
+            organization_id,
+            job_id,
+            page_size,
+            offset,
+        )
+
+        items = [
+            {
+                "row_number": int(r["row_number"]),
+                "status": str(r.get("status") or ""),
+                "error_code": r.get("error_code"),
+                "error_message": r.get("error_message"),
+                "raw_row": r.get("raw_row"),
+                "created_at": r.get("created_at").isoformat() if r.get("created_at") else None,
+                "updated_at": r.get("updated_at").isoformat() if r.get("updated_at") else None,
+            }
+            for r in fetched
+        ]
+        return items, int(total or 0)

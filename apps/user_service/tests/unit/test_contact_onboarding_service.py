@@ -10,9 +10,16 @@ import pytest
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
     CONTACT_LEVEL_STEP_KEYS,
 )
+from apps.user_service.app.schemas.common import Phone
+from apps.user_service.app.schemas.contact_onboarding import (
+    CompleteProfileRequest,
+    CreateHouseholdMemberRequest,
+    UpdateHouseholdMemberRequest,
+)
 from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
     ContactType,
+    ContactUnitRelationship,
     HouseholdInvitationStatus,
     HouseholdMemberStatus,
     SetupStepStatus,
@@ -24,6 +31,7 @@ from apps.user_service.app.services.contact_units_service import ContactUnitsSer
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
+    NotFoundException,
     ValidationException,
 )
 
@@ -159,12 +167,20 @@ class _FakeContactUnitsRepo:
         has_default: bool = True,
         confirm_result: list[dict[str, Any]] | None = None,
         owned_unit: dict[str, Any] | None = None,
+        household_rows: list[dict[str, Any]] | None = None,
+        household_member: dict[str, Any] | None = None,
+        household_link: dict[str, Any] | None = None,
+        link_count: int = 0,
     ):
         self.active_count = active_count
         self.has_default = has_default
         self.confirm_result = confirm_result or [{"id": "cu-1", "status": "active"}]
         self.owned_unit = owned_unit or {"id": "cu-1"}
         self.activate_called = False
+        self.household_rows = household_rows or []
+        self.household_member = household_member
+        self.household_link = household_link
+        self.link_count = link_count
 
     async def count_active_units(self, **_kwargs):
         """Return configured active unit count."""
@@ -189,6 +205,50 @@ class _FakeContactUnitsRepo:
     async def find_active_primary_conflicts(self, **_kwargs):
         """Return no primary conflicts by default."""
         return []
+
+    async def list_household_by_primary(self, **_kwargs):
+        """Return configured household rows."""
+        return getattr(self, "household_rows", [])
+
+    async def get_household_member(self, **_kwargs):
+        """Return configured household member row."""
+        return getattr(self, "household_member", None)
+
+    async def get_household_link(self, **_kwargs):
+        """Return configured household link row."""
+        return getattr(self, "household_link", None)
+
+    async def update_household_relationship(self, **_kwargs):
+        """Record relationship update."""
+        return None
+
+    async def contact_has_active_unit(self, **_kwargs):
+        """Return configured active-unit flag."""
+        return getattr(self, "has_active_unit", True)
+
+    async def get_unit_project(self, **_kwargs):
+        """Return configured unit project row."""
+        return getattr(self, "unit_project", {"project_id": "proj-1"})
+
+    async def insert_household_link(self, **_kwargs):
+        """Return configured household link insert row."""
+        return getattr(
+            self,
+            "inserted_link",
+            {"contact_unit_id": "cu-family-1", "contact_id": "family-1"},
+        )
+
+    async def update_household_link_status(self, **_kwargs):
+        """Record household link status update."""
+        return None
+
+    async def delete_link(self, **_kwargs):
+        """Record household link deletion."""
+        return None
+
+    async def count_links_for_contact(self, **_kwargs):
+        """Return configured link count for orphan detection."""
+        return getattr(self, "link_count", 0)
 
 
 def _service(
@@ -581,3 +641,392 @@ def test_format_household_member_pending_invitation():
     assert item["member_status"] == HouseholdMemberStatus.INVITED.value
     assert item["can_resend_invitation"] is True
     assert item["invite_url"]
+
+
+def test_can_resend_household_invitation_has_user():
+    """Resend is disabled when member already has a portal user."""
+    assert (
+        ContactOnboardingService._can_resend_household_invitation(
+            portal_access=True,
+            invitation_status=HouseholdInvitationStatus.PENDING.value,
+            has_user=True,
+        )
+        is False
+    )
+
+
+def test_can_resend_household_invitation_expired():
+    """Expired revoked invites can be resent."""
+    assert (
+        ContactOnboardingService._can_resend_household_invitation(
+            portal_access=False,
+            invitation_status=HouseholdInvitationStatus.EXPIRED.value,
+            has_user=False,
+        )
+        is True
+    )
+
+
+def test_primary_phone_from_contact():
+    """_primary_phone_from_contact prefers primary flag."""
+    phone = ContactOnboardingService._primary_phone_from_contact(
+        {
+            "phones": [
+                {"phone_number": "111", "phone_isd_code": "+1", "is_primary": False},
+                {"phone_number": "222", "phone_isd_code": "+1", "is_primary": True},
+            ]
+        }
+    )
+    assert phone["phone_number"] == "222"
+
+
+def test_normalize_step_and_step_status():
+    """Step helpers normalize rows and read status by key."""
+    svc = _service()
+    row = {
+        "step_key": ContactOnboardingStep.COMPLETE_PROFILE.value,
+        "status": SetupStepStatus.COMPLETED.value,
+        "completed_at": None,
+    }
+    normalized = svc._normalize_step(row)
+    assert normalized["step_key"] == ContactOnboardingStep.COMPLETE_PROFILE.value
+    status = ContactOnboardingService._step_status([normalized], row["step_key"])
+    assert status == SetupStepStatus.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_list_household_formats_members():
+    """list_household maps repository rows through formatter."""
+    units_repo = _FakeContactUnitsRepo(
+        household_rows=[_household_row(first_name="Alex", last_name="Smith")],
+    )
+    svc = _service(contact_units_repo=units_repo)
+
+    result = await svc.list_household(contact_id="contact-1")
+
+    assert len(result) == 1
+    assert result[0]["first_name"] == "Alex"
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_updates_name():
+    """update_household_member patches contact fields and returns formatted row."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(first_name="Old", last_name="Name"),
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.contacts_repo.update_contact = AsyncMock(return_value={"id": "family-1"})
+
+    result = await svc.update_household_member(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+        body=UpdateHouseholdMemberRequest(first_name="New"),
+    )
+
+    assert result["first_name"] == "Old"
+    svc.contacts_repo.update_contact.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_not_found():
+    """update_household_member raises when link is missing."""
+    svc = _service(contact_units_repo=_FakeContactUnitsRepo(household_link=None))
+    with pytest.raises(NotFoundException):
+        await svc.update_household_member(
+            primary_contact_id="contact-1",
+            contact_unit_id="cu-1",
+            body=UpdateHouseholdMemberRequest(first_name="New"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_complete_profile_updates_contact_and_step(monkeypatch):
+    """complete_profile updates contact details and completes profile step."""
+    repo = _FakeOnboardingRepo()
+    svc = _service(onboarding_repo=repo)
+    contacts_service = MagicMock()
+    contacts_service.update_contact = AsyncMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"id": "contact-1"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+    body = CompleteProfileRequest(first_name="Jane", last_name="Doe")
+
+    result = await svc.complete_profile(contact_id="contact-1", body=body)
+
+    assert result["id"] == "contact-1"
+    assert ContactOnboardingStep.COMPLETE_PROFILE.value in repo.complete_step_calls
+
+
+@pytest.mark.asyncio
+async def test_get_review_aggregates_sections(monkeypatch):
+    """get_review combines contact, units, vehicles, household, and status."""
+    svc = _service()
+    contacts_service = MagicMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"id": "contact-1"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+    svc.contact_units_service.list_my_properties = AsyncMock(return_value=[{"id": "cu-1"}])
+    svc.vehicles_service.list_vehicles = AsyncMock(return_value=[])
+    svc.list_household = AsyncMock(return_value=[])
+    svc.get_status = AsyncMock(
+        return_value={
+            "steps": [],
+            "unit_onboarding": [],
+            "setup_current_step": None,
+            "current_contact_unit_id": None,
+            "is_completed": False,
+        }
+    )
+
+    result = await svc.get_review(contact_id="contact-1")
+
+    assert result["contact"]["id"] == "contact-1"
+    assert result["units"] == [{"id": "cu-1"}]
+    assert result["vehicles"] == []
+
+
+@pytest.mark.asyncio
+async def test_get_profile_delegates(monkeypatch):
+    """get_profile returns contact details from ContactsService."""
+    svc = _service()
+    contacts_service = MagicMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"id": "contact-1"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+
+    result = await svc.get_profile(contact_id="contact-1")
+
+    assert result["id"] == "contact-1"
+
+
+@pytest.mark.asyncio
+async def test_complete_household_step(monkeypatch):
+    """complete_household_step marks household step complete for owned unit."""
+    unit_repo = _FakeUnitOnboardingRepo()
+    units_repo = _FakeContactUnitsRepo()
+    svc = _service(unit_onboarding_repo=unit_repo, contact_units_repo=units_repo)
+
+    await svc.complete_household_step(
+        contact_id="contact-1",
+        contact_unit_id="cu-1",
+    )
+
+    assert unit_repo.complete_step_calls == [
+        ("cu-1", ContactOnboardingStep.HOUSEHOLD.value),
+    ]
+
+
+def _household_create_body(*, portal_access: bool = False) -> CreateHouseholdMemberRequest:
+    """Build a minimal household member create request."""
+    return CreateHouseholdMemberRequest(
+        unit_id="unit-1",
+        first_name="Alex",
+        last_name="Smith",
+        phones=[Phone(phone_number="9876543210", phone_isd_code="+91", is_primary=True)],
+        relationship=ContactUnitRelationship.SPOUSE,
+        portal_access=portal_access,
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_household_member_without_portal(monkeypatch):
+    """add_household_member creates family contact and active link."""
+    units_repo = _FakeContactUnitsRepo()
+    units_repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})  # type: ignore[method-assign]
+    units_repo.insert_household_link = AsyncMock(  # type: ignore[method-assign]
+        return_value={"id": "cu-family-1", "contact_id": "family-1"},
+    )
+    svc = _service(contact_units_repo=units_repo)
+    contacts_service = MagicMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"first_name": "Owner"})
+    contacts_service.create_contact = AsyncMock(
+        return_value={"contact_id": "family-1", "new_data": {"id": "family-1"}},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+
+    result = await svc.add_household_member(
+        primary_contact_id="contact-1",
+        body=_household_create_body(),
+    )
+
+    assert result["contact_id"] == "family-1"
+    assert result["member_status"] == HouseholdMemberStatus.JOINED.value
+    contacts_service.create_contact.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_add_household_member_with_portal(monkeypatch):
+    """add_household_member sends invitation when portal access requested."""
+    units_repo = _FakeContactUnitsRepo()
+    units_repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})  # type: ignore[method-assign]
+    units_repo.insert_household_link = AsyncMock(  # type: ignore[method-assign]
+        return_value={"id": "cu-family-1", "contact_id": "family-1"},
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.household_invitation_service.create_and_send = AsyncMock(
+        return_value={
+            "member_status": HouseholdMemberStatus.INVITED.value,
+            "invitation_id": "inv-1",
+            "phone_masked": "***3210",
+            "invite_url": "https://invite.example",
+        }
+    )
+    contacts_service = MagicMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"first_name": "Owner"})
+    contacts_service.create_contact = AsyncMock(
+        return_value={"contact_id": "family-1", "new_data": {"id": "family-1"}},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+
+    result = await svc.add_household_member(
+        primary_contact_id="contact-1",
+        body=_household_create_body(portal_access=True),
+    )
+
+    assert result["invitation_id"] == "inv-1"
+    assert result["member_status"] == HouseholdMemberStatus.INVITED.value
+
+
+@pytest.mark.asyncio
+async def test_add_household_member_unit_not_assigned():
+    """add_household_member rejects when primary does not own the unit."""
+    units_repo = _FakeContactUnitsRepo()
+    units_repo.contact_has_active_unit = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    svc = _service(contact_units_repo=units_repo)
+
+    with pytest.raises(ValidationException):
+        await svc.add_household_member(
+            primary_contact_id="contact-1",
+            body=_household_create_body(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_resend_household_invitation_pending(monkeypatch):
+    """resend_household_invitation delegates to invitation service when pending."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1", "portal_access": True},
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.household_invitation_service.invitations_repo = MagicMock()
+    svc.household_invitation_service.invitations_repo.get_pending_by_contact_unit = AsyncMock(
+        return_value={"id": "inv-1"},
+    )
+    svc.household_invitation_service.resend = AsyncMock(return_value={"invitation_id": "inv-1"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: MagicMock(
+            get_contact_details=AsyncMock(return_value={"first_name": "Owner"}),
+        ),
+    )
+
+    result = await svc.resend_household_invitation(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+    )
+
+    assert result["invitation_id"] == "inv-1"
+
+
+@pytest.mark.asyncio
+async def test_revoke_household_invitation(monkeypatch):
+    """revoke_household_invitation cancels pending portal access."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(
+            portal_access=True,
+            unit_link_status="pending",
+        ),
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.contacts_repo.update_contact = AsyncMock(return_value={"id": "family-1"})
+    svc.household_invitation_service.cancel_for_contact_unit = AsyncMock()
+    svc.household_invitation_service.invitations_repo = MagicMock()
+    svc.household_invitation_service.invitations_repo.get_pending_by_contact_unit = AsyncMock(
+        return_value=None,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: MagicMock(
+            get_contact_details=AsyncMock(return_value={"first_name": "Owner"}),
+        ),
+    )
+
+    result = await svc.revoke_household_invitation(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+    )
+
+    assert result["invitation_status"] == HouseholdInvitationStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_remove_household_member():
+    """remove_household_member soft-deletes contact when orphaned."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        link_count=0,
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.household_invitation_service.cancel_for_contact_unit = AsyncMock()
+    svc.contacts_repo.soft_delete_contact = AsyncMock(return_value={"id": "family-1"})
+
+    result = await svc.remove_household_member(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+    )
+
+    assert result["contact_deleted"] is True
+    svc.contacts_repo.soft_delete_contact.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_enable_portal(monkeypatch):
+    """update_household_member enabling portal access sends invitation."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(portal_access=False, unit_link_status="active"),
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.contacts_repo.get_contact_details = AsyncMock(
+        return_value={
+            "phones": [{"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}],
+            "first_name": "Alex",
+            "last_name": "Smith",
+        },
+    )
+    svc.contacts_repo.update_contact = AsyncMock(return_value={"id": "family-1"})
+    svc.household_invitation_service.create_and_send = AsyncMock(
+        return_value={"invitation_id": "inv-2"}
+    )
+    svc.household_invitation_service.invitations_repo = MagicMock()
+    svc.household_invitation_service.invitations_repo.get_pending_by_contact_unit = AsyncMock(
+        return_value=None,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: MagicMock(
+            get_contact_details=AsyncMock(return_value={"first_name": "Owner"}),
+        ),
+    )
+
+    await svc.update_household_member(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+        body=UpdateHouseholdMemberRequest(portal_access=True),
+    )
+
+    svc.household_invitation_service.create_and_send.assert_awaited_once()

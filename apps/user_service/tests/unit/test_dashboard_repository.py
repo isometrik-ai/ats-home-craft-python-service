@@ -2,6 +2,7 @@
 
 from collections import deque
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
@@ -37,8 +38,25 @@ class _FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_fetch_dashboard_timezone_then_aggregate():
+async def test_fetch_dashboard_timezone_then_aggregate(monkeypatch):
     """Test fetch_dashboard with timezone validation and aggregate query."""
+    from datetime import date as date_cls
+
+    class _FakeTZ:
+        """Stand-in timezone for ZoneInfo when tzdata is unavailable."""
+
+    monkeypatch.setattr(
+        "apps.user_service.app.db.repositories.dashboard_repository.validate_iana_timezone",
+        lambda tz: tz,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.db.repositories.dashboard_repository.ZoneInfo",
+        lambda _name: _FakeTZ(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.db.repositories.dashboard_repository.datetime",
+        SimpleNamespace(now=lambda tz=None: SimpleNamespace(date=lambda: date_cls(2026, 1, 15))),
+    )
     conn = _FakeConn()
     conn.fetchrow_queue.append({"tz": "America/Chicago"})
     conn.fetchrow_queue.append(
