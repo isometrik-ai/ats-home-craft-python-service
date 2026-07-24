@@ -108,6 +108,11 @@ class _FakeProjectsRepo:
         self.media.append(row)
         return row
 
+    async def delete_media_by_kind(self, **kwargs) -> None:
+        """Remove media rows for a singleton kind."""
+        kind = kwargs.get("kind")
+        self.media = [row for row in self.media if row.get("kind") != kind]
+
     async def list_media(self, **kwargs) -> list[dict[str, Any]]:
         """Return media rows."""
         del kwargs
@@ -422,6 +427,39 @@ async def test_add_and_list_media():
     assert added["path"] == "/logo.png"
     assert len(listed) == 1
     service.setup_service.ensure_project.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_add_media_replaces_singleton_kind():
+    """Cover image and logo uploads replace any existing row of the same kind."""
+    repo = _FakeProjectsRepo(
+        media=[
+            {
+                "id": "old-cover",
+                "project_id": PROJECT_ID,
+                "kind": ProjectMediaKind.COVER_IMAGE.value,
+                "path": "/old-cover.jpg",
+                "mime": "image/jpeg",
+                "size_bytes": 100,
+                "sort_order": 0,
+            }
+        ]
+    )
+    service = _service(projects_repo=repo)
+    body = ProjectMediaRequest(
+        kind=ProjectMediaKind.COVER_IMAGE,
+        path="/new-cover.jpg",
+        mime="image/jpeg",
+        size_bytes=2048,
+        original_name="cover.jpg",
+    )
+
+    added = await service.add_media(project_id=PROJECT_ID, body=body)
+    listed = await service.list_media(project_id=PROJECT_ID)
+
+    assert added["path"] == "/new-cover.jpg"
+    assert len(listed) == 1
+    assert listed[0]["path"] == "/new-cover.jpg"
 
 
 @pytest.mark.asyncio
