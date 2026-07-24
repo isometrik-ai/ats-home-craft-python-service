@@ -27,14 +27,17 @@ def _ctx() -> UserContext:
     )
 
 
-def _create_body(*, team_id: UUID | None = None) -> InviteCreateRequest:
-    """Build InviteCreateRequest with optional team_id."""
+def _create_body(
+    *, team_id: UUID | None = None, tags: list[str] | None = None
+) -> InviteCreateRequest:
+    """Build InviteCreateRequest with optional team_id and tags."""
     return InviteCreateRequest(
         email="invitee@example.com",
         first_name="Jane",
         last_name="Doe",
         role_id=UUID(ROLE_ID),
         team_id=team_id,
+        tags=tags,
     )
 
 
@@ -57,6 +60,27 @@ async def test_metadata_omits_team_id():
     metadata = service._build_invite_metadata(_create_body())  # pylint: disable=protected-access
 
     assert "team_id" not in metadata
+    assert "tags" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_tags():
+    """Metadata stores tags when provided on create request."""
+    service = InviteService(user_context=None, db_connection=None)
+    metadata = service._build_invite_metadata(  # pylint: disable=protected-access
+        _create_body(tags=[" sales ", "onboarding", ""])
+    )
+
+    assert metadata["tags"] == ["sales", "onboarding"]
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_empty_tags():
+    """Metadata stores an empty tags list when explicitly provided."""
+    service = InviteService(user_context=None, db_connection=None)
+    metadata = service._build_invite_metadata(_create_body(tags=[]))  # pylint: disable=protected-access
+
+    assert metadata["tags"] == []
 
 
 @pytest.mark.asyncio
@@ -193,3 +217,23 @@ def test_list_item_includes_team_id():
     )
 
     assert item["team_id"] == TEAM_ID
+
+
+def test_list_item_includes_tags():
+    """List response exposes tags from invitation metadata."""
+    service = InviteService(user_context=None, db_connection=None)
+    item = service.build_invite_list_item(
+        {
+            "id": "inv-1",
+            "email": "invitee@example.com",
+            "role_id": ROLE_ID,
+            "status": "pending",
+            "invited_by": INVITER_ID,
+            "expires_at": "2024-12-26T10:00:00Z",
+            "created_at": "2024-12-19T10:00:00Z",
+            "updated_at": "2024-12-19T10:00:00Z",
+            "metadata": {"first_name": "Jane", "tags": ["sales", "vip"]},
+        }
+    )
+
+    assert item["tags"] == ["sales", "vip"]

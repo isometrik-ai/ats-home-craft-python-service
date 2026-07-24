@@ -93,6 +93,10 @@ class InviteCreateRequest(BaseModel):
         None,
         description="Optional team to add the invitee to when the invitation is accepted",
     )
+    tags: list[str] | None = Field(
+        None,
+        description="Optional tags to assign to the member when the invitation is accepted",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -100,6 +104,7 @@ class InviteCreateRequest(BaseModel):
                 "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "team_id": "660e8400-e29b-41d4-a716-446655440001",
+                "tags": ["sales", "onboarding"],
                 "expires_in_days": 7,
             }
         }
@@ -180,6 +185,10 @@ class InviteListItem(BaseModel):
     team_id: uuid.UUID | None = Field(
         None,
         description="Team the invitee will be added to on acceptance, if set at invite time",
+    )
+    tags: list[str] | None = Field(
+        None,
+        description="Tags to assign to the member on acceptance, if set at invite time",
     )
 
     model_config = ConfigDict(

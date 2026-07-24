@@ -227,6 +227,8 @@ class InviteService:
         }
         if body.team_id:
             metadata["team_id"] = str(body.team_id)
+        if body.tags is not None:
+            metadata["tags"] = [tag.strip() for tag in body.tags if tag and tag.strip()]
         return metadata
 
     async def _add_invitee_to_team(
@@ -581,6 +583,7 @@ class InviteService:
                 "phone_isd_code": phone_isd_code,
                 "timezone": "UTC",
                 "salutation": inv_meta.get("salutation", None),
+                "tags": inv_meta.get("tags") or [],
             },
             email=invitation_data["email"],
             role_data={"id": invitation_data["role_id"], "name": role_data["name"]},
@@ -991,6 +994,7 @@ class InviteService:
             "status": OrganizationMemberStatus.ACTIVE.value,
             "invited_by": invited_by,
             "isometrik_user_id": isometrik_user_id,
+            "tags": invite_data.get("tags") or [],
         }
 
         await self.organization_member_repository.add_member(
@@ -1092,6 +1096,7 @@ class InviteService:
             phone_full = f"{phone_isd_code}{phone_number_db}"
 
         team_id = metadata.get("team_id")
+        tags = metadata.get("tags")
 
         return {
             "invite_id": str(invite_data.get("id")),
@@ -1107,4 +1112,5 @@ class InviteService:
             "last_name": metadata.get("last_name", None),
             "phone": phone_full,
             "team_id": team_id,
+            "tags": tags if tags else None,
         }
