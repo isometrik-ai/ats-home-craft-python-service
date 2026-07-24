@@ -79,10 +79,22 @@ class ProjectsRepository(BaseRepository):
         """Fetch a single project scoped to the organization."""
         row = await self.db_connection.fetchrow(
             """
-            SELECT *
-            FROM projects
-            WHERE id = $1::uuid
-              AND organization_id = $2::uuid
+            SELECT
+              p.*,
+              ca.email AS community_admin_email,
+              ca.phone_number AS community_admin_phone_number,
+              ca.phone_isd_code AS community_admin_phone_isd_code,
+              ca.first_name AS community_admin_first_name,
+              ca.last_name AS community_admin_last_name,
+              ca.salutation AS community_admin_salutation,
+              ca.avatar_url AS community_admin_avatar_url
+            FROM projects p
+            LEFT JOIN organization_members ca
+              ON ca.user_id = p.community_admin_user_id
+             AND ca.organization_id = p.organization_id
+             AND ca.status != 'deleted'
+            WHERE p.id = $1::uuid
+              AND p.organization_id = $2::uuid
             """,
             project_id,
             organization_id,

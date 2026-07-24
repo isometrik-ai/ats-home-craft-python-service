@@ -269,9 +269,25 @@ async def test_resolve_code_suffix_on_conflict():
 @pytest.mark.asyncio
 async def test_get_project_details_found():
     """Get project returns normalized details."""
-    service = _service(projects_repo=_FakeProjectsRepo(project=_project_row()))
+    service = _service(
+        projects_repo=_FakeProjectsRepo(
+            project=_project_row(
+                community_admin_user_id=ADMIN_ID,
+                community_admin_email="admin@example.com",
+                community_admin_phone_number="9876543210",
+                community_admin_phone_isd_code="+91",
+                community_admin_first_name="Jane",
+                community_admin_last_name="Admin",
+                community_admin_salutation="Ms.",
+            )
+        )
+    )
     result = await service.get_project_details(project_id=PROJECT_ID)
     assert result["name"] == "Sunrise Towers"
+    assert result["community_admin"]["user_id"] == ADMIN_ID
+    assert result["community_admin"]["email"] == "admin@example.com"
+    assert result["community_admin"]["display_name"] == "Ms. Jane Admin"
+    assert "community_admin_email" not in result
 
 
 @pytest.mark.asyncio
