@@ -410,6 +410,22 @@ class ProjectsRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def delete_media_by_kind(
+        self, *, organization_id: str, project_id: str, kind: str
+    ) -> None:
+        """Remove existing media rows for singleton kinds (cover_image, logo)."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM project_media
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND kind = $3::project_media_kind
+            """,
+            organization_id,
+            project_id,
+            kind,
+        )
+
     async def delete_media(self, *, organization_id: str, project_id: str, media_id: str) -> bool:
         """Delete a single media row."""
         result = await self.db_connection.execute(

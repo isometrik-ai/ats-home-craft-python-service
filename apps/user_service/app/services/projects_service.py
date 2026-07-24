@@ -14,6 +14,7 @@ from apps.user_service.app.db.repositories.organization_member_repository import
     OrganizationMemberRepository,
 )
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
+from apps.user_service.app.schemas.enums import ProjectMediaKind
 from apps.user_service.app.schemas.project_setup import (
     CreateProjectRequest,
     ProjectMediaRequest,
@@ -32,6 +33,11 @@ from libs.shared_utils.status_codes import CustomStatusCode
 _PROJECT_CODE_MAX_LEN = 64
 _PROJECT_CODE_SUFFIX_RESERVE = 6
 _PROJECT_CODE_MAX_ATTEMPTS = 1000
+
+_SINGLETON_PROJECT_MEDIA_KINDS = {
+    ProjectMediaKind.COVER_IMAGE.value,
+    ProjectMediaKind.LOGO.value,
+}
 
 _COMMUNITY_ADMIN_ROW_KEYS = (
     "community_admin_email",
@@ -439,11 +445,19 @@ class ProjectsService:
     async def add_media(self, *, project_id: str, body: ProjectMediaRequest) -> dict[str, Any]:
         """Attach media metadata to a project (stored as-is)."""
         await self.setup_service.ensure_project(project_id=project_id)
+        org_id = self.user_context.organization_id
+        kind = body.kind.value
+        if kind in _SINGLETON_PROJECT_MEDIA_KINDS:
+            await self.projects_repo.delete_media_by_kind(
+                organization_id=org_id,
+                project_id=project_id,
+                kind=kind,
+            )
         inserted = await self.projects_repo.insert_media(
             {
-                "organization_id": self.user_context.organization_id,
+                "organization_id": org_id,
                 "project_id": project_id,
-                "kind": body.kind.value,
+                "kind": kind,
                 "path": body.path,
                 "mime": body.mime,
                 "size_bytes": body.size_bytes,
