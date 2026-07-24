@@ -34,6 +34,7 @@ class OrganizationMemberRepository:
         # Set default status to ACTIVE if not provided
         status = member_data.get("status") or OrganizationMemberStatus.ACTIVE.value
         member_id = member_data.get("id")
+        tags = member_data.get("tags") or []
 
         # Upsert on (user_id, organization_id) so a previously soft-deleted member
         # is reactivated rather than triggering a unique-constraint violation when
@@ -53,6 +54,7 @@ class OrganizationMemberRepository:
                 timezone = EXCLUDED.timezone,
                 salutation = EXCLUDED.salutation,
                 invited_by = EXCLUDED.invited_by,
+                tags = EXCLUDED.tags,
                 joined_at = NOW(),
                 updated_at = NOW()
         """
@@ -78,12 +80,13 @@ class OrganizationMemberRepository:
                     phone_isd_code,
                     timezone,
                     salutation,
-                    invited_by
+                    invited_by,
+                    tags
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
                     $9, NOW(), NOW(), NOW(),
-                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16
+                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16, $17::text[]
                 )
                 {on_conflict_clause}
                 RETURNING *
@@ -106,6 +109,7 @@ class OrganizationMemberRepository:
                 member_data.get("timezone"),
                 member_data.get("salutation"),
                 member_data.get("invited_by"),
+                tags,
             )
         else:
             query = f"""
@@ -127,12 +131,13 @@ class OrganizationMemberRepository:
                     phone_isd_code,
                     timezone,
                     salutation,
-                    invited_by
+                    invited_by,
+                    tags
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     $8, NOW(), NOW(), NOW(),
-                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15
+                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15, $16::text[]
                 )
                 {on_conflict_clause}
                 RETURNING *
@@ -154,6 +159,7 @@ class OrganizationMemberRepository:
                 member_data.get("timezone"),
                 member_data.get("salutation"),
                 member_data.get("invited_by"),
+                tags,
             )
         return dict(row) if row else {}
 

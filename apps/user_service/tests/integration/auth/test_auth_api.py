@@ -282,6 +282,79 @@ async def test_switch_organization(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_reset_password(monkeypatch, client):
+    """POST /auth/reset-password resets password using authenticated session."""
+
+    async def fake_reset(_self, *, user_id: str, new_password: str):
+        del _self
+        assert user_id == "test-user-id"
+        assert new_password == "ResetPass123!"
+        return {"message": "reset"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.reset_password",
+        fake_reset,
+    )
+
+    res = await client.post(
+        "/v1/auth/reset-password",
+        json={"new_password": "ResetPass123!"},
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_select_organization(monkeypatch, client):
+    """POST /auth/select-org selects organization for the session."""
+
+    async def fake_select(
+        _self,
+        *,
+        user_id: str,
+        session_id: str,
+        organization_id: str,
+        user_type,
+    ):
+        del _self
+        assert user_id == "test-user-id"
+        assert session_id == "test-session-id"
+        assert organization_id == "org-456"
+        return SelectOrganizationResponse(isometrik_details=None)
+
+    async def fake_warm_session(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.AuthService.select_organization",
+        fake_select,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.auth.warm_session_context_after_auth",
+        fake_warm_session,
+    )
+
+    res = await client.post(
+        "/v1/auth/select-org",
+        json={"organization_id": "org-456", "user_type": "organization_member"},
+    )
+    assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_create_isometrik_token(monkeypatch, client):
+    """POST /auth/isometrik-token returns a signed access token."""
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.auth.create_isometrik_token",
+        lambda: "test-isometrik-token",
+    )
+
+    res = await client.post("/v1/auth/isometrik-token")
+    body = assert_success(res, 200)
+    assert body["data"]["token"] == "test-isometrik-token"
+
+
+@pytest.mark.asyncio
 async def test_validate_token_success(client):
     """Test that the validate token endpoint returns organization_id when token is valid."""
     res = await client.get("/v1/auth/validate")

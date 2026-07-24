@@ -138,3 +138,31 @@ async def test_get_overview():
     assert result["daily_help"] == 11
     assert result["start_at"].startswith("2026-06-01T00:00:00")
     assert result["end_at"].startswith("2026-06-30T00:00:00")
+
+
+@pytest.mark.asyncio
+async def test_get_log_detail_returns_pass_timeline():
+    """Detail view should merge pass row with normalized events."""
+    pass_row = {"id": "pass-1", "pass_type": "guest", "status": "approved"}
+    events = [{"id": "evt-1", "event_type": "in"}]
+    passes_repo = _FakePassesRepo(row=pass_row)
+    events_repo = _FakeEventsRepo(events=events)
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+    svc._passes_service = type(
+        "Passes",
+        (),
+        {
+            "_normalize_event": staticmethod(lambda row: {**row, "normalized": True}),
+            "_normalize_pass": staticmethod(
+                lambda row, events=None, include_events=False: {
+                    **row,
+                    "events": events or [],
+                    "include_events": include_events,
+                }
+            ),
+        },
+    )()
+    detail = await svc.get_log_detail(pass_id="pass-1")
+    assert detail["id"] == "pass-1"
+    assert detail["include_events"] is True
+    assert detail["events"][0]["normalized"] is True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -353,3 +354,196 @@ async def test_get_unit_detail_builds_payload():
     assert data["vehicles_count"] == 1
     assert data["financials"]["base_fee_monthly"] == 3000.0
     assert data["financials"]["outstanding_amount"] == 0.0
+
+
+class _FakeUnitsRepo:
+    """In-memory fake UnitsRepository."""
+
+    def __init__(self):
+        self.units: list[dict[str, Any]] = []
+        self.zones: list[dict[str, Any]] = []
+
+    async def insert_unit(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Insert a unit row."""
+        row = {"id": "unit-1", **data}
+        self.units.append(row)
+        return row
+
+    async def list_units(self, **_kwargs) -> tuple[list[dict[str, Any]], int]:
+        """Return all units and total count."""
+        return self.units, len(self.units)
+
+    async def get_unit(self, **_kwargs) -> dict[str, Any] | None:
+        """Return first unit."""
+        return self.units[0] if self.units else None
+
+    async def update_unit(self, **_kwargs) -> dict[str, Any]:
+        """Return updated unit."""
+        return self.units[0] if self.units else {}
+
+    async def delete_unit(self, **_kwargs) -> None:
+        """Remove all units."""
+        self.units = []
+
+    async def insert_parking_zone(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Insert parking zone."""
+        row = {"id": "zone-1", **data}
+        self.zones.append(row)
+        return row
+
+    async def list_parking_zones(self, **_kwargs) -> list[dict[str, Any]]:
+        """Return parking zones."""
+        return self.zones
+
+    async def delete_parking_zone(self, **_kwargs) -> dict[str, Any] | None:
+        """Delete first zone."""
+        if not self.zones:
+            return None
+        zone = self.zones.pop(0)
+        return zone
+
+
+class _FakeProjectsRepo:
+    """Minimal fake for units_count recompute."""
+
+    async def recompute_units_count(self, **_kwargs) -> None:
+        """No-op recompute."""
+
+
+def _units_service(*, units_repo: _FakeUnitsRepo | None = None) -> UnitsService:
+    """Build UnitsService with fake repos."""
+    service = UnitsService.__new__(UnitsService)
+    service.db_connection = MagicMock()
+    service.user_context = MagicMock()
+    service.user_context.organization_id = "org-1"
+    service.units_repo = units_repo or _FakeUnitsRepo()
+    service.projects_repo = _FakeProjectsRepo()
+    service.invoices_repo = AsyncMock()
+    service.setup_service = AsyncMock()
+    return service
+
+
+@pytest.mark.asyncio
+async def test_create_unit_recounts_project():
+    """Create unit inserts row and triggers recount."""
+    from apps.user_service.app.schemas.enums import UnitStatus
+    from apps.user_service.app.schemas.project_inventory import CreateUnitRequest
+
+    repo = _FakeUnitsRepo()
+    service = _units_service(units_repo=repo)
+    body = CreateUnitRequest(code="A-101", status=UnitStatus.VACANT)
+
+    result = await service.create_unit(project_id="proj-1", body=body)
+
+    assert result["code"] == "A-101"
+    assert len(repo.units) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_units_returns_serialized_rows():
+    """List units maps rows through serializer."""
+    from apps.user_service.app.schemas.enums import UnitStatus
+
+    repo = _FakeUnitsRepo()
+    repo.units = [
+        {
+            "id": "unit-1",
+            "organization_id": "org-1",
+            "project_id": "proj-1",
+            "code": "A-101",
+            "status": UnitStatus.VACANT.value,
+            "sort_order": 0,
+            "is_parking": False,
+            "created_at": "2026-07-16T09:00:00+00:00",
+            "updated_at": "2026-07-16T10:00:00+00:00",
+        }
+    ]
+    service = _units_service(units_repo=repo)
+
+    result = await service.list_units(project_id="proj-1")
+
+    assert result["items"][0]["code"] == "A-101"
+    assert result["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_update_unit_not_found():
+    """Update raises when unit is missing."""
+    from apps.user_service.app.schemas.project_inventory import UpdateUnitRequest
+
+    service = _units_service()
+    service.units_repo.get_unit = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await service.update_unit(
+            project_id="proj-1",
+            unit_id="missing",
+            body=UpdateUnitRequest(code="B-202"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_unit_returns_old_data():
+    """Delete unit returns serialized old_data."""
+    from apps.user_service.app.schemas.enums import UnitStatus
+
+    repo = _FakeUnitsRepo()
+    repo.units = [
+        {
+            "id": "unit-1",
+            "organization_id": "org-1",
+            "project_id": "proj-1",
+            "code": "A-101",
+            "status": UnitStatus.VACANT.value,
+            "sort_order": 0,
+            "is_parking": False,
+            "created_at": "2026-07-16T09:00:00+00:00",
+            "updated_at": "2026-07-16T10:00:00+00:00",
+        }
+    ]
+    service = _units_service(units_repo=repo)
+
+    result = await service.delete_unit(project_id="proj-1", unit_id="unit-1")
+
+    assert result["old_data"]["code"] == "A-101"
+    assert result["new_data"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_parking_zone():
+    """Create parking zone persists row."""
+    from apps.user_service.app.schemas.project_inventory import CreateParkingZoneRequest
+
+    repo = _FakeUnitsRepo()
+    service = _units_service(units_repo=repo)
+    body = CreateParkingZoneRequest(
+        tower_id="tower-1",
+        floor_id="floor-1",
+        name="Basement P1",
+    )
+
+    result = await service.create_parking_zone(project_id="proj-1", body=body)
+
+    assert result["name"] == "Basement P1"
+    assert len(repo.zones) == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_parking_zone_not_found():
+    """Delete parking zone raises when missing."""
+    service = _units_service()
+
+    with pytest.raises(NotFoundException):
+        await service.delete_parking_zone(project_id="proj-1", zone_id="zone-1")
+
+
+@pytest.mark.asyncio
+async def test_complete_floor_plans_delegates():
+    """Complete step delegates to setup service."""
+    service = _units_service()
+    service.setup_service.complete_step = AsyncMock(return_value={"step": "done"})
+
+    result = await service.complete_floor_plans(project_id="proj-1")
+
+    assert result["step"] == "done"
+    service.setup_service.complete_step.assert_awaited_once()

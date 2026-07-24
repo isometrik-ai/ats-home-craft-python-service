@@ -130,6 +130,22 @@ class MyProjectSummaryResponse(ProjectSummaryResponse):
     role: str
 
 
+class CommunityAdminSummary(BaseModel):
+    """Community admin assigned to a project."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    user_id: str
+    email: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    salutation: str | None = None
+    avatar_url: str | None = None
+    display_name: str | None = None
+
+
 class ProjectDetailsResponse(BaseModel):
     """Full project detail row."""
 
@@ -158,6 +174,7 @@ class ProjectDetailsResponse(BaseModel):
     setup_current_step: str
     created_at: str
     updated_at: str
+    community_admin: CommunityAdminSummary | None = None
 
 
 # ---------------------------------------------------------------------------

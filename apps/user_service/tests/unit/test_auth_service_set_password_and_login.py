@@ -304,3 +304,90 @@ async def test_set_password_carryover_failure_is_non_fatal(monkeypatch):
     )
 
     assert result.auth.access_token == "atk"
+
+
+@pytest.mark.asyncio
+async def test_set_password_builds_select_org_response(monkeypatch):
+    """set_password returns select-organization payload when old org existed."""
+    from unittest.mock import AsyncMock
+
+    from apps.user_service.app.schemas.auth import (
+        AuthResponse,
+        SelectOrganizationResponse,
+        UserInfo,
+    )
+
+    service, _ = _build_service(monkeypatch, old_org_id="org-old")
+    _patch_password_update(monkeypatch, return_user=SimpleNamespace(email="user@example.com"))
+    session, user = _make_session_user()
+    _patch_login(monkeypatch, session=session, user=user)
+    _patch_claims(monkeypatch, session_id="new-session-id")
+    monkeypatch.setattr(AuthService, "_validate_password_strength", lambda self, p: None)
+    auth_response = AuthResponse(
+        access_token="atk",
+        refresh_token="rtk",
+        expires_in=3600,
+        expires_at=0,
+        user=UserInfo(id="user-1", email="user@example.com", timezone="UTC"),
+    )
+    select_payload = SelectOrganizationResponse(isometrik_details=None)
+    monkeypatch.setattr(
+        AuthService,
+        "_build_auth_response",
+        AsyncMock(return_value=auth_response),
+    )
+    monkeypatch.setattr(
+        AuthService,
+        "_build_select_org_response",
+        AsyncMock(return_value=select_payload),
+    )
+
+    result = await service.set_password(
+        user_id="user-1",
+        current_session_id="old-session-id",
+        password="NewPass123!",
+        admin_client=object(),
+        anon_client=object(),
+    )
+
+    assert result.select_organization is select_payload
+
+
+@pytest.mark.asyncio
+async def test_build_select_org_response_returns_none_without_org():
+    """_build_select_org_response returns None when no prior org context."""
+    service = AuthService.__new__(AuthService)
+    service.db_connection = object()
+    service.organization_repository = _FakeOrgRepo()
+    result = await service._build_select_org_response("user-1", None)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_build_select_org_response_handles_isometrik_failure(monkeypatch):
+    """Isometrik lookup failures are logged and return None."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    service = AuthService.__new__(AuthService)
+    service.db_connection = object()
+    service.organization_repository = _FakeOrgRepo()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.OrganizationMemberRepository",
+        lambda db_connection: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.get_isometrik_details",
+        AsyncMock(side_effect=RuntimeError("isometrik down")),
+    )
+    result = await service._build_select_org_response("user-1", "org-old")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_get_session_org_id_missing_context():
+    """_get_session_org_id returns None when session context is absent."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    repo = MagicMock(get_valid_session_context=AsyncMock(return_value=None))
+    result = await AuthService._get_session_org_id(repo, "session-1")
+    assert result is None

@@ -33,6 +33,27 @@ _PROJECT_CODE_MAX_LEN = 64
 _PROJECT_CODE_SUFFIX_RESERVE = 6
 _PROJECT_CODE_MAX_ATTEMPTS = 1000
 
+_COMMUNITY_ADMIN_ROW_KEYS = (
+    "community_admin_email",
+    "community_admin_phone_number",
+    "community_admin_phone_isd_code",
+    "community_admin_first_name",
+    "community_admin_last_name",
+    "community_admin_salutation",
+    "community_admin_avatar_url",
+)
+
+
+def _community_admin_display_name(row: dict[str, Any]) -> str | None:
+    """Build display name for the community admin org member."""
+    parts = [
+        str(row.get("community_admin_salutation") or "").strip(),
+        str(row.get("community_admin_first_name") or "").strip(),
+        str(row.get("community_admin_last_name") or "").strip(),
+    ]
+    name = " ".join(part for part in parts if part)
+    return name or None
+
 
 def _to_float(value: Any) -> float | None:
     """Coerce Decimal/None to float for API responses."""
@@ -60,6 +81,24 @@ class ProjectsService:
         )
 
     @staticmethod
+    def _build_community_admin(row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build community admin summary from a project detail join row."""
+        user_id = row.get("community_admin_user_id")
+        if not user_id:
+            return None
+        return {
+            "user_id": str(user_id),
+            "email": row.get("community_admin_email"),
+            "phone_number": row.get("community_admin_phone_number"),
+            "phone_isd_code": row.get("community_admin_phone_isd_code"),
+            "first_name": row.get("community_admin_first_name"),
+            "last_name": row.get("community_admin_last_name"),
+            "salutation": row.get("community_admin_salutation"),
+            "avatar_url": row.get("community_admin_avatar_url"),
+            "display_name": _community_admin_display_name(row),
+        }
+
+    @staticmethod
     def _normalize_details(row: dict[str, Any]) -> dict[str, Any]:
         """Serialize a full project row for the API response."""
         out = dict(row)
@@ -76,6 +115,9 @@ class ProjectsService:
             out["possession_date"] = out["possession_date"].isoformat()
         for ts_key in ("created_at", "updated_at"):
             out[ts_key] = format_iso_datetime(out.get(ts_key))
+        out["community_admin"] = ProjectsService._build_community_admin(row)
+        for key in _COMMUNITY_ADMIN_ROW_KEYS:
+            out.pop(key, None)
         return out
 
     @staticmethod

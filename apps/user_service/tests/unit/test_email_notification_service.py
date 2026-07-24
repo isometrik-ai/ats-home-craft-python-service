@@ -210,3 +210,153 @@ async def test_process_continues_when_graphiti_write_fails() -> None:
     assert result.contact_id == "contact-1"
     assert result.stored is False
     assert result.skipped_reason == "graphiti_write_failed"
+
+
+def test_normalize_email_address_blank_and_invalid():
+    """normalize_email_address handles blank and non-email strings."""
+    assert normalize_email_address(None) is None
+    assert normalize_email_address("   ") is None
+    assert normalize_email_address("not-an-email") is None
+
+
+def test_extract_sender_email_missing_message():
+    """extract_sender_email returns None when message object absent."""
+    assert extract_sender_email({"event_type": "message.received"}) is None
+
+
+def test_build_inbound_email_record_requires_content_and_message_id():
+    """Record builder rejects empty content and missing message id."""
+    body = {
+        "message": {
+            "from_": "user@example.com",
+            "subject": "",
+            "extracted_text": "",
+        }
+    }
+    assert (
+        build_inbound_email_record(
+            webhook_body=body,
+            sender_email="user@example.com",
+            contact_id="contact-1",
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_process_skips_unsupported_event_type() -> None:
+    """Unsupported webhook event types skip ingestion."""
+    service = EmailNotificationService(db_connection=MagicMock(), graphiti=MagicMock())
+    with patch(f"{_EMAIL_SVC}.is_graphiti_configured", return_value=True):
+        result = await service.process_message_received(
+            organization_id="org-1",
+            webhook_body={"event_type": "message.sent", "message": {"from_": "a@b.com"}},
+        )
+    assert result.skipped_reason == "unsupported_event_type:message.sent"
+
+
+@pytest.mark.asyncio
+async def test_process_skips_when_graphiti_not_configured() -> None:
+    """Graphiti disabled skips ingestion early."""
+    service = EmailNotificationService(db_connection=MagicMock(), graphiti=MagicMock())
+    with patch(f"{_EMAIL_SVC}.is_graphiti_configured", return_value=False):
+        result = await service.process_message_received(
+            organization_id="org-1",
+            webhook_body=SAMPLE_WEBHOOK,
+        )
+    assert result.skipped_reason == "graphiti_not_configured"
+
+
+@pytest.mark.asyncio
+async def test_process_skips_duplicate_message_id() -> None:
+    """Duplicate Graphiti episodes are skipped."""
+    repo = MagicMock()
+    repo.get_contact_id_by_email = AsyncMock(return_value="contact-1")
+    graphiti = MagicMock()
+    graphiti.episode_exists = AsyncMock(return_value=True)
+    sync_service = MagicMock()
+    sync_service.load_contact_snapshot = AsyncMock(return_value=_contact_snapshot())
+
+    service = EmailNotificationService(
+        db_connection=MagicMock(),
+        graphiti=graphiti,
+        sync_service=sync_service,
+    )
+    service._contacts_repo = repo
+
+    with (
+        patch(f"{_EMAIL_SVC}.is_graphiti_configured", return_value=True),
+        patch(
+            f"{_EMAIL_SVC}.is_organization_memory_enabled",
+            new=AsyncMock(return_value=True),
+        ),
+    ):
+        result = await service.process_message_received(
+            organization_id="org-1",
+            webhook_body=SAMPLE_WEBHOOK,
+        )
+
+    assert result.skipped_reason == "duplicate_message_id"
+
+
+@pytest.mark.asyncio
+async def test_fetch_attachment_blocks_when_inbox_missing() -> None:
+    """Attachment fetch is skipped when inbox_id is absent."""
+    from apps.user_service.app.services.email_notification_service import (
+        InboundEmailRecord,
+    )
+
+    agentmail = MagicMock()
+    agentmail.is_configured = True
+    agentmail.fetch_message_attachment = AsyncMock()
+
+    service = EmailNotificationService(
+        db_connection=MagicMock(),
+        agentmail=agentmail,
+    )
+    record = InboundEmailRecord(
+        message_id="m1",
+        contact_id="contact-1",
+        from_email="user@example.com",
+        body="hello",
+        subject="Hi",
+        from_header=None,
+        to=(),
+        thread_id=None,
+        inbox_id=None,
+        received_at=None,
+        attachments=({"attachment_id": "att-1"},),
+    )
+
+    blocks = await service._fetch_attachment_blocks(record)
+    assert blocks == []
+    agentmail.fetch_message_attachment.assert_not_awaited()
+
+
+def test_extract_sender_email_uses_from_key() -> None:
+    """extract_sender_email reads legacy 'from' field when present."""
+    body = {"message": {"from": "User <user@example.com>"}}
+    assert extract_sender_email(body) == "user@example.com"
+
+
+def test_email_helper_parsers() -> None:
+    """Cover recipient, thread, reference-time, and attachment helpers."""
+    from apps.user_service.app.services.email_notification_service import (
+        _extract_body,
+        _parse_attachments,
+        _parse_recipients,
+        _parse_reference_time,
+        _resolve_thread_id,
+    )
+
+    message = {
+        "extracted_text": " hello ",
+        "attachments": [{"filename": "a.txt", "attachment_id": "1"}],
+    }
+    assert _extract_body(message) == "hello"
+    assert _parse_recipients(["a@b.com"]) == ("a@b.com",)
+    assert _parse_recipients("") == ()
+    assert _parse_attachments(message)
+    assert _resolve_thread_id({"thread": {"thread_id": "t1"}}, message) == "t1"
+    assert _parse_reference_time("2026-01-01T00:00:00Z").year == 2026
+    assert _parse_reference_time("bad-date").tzinfo is not None
