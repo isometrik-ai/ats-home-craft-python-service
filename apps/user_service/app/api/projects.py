@@ -3070,6 +3070,11 @@ async def delete_site_map_overlay(
     "/{project_id}/vehicle-requests",
     status_code=http_status.HTTP_200_OK,
     summary="List resident vehicle registration requests",
+    description=(
+        "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
+        "profile_photo_url) and `unit` (code, location_label, property_type, config, floor, "
+        "status)."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")

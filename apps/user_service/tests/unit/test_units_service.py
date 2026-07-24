@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -332,9 +332,17 @@ async def test_get_unit_detail_builds_payload():
     service.invoices_repo.sum_outstanding_by_unit.return_value = 0
     service.invoices_repo.latest_monthly_fee_by_unit.return_value = 300000
 
-    data = await service.get_unit_detail(project_id="proj-1", unit_id="unit-1")
+    mock_docs_service = MagicMock()
+    mock_docs_service.list_documents_for_owner_contact_unit = AsyncMock(return_value=[])
+
+    with patch(
+        "apps.user_service.app.services.units_service.ContactUnitDocumentsService",
+        return_value=mock_docs_service,
+    ):
+        data = await service.get_unit_detail(project_id="proj-1", unit_id="unit-1")
 
     assert data["code"] == "A-1802"
+    assert data["documents"] == []
     assert data["occupancy_label"] == "sold"
     assert data["owner"]["display_name"] == "Mr. Rajesh Kapoor"
     assert data["owner"]["phone"] == "+919876543210"
