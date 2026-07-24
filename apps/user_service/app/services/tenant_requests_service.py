@@ -32,14 +32,25 @@ from apps.user_service.app.schemas.tenant_requests import (
     ReuploadTenantDocumentRequest,
     TenantRequestDocumentResponse,
     TenantRequestEventResponse,
+    TenantRequestListItemResponse,
     TenantRequestListQuery,
     TenantRequestMilestoneResponse,
     TenantRequestResponse,
     TenantRequestSummaryResponse,
 )
 from apps.user_service.app.services.contacts_service import ContactsService
-from apps.user_service.app.services.units_service import format_contact_display_name
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.units_service import (
+    format_contact_display_name,
+    format_primary_contact_email,
+    format_primary_contact_phone,
+    serialize_unit_list_item,
+)
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_any,
+)
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -73,6 +84,30 @@ class TenantRequestsService:
         self.supabase_client = supabase_client
         self.repo = tenant_requests_repository or TenantRequestsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self.setup_service = ProjectSetupService(
+            db_connection=db_connection,
+            user_context=user_context,
+        )
+
+    async def _ensure_project(self, *, project_id: str) -> None:
+        """Raise when the project is missing or outside the organization."""
+        await self.setup_service.ensure_project(project_id=project_id)
+
+    async def _get_admin_request_or_raise(
+        self,
+        *,
+        project_id: str,
+        tenant_request_id: str,
+    ) -> dict[str, Any]:
+        """Fetch a tenant request scoped to a project or raise not found."""
+        await self._ensure_project(project_id=project_id)
+        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        if str(row["project_id"]) != project_id:
+            raise NotFoundException(
+                message_key="tenant_requests.errors.request_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return row
 
     @staticmethod
     def _format_date(value: Any) -> str | None:
@@ -142,6 +177,119 @@ class TenantRequestsService:
             ),
         ]
 
+    _OWNER_ROW_KEYS = (
+        "owner_contact_id",
+        "owner_prefix",
+        "owner_first_name",
+        "owner_last_name",
+        "owner_phones",
+        "owner_emails",
+        "owner_profile_photo_url",
+    )
+
+    _UNIT_ROW_KEYS = (
+        "unit_code",
+        "unit_label",
+        "unit_status",
+        "unit_tower_id",
+        "unit_config_id",
+        "unit_plot_item_id",
+        "unit_sort_order",
+        "unit_tower_name",
+        "unit_tower_type",
+        "unit_floor_display_name",
+        "unit_floor_level_number",
+        "unit_config_kind",
+        "unit_config_display_label",
+        "unit_config_name",
+        "unit_plot_description",
+        "unit_resolved_property_type",
+        "unit_resolved_config_kind",
+    )
+
+    def _build_owner_summary(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build owner (submitter) summary from a repository join row."""
+        contact_id = row.get("owner_contact_id") or row.get("submitted_by_contact_id")
+        if not contact_id:
+            return None
+        phone = format_primary_contact_phone(parse_json_any(row.get("owner_phones"), default=[]))
+        email = format_primary_contact_email(parse_json_any(row.get("owner_emails"), default=[]))
+        profile_photo_url = row.get("owner_profile_photo_url")
+        return {
+            "contact_id": str(contact_id),
+            "display_name": format_contact_display_name(
+                prefix=row.get("owner_prefix"),
+                first_name=row.get("owner_first_name"),
+                last_name=row.get("owner_last_name"),
+            )
+            or None,
+            "phone": str(phone).strip() if phone else None,
+            "email": str(email).strip() if email else None,
+            "profile_photo_url": str(profile_photo_url).strip() if profile_photo_url else None,
+        }
+
+    def _build_unit_summary(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build unit summary from a repository join row."""
+        unit_id = row.get("unit_id")
+        if not unit_id:
+            return None
+        unit_item = serialize_unit_list_item(
+            {
+                "id": str(unit_id),
+                "code": row.get("unit_code") or "",
+                "unit_label": row.get("unit_label"),
+                "status": row.get("unit_status") or "",
+                "sort_order": row.get("unit_sort_order") or 0,
+                "tower_id": row.get("unit_tower_id"),
+                "config_id": row.get("unit_config_id"),
+                "plot_item_id": row.get("unit_plot_item_id"),
+                "tower_name": row.get("unit_tower_name"),
+                "tower_type": row.get("unit_tower_type"),
+                "floor_display_name": row.get("unit_floor_display_name"),
+                "floor_level_number": row.get("unit_floor_level_number"),
+                "config_kind": row.get("unit_config_kind"),
+                "config_display_label": row.get("unit_config_display_label"),
+                "config_name": row.get("unit_config_name"),
+                "plot_description": row.get("unit_plot_description"),
+                "resolved_property_type": row.get("unit_resolved_property_type"),
+                "resolved_config_kind": row.get("unit_resolved_config_kind"),
+            }
+        )
+        unit_item.pop("owner", None)
+        return unit_item
+
+    def _serialize_list_item(self, row: dict[str, Any]) -> TenantRequestListItemResponse:
+        """Map a tenant request row to the admin list API shape."""
+        owner_name = format_contact_display_name(
+            prefix=row.get("owner_prefix"),
+            first_name=row.get("owner_first_name"),
+            last_name=row.get("owner_last_name"),
+        )
+        return TenantRequestListItemResponse(
+            id=str(row["id"]),
+            organization_id=str(row["organization_id"]),
+            project_id=str(row["project_id"]),
+            unit_id=str(row["unit_id"]),
+            submitted_by_contact_id=str(row["submitted_by_contact_id"]),
+            owner_name=owner_name or None,
+            tenant_first_name=row.get("tenant_first_name") or "",
+            tenant_last_name=row.get("tenant_last_name"),
+            tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
+            tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
+            move_in_date=self._format_date(row.get("move_in_date")),
+            status=str(row.get("status")),
+            portal_access=bool(row.get("portal_access", False)),
+            submitted_at=format_iso_datetime(row.get("submitted_at")),
+            approved_at=format_iso_datetime(row.get("approved_at")),
+            cancelled_at=format_iso_datetime(row.get("cancelled_at")),
+            documents_verified_count=int(row.get("documents_verified_count") or 0),
+            documents_total_count=int(row.get("documents_total_count") or 0),
+            owner=self._build_owner_summary(row),
+            unit=self._build_unit_summary(row),
+            created_at=format_iso_datetime(row.get("created_at")),
+            updated_at=format_iso_datetime(row.get("updated_at")),
+        )
+
     async def _serialize_detail(self, row: dict[str, Any]) -> TenantRequestResponse:
         """Load documents/events and map a DB row to the API response."""
         org_id = self.user_context.organization_id
@@ -174,8 +322,8 @@ class TenantRequestsService:
             ),
             tenant_first_name=row.get("tenant_first_name") or "",
             tenant_last_name=row.get("tenant_last_name"),
-            tenant_phones=list(row.get("tenant_phones") or []),
-            tenant_emails=list(row.get("tenant_emails") or []),
+            tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
+            tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
             move_in_date=self._format_date(row.get("move_in_date")),
             status=str(row.get("status")),
             portal_access=bool(row.get("portal_access", False)),
@@ -204,13 +352,15 @@ class TenantRequestsService:
                     id=str(event["id"]),
                     event_type=str(event["event_type"]),
                     occurred_at=format_iso_datetime(event.get("occurred_at")) or "",
-                    payload=dict(event.get("payload") or {}),
+                    payload=parse_json_any(event.get("payload"), default={}) or {},
                 )
                 for event in events
             ],
             milestones=self._derive_milestones(row=row, events=events),
             documents_verified_count=verified_count,
             documents_total_count=len(documents),
+            owner=self._build_owner_summary(row),
+            unit=self._build_unit_summary(row),
             created_at=format_iso_datetime(row.get("created_at")),
             updated_at=format_iso_datetime(row.get("updated_at")),
         )
@@ -491,20 +641,27 @@ class TenantRequestsService:
         }
         return mapping.get(bucket)
 
-    async def get_admin_summary(self) -> TenantRequestSummaryResponse:
-        """Return dashboard summary card counts."""
+    async def get_admin_summary(self, *, project_id: str) -> TenantRequestSummaryResponse:
+        """Return dashboard summary card counts for a project."""
         org_id = self.user_context.organization_id
         assert org_id
-        counts = await self.repo.get_summary_counts(organization_id=org_id)
+        await self._ensure_project(project_id=project_id)
+        counts = await self.repo.get_summary_counts(
+            organization_id=org_id,
+            project_id=project_id,
+        )
         return TenantRequestSummaryResponse(**counts)
 
     async def list_admin_requests(
         self,
+        *,
+        project_id: str,
         query: TenantRequestListQuery,
-    ) -> tuple[list[TenantRequestResponse], int]:
-        """Return paginated tenant requests for admin review."""
+    ) -> tuple[list[TenantRequestListItemResponse], int]:
+        """Return paginated tenant requests for admin review within a project."""
         org_id = self.user_context.organization_id
         assert org_id
+        await self._ensure_project(project_id=project_id)
         statuses = [query.status.value] if query.status else self._bucket_to_statuses(query.bucket)
         offset = (query.page - 1) * query.page_size
         rows, total = await self.repo.list_for_admin(
@@ -512,16 +669,24 @@ class TenantRequestsService:
             statuses=statuses,
             search=query.search,
             unit_id=query.unit_id,
-            project_id=query.project_id,
+            project_id=project_id,
             limit=query.page_size,
             offset=offset,
         )
-        items = [await self._serialize_detail(row) for row in rows]
+        items = [self._serialize_list_item(row) for row in rows]
         return items, total
 
-    async def get_admin_request(self, tenant_request_id: str) -> TenantRequestResponse:
-        """Return one tenant request for admin review."""
-        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+    async def get_admin_request(
+        self,
+        *,
+        project_id: str,
+        tenant_request_id: str,
+    ) -> TenantRequestResponse:
+        """Return one tenant request for admin review within a project."""
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
         return await self._serialize_detail(row)
 
     async def _recompute_after_document_review(
@@ -563,11 +728,15 @@ class TenantRequestsService:
     async def verify_document(
         self,
         *,
+        project_id: str,
         tenant_request_id: str,
         document_id: str,
     ) -> TenantRequestResponse:
         """Admin marks one document as verified."""
-        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
         if row.get("status") not in _INFLIGHT_STATUSES:
             raise ValidationException(
                 message_key="tenant_requests.errors.invalid_status_transition",
@@ -593,18 +762,25 @@ class TenantRequestsService:
             event_type=TenantRequestEventType.DOCUMENT_VERIFIED.value,
             payload={"document_type": updated.get("document_type")},
         )
-        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
         return await self._serialize_detail(row)
 
     async def reject_document(
         self,
         *,
+        project_id: str,
         tenant_request_id: str,
         document_id: str,
         body: RejectTenantDocumentRequest,
     ) -> TenantRequestResponse:
         """Admin rejects one document with a reason."""
-        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
         if row.get("status") not in _INFLIGHT_STATUSES:
             raise ValidationException(
                 message_key="tenant_requests.errors.invalid_status_transition",
@@ -634,17 +810,24 @@ class TenantRequestsService:
                 "rejection_reason": body.rejection_reason,
             },
         )
-        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
         return await self._serialize_detail(row)
 
     async def approve_request(
         self,
         *,
+        project_id: str,
         tenant_request_id: str,
         body: ApproveTenantRequestRequest,
     ) -> TenantRequestResponse:
         """Admin approves a ready request and provisions the tenant contact."""
-        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
         if row.get("status") != TenantRequestStatus.READY_TO_APPROVE.value:
             raise ValidationException(
                 message_key="tenant_requests.errors.not_ready_to_approve",

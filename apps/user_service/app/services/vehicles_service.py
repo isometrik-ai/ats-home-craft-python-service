@@ -24,6 +24,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
     ReviewVehicleRequest,
     UpdateVehicleRequest,
+    VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
@@ -145,7 +146,7 @@ class VehiclesService:
             return None
         unit_item = serialize_unit_list_item(
             {
-                "id": unit_id,
+                "id": str(unit_id),
                 "code": row.get("unit_code") or "",
                 "unit_label": row.get("unit_label"),
                 "status": row.get("unit_status") or "",
@@ -167,6 +168,11 @@ class VehiclesService:
         )
         unit_item.pop("owner", None)
         return unit_item
+
+    def _serialize_admin_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Map a project vehicle row to the admin list API contract."""
+        payload = self._normalize_project_vehicle(row)
+        return VehicleResponse.model_validate(payload).model_dump(mode="json")
 
     def _normalize_project_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a project vehicle row to admin list response shape."""
@@ -379,7 +385,7 @@ class VehiclesService:
             project_id=project_id,
             status=status.value if status else None,
         )
-        return [self._normalize_project_vehicle(row) for row in rows]
+        return [self._serialize_admin_vehicle(row) for row in rows]
 
     async def review_vehicle(
         self,

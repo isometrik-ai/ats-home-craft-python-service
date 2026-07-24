@@ -118,7 +118,7 @@ async def api_status():
             "/contacts",
             "/contact-onboarding",
             "/contact-onboarding/tenant-requests",
-            "/tenant-requests",
+            "/projects/{project_id}/tenant-requests",
             "/passes",
             "/visitor-logs",
             "/move-events",
