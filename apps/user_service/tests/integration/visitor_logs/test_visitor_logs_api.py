@@ -58,11 +58,13 @@ async def test_list_visitor_logs(monkeypatch, client):
         entry_method=None,
         access_status=None,
         tower_id=None,
+        project_id=None,
+        unit_id=None,
         page=1,
         page_size=20,
     ):
         del _self, start_at, end_at, search, pass_type, entry_method
-        del access_status, tower_id
+        del access_status, tower_id, project_id, unit_id
         assert page == 1
         assert page_size == 20
         return [_FAKE_LOG_ITEM], 1
@@ -85,8 +87,15 @@ async def test_get_visitor_log_overview(monkeypatch, client):
 
     patch_check_permissions(monkeypatch, "apps.user_service.app.api.visitor_logs")
 
-    async def fake_get_overview(_self, *, start_at=None, end_at=None):
-        del _self, start_at, end_at
+    async def fake_get_overview(
+        _self,
+        *,
+        start_at=None,
+        end_at=None,
+        project_id=None,
+        unit_id=None,
+    ):
+        del _self, start_at, end_at, project_id, unit_id
         return _FAKE_OVERVIEW
 
     monkeypatch.setattr(
