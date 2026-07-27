@@ -48,6 +48,13 @@ def is_unsold_status(status: str) -> bool:
     return status in _UNSOLD_STATUSES
 
 
+def resolve_is_sold(*, status: str, owner_contact_id: str | None = None) -> bool:
+    """Return True when a unit is sold/allotted, including vacant after move-out."""
+    if is_sold_status(status):
+        return True
+    return bool(owner_contact_id)
+
+
 def resolve_unit_kind(*, config_kind: str | None, tower_type: str | None) -> str | None:
     """Resolve apartment/commercial classification for a unit."""
     if config_kind in {UnitConfigKind.APARTMENT.value, UnitConfigKind.COMMERCIAL.value}:

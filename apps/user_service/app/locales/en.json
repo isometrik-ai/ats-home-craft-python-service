@@ -789,5 +789,27 @@
       "document_rejected": "Document rejected successfully.",
       "approved": "Tenant request approved successfully."
     }
+  },
+  "walk_in": {
+    "errors": {
+      "not_found": "The walk-in visit could not be found.",
+      "flats_required": "At least one flat is required.",
+      "unit_not_in_project": "One or more flats are invalid for this project.",
+      "photos_required": "At least one visitor photo is required.",
+      "no_approved_visit_units": "At least one flat must approve before marking entry.",
+      "visit_unit_not_awaiting": "This flat is not awaiting approval.",
+      "unit_not_accessible": "You do not have access to act on this flat.",
+      "invalid_status_transition": "This action is not allowed for the current visit status."
+    },
+    "success": {
+      "created": "Walk-in visit created successfully.",
+      "list_retrieved": "Walk-in visits retrieved successfully.",
+      "retrieved": "Walk-in visit retrieved successfully.",
+      "entered": "Visitor marked as entered.",
+      "exited": "Visitor marked as exited.",
+      "visit_units_retrieved": "Walk-in visit units retrieved successfully.",
+      "visit_unit_approved": "Walk-in approved for your flat.",
+      "visit_unit_rejected": "Walk-in rejected for your flat."
+    }
   }
 }

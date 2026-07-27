@@ -161,6 +161,7 @@ class PassVerificationService:
             ),
             "valid_from": format_iso_datetime(row.get("valid_from")),
             "valid_until": format_iso_datetime(row.get("valid_until")),
+            "validity_type": str(row.get("validity_type") or ""),
             "is_private": bool(row.get("is_private")),
             "access_status": decision.access_status,
             "can_check_in": decision.can_check_in,
@@ -212,6 +213,11 @@ class PassVerificationService:
             )
         return row
 
+    async def _ensure_gate_if_provided(self, *, gate_id: str | None) -> None:
+        """Validate tower gate when the client supplies gate_id."""
+        if gate_id:
+            await self._get_gate_or_404(gate_id=gate_id)
+
     async def verify(self, *, code: str, gate_id: str | None = None) -> dict[str, Any]:
         """Read-only lookup of a pass by 4-digit code."""
         del gate_id  # reserved for future gate-scoped rules
@@ -238,7 +244,7 @@ class PassVerificationService:
         """Record guest entry at the gate."""
         org_id = self.user_context.organization_id
         assert org_id
-        await self._get_gate_or_404(gate_id=body.gate_id)
+        await self._ensure_gate_if_provided(gate_id=body.gate_id)
         row = await self._get_pass_or_404(pass_id=pass_id)
         decision = self._compute_admissibility(row)
         override = body.access_status == PassAccessStatus.GRANTED
@@ -307,7 +313,7 @@ class PassVerificationService:
         """Record guest exit at the gate."""
         org_id = self.user_context.organization_id
         assert org_id
-        await self._get_gate_or_404(gate_id=body.gate_id)
+        await self._ensure_gate_if_provided(gate_id=body.gate_id)
         row = await self._get_pass_or_404(pass_id=pass_id)
         has_open = await self.events_repo.has_open_check_in(
             organization_id=org_id,

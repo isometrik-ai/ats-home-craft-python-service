@@ -393,6 +393,20 @@ class UnitsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def get_by_plot_item_id(
+        self, *, organization_id: str, plot_item_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch a unit linked to a plot config item."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT * FROM units
+            WHERE plot_item_id = $1::uuid AND organization_id = $2::uuid
+            """,
+            plot_item_id,
+            organization_id,
+        )
+        return dict(row) if row else None
+
     async def delete_unit(self, *, organization_id: str, project_id: str, unit_id: str) -> bool:
         """Delete a unit."""
         result = await self.db_connection.execute(

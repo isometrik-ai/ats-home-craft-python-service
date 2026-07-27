@@ -126,3 +126,49 @@ async def test_get_overview_aggregates():
     assert PassEventType.CHECKED_IN.value in args
     assert PassType.DELIVERY.value in args
     assert PassType.SERVICE.value in args
+
+
+@pytest.mark.asyncio
+async def test_list_logs_unit_and_project_filters():
+    """Unit and project filters scope passes to one flat."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.list_logs(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        page=1,
+        page_size=20,
+    )
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "p.project_id = $4::uuid" in count_query
+    assert "p.unit_id = $5::uuid" in count_query
+    assert "project-1" in count_args
+    assert "unit-1" in count_args
+
+
+@pytest.mark.asyncio
+async def test_get_overview_unit_scope():
+    """Overview applies optional unit/project scope."""
+    conn = _FakeConn(
+        row={
+            "total_visitors": 2,
+            "in_count": 1,
+            "deliveries": 0,
+            "daily_help": 0,
+        }
+    )
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.get_overview(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+    )
+    overview_query = conn.fetchrow_calls[0][0]
+    assert "p.project_id = $7::uuid" in overview_query
+    assert "p.unit_id = $8::uuid" in overview_query
+    assert "EXISTS" in overview_query

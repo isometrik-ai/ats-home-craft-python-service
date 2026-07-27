@@ -49,6 +49,8 @@ class VisitorLogsRepository(BaseRepository):
         entry_method: str | None,
         access_status: str | None,
         tower_id: str | None,
+        project_id: str | None,
+        unit_id: str | None,
         param_index: int,
     ) -> tuple[str, list[Any]]:
         """Build dynamic WHERE fragments for visitor log list queries."""
@@ -87,6 +89,16 @@ class VisitorLogsRepository(BaseRepository):
             args.append(tower_id)
             idx += 1
 
+        if project_id:
+            clauses.append(f"p.project_id = ${idx}::uuid")
+            args.append(project_id)
+            idx += 1
+
+        if unit_id:
+            clauses.append(f"p.unit_id = ${idx}::uuid")
+            args.append(unit_id)
+            idx += 1
+
         if not clauses:
             return "", args
         return " AND " + " AND ".join(clauses), args
@@ -102,6 +114,8 @@ class VisitorLogsRepository(BaseRepository):
         entry_method: str | None = None,
         access_status: str | None = None,
         tower_id: str | None = None,
+        project_id: str | None = None,
+        unit_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -114,6 +128,8 @@ class VisitorLogsRepository(BaseRepository):
             entry_method=entry_method,
             access_status=access_status,
             tower_id=tower_id,
+            project_id=project_id,
+            unit_id=unit_id,
             param_index=4,
         )
         args.extend(filter_args)
@@ -165,6 +181,7 @@ class VisitorLogsRepository(BaseRepository):
             SELECT
               p.id::text AS pass_id,
               p.pass_type::text AS pass_type,
+              p.guest_name,
               u.unit_label,
               t.name AS tower_name,
               TRIM(
@@ -191,12 +208,34 @@ class VisitorLogsRepository(BaseRepository):
         organization_id: str,
         start_at: datetime | None = None,
         end_at: datetime | None = None,
+        project_id: str | None = None,
+        unit_id: str | None = None,
     ) -> dict[str, Any]:
         """Aggregate overview card metrics for a date range."""
         range_start, range_end = self._resolve_range(start_at=start_at, end_at=end_at)
+        scope_sql = ""
+        scope_args: list[Any] = []
+        scope_idx = 7
+        if project_id:
+            scope_sql += f" AND p.project_id = ${scope_idx}::uuid"
+            scope_args.append(project_id)
+            scope_idx += 1
+        if unit_id:
+            scope_sql += f" AND p.unit_id = ${scope_idx}::uuid"
+            scope_args.append(unit_id)
+        event_scope_sql = ""
+        if scope_sql:
+            event_scope_sql = (
+                " AND EXISTS ("
+                "   SELECT 1 FROM passes p"
+                "   WHERE p.organization_id = pe.organization_id"
+                "     AND p.id = pe.pass_id"
+                f"{scope_sql}"
+                " )"
+            )
 
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
               (
                 SELECT COUNT(*)
@@ -204,6 +243,7 @@ class VisitorLogsRepository(BaseRepository):
                 WHERE p.organization_id = $1::uuid
                   AND p.valid_from >= $2
                   AND p.valid_from < $3
+                  {scope_sql}
               ) AS total_visitors,
               (
                 SELECT COUNT(*)
@@ -212,6 +252,7 @@ class VisitorLogsRepository(BaseRepository):
                   AND pe.event_type = $4::pass_event_type
                   AND pe.occurred_at >= $2
                   AND pe.occurred_at < $3
+                  {event_scope_sql}
               ) AS in_count,
               (
                 SELECT COUNT(*)
@@ -220,6 +261,7 @@ class VisitorLogsRepository(BaseRepository):
                   AND p.valid_from >= $2
                   AND p.valid_from < $3
                   AND p.pass_type = $5::pass_type
+                  {scope_sql}
               ) AS deliveries,
               (
                 SELECT COUNT(*)
@@ -228,6 +270,7 @@ class VisitorLogsRepository(BaseRepository):
                   AND p.valid_from >= $2
                   AND p.valid_from < $3
                   AND p.pass_type = $6::pass_type
+                  {scope_sql}
               ) AS daily_help
             """,
             organization_id,
@@ -236,6 +279,7 @@ class VisitorLogsRepository(BaseRepository):
             PassEventType.CHECKED_IN.value,
             PassType.DELIVERY.value,
             PassType.SERVICE.value,
+            *scope_args,
         )
         payload = dict(row) if row else {}
         return {

@@ -10,10 +10,12 @@ import pytest
 from apps.user_service.app.services.units_service import (
     UnitsService,
     build_location_label,
+    build_plot_unit_code,
     format_contact_display_name,
     format_primary_contact_email,
     format_primary_contact_phone,
     pick_unit_owner,
+    plot_item_status_to_unit_status,
     resolve_carpet_area_sqft,
     resolve_occupancy_label,
     resolve_unit_facing,
@@ -29,6 +31,18 @@ def test_format_contact_display_name_with_prefix():
         format_contact_display_name(prefix="Mr.", first_name="Rajesh", last_name="Kapoor")
         == "Mr. Rajesh Kapoor"
     )
+
+
+def test_build_plot_unit_code():
+    """Plot unit codes combine config code and plot number."""
+    assert build_plot_unit_code(config_code="P1", plot_no="101") == "P1-101"
+
+
+def test_plot_item_status_to_unit_status():
+    """Plot construction status maps to inventory unit status."""
+    assert plot_item_status_to_unit_status("empty") == "vacant"
+    assert plot_item_status_to_unit_status("constructed") == "vacant"
+    assert plot_item_status_to_unit_status("under_construction") == "under_maintenance"
 
 
 def test_resolve_occupancy_label_mapping():
@@ -136,6 +150,7 @@ def test_serialize_unit_list_item_builds_registry_row():
     assert item["owner"]["display_name"] == "Mr. Rajesh Kapoor"
     assert item["owner"]["phone"] == "+919876543210"
     assert item["owner"]["email"] == "rajesh@example.com"
+    assert item["is_sold"] is True
 
 
 def test_format_primary_contact_phone_and_email():
@@ -153,8 +168,8 @@ def test_format_primary_contact_phone_and_email():
     assert format_primary_contact_email(emails) == "owner@example.com"
 
 
-def test_list_item_hides_owner_when_vacant():
-    """Vacant units do not expose owner even when an Owner link exists in DB."""
+def test_list_item_shows_owner_and_is_sold_when_vacant_but_allotted():
+    """Vacant units with an active Owner allotment remain sold in the registry."""
     item = serialize_unit_list_item(
         {
             "id": "unit-1",
@@ -167,7 +182,8 @@ def test_list_item_hides_owner_when_vacant():
     )
 
     assert item["status"] == "vacant"
-    assert item["owner"] is None
+    assert item["is_sold"] is True
+    assert item["owner"]["contact_id"] == "c-1"
 
 
 def test_list_item_occupied_without_owner():
@@ -182,6 +198,7 @@ def test_list_item_occupied_without_owner():
     )
 
     assert item["status"] == "occupied"
+    assert item["is_sold"] is True
     assert item["owner"] is None
 
 

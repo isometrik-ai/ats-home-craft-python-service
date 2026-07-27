@@ -27,6 +27,14 @@ def _service() -> UnitConfigsService:
     svc = UnitConfigsService(db_connection=MagicMock(), user_context=_user_context())
     svc.configs_repo = MagicMock()
     svc.configs_repo.insert_config = AsyncMock(return_value={"id": "c1"})
+    svc.units_repo = MagicMock()
+    svc.units_repo.get_by_plot_item_id = AsyncMock(
+        side_effect=[None, {"id": "unit-1"}],
+    )
+    svc.units_repo.insert_unit = AsyncMock(return_value={"id": "unit-1"})
+    svc.units_repo.delete_unit = AsyncMock(return_value=True)
+    svc.projects_repo = MagicMock()
+    svc.projects_repo.recompute_units_count = AsyncMock(return_value=1)
     svc.setup_service = MagicMock()
     svc.setup_service.ensure_project = AsyncMock(return_value={"id": "p1"})
     svc.setup_service.complete_step = AsyncMock(
@@ -162,9 +170,20 @@ async def test_plot_item_and_media_crud():
 
     svc = _service()
     svc.configs_repo.get_config = AsyncMock(
-        return_value={"id": "c1", "config_kind": UnitConfigKind.PLOT.value}
+        return_value={
+            "id": "c1",
+            "config_kind": UnitConfigKind.PLOT.value,
+            "code": "P1",
+        }
     )
-    svc.configs_repo.insert_plot_item = AsyncMock(return_value={"id": "item-1"})
+    svc.configs_repo.insert_plot_item = AsyncMock(
+        return_value={
+            "id": "item-1",
+            "plot_no": "P-1",
+            "status": "empty",
+            "sort_order": 0,
+        }
+    )
     svc.configs_repo.list_plot_items = AsyncMock(return_value=[{"id": "item-1"}])
     svc.configs_repo.delete_plot_item = AsyncMock(return_value={"id": "item-1"})
     svc.configs_repo.insert_media = AsyncMock(return_value={"id": "media-1"})
@@ -181,12 +200,23 @@ async def test_plot_item_and_media_crud():
         ),
     )
     assert item["id"] == "item-1"
+    svc.units_repo.insert_unit.assert_awaited_once()
+    insert_payload = svc.units_repo.insert_unit.await_args.args[0]
+    assert insert_payload["code"] == "P1-P-1"
+    assert insert_payload["plot_item_id"] == "item-1"
+    assert insert_payload["config_id"] == "c1"
+    svc.projects_repo.recompute_units_count.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+    )
 
     items = await svc.list_plot_items(project_id="p1", config_id="c1")
     assert len(items) == 1
 
     deleted_item = await svc.delete_plot_item(project_id="p1", config_id="c1", item_id="item-1")
     assert deleted_item["old_data"]["id"] == "item-1"
+    svc.units_repo.get_by_plot_item_id.assert_awaited()
+    svc.units_repo.delete_unit.assert_awaited_once()
 
     media = await svc.add_media(
         project_id="p1",

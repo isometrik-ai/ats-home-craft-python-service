@@ -67,6 +67,8 @@ async def list_visitor_logs(
         entry_method=query.entry_method.value if query.entry_method else None,
         access_status=query.access_status.value if query.access_status else None,
         tower_id=query.tower_id,
+        project_id=query.project_id,
+        unit_id=query.unit_id,
         page=query.page,
         page_size=query.page_size,
     )
@@ -106,7 +108,12 @@ async def get_visitor_log_overview(
         db_connection=db_connection,
         user_context=user_context,
     )
-    result = await service.get_overview(start_at=query.start_at, end_at=query.end_at)
+    result = await service.get_overview(
+        start_at=query.start_at,
+        end_at=query.end_at,
+        project_id=query.project_id,
+        unit_id=query.unit_id,
+    )
     return success_response(
         request=request,
         message_key="visitor_logs.success.overview_retrieved",
