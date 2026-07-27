@@ -13,6 +13,7 @@ ADRs capture significant design choices, the context behind them, and their cons
 | [0005](./0005-move-events.md)                        | Move events — move-in / move-out records              | Accepted           |
 | [0006](./0006-project-fee-configuration.md)          | Project fee configuration — schema and backend model  | Accepted           |
 | [0007](./0007-tenant-requests.md)                    | Tenant requests — owner submit, admin review          | Accepted (Phase 1) |
+| [0008](./0008-walk-in-entries.md)                    | Walk-in entries — security request, resident approval | Accepted (Phase 1) |
 
 ## Format
 

@@ -55,6 +55,8 @@ from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )
 from apps.user_service.app.api.visitor_logs import router as visitor_logs_router
+from apps.user_service.app.api.walk_ins import router as walk_ins_router
+from apps.user_service.app.api.walk_ins_owner import router as walk_ins_owner_router
 from apps.user_service.app.api.webhooks import router as webhooks_router
 
 router = APIRouter(prefix="/v1")
@@ -78,6 +80,8 @@ router.include_router(tenant_requests_owner_router)
 router.include_router(tenant_requests_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
+router.include_router(walk_ins_router)
+router.include_router(walk_ins_owner_router)
 router.include_router(visitor_logs_router)
 router.include_router(move_events_router)
 router.include_router(custom_fields_router)
