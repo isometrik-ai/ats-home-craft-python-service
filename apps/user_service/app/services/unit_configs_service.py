@@ -7,9 +7,11 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
+from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.unit_configs_repository import (
     UnitConfigsRepository,
 )
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import ProjectSetupStep, UnitConfigKind
 from apps.user_service.app.schemas.project_inventory import (
     ConfigMediaRequest,
@@ -18,6 +20,10 @@ from apps.user_service.app.schemas.project_inventory import (
     UpdateUnitConfigRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.units_service import (
+    build_plot_unit_code,
+    plot_item_status_to_unit_status,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.project_serialization import serialize_row
 from libs.shared_utils.http_exceptions import (
@@ -58,6 +64,8 @@ class UnitConfigsService:
         self.db_connection = db_connection
         self.user_context = user_context
         self.configs_repo = UnitConfigsRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
+        self.projects_repo = ProjectsRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection, user_context=user_context
         )
@@ -90,6 +98,67 @@ class UnitConfigsService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return config
+
+    async def _create_unit_for_plot_item(
+        self,
+        *,
+        project_id: str,
+        config_id: str,
+        config: dict[str, Any],
+        plot_item: dict[str, Any],
+    ) -> None:
+        """Create a registry unit row for a newly inserted plot item."""
+        plot_item_id = str(plot_item["id"])
+        existing = await self.units_repo.get_by_plot_item_id(
+            organization_id=self._org_id,
+            plot_item_id=plot_item_id,
+        )
+        if existing:
+            return
+
+        await self.units_repo.insert_unit(
+            {
+                "organization_id": self._org_id,
+                "project_id": project_id,
+                "config_id": config_id,
+                "code": build_plot_unit_code(
+                    config_code=str(config.get("code") or "PLOT"),
+                    plot_no=str(plot_item["plot_no"]),
+                ),
+                "unit_label": str(plot_item["plot_no"]),
+                "status": plot_item_status_to_unit_status(str(plot_item.get("status") or "empty")),
+                "sort_order": int(plot_item.get("sort_order") or 0),
+                "is_parking": False,
+                "plot_item_id": plot_item_id,
+            }
+        )
+        await self.projects_repo.recompute_units_count(
+            organization_id=self._org_id,
+            project_id=project_id,
+        )
+
+    async def _delete_unit_for_plot_item(
+        self,
+        *,
+        project_id: str,
+        plot_item_id: str,
+    ) -> None:
+        """Remove the registry unit linked to a plot item, if present."""
+        unit = await self.units_repo.get_by_plot_item_id(
+            organization_id=self._org_id,
+            plot_item_id=plot_item_id,
+        )
+        if not unit:
+            return
+        await self.units_repo.delete_unit(
+            organization_id=self._org_id,
+            project_id=project_id,
+            unit_id=str(unit["id"]),
+        )
+        await self.projects_repo.recompute_units_count(
+            organization_id=self._org_id,
+            project_id=project_id,
+        )
 
     async def create_config(
         self, *, project_id: str, body: CreateUnitConfigRequest
@@ -183,6 +252,12 @@ class UnitConfigsService:
                 message_key="project_setup.errors.duplicate_code",
                 custom_code=CustomStatusCode.CONFLICT,
             ) from exc
+        await self._create_unit_for_plot_item(
+            project_id=project_id,
+            config_id=config_id,
+            config=config,
+            plot_item=inserted,
+        )
         return serialize_row(inserted)
 
     async def list_plot_items(self, *, project_id: str, config_id: str) -> list[dict[str, Any]]:
@@ -198,6 +273,10 @@ class UnitConfigsService:
     ) -> dict[str, Any]:
         """Delete a plot item."""
         await self._ensure_config(project_id=project_id, config_id=config_id)
+        await self._delete_unit_for_plot_item(
+            project_id=project_id,
+            plot_item_id=item_id,
+        )
         deleted = await self.configs_repo.delete_plot_item(
             organization_id=self._org_id, config_id=config_id, item_id=item_id
         )

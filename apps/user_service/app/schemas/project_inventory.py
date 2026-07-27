@@ -315,6 +315,7 @@ class UnitListItemResponse(BaseModel):
     config_id: str | None = None
     owner: UnitListOwner | None = None
     status: UnitStatus
+    is_sold: bool = False
     sort_order: int = Field(default=0, ge=0)
 
 
