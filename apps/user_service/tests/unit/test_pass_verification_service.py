@@ -164,6 +164,7 @@ async def test_verify_approved():
     assert result["can_check_in"] is True
     assert result["guest_name"] == "Ravi Kumar"
     assert result["host_name"] == "N. Reddy"
+    assert result["validity_type"] == PassValidityType.ONE_TIME.value
 
 
 @pytest.mark.asyncio
@@ -253,6 +254,33 @@ async def test_check_in_success():
     assert events_repo.insert_calls[-1]["event_type"] == PassEventType.CHECKED_IN.value
     assert events_repo.insert_calls[-1]["entry_method"] == PassEntryMethod.QR.value
     assert passes_repo.increment_calls
+
+
+@pytest.mark.asyncio
+async def test_check_in_without_gate_id():
+    """Check-in succeeds when gate_id is omitted."""
+    events_repo = _FakeEventsRepo()
+    passes_repo = _FakePassesRepo()
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+    body = CheckInRequest(
+        entry_method=PassEntryMethod.QR,
+        access_status=PassAccessStatus.APPROVED,
+    )
+    result = await svc.check_in(pass_id="pass-1", body=body)
+    assert result["entry_count"] == 1
+    assert events_repo.insert_calls[-1]["gate_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_check_out_without_gate_id():
+    """Check-out succeeds when gate_id is omitted."""
+    events_repo = _FakeEventsRepo(has_open_check_in=True)
+    passes_repo = _FakePassesRepo()
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+    body = CheckOutRequest()
+    result = await svc.check_out(pass_id="pass-1", body=body)
+    assert result["pass_status"]
+    assert events_repo.insert_calls[-1]["gate_id"] is None
 
 
 @pytest.mark.asyncio

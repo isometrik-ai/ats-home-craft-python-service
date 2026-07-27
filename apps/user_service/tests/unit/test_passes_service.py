@@ -13,7 +13,11 @@ from apps.user_service.app.schemas.enums import (
     PassStatus,
     PassValidityType,
 )
-from apps.user_service.app.schemas.passes import CreatePassRequest, UpdatePassRequest
+from apps.user_service.app.schemas.passes import (
+    AdminUnitPassListQuery,
+    CreatePassRequest,
+    UpdatePassRequest,
+)
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
@@ -324,3 +328,33 @@ async def test_update_pass_rejects_non_editable():
             pass_id="pass-1",
             body=UpdatePassRequest(guest_name="New Name"),
         )
+
+
+@pytest.mark.asyncio
+async def test_list_unit_passes_for_admin():
+    """Admin unit pass list validates unit and maps created_by."""
+    passes_repo = _FakePassesRepo()
+    passes_repo.list_result = (
+        [
+            {
+                **_pass_row(),
+                "created_by": "Priya Verma",
+            }
+        ],
+        1,
+    )
+
+    async def _list_by_unit(**_kwargs):
+        return passes_repo.list_result
+
+    passes_repo.list_by_unit = _list_by_unit  # type: ignore[attr-defined]
+
+    contact_units_repo = _FakeContactUnitsRepo()
+    svc = _service(passes_repo=passes_repo, contact_units_repo=contact_units_repo)
+    items, total = await svc.list_unit_passes_for_admin(
+        project_id="project-1",
+        unit_id="unit-1",
+        query=AdminUnitPassListQuery(),
+    )
+    assert total == 1
+    assert items[0]["created_by"] == "Priya Verma"

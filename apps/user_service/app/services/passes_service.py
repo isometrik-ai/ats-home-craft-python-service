@@ -22,7 +22,11 @@ from apps.user_service.app.schemas.enums import (
     PassStatus,
     PassValidityType,
 )
-from apps.user_service.app.schemas.passes import CreatePassRequest, UpdatePassRequest
+from apps.user_service.app.schemas.passes import (
+    AdminUnitPassListQuery,
+    CreatePassRequest,
+    UpdatePassRequest,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     InternalServerErrorException,
@@ -185,6 +189,57 @@ class PassesService:
             "entry_count": int(row.get("entry_count") or 0),
             "is_private": bool(row.get("is_private")),
         }
+
+    def _normalize_admin_unit_list_item(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Map a pass row to admin unit list item shape."""
+        item = self._normalize_list_item(row)
+        created_by = (row.get("created_by") or "").strip() or None
+        item["created_by"] = created_by
+        item["guest_phone_isd_code"] = row.get("guest_phone_isd_code")
+        item["guest_phone_number"] = row.get("guest_phone_number")
+        return item
+
+    async def _assert_unit_in_project(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+    ) -> None:
+        """Ensure the unit belongs to the project within the org."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if not unit or str(unit.get("project_id")) != project_id:
+            raise NotFoundException(
+                message_key="project_setup.errors.unit_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def list_unit_passes_for_admin(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+        query: AdminUnitPassListQuery,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List passes issued for a unit (admin unit detail / QRs generated)."""
+        await self._assert_unit_in_project(project_id=project_id, unit_id=unit_id)
+        org_id = self.user_context.organization_id
+        assert org_id
+        rows, total = await self.passes_repo.list_by_unit(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            bucket=query.bucket.value if query.bucket else None,
+            display_status=query.display_status.value if query.display_status else None,
+            pass_type=query.pass_type.value if query.pass_type else None,
+            page=query.page,
+            page_size=query.page_size,
+        )
+        return [self._normalize_admin_unit_list_item(row) for row in rows], total
 
     async def _assert_unit_owned(self, *, contact_id: str, unit_id: str) -> dict[str, Any]:
         """Ensure the contact actively owns the unit; return unit project row."""

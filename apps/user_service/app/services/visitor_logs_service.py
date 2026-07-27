@@ -64,6 +64,7 @@ class VisitorLogsService:
         return {
             "pass_id": str(row["pass_id"]),
             "pass_type": row.get("pass_type"),
+            "guest_name": row.get("guest_name"),
             "unit_label": row.get("unit_label"),
             "tower_name": row.get("tower_name"),
             "created_by": created_by,
@@ -87,6 +88,8 @@ class VisitorLogsService:
         entry_method: str | None = None,
         access_status: str | None = None,
         tower_id: str | None = None,
+        project_id: str | None = None,
+        unit_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -102,6 +105,8 @@ class VisitorLogsService:
             entry_method=entry_method,
             access_status=access_status,
             tower_id=tower_id,
+            project_id=project_id,
+            unit_id=unit_id,
             page=page,
             page_size=page_size,
         )
@@ -112,6 +117,8 @@ class VisitorLogsService:
         *,
         start_at: datetime | None = None,
         end_at: datetime | None = None,
+        project_id: str | None = None,
+        unit_id: str | None = None,
     ) -> dict[str, Any]:
         """Return overview card metrics."""
         from apps.user_service.app.utils.common_utils import format_iso_datetime
@@ -122,6 +129,8 @@ class VisitorLogsService:
             organization_id=org_id,
             start_at=start_at,
             end_at=end_at,
+            project_id=project_id,
+            unit_id=unit_id,
         )
         return {
             **result,

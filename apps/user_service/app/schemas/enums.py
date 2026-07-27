@@ -1507,6 +1507,57 @@ TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES: tuple[TenantRequestDocumentType, ...] = 
 
 
 # ============================================================================
+# WALK-IN ENUMS — mirror Postgres walk_in_* enums (ADR 0008)
+# ============================================================================
+
+
+class WalkInStatus(str, Enum):
+    """Walk-in visit header status (Postgres walk_in_status enum)."""
+
+    AWAITING = "awaiting"
+    APPROVED = "approved"
+    ENTERED = "entered"
+    EXITED = "exited"
+    CANCELLED = "cancelled"
+
+
+class WalkInVisitUnitStatus(str, Enum):
+    """Per-flat approval status on a walk-in visit."""
+
+    AWAITING = "awaiting"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class WalkInEventType(str, Enum):
+    """Append-only walk-in timeline events."""
+
+    REQUESTED = "requested"
+    VISIT_UNIT_APPROVED = "visit_unit_approved"
+    VISIT_UNIT_REJECTED = "visit_unit_rejected"
+    ENTERED = "entered"
+    EXITED = "exited"
+    CANCELLED = "cancelled"
+
+
+class WalkInActorType(str, Enum):
+    """Who recorded a walk-in timeline event."""
+
+    STAFF = "staff"
+    RESIDENT = "resident"
+    SYSTEM = "system"
+
+
+WALK_IN_RESIDENT_CONTACT_TYPES: frozenset[str] = frozenset(
+    {
+        ContactType.OWNER.value,
+        ContactType.FAMILY.value,
+        ContactType.TENANT.value,
+    }
+)
+
+
+# ============================================================================
 # FEE CONFIGURATION ENUMS — mirror Postgres project_fee enums
 # ============================================================================
 

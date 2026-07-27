@@ -33,6 +33,7 @@ class VerifyPassResponse(BaseModel):
     host_name: str | None = None
     valid_from: str | None = None
     valid_until: str | None = None
+    validity_type: str
     is_private: bool = False
     access_status: str
     can_check_in: bool
@@ -44,7 +45,7 @@ class CheckInRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    gate_id: str
+    gate_id: str | None = None
     entry_method: PassEntryMethod
     access_status: PassAccessStatus
     notes: str | None = Field(None, max_length=1000)
@@ -55,7 +56,7 @@ class CheckOutRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    gate_id: str
+    gate_id: str | None = None
     notes: str | None = Field(None, max_length=1000)
 
 
