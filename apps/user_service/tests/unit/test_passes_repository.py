@@ -256,6 +256,26 @@ async def test_list_by_contact_unit_and_pass_type_filters():
 
 
 @pytest.mark.asyncio
+async def test_list_by_unit_scopes_project_and_unit():
+    """Admin unit pass list filters by project_id and unit_id."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+
+    await repo.list_by_unit(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        page=1,
+        page_size=20,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "p.project_id = $2::uuid" in count_query
+    assert "p.unit_id = $3::uuid" in count_query
+    list_query, _ = conn.fetch_calls[0]
+    assert "creator.first_name" in list_query
+
+
+@pytest.mark.asyncio
 async def test_get_owned_by_contact_and_get_by_id():
     """Owned and gate lookups return joined rows."""
     conn = _FakeConn(row={"id": "pass-1", "code": "4821"})

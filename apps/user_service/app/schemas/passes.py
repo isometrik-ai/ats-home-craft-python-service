@@ -155,3 +155,23 @@ class PassListQuery(BaseModel):
     pass_type: PassType | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
+
+
+class AdminUnitPassListQuery(BaseModel):
+    """Query params for admin GET /projects/{project_id}/units/{unit_id}/passes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bucket: PassListBucket | None = None
+    display_status: PassDisplayStatus | None = None
+    pass_type: PassType | None = None
+    page: int = Field(1, ge=1)
+    page_size: int = Field(20, ge=1, le=100)
+
+
+class AdminUnitPassListItemResponse(PassListItemResponse):
+    """Pass summary for admin unit detail (QRs generated)."""
+
+    created_by: str | None = None
+    guest_phone_isd_code: str | None = None
+    guest_phone_number: str | None = None

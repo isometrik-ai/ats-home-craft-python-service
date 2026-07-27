@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.enums import (
     UnitStatus,
     VehicleStatus,
 )
+from apps.user_service.app.schemas.passes import AdminUnitPassListQuery
 from apps.user_service.app.schemas.project_inventory import (
     ConfigMediaRequest,
     CreateFacilityRequest,
@@ -65,6 +66,7 @@ from apps.user_service.app.services.contact_unit_documents_service import (
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.facilities_service import FacilitiesService
 from apps.user_service.app.services.inventory_service import InventoryService
+from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.services.projects_service import ProjectsService
 from apps.user_service.app.services.site_map_service import SiteMapService
@@ -85,6 +87,7 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_DELETE,
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
+    VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -2393,6 +2396,51 @@ async def get_unit_detail(
         message_key="project_setup.success.unit_detail_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=payload,
+    )
+
+
+@handle_api_exceptions("list unit visitor passes")
+@router.get(
+    "/{project_id}/units/{unit_id}/passes",
+    status_code=http_status.HTTP_200_OK,
+    summary="List visitor passes for a unit",
+    description=(
+        "Admin list of QRs / visitor passes issued for a flat. "
+        "Use for the unit detail 'QRs Generated' section."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_unit_passes(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(..., description="Unit identifier (UUID string)."),
+    query: AdminUnitPassListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """List visitor passes generated for one unit."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=VISITOR_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = PassesService(db_connection=db_connection, user_context=user_context)
+    items, total = await service.list_unit_passes_for_admin(
+        project_id=project_id,
+        unit_id=unit_id,
+        query=query,
+    )
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="passes.success.list_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        status_code=http_status.HTTP_200_OK,
     )
 
 

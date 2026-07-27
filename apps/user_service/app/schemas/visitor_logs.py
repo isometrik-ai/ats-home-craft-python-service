@@ -53,12 +53,17 @@ class VisitorLogQuery(VisitorLogDateRangeQuery):
     entry_method: PassEntryMethod | None = None
     access_status: PassAccessStatus | None = None
     tower_id: str | None = None
+    project_id: str | None = None
+    unit_id: str | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
 
 
 class VisitorLogOverviewQuery(VisitorLogDateRangeQuery):
     """Query params for GET /visitor-logs/overview."""
+
+    project_id: str | None = None
+    unit_id: str | None = None
 
 
 class VisitorLogItemResponse(BaseModel):
@@ -68,6 +73,7 @@ class VisitorLogItemResponse(BaseModel):
 
     pass_id: str
     pass_type: str
+    guest_name: str | None = None
     unit_label: str | None = None
     tower_name: str | None = None
     created_by: str | None = None

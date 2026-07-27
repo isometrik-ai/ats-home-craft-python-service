@@ -424,6 +424,113 @@ class PassesRepository(BaseRepository):
         )
         return [dict(row) for row in rows], int(count or 0)
 
+    async def list_by_unit(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        bucket: str | None = None,
+        display_status: str | None = None,
+        pass_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List passes for a unit (admin unit detail / QRs generated)."""
+        args: list[Any] = [organization_id, project_id, unit_id]
+        where = [
+            "p.project_id = $2::uuid",
+            "p.unit_id = $3::uuid",
+        ]
+        idx = 4
+
+        bucket_sql, bucket_args = self._bucket_predicate(bucket, param_index=idx)
+        if bucket_sql:
+            where.append(bucket_sql)
+        args.extend(bucket_args)
+        idx += len(bucket_args)
+
+        display_sql, display_args = self._display_status_predicate(
+            display_status,
+            param_index=idx,
+        )
+        if display_sql:
+            where.append(display_sql)
+        args.extend(display_args)
+        idx += len(display_args)
+
+        if pass_type:
+            where.append(f"p.pass_type = ${idx}::pass_type")
+            args.append(pass_type)
+            idx += 1
+
+        where_sql = " AND ".join(where)
+        offset = (page - 1) * page_size
+
+        count = await self.db_connection.fetchval(
+            f"""
+            SELECT COUNT(*)
+            FROM passes p
+            WHERE p.organization_id = $1::uuid
+              AND {where_sql}
+            """,
+            *args,
+        )
+
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              p.id::text AS id,
+              p.organization_id::text AS organization_id,
+              p.project_id::text AS project_id,
+              p.unit_id::text AS unit_id,
+              p.host_contact_id::text AS host_contact_id,
+              p.pass_type::text AS pass_type,
+              p.guest_name,
+              p.guest_phone_isd_code,
+              p.guest_phone_number,
+              p.visitor_count,
+              p.vehicle_number,
+              p.purpose,
+              p.valid_from,
+              p.valid_until,
+              p.validity_type::text AS validity_type,
+              p.allow_multiple_entries,
+              p.is_private,
+              p.max_entries,
+              p.entry_count,
+              p.status::text AS status,
+              p.code,
+              p.pass_image_path,
+              p.notes,
+              p.created_by_contact_id::text AS created_by_contact_id,
+              p.created_at,
+              p.updated_at,
+              u.code AS unit_code,
+              u.unit_label,
+              t.name AS tower_name,
+              f.display_name AS floor_name,
+              uc.display_label AS config_label,
+              TRIM(
+                COALESCE(creator.first_name, '') || ' ' || COALESCE(creator.last_name, '')
+              ) AS created_by
+            FROM passes p
+            JOIN units u ON u.id = p.unit_id
+            LEFT JOIN towers t ON t.id = u.tower_id
+            LEFT JOIN floors f ON f.id = u.floor_id
+            LEFT JOIN unit_configs uc ON uc.id = u.config_id
+            LEFT JOIN contacts creator ON creator.id = p.created_by_contact_id
+            WHERE p.organization_id = $1::uuid
+              AND {where_sql}
+            ORDER BY p.created_at DESC, p.valid_from DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+            """,
+            *args,
+            page_size,
+            offset,
+        )
+        return [dict(row) for row in rows], int(count or 0)
+
     async def code_exists_active(
         self,
         *,
