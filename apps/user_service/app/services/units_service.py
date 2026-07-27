@@ -12,7 +12,11 @@ from apps.user_service.app.db.repositories.maintenance_fee_invoices_repository i
 )
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
-from apps.user_service.app.schemas.enums import ProjectSetupStep, PropertyType
+from apps.user_service.app.schemas.enums import (
+    ProjectSetupStep,
+    PropertyType,
+    UnitStatus,
+)
 from apps.user_service.app.schemas.project_inventory import (
     CreateParkingZoneRequest,
     CreateUnitRequest,
@@ -29,6 +33,7 @@ from apps.user_service.app.services.fee_property_types import (
 )
 from apps.user_service.app.services.inventory_service import (
     is_sold_status,
+    resolve_is_sold,
     resolve_unit_kind,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
@@ -90,6 +95,18 @@ def format_primary_contact_email(emails: Any) -> str | None:
     return email or None
 
 
+def build_plot_unit_code(*, config_code: str, plot_no: str) -> str:
+    """Build a unique unit code for a plot item within a project."""
+    return f"{config_code.strip()}-{plot_no.strip()}"[:64]
+
+
+def plot_item_status_to_unit_status(status: str) -> str:
+    """Map plot construction status to inventory unit status."""
+    if status == "under_construction":
+        return UnitStatus.UNDER_MAINTENANCE.value
+    return UnitStatus.VACANT.value
+
+
 def resolve_occupancy_label(status: str) -> str:
     """Map raw unit status to inventory occupancy label."""
     if is_sold_status(status):
@@ -149,10 +166,11 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
         last_name=row.get("owner_last_name"),
     )
     status = str(row.get("status") or "")
+    owner_contact_id = row.get("owner_contact_id")
     owner = None
-    if row.get("owner_contact_id") and is_sold_status(status):
+    if owner_contact_id:
         owner = {
-            "contact_id": str(row["owner_contact_id"]),
+            "contact_id": str(owner_contact_id),
             "display_name": owner_display_name or None,
             "phone": format_primary_contact_phone(row.get("owner_phones")),
             "email": format_primary_contact_email(row.get("owner_emails")),
@@ -177,6 +195,10 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
         "config_id": str(row["config_id"]) if row.get("config_id") else None,
         "owner": owner,
         "status": status,
+        "is_sold": resolve_is_sold(
+            status=status,
+            owner_contact_id=str(owner_contact_id) if owner_contact_id else None,
+        ),
         "sort_order": int(row.get("sort_order") or 0),
     }
 
@@ -375,15 +397,13 @@ class UnitsService:
 
         status = str(row.get("status") or "")
         residents = [build_unit_detail_person(resident) for resident in residents_raw]
+        owner_row = await self.units_repo.get_unit_owner_contact(
+            organization_id=self._org_id,
+            unit_id=unit_id,
+        )
         owner = None
-        owner_row = None
-        if is_sold_status(status):
-            owner_row = await self.units_repo.get_unit_owner_contact(
-                organization_id=self._org_id,
-                unit_id=unit_id,
-            )
-            if owner_row:
-                owner = build_unit_owner_detail(owner_row)
+        if owner_row:
+            owner = build_unit_owner_detail(owner_row)
 
         documents: list[dict[str, Any]] = []
         if owner_row:
@@ -462,7 +482,10 @@ class UnitsService:
             "unit_label": row.get("unit_label"),
             "status": status,
             "occupancy_label": resolve_occupancy_label(status),
-            "is_sold": is_sold_status(status),
+            "is_sold": resolve_is_sold(
+                status=status,
+                owner_contact_id=str(owner_row["contact_id"]) if owner_row else None,
+            ),
             "is_parking": bool(row.get("is_parking")),
             "sort_order": int(row.get("sort_order") or 0),
             "location_label": build_location_label(

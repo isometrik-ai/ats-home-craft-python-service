@@ -12,6 +12,7 @@ from apps.user_service.app.services.inventory_service import (
     build_inventory_summary,
     is_sold_status,
     is_unsold_status,
+    resolve_is_sold,
     resolve_unit_kind,
 )
 from apps.user_service.app.utils.common_utils import UserContext
@@ -73,6 +74,14 @@ def test_status_helpers():
     assert is_unsold_status("vacant") is True
     assert is_sold_status("vacant") is False
     assert is_unsold_status("occupied") is False
+
+
+def test_resolve_is_sold():
+    """Sold includes occupied/blocked units and vacant units with owner allotment."""
+    assert resolve_is_sold(status="occupied") is True
+    assert resolve_is_sold(status="blocked") is True
+    assert resolve_is_sold(status="vacant", owner_contact_id="owner-1") is True
+    assert resolve_is_sold(status="vacant") is False
 
 
 def test_resolve_unit_kind_prefers_config_kind():
