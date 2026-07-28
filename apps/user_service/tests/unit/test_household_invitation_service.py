@@ -222,12 +222,21 @@ async def test_decline_deletes_orphan_contact() -> None:
     service.contact_units_repo.delete_link = AsyncMock()
     service.contact_units_repo.count_links_for_contact = AsyncMock(return_value=0)
     service.contacts_repo = MagicMock()
+    service.contacts_repo.get_contact_details = AsyncMock(
+        return_value={"id": CONTACT_ID, "user_id": "user-1"}
+    )
     service.contacts_repo.soft_delete_contact = AsyncMock()
 
-    result = await service.decline(token=TOKEN)
+    with patch(
+        "apps.user_service.app.services.household_invitation_service.revoke_contact_portal_sessions",
+        new=AsyncMock(),
+    ) as revoke_sessions:
+        result = await service.decline(token=TOKEN)
 
     assert result["contact_deleted"] is True
+    service.contacts_repo.get_contact_details.assert_awaited_once()
     service.contacts_repo.soft_delete_contact.assert_awaited_once()
+    revoke_sessions.assert_awaited_once()
 
 
 @pytest.mark.asyncio
