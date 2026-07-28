@@ -8,7 +8,11 @@ import pytest
 
 from apps.user_service.app.schemas.enums import VehicleStatus
 from apps.user_service.app.services.vehicles_service import VehiclesService
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 
 
 def _service() -> VehiclesService:
@@ -453,3 +457,283 @@ async def test_complete_vehicles_step():
     await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")
 
     svc.unit_onboarding_repo.complete_step.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_vehicle_unit_returns_none_without_unit_id():
+    """Rows without unit_id skip nested unit serialization."""
+    svc = _service()
+    assert svc._build_vehicle_unit({"unit_id": None}) is None
+
+
+@pytest.mark.asyncio
+async def test_create_vehicle_unit_not_found():
+    """Create vehicle fails when unit project lookup misses."""
+    from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value=None)
+
+    body = CreateVehicleRequest(
+        unit_id="u1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        registration_number="mh12ab1234",
+    )
+
+    with pytest.raises(NotFoundException):
+        await svc.create_vehicle(contact_id="c1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_create_vehicle_duplicate_registration():
+    """Duplicate registration raises conflict."""
+    from asyncpg.exceptions import UniqueViolationError
+
+    from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
+    svc.repo.create = AsyncMock(side_effect=UniqueViolationError("duplicate"))
+
+    body = CreateVehicleRequest(
+        unit_id="u1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        registration_number="mh12ab1234",
+    )
+
+    with pytest.raises(ConflictException):
+        await svc.create_vehicle(contact_id="c1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_list_vehicles_with_unit_filter():
+    """Listing by unit validates assignment first."""
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
+    svc.repo.list_by_contact = AsyncMock(return_value=[])
+
+    await svc.list_vehicles(contact_id="c1", unit_id="u1")
+
+    svc.contact_units_repo.contact_has_active_unit.assert_awaited_once()
+    svc.repo.list_by_contact.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        unit_id="u1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_vehicle_success_and_duplicate():
+    """Update vehicle normalizes enums and maps duplicate registration."""
+    from asyncpg.exceptions import UniqueViolationError
+
+    from apps.user_service.app.schemas.contact_onboarding import UpdateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleFuelType, VehicleType
+
+    svc = _service()
+    svc.repo.update = AsyncMock(
+        side_effect=[
+            UniqueViolationError("duplicate"),
+            {
+                "id": "v1",
+                "organization_id": "org-1",
+                "project_id": "p1",
+                "contact_id": "c1",
+                "unit_id": "u1",
+                "vehicle_type": VehicleType.FOUR_WHEELER.value,
+                "registration_number": "MH12AB1234",
+                "photo_paths": [],
+                "status": VehicleStatus.PENDING.value,
+                "status_updated_at": "2026-07-16T10:00:00Z",
+                "created_at": "2026-07-16T09:00:00Z",
+                "updated_at": "2026-07-16T10:00:00Z",
+                "sort_order": 0,
+            },
+        ]
+    )
+    body = UpdateVehicleRequest(
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        fuel_type=VehicleFuelType.NON_EV,
+        registration_number=" mh12ab1234 ",
+    )
+
+    with pytest.raises(ConflictException):
+        await svc.update_vehicle(contact_id="c1", vehicle_id="v1", body=body)
+
+    result = await svc.update_vehicle(contact_id="c1", vehicle_id="v1", body=body)
+    assert result["registration_number"] == "MH12AB1234"
+
+
+@pytest.mark.asyncio
+async def test_update_vehicle_not_found():
+    """Update returns not found when repository misses row."""
+    from apps.user_service.app.schemas.contact_onboarding import UpdateVehicleRequest
+
+    svc = _service()
+    svc.repo.update = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.update_vehicle(
+            contact_id="c1",
+            vehicle_id="v1",
+            body=UpdateVehicleRequest(make="Honda"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_withdraw_not_found():
+    """Withdraw missing vehicle raises not found."""
+    svc = _service()
+    svc.repo.get_by_id = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.withdraw_vehicle(contact_id="c1", vehicle_id="v1")
+
+
+@pytest.mark.asyncio
+async def test_remove_rejected_not_allowed():
+    """Rejected vehicles cannot be soft-removed."""
+    svc = _service()
+    svc.repo.get_by_id = AsyncMock(
+        return_value={"id": "v1", "status": VehicleStatus.REJECTED.value}
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.remove_vehicle(contact_id="c1", vehicle_id="v1")
+
+
+@pytest.mark.asyncio
+async def test_remove_soft_remove_not_found():
+    """Soft remove not found after release raises."""
+    svc = _service()
+    svc.repo.get_by_id = AsyncMock(
+        return_value={
+            "id": "v1",
+            "status": VehicleStatus.APPROVED.value,
+            "project_id": "p1",
+            "parking_slot_id": None,
+        }
+    )
+    svc.repo.soft_remove = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.remove_vehicle(contact_id="c1", vehicle_id="v1")
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_not_found():
+    """Review missing vehicle raises not found."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project = AsyncMock(return_value=None)
+    body = ReviewVehicleRequest(status=VehicleStatus.REJECTED, rejection_reason="bad")
+
+    with pytest.raises(NotFoundException):
+        await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_slot_unavailable():
+    """Approve fails when parking slot is not available."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project = AsyncMock(
+        return_value={"id": "v1", "status": VehicleStatus.PENDING.value}
+    )
+    svc.parking_slots_repo.get_slot = AsyncMock(return_value={"id": "slot-1", "status": "assigned"})
+    body = ReviewVehicleRequest(status=VehicleStatus.APPROVED, parking_slot_id="slot-1")
+
+    with pytest.raises(ValidationException):
+        await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_assign_slot_fails():
+    """Approve fails when slot assignment race loses."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project = AsyncMock(
+        return_value={"id": "v1", "status": VehicleStatus.PENDING.value}
+    )
+    svc.parking_slots_repo.get_slot = AsyncMock(
+        return_value={"id": "slot-1", "status": "available"}
+    )
+    svc.parking_slots_repo.assign_slot = AsyncMock(return_value=False)
+    body = ReviewVehicleRequest(status=VehicleStatus.APPROVED, parking_slot_id="slot-1")
+
+    with pytest.raises(ValidationException):
+        await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_reject_success():
+    """Reject path updates vehicle without assigning slot."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project = AsyncMock(
+        return_value={"id": "v1", "status": VehicleStatus.PENDING.value}
+    )
+    svc.repo.update_by_project = AsyncMock(
+        return_value={
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "MH12AB1234",
+            "photo_paths": [],
+            "status": VehicleStatus.REJECTED.value,
+            "rejection_reason": "Invalid docs",
+            "status_updated_at": "2026-07-16T10:00:00Z",
+            "created_at": "2026-07-16T09:00:00Z",
+            "updated_at": "2026-07-16T10:00:00Z",
+            "sort_order": 0,
+        }
+    )
+    body = ReviewVehicleRequest(status=VehicleStatus.REJECTED, rejection_reason="Invalid docs")
+
+    result = await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+    assert result["status"] == VehicleStatus.REJECTED.value
+    svc.parking_slots_repo.assign_slot.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_update_returns_none():
+    """Review raises when update_by_project returns nothing."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project = AsyncMock(
+        return_value={"id": "v1", "status": VehicleStatus.PENDING.value}
+    )
+    svc.repo.update_by_project = AsyncMock(return_value=None)
+    body = ReviewVehicleRequest(status=VehicleStatus.REJECTED, rejection_reason="bad")
+
+    with pytest.raises(NotFoundException):
+        await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_complete_vehicles_step_not_found():
+    """Complete step fails when contact unit is missing."""
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.unit_onboarding_repo = AsyncMock()
+    svc.contact_units_repo.get_owned_by_contact = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")

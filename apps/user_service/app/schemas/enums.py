@@ -1619,3 +1619,11 @@ class MaintenanceFeeInvoiceEventType(str, Enum):
     RETRY_SCHEDULED = "retry_scheduled"
     ESCALATED = "escalated"
     CANCELLED = "cancelled"
+
+
+class PushPlatform(str, Enum):
+    """Mobile/web push platform enumeration."""
+
+    IOS = "ios"
+    ANDROID = "android"
+    WEB = "web"

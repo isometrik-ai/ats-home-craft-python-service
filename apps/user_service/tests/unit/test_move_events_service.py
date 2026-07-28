@@ -299,3 +299,227 @@ async def test_delete_rederives_occupancy_from_latest_move():
     await service.delete_move_event("move-1")
 
     assert len(contact_units_repo.sync_move_in_calls) == 1
+
+
+def test_format_date_and_decimal_helpers():
+    """Static formatters handle None, native types, and string fallbacks."""
+    assert MoveEventsService._format_date(None) == ""
+    assert MoveEventsService._format_date(date(2026, 1, 2)) == "2026-01-02"
+    assert MoveEventsService._format_date("2026-01-02") == "2026-01-02"
+    assert MoveEventsService._format_decimal(None) is None
+    assert MoveEventsService._format_decimal(Decimal("10.50")) == "10.50"
+    assert MoveEventsService._format_decimal(42) == "42"
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_success_syncs_move_out():
+    """Move-out inserts event and syncs move-out on contact_units."""
+    move_repo = _FakeMoveEventsRepo()
+    move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+
+    result = await service.create_move_event(
+        CreateMoveEventRequest(
+            unit_id="unit-1",
+            contact_id="contact-1",
+            move_type=MoveEventType.MOVE_OUT,
+            event_date=date(2026, 5, 8),
+        )
+    )
+
+    assert result.move_type == MoveEventType.MOVE_OUT.value
+    assert len(contact_units_repo.sync_move_out_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_missing_contact():
+    """Unknown contact raises not found."""
+    move_repo = _FakeMoveEventsRepo()
+    move_repo.contact_exists_flag = False
+    service = _service(move_repo, _FakeContactUnitsRepo())
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.create_move_event(
+            CreateMoveEventRequest(
+                unit_id="unit-1",
+                contact_id="missing-contact",
+                move_type=MoveEventType.MOVE_IN,
+                event_date=date(2026, 5, 25),
+            )
+        )
+    assert exc_info.value.message_key == "move_events.errors.contact_not_found"
+
+
+@pytest.mark.asyncio
+async def test_create_raises_when_inserted_row_missing():
+    """Insert succeeds but follow-up fetch missing raises not found."""
+    move_repo = _FakeMoveEventsRepo()
+
+    async def _missing_after_insert(**kwargs):
+        del kwargs
+        return None
+
+    move_repo.get_by_id = _missing_after_insert
+    service = _service(move_repo, _FakeContactUnitsRepo())
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.create_move_event(
+            CreateMoveEventRequest(
+                unit_id="unit-1",
+                contact_id="contact-1",
+                move_type=MoveEventType.MOVE_IN,
+                event_date=date(2026, 5, 25),
+            )
+        )
+    assert exc_info.value.message_key == "move_events.errors.move_event_not_found"
+
+
+@pytest.mark.asyncio
+async def test_list_and_get_move_events():
+    """List and get serialize repository rows."""
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo, _FakeContactUnitsRepo())
+
+    rows, total = await service.list_move_events(search="A-0101", page=1, page_size=10)
+    assert total == 1
+    assert rows[0].unit_code == "A-0101"
+
+    fetched = await service.get_move_event("move-1")
+    assert fetched.id == "move-1"
+
+
+@pytest.mark.asyncio
+async def test_get_move_event_not_found():
+    """Missing move event raises not found."""
+    service = _service(_FakeMoveEventsRepo(), _FakeContactUnitsRepo())
+
+    with pytest.raises(NotFoundException) as exc_info:
+        await service.get_move_event("missing")
+    assert exc_info.value.message_key == "move_events.errors.move_event_not_found"
+
+
+@pytest.mark.asyncio
+async def test_update_empty_payload_returns_existing():
+    """Empty patch returns existing row without repository update."""
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo, _FakeContactUnitsRepo())
+
+    result = await service.update_move_event("move-1", UpdateMoveEventRequest())
+
+    assert result.id == "move-1"
+    assert move_repo.row["event_date"] == date(2026, 5, 25)
+
+
+@pytest.mark.asyncio
+async def test_update_rejects_negative_fee():
+    """Negative fee amount is rejected by service validation."""
+    service = _service(_FakeMoveEventsRepo(), _FakeContactUnitsRepo())
+    body = UpdateMoveEventRequest.model_construct(fee_amount=Decimal("-1"))
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.update_move_event("move-1", body)
+    assert exc_info.value.message_key == "move_events.errors.invalid_fee"
+
+
+@pytest.mark.asyncio
+async def test_update_not_found_paths():
+    """Update raises when existing or updated row is missing."""
+    service = _service(_FakeMoveEventsRepo(), _FakeContactUnitsRepo())
+
+    with pytest.raises(NotFoundException):
+        await service.update_move_event("missing", UpdateMoveEventRequest(notes="x"))
+
+    move_repo = _FakeMoveEventsRepo()
+
+    async def _update_returns_none(**kwargs):
+        del kwargs
+        return None
+
+    move_repo.update = _update_returns_none
+    service = _service(move_repo, _FakeContactUnitsRepo())
+
+    with pytest.raises(NotFoundException):
+        await service.update_move_event("move-1", UpdateMoveEventRequest(notes="x"))
+
+
+@pytest.mark.asyncio
+async def test_update_event_date_resyncs_move_out():
+    """Patching event_date on move-out re-syncs move-out occupancy."""
+    move_repo = _FakeMoveEventsRepo()
+    move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+
+    await service.update_move_event(
+        "move-1",
+        UpdateMoveEventRequest(event_date=date(2026, 5, 27)),
+    )
+
+    assert len(contact_units_repo.sync_move_out_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_not_found_paths():
+    """Delete raises when existing or soft-delete result is missing."""
+    service = _service(_FakeMoveEventsRepo(), _FakeContactUnitsRepo())
+
+    with pytest.raises(NotFoundException):
+        await service.delete_move_event("missing")
+
+    move_repo = _FakeMoveEventsRepo()
+
+    async def _soft_delete_none(**kwargs):
+        del kwargs
+        return None
+
+    move_repo.soft_delete = _soft_delete_none
+    service = _service(move_repo, _FakeContactUnitsRepo())
+
+    with pytest.raises(NotFoundException):
+        await service.delete_move_event("move-1")
+
+
+@pytest.mark.asyncio
+async def test_delete_without_latest_skips_resync():
+    """Voiding a move skips occupancy sync when no prior move exists."""
+    move_repo = _FakeMoveEventsRepo()
+    move_repo.latest_row = None
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+
+    await service.delete_move_event("move-1")
+
+    assert not contact_units_repo.sync_move_in_calls
+    assert not contact_units_repo.sync_move_out_calls
+
+
+@pytest.mark.asyncio
+async def test_update_event_date_skips_resync_without_contact_unit():
+    """Patching event_date skips occupancy sync when contact_unit_id is missing."""
+    move_repo = _FakeMoveEventsRepo()
+    move_repo.row = _move_row(contact_unit_id=None)
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+
+    await service.update_move_event(
+        "move-1",
+        UpdateMoveEventRequest(event_date=date(2026, 5, 27)),
+    )
+
+    assert not contact_units_repo.sync_move_in_calls
+    assert not contact_units_repo.sync_move_out_calls
+
+
+@pytest.mark.asyncio
+async def test_update_with_null_fee_amount_skips_fee_validation():
+    """Explicit null fee_amount bypasses negative-fee service check."""
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo, _FakeContactUnitsRepo())
+
+    result = await service.update_move_event(
+        "move-1",
+        UpdateMoveEventRequest(fee_amount=None, notes="cleared"),
+    )
+
+    assert result.notes == "cleared"

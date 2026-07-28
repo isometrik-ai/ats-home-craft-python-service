@@ -33,6 +33,9 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     hash_token,
 )
+from apps.user_service.app.utils.contact_session_utils import (
+    revoke_contact_portal_sessions,
+)
 from apps.user_service.app.utils.household_invitation_sms import (
     mask_phone,
     send_household_invitation_sms,
@@ -574,9 +577,18 @@ class HouseholdInvitationService:
         )
         contact_deleted = False
         if remaining == 0:
+            contact = await self.contacts_repo.get_contact_details(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
             await self.contacts_repo.soft_delete_contact(
                 contact_id=contact_id,
                 organization_id=org_id,
+            )
+            await revoke_contact_portal_sessions(
+                db_connection=self.db_connection,
+                organization_id=org_id,
+                user_id=contact.get("user_id") if contact else None,
             )
             contact_deleted = True
 

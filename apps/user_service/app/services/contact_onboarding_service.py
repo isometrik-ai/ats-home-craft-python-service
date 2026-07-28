@@ -48,6 +48,9 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_any,
 )
+from apps.user_service.app.utils.contact_session_utils import (
+    revoke_contact_portal_sessions,
+)
 from apps.user_service.app.utils.household_invitation_sms import mask_phone
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -896,9 +899,18 @@ class ContactOnboardingService:
             contact_id=family_contact_id,
         )
         if remaining == 0:
+            family_contact = await self.contacts_repo.get_contact_details(
+                contact_id=family_contact_id,
+                organization_id=org_id,
+            )
             await self.contacts_repo.soft_delete_contact(
                 contact_id=family_contact_id,
                 organization_id=org_id,
+            )
+            await revoke_contact_portal_sessions(
+                db_connection=self.db_connection,
+                organization_id=org_id,
+                user_id=family_contact.get("user_id") if family_contact else None,
             )
         return {
             "contact_unit_id": contact_unit_id,

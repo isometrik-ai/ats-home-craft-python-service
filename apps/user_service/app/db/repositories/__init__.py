@@ -50,6 +50,9 @@ from apps.user_service.app.db.repositories.team_repository import TeamRepository
 from apps.user_service.app.db.repositories.user_event_repository import (
     UserEventRepository,
 )
+from apps.user_service.app.db.repositories.user_push_tokens_repository import (
+    UserPushTokensRepository,
+)
 from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.db.repositories.verification_code_repository import (
     VerificationCodeRepository,
@@ -59,6 +62,7 @@ __all__ = [
     "ContactsRepository",
     "CompaniesRepository",
     "ContactCompaniesRepository",
+    "UserPushTokensRepository",
     "TeamRepository",
     "UserEventRepository",
     "PermissionsRepository",

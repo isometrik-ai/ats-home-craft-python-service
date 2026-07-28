@@ -15,6 +15,7 @@ _FAKE_LOG_ITEM = {
     "created_by": "T. Nair",
     "scheduled_from": "2026-06-09T09:00:00Z",
     "scheduled_until": "2026-06-09T18:00:00Z",
+    "validity_type": "one_time",
     "entry_method": "qr",
     "guard_name": "Ramesh Kumar",
     "access_status": "approved",
@@ -79,6 +80,7 @@ async def test_list_visitor_logs(monkeypatch, client):
     assert body["data"][0]["pass_id"] == PASS_ID
     assert body["total"] == 1
     assert body["data"][0]["time_spent_minutes"] == 6
+    assert body["data"][0]["validity_type"] == "one_time"
 
 
 @pytest.mark.asyncio

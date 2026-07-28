@@ -70,6 +70,7 @@ class VisitorLogsService:
             "created_by": created_by,
             "scheduled_from": format_iso_datetime(row.get("scheduled_from")),
             "scheduled_until": format_iso_datetime(row.get("scheduled_until")),
+            "validity_type": str(row.get("validity_type") or ""),
             "entry_method": row.get("entry_method"),
             "guard_name": row.get("guard_name"),
             "access_status": row.get("access_status"),

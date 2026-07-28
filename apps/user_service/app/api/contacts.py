@@ -1111,8 +1111,13 @@ async def assign_unit_to_contact(
     status_code=http_status.HTTP_200_OK,
     summary="Delete a contact (soft delete)",
     description=(
-        "Soft-deletes a contact.\n\n"
+        "Soft-deletes a contact and cascades cleanup based on contact type.\n\n"
+        "Owner: vacates owned units, soft-deletes household family, removes unit "
+        "vehicles/passes, and revokes portal sessions.\n"
+        "Family: moves out the member only (unit assets stay with owner).\n"
+        "Tenant: moves out the tenant and revokes their portal sessions.\n\n"
         "Side effects:\n"
+        "- Revokes org-scoped login sessions when the contact has portal access\n"
         "- Emits a DELETED lifecycle event\n"
         "- Schedules Typesense de-indexing for the contact"
     ),

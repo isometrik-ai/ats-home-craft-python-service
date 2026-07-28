@@ -260,6 +260,98 @@ class ContactUnitsRepository(BaseRepository):
         )
         return row is not None
 
+    async def list_open_links_for_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return pending/active contact_units for a contact."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+                cu.id::text AS id,
+                cu.unit_id::text AS unit_id,
+                cu.project_id::text AS project_id,
+                cu.status::text AS status
+            FROM contact_units cu
+            WHERE cu.organization_id = $1::uuid
+              AND cu.contact_id = $2::uuid
+              AND cu.status IN (
+                  'pending'::contact_unit_status,
+                  'active'::contact_unit_status
+              )
+            ORDER BY cu.created_at
+            """,
+            organization_id,
+            contact_id,
+        )
+        return [dict(row) for row in rows]
+
+    async def release_open_links_for_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> list[dict[str, Any]]:
+        """Mark all pending/active links for a contact as moved_out."""
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE contact_units cu
+            SET status = $3::contact_unit_status,
+                moved_out_at = COALESCE(cu.moved_out_at, now()),
+                is_default_login = false,
+                updated_at = now()
+            WHERE cu.organization_id = $1::uuid
+              AND cu.contact_id = $2::uuid
+              AND cu.status IN (
+                  'pending'::contact_unit_status,
+                  'active'::contact_unit_status
+              )
+            RETURNING
+                cu.id::text AS id,
+                cu.unit_id::text AS unit_id,
+                cu.project_id::text AS project_id,
+                cu.contact_id::text AS contact_id
+            """,
+            organization_id,
+            contact_id,
+            ContactUnitStatus.MOVED_OUT.value,
+        )
+        return [dict(row) for row in rows]
+
+    async def release_all_open_links_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """Mark every pending/active occupant link on a unit as moved_out."""
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE contact_units cu
+            SET status = $3::contact_unit_status,
+                moved_out_at = COALESCE(cu.moved_out_at, now()),
+                is_default_login = false,
+                updated_at = now()
+            WHERE cu.organization_id = $1::uuid
+              AND cu.unit_id = $2::uuid
+              AND cu.status IN (
+                  'pending'::contact_unit_status,
+                  'active'::contact_unit_status
+              )
+            RETURNING
+                cu.id::text AS id,
+                cu.unit_id::text AS unit_id,
+                cu.project_id::text AS project_id,
+                cu.contact_id::text AS contact_id
+            """,
+            organization_id,
+            unit_id,
+            ContactUnitStatus.MOVED_OUT.value,
+        )
+        return [dict(row) for row in rows]
+
     async def release_unit_owner_links(
         self,
         *,

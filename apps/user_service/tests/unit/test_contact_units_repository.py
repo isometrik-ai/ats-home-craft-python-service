@@ -383,3 +383,252 @@ async def test_get_unit_project():
     row = await repo.get_unit_project(organization_id=ORG_ID, unit_id=UNIT_ID)
 
     assert row["project_id"] == PROJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_owner_has_active_unit():
+    """Owner active unit check joins contacts.contact_type."""
+    conn = _FakeConn(val=1)
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    assert (
+        await repo.owner_has_active_unit(
+            organization_id=ORG_ID,
+            owner_contact_id=CONTACT_ID,
+            unit_id=UNIT_ID,
+        )
+        is True
+    )
+    query, _ = conn.fetchval_calls[0]
+    assert "c.contact_type = 'Owner'" in query
+
+
+@pytest.mark.asyncio
+async def test_insert_primary_occupant_link():
+    """Primary occupant insert clears other primaries then inserts."""
+    conn = _FakeConn(row={"id": CU_ID})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.insert_primary_occupant_link(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+        contact_id=CONTACT_ID,
+    )
+
+    assert row["id"] == CU_ID
+    assert len(conn.execute_calls) == 1
+    assert "is_primary = false" in conn.execute_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_contact_exists():
+    """contact_exists returns bool from fetchval."""
+    conn = _FakeConn(val=None)
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    assert await repo.contact_exists(organization_id=ORG_ID, contact_id=CONTACT_ID) is False
+
+
+@pytest.mark.asyncio
+async def test_release_unit_owner_links():
+    """release_unit_owner_links marks owner links moved_out."""
+    conn = _FakeConn(rows=[{"id": CU_ID, "contact_id": CONTACT_ID, "status": "moved_out"}])
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    rows = await repo.release_unit_owner_links(organization_id=ORG_ID, unit_id=UNIT_ID)
+
+    assert rows[0]["status"] == "moved_out"
+    query, _ = conn.fetch_calls[0]
+    assert "c.contact_type = 'Owner'" in query
+
+
+@pytest.mark.asyncio
+async def test_reactivate_allotment():
+    """reactivate_allotment reopens moved_out row as pending."""
+    conn = _FakeConn(row={"id": CU_ID, "status": ContactUnitStatus.PENDING.value})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.reactivate_allotment(
+        organization_id=ORG_ID,
+        contact_unit_id=CU_ID,
+        is_primary=False,
+        relationship="self",
+    )
+
+    assert row["status"] == ContactUnitStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+async def test_find_active_primary_conflicts_with_ids():
+    """Conflict lookup returns unit_ids when ids are provided."""
+    conn = _FakeConn(rows=[{"unit_id": UNIT_ID}])
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    conflicts = await repo.find_active_primary_conflicts(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        contact_unit_ids=[CU_ID],
+    )
+
+    assert conflicts == [UNIT_ID]
+
+
+@pytest.mark.asyncio
+async def test_unit_has_primary_occupant_without_exclude():
+    """Primary occupant check works without exclude_contact_id."""
+    conn = _FakeConn(row={"?column?": 1})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    assert (
+        await repo.unit_has_primary_occupant(
+            organization_id=ORG_ID,
+            unit_id=UNIT_ID,
+        )
+        is True
+    )
+    query, _ = conn.fetchrow_calls[0]
+    assert "contact_id <>" not in query
+
+
+@pytest.mark.asyncio
+async def test_activate_units_by_ids():
+    """activate_units_by_ids executes update when ids present."""
+    conn = _async_mock_conn()
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    await repo.activate_units_by_ids(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        contact_unit_ids=[CU_ID],
+    )
+    conn.execute.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_activate_for_contact():
+    """activate_for_contact sets activated_at on active rows."""
+    conn = _FakeConn()
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    await repo.activate_for_contact(organization_id=ORG_ID, contact_id=CONTACT_ID)
+
+    assert len(conn.execute_calls) == 1
+    assert "activated_at" in conn.execute_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_insert_household_link():
+    """insert_household_link creates family link."""
+    conn = _FakeConn(row={"id": CU_ID})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.insert_household_link(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+        contact_id=CONTACT_ID,
+        relationship="spouse",
+    )
+
+    assert row["id"] == CU_ID
+
+
+@pytest.mark.asyncio
+async def test_activate_contact_unit():
+    """activate_contact_unit activates pending link."""
+    conn = _FakeConn(row={"id": CU_ID, "status": ContactUnitStatus.ACTIVE.value})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.activate_contact_unit(
+        organization_id=ORG_ID,
+        contact_unit_id=CU_ID,
+    )
+
+    assert row["status"] == ContactUnitStatus.ACTIVE.value
+
+
+@pytest.mark.asyncio
+async def test_get_household_link():
+    """get_household_link scopes to primary-owned unit."""
+    conn = _FakeConn(row={"contact_unit_id": CU_ID, "contact_id": CONTACT_ID, "unit_id": UNIT_ID})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.get_household_link(
+        organization_id=ORG_ID,
+        primary_contact_id=CONTACT_ID,
+        contact_unit_id=CU_ID,
+    )
+
+    assert row["unit_id"] == UNIT_ID
+
+
+@pytest.mark.asyncio
+async def test_get_household_member():
+    """get_household_member returns one household row."""
+    conn = _FakeConn(row={"contact_unit_id": CU_ID, "contact_id": CONTACT_ID})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.get_household_member(
+        organization_id=ORG_ID,
+        primary_contact_id=CONTACT_ID,
+        contact_unit_id=CU_ID,
+    )
+
+    assert row["contact_unit_id"] == CU_ID
+
+
+@pytest.mark.asyncio
+async def test_update_household_relationship():
+    """update_household_relationship patches relationship enum."""
+    conn = _FakeConn(row={"id": CU_ID, "relationship": "child"})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.update_household_relationship(
+        organization_id=ORG_ID,
+        contact_unit_id=CU_ID,
+        relationship="child",
+    )
+
+    assert row["relationship"] == "child"
+
+
+@pytest.mark.asyncio
+async def test_update_household_link_status():
+    """update_household_link_status patches status."""
+    conn = _FakeConn(row={"id": CU_ID, "status": ContactUnitStatus.ACTIVE.value})
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    row = await repo.update_household_link_status(
+        organization_id=ORG_ID,
+        contact_unit_id=CU_ID,
+        status=ContactUnitStatus.ACTIVE.value,
+    )
+
+    assert row["status"] == ContactUnitStatus.ACTIVE.value
+
+
+@pytest.mark.asyncio
+async def test_delete_link_no_row():
+    """delete_link returns False when nothing deleted."""
+    conn = _async_mock_conn(execute_result="DELETE 0")
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    assert await repo.delete_link(organization_id=ORG_ID, contact_unit_id=CU_ID) is False
+
+
+@pytest.mark.asyncio
+async def test_list_household_by_primary_without_unit_filter():
+    """Household list without unit_id omits unit filter."""
+    conn = _FakeConn(rows=[{"contact_unit_id": CU_ID}])
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    rows = await repo.list_household_by_primary(
+        organization_id=ORG_ID,
+        primary_contact_id=CONTACT_ID,
+    )
+
+    assert rows[0]["contact_unit_id"] == CU_ID
+    query, args = conn.fetch_calls[0]
+    assert "AND primary_cu.unit_id = $" not in query
+    assert len(args) == 4
