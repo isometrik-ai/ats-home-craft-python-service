@@ -383,6 +383,7 @@ async def test_soft_delete_contact():
     assert deleted["status"] == ClientStatus.DELETED.value
     query, _ = _sql_args(conn.fetchrow)
     assert "UPDATE contacts" in query
+    assert "user_id" not in query.lower()
 
 
 @pytest.mark.asyncio

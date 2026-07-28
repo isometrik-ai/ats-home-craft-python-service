@@ -473,6 +473,34 @@ class TenantRequestsRepository(BaseRepository):
         row = await self.db_connection.fetchrow(query, *args)
         return dict(row) if row else None
 
+    async def list_inflight_ids_for_submitter(
+        self,
+        *,
+        organization_id: str,
+        submitted_by_contact_id: str,
+    ) -> list[str]:
+        """Return in-flight tenant request ids owned by a submitter contact."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT id::text AS id
+            FROM tenant_requests
+            WHERE organization_id = $1::uuid
+              AND submitted_by_contact_id = $2::uuid
+              AND status = ANY($3::tenant_request_status[])
+            ORDER BY created_at
+            """,
+            organization_id,
+            submitted_by_contact_id,
+            [
+                TenantRequestStatus.DRAFT.value,
+                TenantRequestStatus.SUBMITTED.value,
+                TenantRequestStatus.PENDING_REVIEW.value,
+                TenantRequestStatus.AWAITING_RESUBMISSION.value,
+                TenantRequestStatus.READY_TO_APPROVE.value,
+            ],
+        )
+        return [str(row["id"]) for row in rows]
+
     async def list_for_owner(
         self,
         *,
@@ -626,6 +654,33 @@ class TenantRequestsRepository(BaseRepository):
             """,
             organization_id,
             unit_id,
+            TenantRequestStatus.APPROVED.value,
+        )
+        return dict(row) if row else None
+
+    async def find_active_approved_for_unit_by_tenant(
+        self,
+        *,
+        organization_id: str,
+        tenant_contact_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the active approved tenant request for a tenant contact."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+                id::text AS id,
+                tenant_contact_id::text AS tenant_contact_id,
+                contact_unit_id::text AS contact_unit_id,
+                unit_id::text AS unit_id
+            FROM tenant_requests
+            WHERE organization_id = $1::uuid
+              AND tenant_contact_id = $2::uuid
+              AND status = $3::tenant_request_status
+              AND superseded_at IS NULL
+            LIMIT 1
+            """,
+            organization_id,
+            tenant_contact_id,
             TenantRequestStatus.APPROVED.value,
         )
         return dict(row) if row else None

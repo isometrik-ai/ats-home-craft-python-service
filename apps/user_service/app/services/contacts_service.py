@@ -75,6 +75,9 @@ from apps.user_service.app.services.client_enrichment_service import (
     ClientEnrichmentService,
     client_enrichment_enabled,
 )
+from apps.user_service.app.services.contact_delete_cascade_service import (
+    ContactDeleteCascadeService,
+)
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.lead_service import LeadService
@@ -2305,6 +2308,14 @@ class ContactsService:
                 message_key="contacts.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        cascade = ContactDeleteCascadeService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await cascade.cascade_before_soft_delete(
+            contact_id=contact_id,
+            contact=current,
+        )
         updated = await self.contacts_repo.soft_delete_contact(
             contact_id=contact_id, organization_id=org_id
         )

@@ -606,6 +606,50 @@ class PassesRepository(BaseRepository):
             pass_id=pass_id,
         )
 
+    async def list_active_ids_for_host(
+        self,
+        *,
+        organization_id: str,
+        host_contact_id: str,
+    ) -> list[str]:
+        """Return active pass ids owned by a host contact."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT id::text AS id
+            FROM passes
+            WHERE organization_id = $1::uuid
+              AND host_contact_id = $2::uuid
+              AND status = $3::pass_status
+            ORDER BY created_at
+            """,
+            organization_id,
+            host_contact_id,
+            PassStatus.ACTIVE.value,
+        )
+        return [str(row["id"]) for row in rows]
+
+    async def list_active_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return active passes for a unit with host contact ids."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT id::text AS id, host_contact_id::text AS host_contact_id
+            FROM passes
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND status = $3::pass_status
+            ORDER BY created_at
+            """,
+            organization_id,
+            unit_id,
+            PassStatus.ACTIVE.value,
+        )
+        return [dict(row) for row in rows]
+
     async def cancel(
         self,
         *,

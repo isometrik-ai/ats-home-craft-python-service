@@ -172,6 +172,28 @@ class VehiclesRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def list_by_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """List active vehicles registered against a unit (any contact)."""
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              {self._VEHICLE_SELECT_COLUMNS}
+            FROM vehicles v
+            WHERE v.organization_id = $1::uuid
+              AND v.unit_id = $2::uuid
+              AND {_ACTIVE_VEHICLE_FILTER}
+            ORDER BY v.sort_order, v.created_at
+            """,
+            organization_id,
+            unit_id,
+        )
+        return [dict(row) for row in rows]
+
     async def get_by_id(
         self,
         *,
