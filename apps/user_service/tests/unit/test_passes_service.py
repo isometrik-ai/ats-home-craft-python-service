@@ -11,6 +11,7 @@ import pytest
 from apps.user_service.app.schemas.enums import (
     PassDisplayStatus,
     PassStatus,
+    PassType,
     PassValidityType,
 )
 from apps.user_service.app.schemas.passes import (
@@ -358,3 +359,157 @@ async def test_list_unit_passes_for_admin():
     )
     assert total == 1
     assert items[0]["created_by"] == "Priya Verma"
+
+
+@pytest.mark.asyncio
+async def test_list_passes_returns_normalized_items():
+    """List passes maps repository rows to list items."""
+    passes_repo = _FakePassesRepo()
+    passes_repo.list_result = ([_pass_row()], 1)
+    svc = _service(passes_repo=passes_repo)
+
+    items, total = await svc.list_passes(
+        contact_id="contact-1",
+        bucket="active",
+        page=1,
+        page_size=20,
+    )
+
+    assert total == 1
+    assert items[0]["id"] == "pass-1"
+    assert items[0]["display_status"] == PassDisplayStatus.ACTIVE.value
+
+
+@pytest.mark.asyncio
+async def test_get_pass_includes_events():
+    """Get pass loads timeline events when requested."""
+    passes_repo = _FakePassesRepo()
+    events_repo = _FakeEventsRepo()
+    events_repo.events = [
+        {
+            "id": "event-1",
+            "event_type": "created",
+            "actor_type": "resident",
+            "occurred_at": datetime.now(timezone.utc),
+        }
+    ]
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+
+    result = await svc.get_pass(contact_id="contact-1", pass_id="pass-1", include_events=True)
+
+    assert result["id"] == "pass-1"
+    assert len(result["events"]) == 1
+    assert result["events"][0]["event_type"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_get_pass_without_events():
+    """Get pass skips event lookup when include_events is false."""
+    passes_repo = _FakePassesRepo()
+    events_repo = _FakeEventsRepo()
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+
+    result = await svc.get_pass(contact_id="contact-1", pass_id="pass-1", include_events=False)
+
+    assert result["id"] == "pass-1"
+    assert "events" not in result
+
+
+@pytest.mark.asyncio
+async def test_update_pass_empty_body_returns_current():
+    """Update with no fields returns the existing pass unchanged."""
+    passes_repo = _FakePassesRepo()
+    svc = _service(passes_repo=passes_repo)
+
+    result = await svc.update_pass(
+        contact_id="contact-1",
+        pass_id="pass-1",
+        body=UpdatePassRequest(),
+    )
+
+    assert result["guest_name"] == "Ravi Kumar"
+
+
+@pytest.mark.asyncio
+async def test_update_pass_success():
+    """Update persists changes and returns normalized pass."""
+    passes_repo = _FakePassesRepo()
+    passes_repo.update_result = _pass_row(guest_name="Updated Guest")
+    svc = _service(passes_repo=passes_repo)
+
+    result = await svc.update_pass(
+        contact_id="contact-1",
+        pass_id="pass-1",
+        body=UpdatePassRequest(guest_name="Updated Guest", pass_type=PassType.DELIVERY),
+    )
+
+    assert result["guest_name"] == "Updated Guest"
+
+
+@pytest.mark.asyncio
+async def test_update_pass_not_found_after_update():
+    """Update raises not found when repository returns no row."""
+    passes_repo = _FakePassesRepo()
+
+    async def _update_missing(**_kwargs):
+        return None
+
+    passes_repo.update = _update_missing  # type: ignore[method-assign]
+    svc = _service(passes_repo=passes_repo)
+
+    with pytest.raises(NotFoundException):
+        await svc.update_pass(
+            contact_id="contact-1",
+            pass_id="pass-1",
+            body=UpdatePassRequest(guest_name="Updated Guest"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_pass_validates_validity_window():
+    """Update validates combined validity window."""
+    passes_repo = _FakePassesRepo()
+    svc = _service(passes_repo=passes_repo)
+    now = datetime.now(timezone.utc)
+
+    with pytest.raises(ValidationException):
+        await svc.update_pass(
+            contact_id="contact-1",
+            pass_id="pass-1",
+            body=UpdatePassRequest(
+                valid_from=now + timedelta(hours=5),
+                valid_until=now + timedelta(hours=1),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_pass_repo_failure():
+    """Cancel raises when repository cannot cancel the pass."""
+    passes_repo = _FakePassesRepo()
+    passes_repo.cancel_result = None
+    svc = _service(passes_repo=passes_repo)
+
+    with pytest.raises(ValidationException):
+        await svc.cancel_pass(contact_id="contact-1", pass_id="pass-1")
+
+
+@pytest.mark.asyncio
+async def test_list_events_returns_normalized_timeline():
+    """List events returns normalized pass timeline entries."""
+    passes_repo = _FakePassesRepo()
+    events_repo = _FakeEventsRepo()
+    events_repo.events = [
+        {
+            "id": "event-1",
+            "event_type": "check_in",
+            "actor_type": "gate",
+            "occurred_at": datetime.now(timezone.utc),
+        }
+    ]
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+
+    events = await svc.list_events(contact_id="contact-1", pass_id="pass-1")
+
+    assert len(events) == 1
+    assert events[0]["event_type"] == "check_in"

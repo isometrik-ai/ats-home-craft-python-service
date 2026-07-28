@@ -261,3 +261,204 @@ async def test_require_list_permission():
     assert ctx.organization_id == ORG_ID
     assert entity_type == EntityType.LEAD
     mock_require.assert_awaited_once()
+
+
+def test_get_permission_code_company_and_project_actions():
+    """Permission map covers company/project and normalizes unknown actions to view."""
+    from libs.shared_utils.common_query import (
+        COMPANIES_MANAGEMENT_CREATE,
+        PROJECTS_MANAGEMENT_VIEW,
+    )
+
+    assert (
+        EntityListsService.get_permission_code(entity_type=EntityType.COMPANY, action="create")
+        == COMPANIES_MANAGEMENT_CREATE
+    )
+    assert (
+        EntityListsService.get_permission_code(entity_type=EntityType.PROJECT, action="archive")
+        == PROJECTS_MANAGEMENT_VIEW
+    )
+
+
+def test_build_update_data_includes_metadata_fields():
+    """Update builder maps description, tags, and active status."""
+    service = _service(_FakeEntityListsRepo())
+    update_data, add_ids, remove_ids = service._build_update_data(
+        body=UpdateEntityListRequest(
+            name=" Renamed ",
+            description="Updated",
+            tags=[" one ", ""],
+            status=EntityListStatus.INACTIVE,
+            add_ids=[" a "],
+            remove_ids=[" b "],
+        )
+    )
+    assert update_data["name"] == "Renamed"
+    assert update_data["description"] == "Updated"
+    assert update_data["tags"] == ["one"]
+    assert update_data["status"] == EntityListStatus.INACTIVE.value
+    assert add_ids == ["a"]
+    assert remove_ids == ["b"]
+
+
+def test_validate_update_payload_rejects_too_many_remove_ids():
+    """Bulk remove ids enforce the same max size as add ids."""
+    service = _service(_FakeEntityListsRepo())
+    too_many = [f"id-{idx}" for idx in range(service.BULK_MEMBER_IDS_MAX + 1)]
+    update_data, add_ids, remove_ids = service._build_update_data(
+        body=UpdateEntityListRequest(name="Renamed")
+    )
+    remove_ids = too_many
+
+    with pytest.raises(ValidationException) as exc_info:
+        service._validate_update_payload(
+            body=UpdateEntityListRequest(name="Renamed"),
+            update_data=update_data,
+            add_ids=add_ids,
+            remove_ids=remove_ids,
+        )
+    assert exc_info.value.message_key == "entity_lists.errors.too_many_member_ids"
+
+
+@pytest.mark.asyncio
+async def test_require_list_permission_list_not_found():
+    """Helper raises when list id does not exist."""
+    user_context = UserContext(user_id="u1", email="u@example.com", organization_id=ORG_ID)
+    fake_repo = _FakeEntityListsRepo(list_row=None)
+
+    with (
+        patch(
+            "apps.user_service.app.services.entity_lists_service.extract_user_context",
+            new=AsyncMock(return_value=user_context),
+        ),
+        patch(
+            "apps.user_service.app.services.entity_lists_service.EntityListsRepository",
+            return_value=fake_repo,
+        ),
+        pytest.raises(NotFoundException),
+    ):
+        await EntityListsService.require_list_permission(
+            current_user={"sub": "u1"},
+            db_connection=MagicMock(),
+            list_id=LIST_ID,
+            action="view",
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_list_details_success():
+    """Existing list details are returned from repository."""
+    details = {"id": LIST_ID, "name": "VIP", "member_count": 2}
+    service = _service(_FakeEntityListsRepo(details=details))
+
+    row = await service.get_list_details(list_id=LIST_ID)
+
+    assert row == details
+
+
+@pytest.mark.asyncio
+async def test_update_list_rejects_already_deleted_list():
+    """Cannot update a list that is already soft-deleted."""
+    repo = _FakeEntityListsRepo(
+        list_row={"id": LIST_ID, "status": EntityListStatus.DELETED.value},
+    )
+    service = _service(repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.update_list(
+            list_id=LIST_ID,
+            body=UpdateEntityListRequest(name="Renamed"),
+        )
+    assert exc_info.value.message_key == "entity_lists.errors.cannot_modify_deleted_list"
+
+
+@pytest.mark.asyncio
+async def test_update_list_success():
+    """Successful update delegates normalized payload to repository."""
+    repo = _FakeEntityListsRepo(
+        list_row={"id": LIST_ID, "status": EntityListStatus.ACTIVE.value},
+        updated={"id": LIST_ID, "name": "Renamed"},
+    )
+    service = _service(repo)
+
+    updated = await service.update_list(
+        list_id=LIST_ID,
+        body=UpdateEntityListRequest(name="Renamed", add_ids=["e1"]),
+    )
+
+    assert updated["name"] == "Renamed"
+    assert repo.last_update_kwargs["update_data"]["add_entity_ids"] == ["e1"]
+
+
+@pytest.mark.asyncio
+async def test_update_list_duplicate_name():
+    """Unique violation on update becomes DuplicateValueException."""
+    repo = _FakeEntityListsRepo(
+        list_row={"id": LIST_ID, "status": EntityListStatus.ACTIVE.value},
+        update_error=UniqueViolationError("duplicate"),
+    )
+    service = _service(repo)
+
+    with pytest.raises(DuplicateValueException):
+        await service.update_list(
+            list_id=LIST_ID,
+            body=UpdateEntityListRequest(name="Renamed"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_list_not_found_after_repo_update():
+    """Update raises when repository returns no row."""
+    repo = _FakeEntityListsRepo(
+        list_row={"id": LIST_ID, "status": EntityListStatus.ACTIVE.value},
+        updated=None,
+    )
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.update_list(
+            list_id=LIST_ID,
+            body=UpdateEntityListRequest(name="Renamed"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_active_list():
+    """Soft delete marks an active list as deleted."""
+    repo = _FakeEntityListsRepo(
+        list_row={"id": LIST_ID, "status": EntityListStatus.ACTIVE.value},
+        updated={"id": LIST_ID, "status": EntityListStatus.DELETED.value},
+    )
+    service = _service(repo)
+
+    await service.soft_delete(list_id=LIST_ID)
+
+    assert repo.last_update_kwargs["update_data"]["status"] == EntityListStatus.DELETED.value
+
+
+@pytest.mark.asyncio
+async def test_list_lists_delegates_to_repository():
+    """List index delegates to repository with entity type filter."""
+    rows = [{"id": LIST_ID, "name": "VIP"}]
+    repo = _FakeEntityListsRepo(lists=rows)
+    service = _service(repo)
+
+    result, total = await service.list_lists(
+        entity_type=EntityType.CONTACT,
+        status=EntityListStatus.ACTIVE,
+        search="VIP",
+        limit=10,
+        offset=0,
+    )
+
+    assert result == rows
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_list_member_ids_requires_existing_list():
+    """Listing members raises when list does not exist."""
+    service = _service(_FakeEntityListsRepo(list_row=None))
+
+    with pytest.raises(NotFoundException):
+        await service.list_member_ids(list_id=LIST_ID, limit=10, offset=0)
