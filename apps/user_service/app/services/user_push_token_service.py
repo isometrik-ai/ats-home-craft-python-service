@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
+from fastapi import Request
 
 from apps.user_service.app.db.repositories.user_push_tokens_repository import (
     UserPushTokensRepository,
@@ -18,7 +19,7 @@ from apps.user_service.app.utils.common_utils import (
     extract_user_context,
     format_iso_datetime,
 )
-from libs.shared_utils.http_exceptions import BadRequestException
+from libs.shared_utils.http_exceptions import BadRequestException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -46,9 +47,14 @@ class UserPushTokenService:
         *,
         db_connection: asyncpg.Connection,
         current_user: dict,
+        request: Request | None = None,
     ) -> UserPushTokenService:
         """Build service for end-user routes using JWT org and user context."""
-        user_context = await extract_user_context(current_user, db_connection)
+        user_context = await extract_user_context(
+            current_user,
+            db_connection,
+            request=request,
+        )
         user_metadata = current_user.get("user_metadata") or {}
         metadata_organization_id = user_metadata.get("organization_id")
         if metadata_organization_id:
@@ -63,12 +69,29 @@ class UserPushTokenService:
         """Return organization and user ids from context; raise if missing."""
         org_id = (self.user_context.organization_id or "").strip()
         user_id = (self.user_context.user_id or "").strip()
-        if not org_id or not user_id:
-            raise BadRequestException(
-                message_key="errors.bad_request",
-                custom_code=CustomStatusCode.BAD_REQUEST,
+        if not user_id:
+            raise ValidationException(
+                message_key="errors.invalid_token",
+                custom_code=CustomStatusCode.INVALID_DATA,
+                params={"error": "user ID not found"},
+            )
+        if not org_id:
+            raise ValidationException(
+                message_key="auth.errors.session_not_found",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
             )
         return org_id, user_id
+
+    def _require_user(self) -> str:
+        """Return user id from context; raise if missing."""
+        user_id = (self.user_context.user_id or "").strip()
+        if not user_id:
+            raise ValidationException(
+                message_key="errors.invalid_token",
+                custom_code=CustomStatusCode.INVALID_DATA,
+                params={"error": "user ID not found"},
+            )
+        return user_id
 
     async def register_device(
         self,
@@ -88,7 +111,7 @@ class UserPushTokenService:
         )
         if not row:
             raise BadRequestException(
-                message_key="contacts.errors.push_device_registration_failed",
+                message_key="users.errors.push_device_registration_failed",
                 custom_code=CustomStatusCode.BAD_REQUEST,
             )
 
@@ -101,11 +124,11 @@ class UserPushTokenService:
 
     async def unregister_device(self, *, device_id: str) -> dict[str, Any]:
         """Remove a push device registration for the authenticated user (idempotent)."""
-        _, user_id = self._require_org_and_user()
+        user_id = self._require_user()
         normalized_device_id = (device_id or "").strip()
         if not normalized_device_id:
             raise BadRequestException(
-                message_key="errors.bad_request",
+                message_key="users.errors.invalid_device_id",
                 custom_code=CustomStatusCode.BAD_REQUEST,
             )
 

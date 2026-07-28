@@ -12,7 +12,7 @@ from apps.user_service.app.services.user_push_token_service import (
     user_push_topic,
 )
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import BadRequestException
+from libs.shared_utils.http_exceptions import ValidationException
 
 
 class _FakePushTokensRepo:
@@ -83,11 +83,11 @@ async def test_register_upserts_for_authenticated_user():
 
 
 @pytest.mark.asyncio
-async def test_register_rejects_missing_org_or_user():
-    """register_device fails when org or user context is missing."""
-    service = _service(org_id="", user_id="")
+async def test_register_rejects_missing_org():
+    """register_device fails when organization context is missing."""
+    service = _service(org_id="")
 
-    with pytest.raises(BadRequestException):
+    with pytest.raises(ValidationException):
         await service.register_device(
             body=RegisterUserPushTokenRequest(
                 device_id="device-xyz",
@@ -102,6 +102,18 @@ async def test_unregister_calls_scoped_delete():
     """unregister_device deletes locally scoped to authenticated user."""
     push_repo = _FakePushTokensRepo()
     service = _service(push_repo=push_repo)
+
+    result = await service.unregister_device(device_id="device-xyz")
+
+    assert result == {"device_id": "device-xyz"}
+    assert push_repo.delete_calls == [("device-xyz", "user-1")]
+
+
+@pytest.mark.asyncio
+async def test_unregister_works_without_org():
+    """unregister_device only requires user_id, not organization."""
+    push_repo = _FakePushTokensRepo()
+    service = _service(org_id="", push_repo=push_repo)
 
     result = await service.unregister_device(device_id="device-xyz")
 

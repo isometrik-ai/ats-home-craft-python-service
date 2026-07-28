@@ -259,8 +259,7 @@
       "exactly_one_primary_phone": "Exactly one phone number must be marked as primary in the phones list.",
       "primary_email_phone_auth_mismatch": "The provided primary email and phone belong to different accounts.",
       "work_history_item_not_found": "Work history item not found",
-      "educational_history_item_not_found": "Educational history item not found",
-      "push_device_registration_failed": "Push device registration failed. Please try again."
+      "educational_history_item_not_found": "Educational history item not found"
     },
     "success": {
       "contact_created": "Contact created successfully.",
@@ -274,9 +273,7 @@
       "contact_vehicle_created": "Contact vehicle added successfully.",
       "contact_household_retrieved": "Contact household members retrieved successfully.",
       "contact_household_member_added": "Contact household member added successfully.",
-      "overview_retrieved": "Contact overview retrieved successfully.",
-      "push_device_registered": "Push device registered successfully.",
-      "push_device_unregistered": "Push device unregistered successfully."
+      "overview_retrieved": "Contact overview retrieved successfully."
     }
   },
   "audit_logs": {
@@ -305,14 +302,18 @@
       "role_not_found": "The role you are trying to assign does not exist in this organization.",
       "cannot_change_member_role": "You do not have permission to change member roles.",
       "cannot_change_admin_user_role": "You cannot change the role of an administrator.",
-      "cannot_change_organization_creator_role": "Only the organization creator can change this member's role."
+      "cannot_change_organization_creator_role": "Only the organization creator can change this member's role.",
+      "push_device_registration_failed": "Push device registration failed. Please try again.",
+      "invalid_device_id": "Device identifier is required."
     },
     "success": {
       "email_updated": "User email updated successfully",
       "member_patched": "Member updated successfully",
       "user_banned": "User banned successfully",
       "user_unbanned": "User unbanned successfully",
-      "user_profile_updated": "User profile updated successfully"
+      "user_profile_updated": "User profile updated successfully",
+      "push_device_registered": "Push device registered successfully.",
+      "push_device_unregistered": "Push device unregistered successfully."
     }
   },
   "presigned_url": {

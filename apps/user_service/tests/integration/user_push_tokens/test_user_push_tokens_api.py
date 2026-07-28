@@ -23,20 +23,20 @@ class _FakePushService:
 
 @pytest.mark.asyncio
 async def test_register_push_device_api(monkeypatch, client):
-    """POST /v1/contacts/me/push-devices returns 201."""
+    """POST /v1/users/me/push-devices returns 201."""
     fake_service = _FakePushService()
 
-    async def fake_for_end_user(*, db_connection, current_user):
-        del db_connection, current_user
+    async def fake_for_end_user(*, db_connection, current_user, request=None):
+        del db_connection, current_user, request
         return fake_service
 
     monkeypatch.setattr(
-        "apps.user_service.app.api.contacts.UserPushTokenService.for_end_user",
+        "apps.user_service.app.api.user_push_tokens.UserPushTokenService.for_end_user",
         fake_for_end_user,
     )
 
     res = await client.post(
-        "/v1/contacts/me/push-devices",
+        "/v1/users/me/push-devices",
         json={
             "device_id": "device-xyz",
             "push_token": "token-abc",
@@ -51,19 +51,19 @@ async def test_register_push_device_api(monkeypatch, client):
 
 @pytest.mark.asyncio
 async def test_unregister_push_device_api(monkeypatch, client):
-    """DELETE /v1/contacts/me/push-devices/{device_id} returns 200."""
+    """DELETE /v1/users/me/push-devices/{device_id} returns 200."""
     fake_service = _FakePushService()
 
-    async def fake_for_end_user(*, db_connection, current_user):
-        del db_connection, current_user
+    async def fake_for_end_user(*, db_connection, current_user, request=None):
+        del db_connection, current_user, request
         return fake_service
 
     monkeypatch.setattr(
-        "apps.user_service.app.api.contacts.UserPushTokenService.for_end_user",
+        "apps.user_service.app.api.user_push_tokens.UserPushTokenService.for_end_user",
         fake_for_end_user,
     )
 
-    res = await client.delete("/v1/contacts/me/push-devices/device-xyz")
+    res = await client.delete("/v1/users/me/push-devices/device-xyz")
 
     body = assert_success(res, 200)
     assert body["data"]["device_id"] == "device-xyz"

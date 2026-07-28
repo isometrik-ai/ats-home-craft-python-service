@@ -50,6 +50,7 @@ from apps.user_service.app.api.tenant_requests import router as tenant_requests_
 from apps.user_service.app.api.tenant_requests_owner import (
     router as tenant_requests_owner_router,
 )
+from apps.user_service.app.api.user_push_tokens import router as user_push_tokens_router
 from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
@@ -66,6 +67,7 @@ router.include_router(organization_router)
 router.include_router(organization_memory_router)
 router.include_router(superadmin_organizations_router)
 router.include_router(users_router)
+router.include_router(user_push_tokens_router)
 router.include_router(roles_router)
 router.include_router(sessions_router)
 router.include_router(permissions_router)
