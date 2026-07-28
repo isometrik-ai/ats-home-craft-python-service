@@ -189,6 +189,7 @@ class VisitorLogsRepository(BaseRepository):
               ) AS created_by,
               p.valid_from AS scheduled_from,
               p.valid_until AS scheduled_until,
+              p.validity_type::text AS validity_type,
               ci.entry_method::text AS entry_method,
               ci.actor_label AS guard_name,
               ci.access_status::text AS access_status,

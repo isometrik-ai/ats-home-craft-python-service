@@ -79,6 +79,7 @@ class VisitorLogItemResponse(BaseModel):
     created_by: str | None = None
     scheduled_from: str | None = None
     scheduled_until: str | None = None
+    validity_type: str | None = None
     entry_method: str | None = None
     guard_name: str | None = None
     access_status: str | None = None

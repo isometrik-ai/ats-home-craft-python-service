@@ -99,6 +99,7 @@ async def test_list_logs_shapes_time_spent():
                 "created_by": "T. Nair",
                 "scheduled_from": in_time,
                 "scheduled_until": out_time,
+                "validity_type": "one_time",
                 "entry_method": "qr",
                 "guard_name": "Ramesh Kumar",
                 "access_status": "approved",
@@ -115,6 +116,7 @@ async def test_list_logs_shapes_time_spent():
     assert total == 1
     assert items[0]["time_spent_minutes"] == 6
     assert items[0]["created_by"] == "T. Nair"
+    assert items[0]["validity_type"] == "one_time"
 
 
 @pytest.mark.asyncio
