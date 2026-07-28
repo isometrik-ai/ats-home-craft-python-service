@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -176,16 +176,26 @@ async def test_owner_delete_soft_deletes_family_without_remaining_links():
         "id": "family-abc",
         "contact_type": ContactType.FAMILY.value,
         "status": "active",
+        "user_id": "family-user-1",
     }
 
-    await svc.cascade_before_soft_delete(
-        contact_id="owner-1",
-        contact={"contact_type": ContactType.OWNER.value},
-    )
+    with patch(
+        "apps.user_service.app.services.contact_delete_cascade_service.revoke_contact_portal_sessions",
+        new=AsyncMock(),
+    ) as revoke_sessions:
+        await svc.cascade_before_soft_delete(
+            contact_id="owner-1",
+            contact={"contact_type": ContactType.OWNER.value},
+        )
 
     svc.contacts_repo.soft_delete_contact.assert_awaited_once_with(
         contact_id="family-abc",
         organization_id="org-1",
+    )
+    revoke_sessions.assert_awaited_once_with(
+        db_connection=svc.db_connection,
+        organization_id="org-1",
+        user_id="family-user-1",
     )
 
 

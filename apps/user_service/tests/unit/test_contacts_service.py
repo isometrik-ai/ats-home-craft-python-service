@@ -517,18 +517,29 @@ async def test_get_contacts_by_ids_empty_input():
 @pytest.mark.asyncio
 async def test_soft_delete_contact_success():
     """Soft delete returns old and new snapshots."""
-    current = {"id": CONTACT_ID, "status": ClientStatus.ACTIVE.value}
+    current = {
+        "id": CONTACT_ID,
+        "status": ClientStatus.ACTIVE.value,
+        "user_id": "user-1",
+    }
     updated = {"id": CONTACT_ID, "status": ClientStatus.DELETED.value}
     repo = _FakeContactsRepo(contact_for_update=current, soft_deleted=updated)
     svc = _service(contacts_repo=repo)
 
-    with patch(
-        "apps.user_service.app.services.contacts_service.ContactDeleteCascadeService"
-    ) as cascade_cls:
+    with (
+        patch(
+            "apps.user_service.app.services.contacts_service.ContactDeleteCascadeService"
+        ) as cascade_cls,
+        patch(
+            "apps.user_service.app.services.contacts_service.revoke_contact_portal_sessions",
+            new=AsyncMock(),
+        ) as revoke_sessions,
+    ):
         cascade_cls.return_value.cascade_before_soft_delete = AsyncMock()
         result = await svc.soft_delete_contact(contact_id=CONTACT_ID)
 
     cascade_cls.return_value.cascade_before_soft_delete.assert_awaited_once()
+    revoke_sessions.assert_awaited_once()
     assert result["old_data"]["status"] == ClientStatus.ACTIVE.value
     assert result["new_data"]["status"] == ClientStatus.DELETED.value
 

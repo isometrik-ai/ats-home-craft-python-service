@@ -36,6 +36,9 @@ from apps.user_service.app.schemas.enums import (
     VehicleStatus,
 )
 from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.contact_session_utils import (
+    revoke_contact_portal_sessions,
+)
 
 
 class ContactDeleteCascadeService:
@@ -363,6 +366,11 @@ class ContactDeleteCascadeService:
             await self.contacts_repo.soft_delete_contact(
                 contact_id=family_contact_id,
                 organization_id=organization_id,
+            )
+            await revoke_contact_portal_sessions(
+                db_connection=self.db_connection,
+                organization_id=organization_id,
+                user_id=contact.get("user_id"),
             )
 
     async def _supersede_approved_tenant_for_unit(
