@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -288,3 +289,142 @@ async def test_shutdown_cancels_on_timeout(logger):
         await logger.shutdown()
 
     mock_task.cancel.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_log_audit_event_queue_full_then_enqueued(logger):
+    """Full queue falls back to timed put and enqueues the event."""
+    audit_event = {"description": "queued"}
+
+    with (
+        patch.object(logger._queue, "put_nowait", side_effect=asyncio.QueueFull()),  # pylint: disable=protected-access
+        patch.object(logger._queue, "put", new=AsyncMock()) as mock_put,  # pylint: disable=protected-access
+        patch.object(
+            logger,
+            "_create_audit_event_dict",
+            return_value=audit_event,
+        ),
+    ):
+        await logger.log_audit_event(_event_data(), _request())
+
+    mock_put.assert_awaited_once_with(audit_event)
+
+
+@pytest.mark.asyncio
+async def test_log_audit_event_queue_timeout(logger):
+    """Queue timeout during fallback is handled without raising."""
+    with (
+        patch.object(logger._queue, "put_nowait", side_effect=asyncio.QueueFull()),  # pylint: disable=protected-access
+        patch.object(
+            logger._queue,
+            "put",
+            side_effect=asyncio.TimeoutError(),
+        ),  # pylint: disable=protected-access
+        patch.object(
+            logger,
+            "_create_audit_event_dict",
+            return_value={"description": "queued"},
+        ),
+    ):
+        await logger.log_audit_event(_event_data(), _request())
+
+    assert logger._queue.qsize() == 0  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_log_audit_event_validation_error(logger):
+    """Data validation errors in audit logging are swallowed."""
+    with patch.object(
+        logger,
+        "_create_audit_event_dict",
+        side_effect=ValueError("bad data"),
+    ):
+        await logger.log_audit_event(_event_data(), _request())
+
+    assert logger._queue.qsize() == 0  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_log_audit_event_runtime_error(logger):
+    """Runtime errors in audit logging are logged and swallowed."""
+    with patch.object(
+        logger,
+        "_create_audit_event_dict",
+        side_effect=RuntimeError("loop closed"),
+    ):
+        await logger.log_audit_event(_event_data(), _request())
+
+    assert logger._queue.qsize() == 0  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_process_audit_queue_writes_batch(logger):
+    """Processing loop writes collected batches and clears state."""
+    batch = [{"description": "event-1"}]
+    logger._shutdown_event.clear()  # pylint: disable=protected-access
+
+    collect_calls = {"count": 0}
+
+    async def fake_collect(_timeout):
+        collect_calls["count"] += 1
+        if collect_calls["count"] == 1:
+            return batch.copy(), True
+        logger._shutdown_event.set()  # pylint: disable=protected-access
+        return [], False
+
+    write_mock = AsyncMock()
+
+    with (
+        patch.object(logger, "_collect_batch_events", side_effect=fake_collect),
+        patch.object(logger, "_write_audit_batch_with_retry", write_mock),
+        patch("asyncio.sleep", new=AsyncMock()),
+    ):
+        await logger._process_audit_queue()  # pylint: disable=protected-access
+
+    write_mock.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_audit_queue_handles_processing_error(logger):
+    """Processing loop sleeps and continues after unexpected errors."""
+    logger._shutdown_event.clear()  # pylint: disable=protected-access
+    calls = {"count": 0}
+
+    async def fake_collect(_timeout):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise ValueError("transient")
+        logger._shutdown_event.set()  # pylint: disable=protected-access
+        return [], False
+
+    sleep_mock = AsyncMock()
+
+    with (
+        patch.object(logger, "_collect_batch_events", side_effect=fake_collect),
+        patch("asyncio.sleep", sleep_mock),
+    ):
+        await logger._process_audit_queue()  # pylint: disable=protected-access
+
+    sleep_mock.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_write_audit_batch_with_retry_eventual_success(logger):
+    """Batch write retries transient failures before succeeding."""
+    write_mock = AsyncMock(side_effect=[ValueError("retry"), None])
+
+    with patch.object(logger, "_write_audit_batch", write_mock):
+        await logger._write_audit_batch_with_retry([{"description": "x"}])  # pylint: disable=protected-access
+
+    assert write_mock.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_write_audit_batch_with_retry_exhausted(logger):
+    """Batch write stops after max retries."""
+    write_mock = AsyncMock(side_effect=RuntimeError("persistent"))
+
+    with patch.object(logger, "_write_audit_batch", write_mock):
+        await logger._write_audit_batch_with_retry([{"description": "x"}])  # pylint: disable=protected-access
+
+    assert write_mock.await_count == logger._max_retries  # pylint: disable=protected-access

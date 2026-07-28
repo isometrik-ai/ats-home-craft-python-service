@@ -172,3 +172,105 @@ async def test_get_overview_unit_scope():
     assert "p.project_id = $7::uuid" in overview_query
     assert "p.unit_id = $8::uuid" in overview_query
     assert "EXISTS" in overview_query
+
+
+def test_resolve_range_defaults_to_current_month():
+    """Omitted bounds default to the current UTC calendar month."""
+    start, end = VisitorLogsRepository._resolve_range(start_at=None, end_at=None)
+    assert start.tzinfo is not None
+    assert end > start
+    assert start.day == 1
+
+
+def test_resolve_range_rejects_partial_bounds():
+    """start_at and end_at must be supplied together."""
+    with pytest.raises(ValueError, match="must be provided together"):
+        VisitorLogsRepository._resolve_range(
+            start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            end_at=None,
+        )
+
+
+def test_resolve_range_rejects_end_before_start():
+    """end_at must be strictly after start_at."""
+    start = datetime(2026, 6, 30, tzinfo=timezone.utc)
+    end = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="must be after"):
+        VisitorLogsRepository._resolve_range(start_at=start, end_at=end)
+
+
+def test_resolve_range_adds_utc_to_naive_datetimes():
+    """Naive datetimes are treated as UTC."""
+    start = datetime(2026, 6, 1)
+    end = datetime(2026, 6, 30)
+    resolved_start, resolved_end = VisitorLogsRepository._resolve_range(
+        start_at=start,
+        end_at=end,
+    )
+    assert resolved_start.tzinfo == timezone.utc
+    assert resolved_end.tzinfo == timezone.utc
+
+
+def test_current_month_bounds_december():
+    """December rolls end bound into January of the next year."""
+    from unittest.mock import patch
+
+    dec_now = datetime(2026, 12, 15, 12, 0, tzinfo=timezone.utc)
+    with patch("apps.user_service.app.db.repositories.visitor_logs_repository.datetime") as mock_dt:
+        mock_dt.now.return_value = dec_now
+        mock_dt.side_effect = lambda *args, **kwargs: datetime(*args, **kwargs)
+        start, end = VisitorLogsRepository._current_month_bounds()
+    assert start == datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert end == datetime(2027, 1, 1, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_list_logs_entry_method_and_access_status_filters():
+    """Entry method and access status filters are applied."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.list_logs(
+        organization_id="org-1",
+        entry_method="qr_scan",
+        access_status="granted",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        page=1,
+        page_size=20,
+    )
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "ci.entry_method = $4::pass_entry_method" in count_query
+    assert "ci.access_status = $5::pass_access_status" in count_query
+    assert "qr_scan" in count_args
+    assert "granted" in count_args
+
+
+@pytest.mark.asyncio
+async def test_list_logs_tower_filter():
+    """Tower filter scopes to unit tower_id."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.list_logs(
+        organization_id="org-1",
+        tower_id="tower-1",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        page=1,
+        page_size=20,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "u.tower_id = $4::uuid" in count_query
+
+
+@pytest.mark.asyncio
+async def test_get_overview_empty_row():
+    """Overview returns zero metrics when fetchrow is empty."""
+    conn = _FakeConn(row=None)
+    repo = VisitorLogsRepository(db_connection=conn)
+    result = await repo.get_overview(
+        organization_id="org-1",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+    )
+    assert result["total_visitors"] == 0
+    assert result["in_count"] == 0

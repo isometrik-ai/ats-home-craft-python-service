@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -805,3 +806,361 @@ async def test_enqueue_business_overview_enrichment(monkeypatch):
     )
 
     enqueue_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_organization_empty_payload_returns_existing(monkeypatch):
+    """Empty admin update returns existing org metadata without DB write."""
+    repo = _FakeOrgRepo(organization=_org_row())
+    svc = _service(org_repo=repo)
+    monkeypatch.setattr(
+        svc,
+        "_build_admin_update_payload",
+        lambda _update: {},
+    )
+    result = await svc.update_organization(ORG_ID, OrganizationAdminUpdate(name="ignored"))
+    assert result["organization_name"] == "Acme Legal"
+    assert result["old_data"]["name"] == "Acme Legal"
+    assert repo.last_update is None
+
+
+@pytest.mark.asyncio
+async def test_update_organization_memory_and_ai_overview(monkeypatch):
+    """Update with memory/AI settings invalidates cache and returns effective values."""
+    from apps.user_service.app.schemas.ai_overview_settings import (
+        AiOverviewSettingsUpdate,
+    )
+
+    repo = _FakeOrgRepo(organization=_org_row(settings='{"organization_memory":false}'))
+    svc = _service(org_repo=repo)
+    invalidate = MagicMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_memory_service.invalidate_organization_memory_cache",
+        invalidate,
+    )
+    body = OrganizationAdminUpdate(
+        organization_memory=True,
+        ai_overview_settings=AiOverviewSettingsUpdate(business_overview="New overview"),
+    )
+    result = await svc.update_organization(ORG_ID, body)
+    assert result["organization_memory"] is True
+    assert result["ai_overview_settings"]["business_overview"] == "New overview"
+    invalidate.assert_called_once_with(ORG_ID)
+
+
+def test_build_admin_update_payload_ai_overview_none():
+    """Explicit ai_overview_settings=None resets to empty dict in payload."""
+    body = OrganizationAdminUpdate.model_construct(
+        ai_overview_settings=None,
+    )
+    body.model_fields_set.add("ai_overview_settings")
+    payload = OrganizationService._build_admin_update_payload(body)
+    assert payload["ai_overview_settings"] == {}
+
+
+def test_build_organization_payload_isometrik_project_id():
+    """Valid isometrik project id is copied onto org payload."""
+    svc = _service()
+    payload = svc._build_organization_payload(
+        organization_id=ORG_ID,
+        resolved_slug="business-acme",
+        body=_new_org_body(),
+        subscription={"plan_type": PlanType.TRIAL.value},
+        settings={"website_url": "https://acme.example.com"},
+        isometrik_details={"projectId": "proj-123", "userSecret": "secret"},
+    )
+    assert payload["isometrik_project_id"] == "proj-123"
+    assert "isometrik_application_details" in json.loads(payload["settings"])
+
+
+def test_build_organization_payload_invalid_project_id():
+    """Invalid isometrik project id raises InternalServerErrorException."""
+    from libs.shared_utils.http_exceptions import InternalServerErrorException
+
+    svc = _service()
+    with pytest.raises(InternalServerErrorException):
+        svc._build_organization_payload(
+            organization_id=ORG_ID,
+            resolved_slug="business-acme",
+            body=_new_org_body(),
+            subscription={},
+            settings={},
+            isometrik_details={"projectId": 123},
+        )
+
+
+def test_build_subscription_with_model():
+    """Provided subscription model is serialized via model_dump."""
+    from apps.user_service.app.schemas.common import Subscription
+
+    svc = _service()
+    body = _new_org_body()
+    body.company_data = types.SimpleNamespace(
+        company_name=body.company_data.company_name,
+        website_url=body.company_data.website_url,
+        primary_practice_areas=body.company_data.primary_practice_areas,
+        subscription=Subscription(plan_type=PlanType.TRIAL, max_users=10),
+    )
+    sub = svc._build_subscription(body)
+    assert sub["plan_type"] == PlanType.TRIAL.value
+
+
+def test_build_settings_with_provided_settings():
+    """Provided settings payload is serialized instead of derived defaults."""
+    svc = _service()
+    body = _new_org_body()
+    body.company_data = types.SimpleNamespace(
+        company_name=body.company_data.company_name,
+        website_url=body.company_data.website_url,
+        primary_practice_areas=body.company_data.primary_practice_areas,
+        secondary_practice_areas=None,
+        specializations=None,
+        preferred_integration=None,
+        need_help_importing_data=False,
+        need_migration_assistance=False,
+        compliance_security=None,
+        enterprise_features=None,
+        team_setup=None,
+        address=None,
+        settings={"website_url": "https://custom.example"},
+    )
+    settings = svc._build_settings(body)
+    assert settings["website_url"] == "https://custom.example"
+    assert settings["organization_memory"] is True
+
+
+@pytest.mark.asyncio
+async def test_notify_super_admins_no_emails(monkeypatch):
+    """No super admin emails is a no-op."""
+    svc = _service()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.get_system_super_admin_emails",
+        AsyncMock(return_value=[]),
+    )
+    await svc._notify_super_admins("Acme", "owner@example.com")
+
+
+@pytest.mark.asyncio
+async def test_notify_super_admins_all_fail_raises(monkeypatch):
+    """All email failures raise InternalServerErrorException."""
+    from libs.shared_utils.http_exceptions import InternalServerErrorException
+
+    svc = _service()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.get_system_super_admin_emails",
+        AsyncMock(return_value=["a@example.com", "b@example.com"]),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.send_organization_delete_request_email",
+        lambda **kwargs: False,
+    )
+    with pytest.raises(InternalServerErrorException):
+        await svc._notify_super_admins("Acme", "owner@example.com")
+
+
+@pytest.mark.asyncio
+async def test_create_delete_request_swallows_email_errors(monkeypatch):
+    """Email notification failures during delete request are logged, not raised."""
+    repo = _FakeOrgRepo(organization=_org_row())
+    svc = _service(org_repo=repo)
+    svc.delete_request_repository.get_pending_request_by_organization_and_requester = AsyncMock(
+        return_value=None
+    )
+    svc.delete_request_repository.create_delete_request = AsyncMock(return_value={"id": REQUEST_ID})
+    monkeypatch.setattr(
+        svc, "_notify_super_admins", AsyncMock(side_effect=RuntimeError("smtp down"))
+    )
+
+    result = await svc.create_delete_request(ORG_ID)
+    assert result["id"] == REQUEST_ID
+
+
+@pytest.mark.asyncio
+async def test_process_delete_request_not_found():
+    """Missing delete request raises NotFoundException."""
+    svc = _service()
+    svc.delete_request_repository.get_delete_request_by_id = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc.process_delete_request(REQUEST_ID, is_accepted=True, reason="Yes")
+
+
+@pytest.mark.asyncio
+async def test_process_delete_request_org_missing():
+    """Missing organization after delete request raises NotFoundException."""
+    svc = _service(org_repo=_FakeOrgRepo(organization=None))
+    svc.delete_request_repository.get_delete_request_by_id = AsyncMock(
+        return_value={
+            "id": REQUEST_ID,
+            "organization_id": ORG_ID,
+            "requester_id": MEMBER_ID,
+            "status": DeleteRequestStatus.PENDING.value,
+        }
+    )
+    with pytest.raises(NotFoundException):
+        await svc.process_delete_request(REQUEST_ID, is_accepted=True, reason="Yes")
+
+
+@pytest.mark.asyncio
+async def test_approve_delete_request_full_flow(monkeypatch):
+    """Approve path deletes related data, updates request, and emails members."""
+    repo = _FakeOrgRepo(organization=_org_row())
+    svc = _service(org_repo=repo)
+    svc.organization_member_repository.get_all_members_by_organization_id = AsyncMock(
+        return_value=[{"email": "member@example.com"}]
+    )
+    svc.team_repository.delete_all_teams_by_organization_id = AsyncMock()
+    svc.role_repository.delete_all_roles_by_organization_id = AsyncMock()
+    svc.permissions_repository.delete_all_permissions_by_organization_id = AsyncMock()
+    svc.organization_member_repository.delete_all_members_by_organization_id = AsyncMock()
+    svc.delete_request_repository.approve_delete_request = AsyncMock(
+        return_value={
+            "id": REQUEST_ID,
+            "organization_id": ORG_ID,
+            "status": DeleteRequestStatus.APPROVED.value,
+            "review_reason": "Approved",
+        }
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.revoke_organization_sessions_everywhere",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.send_organization_deletion_approved_email",
+        lambda **kwargs: True,
+    )
+    result = await svc._approve_delete_request(
+        request_id=REQUEST_ID,
+        organization_id=ORG_ID,
+        organization_name="Acme Legal",
+        reason="Approved",
+    )
+    assert result["status"] == DeleteRequestStatus.APPROVED.value
+
+
+@pytest.mark.asyncio
+async def test_reject_delete_request_sends_email(monkeypatch):
+    """Reject path updates request and emails requester when profile exists."""
+    svc = _service()
+    svc.organization_member_repository.get_user_profile_by_id = AsyncMock(
+        return_value={"email": "owner@example.com"}
+    )
+    svc.delete_request_repository.reject_delete_request = AsyncMock(
+        return_value={
+            "id": REQUEST_ID,
+            "organization_id": ORG_ID,
+            "status": DeleteRequestStatus.REJECTED.value,
+            "review_reason": "No",
+        }
+    )
+    sent = {"called": False}
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.send_organization_deletion_rejected_email",
+        lambda **kwargs: sent.update({"called": True}),
+    )
+    result = await svc._reject_delete_request(
+        request_id=REQUEST_ID,
+        organization_id=ORG_ID,
+        organization_name="Acme Legal",
+        delete_request={"requester_id": MEMBER_ID},
+        reason="No",
+    )
+    assert result["status"] == DeleteRequestStatus.REJECTED.value
+    assert sent["called"] is True
+
+
+@pytest.mark.asyncio
+async def test_delete_organization_member_audit_fields(monkeypatch):
+    """Delete member builds audit payload with joined/last_active timestamps."""
+    svc = _service()
+    svc.organization_member_repository.get_user_profile_by_id = AsyncMock(
+        return_value={
+            "user_id": MEMBER_ID,
+            "email": "member@example.com",
+            "organization_id": ORG_ID,
+            "role_id": "role-1",
+            "joined_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "last_active_at": datetime(2026, 1, 2, tzinfo=timezone.utc),
+        }
+    )
+    svc.organization_repository.is_user_organization_owner = AsyncMock(return_value=False)
+    svc.organization_member_repository.delete_member_by_user_id = AsyncMock()
+    svc.team_repository.delete_user_from_all_teams = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.revoke_org_member_sessions_everywhere",
+        AsyncMock(),
+    )
+    result = await svc.delete_organization_member(MEMBER_ID)
+    assert result["audit_new"]["status"] == "deleted"
+    assert "joined_at" in result["audit_new"]
+
+
+@pytest.mark.asyncio
+async def test_create_organization_for_owner_forbidden():
+    """create_organization_for_owner requires authenticated user."""
+    svc = OrganizationService(
+        user_context=UserContext(user_id=None, email=None, organization_id=None),
+        db_connection=MagicMock(),
+    )
+    with pytest.raises(ForbiddenException):
+        await svc.create_organization_for_owner(_new_org_body())
+
+
+@pytest.mark.asyncio
+async def test_create_isometrik_ai_agent_best_effort(monkeypatch):
+    """_create_isometrik_ai_agent_best_effort delegates to pulse agent service."""
+    svc = _service()
+    create_mock = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.isometrik_pulse_agent_service."
+        "IsometrikPulseAgentService.create_for_organization_best_effort",
+        create_mock,
+    )
+    await svc._create_isometrik_ai_agent_best_effort(
+        organization_id=ORG_ID,
+        isometrik_details={"projectId": "p1"},
+    )
+    create_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_delete_requests_with_org_filter():
+    """list_delete_requests validates organization_id and paginates."""
+    svc = _service()
+    svc.delete_request_repository.get_delete_requests_list = AsyncMock(
+        return_value=[
+            {
+                "id": REQUEST_ID,
+                "organization_id": ORG_ID,
+                "requester_id": MEMBER_ID,
+                "status": DeleteRequestStatus.PENDING.value,
+                "requested_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+                "updated_at": datetime(2026, 1, 2, tzinfo=timezone.utc),
+            }
+        ]
+    )
+    svc.delete_request_repository.get_delete_requests_count = AsyncMock(return_value=1)
+    result = await svc.list_delete_requests(page=1, page_size=10, organization_id=ORG_ID)
+    assert result["total_count"] == 1
+    assert len(result["data"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_permanently_delete_organization_data(monkeypatch):
+    """_permanently_delete_organization_data cascades deletes and returns emails."""
+    repo = _FakeOrgRepo(organization=_org_row())
+    svc = _service(org_repo=repo)
+    svc.organization_member_repository.get_all_members_by_organization_id = AsyncMock(
+        return_value=[{"email": "a@example.com"}]
+    )
+    svc.team_repository.delete_all_teams_by_organization_id = AsyncMock()
+    svc.role_repository.delete_all_roles_by_organization_id = AsyncMock()
+    svc.permissions_repository.delete_all_permissions_by_organization_id = AsyncMock()
+    svc.organization_member_repository.delete_all_members_by_organization_id = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.organization_service.revoke_organization_sessions_everywhere",
+        AsyncMock(),
+    )
+    emails = await svc._permanently_delete_organization_data(ORG_ID)
+    assert emails == ["a@example.com"]
+    assert repo.deleted_id == ORG_ID

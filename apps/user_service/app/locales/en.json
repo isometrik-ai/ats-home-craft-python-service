@@ -302,14 +302,18 @@
       "role_not_found": "The role you are trying to assign does not exist in this organization.",
       "cannot_change_member_role": "You do not have permission to change member roles.",
       "cannot_change_admin_user_role": "You cannot change the role of an administrator.",
-      "cannot_change_organization_creator_role": "Only the organization creator can change this member's role."
+      "cannot_change_organization_creator_role": "Only the organization creator can change this member's role.",
+      "push_device_registration_failed": "Push device registration failed. Please try again.",
+      "invalid_device_id": "Device identifier is required."
     },
     "success": {
       "email_updated": "User email updated successfully",
       "member_patched": "Member updated successfully",
       "user_banned": "User banned successfully",
       "user_unbanned": "User unbanned successfully",
-      "user_profile_updated": "User profile updated successfully"
+      "user_profile_updated": "User profile updated successfully",
+      "push_device_registered": "Push device registered successfully.",
+      "push_device_unregistered": "Push device unregistered successfully."
     }
   },
   "presigned_url": {

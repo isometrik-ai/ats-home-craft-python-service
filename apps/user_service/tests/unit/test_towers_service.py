@@ -329,3 +329,177 @@ async def test_complete_tower_builder():
 
     assert result["step_key"] == ProjectSetupStep.TOWER_BUILDER.value
     service.setup_service.complete_step.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_tower_success():
+    """Update tower merges patch and returns serialized row."""
+    repo = _FakeTowersRepo(
+        tower={
+            "id": TOWER_ID,
+            "name": "Tower A",
+            "numbering_pattern": UnitNumberingPattern.FLOOR_UNIT.value,
+            "custom_prefix": None,
+        }
+    )
+    service = _service(repo)
+
+    updated = await service.update_tower(
+        project_id=PROJECT_ID,
+        tower_id=TOWER_ID,
+        body=UpdateTowerRequest(name="Tower Alpha"),
+    )
+
+    assert updated["name"] == "Tower Alpha"
+    assert repo.last_update is not None
+
+
+@pytest.mark.asyncio
+async def test_update_tower_duplicate_code():
+    """Update tower maps unique violation to ConflictException."""
+    repo = _FakeTowersRepo(
+        tower={
+            "id": TOWER_ID,
+            "numbering_pattern": UnitNumberingPattern.FLOOR_UNIT.value,
+            "custom_prefix": None,
+        }
+    )
+
+    async def _raise_unique(**kwargs):
+        del kwargs
+        raise UniqueViolationError("duplicate")
+
+    repo.update_tower = _raise_unique
+    service = _service(repo)
+
+    with pytest.raises(ConflictException):
+        await service.update_tower(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            body=UpdateTowerRequest(code="TB"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_tower():
+    """Delete tower returns old_data snapshot."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID, "name": "Tower A", "code": "TA"})
+    service = _service(repo)
+
+    result = await service.delete_tower(project_id=PROJECT_ID, tower_id=TOWER_ID)
+
+    assert result["old_data"]["id"] == TOWER_ID
+    assert result["new_data"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_wings_gates_lifts_floors():
+    """List nested tower entities serializes repository rows."""
+    repo = _FakeTowersRepo(
+        tower={"id": TOWER_ID, "name": "Tower A"},
+        wings=[{"id": WING_ID, "name": "East Wing"}],
+        gates=[{"id": "gate-1", "name": "Gate 1"}],
+        lifts=[{"id": "lift-1", "name": "Lift 1"}],
+        floors=[{"id": "floor-1", "display_name": "Ground"}],
+    )
+    service = _service(repo)
+
+    wings = await service.list_wings(project_id=PROJECT_ID, tower_id=TOWER_ID)
+    gates = await service.list_gates(project_id=PROJECT_ID, tower_id=TOWER_ID)
+    lifts = await service.list_lifts(project_id=PROJECT_ID, tower_id=TOWER_ID)
+    floors = await service.list_floors(project_id=PROJECT_ID, tower_id=TOWER_ID)
+
+    assert wings[0]["name"] == "East Wing"
+    assert gates[0]["name"] == "Gate 1"
+    assert lifts[0]["name"] == "Lift 1"
+    assert floors[0]["display_name"] == "Ground"
+
+
+@pytest.mark.asyncio
+async def test_create_wing_duplicate_code():
+    """Wing insert unique violation becomes ConflictException."""
+    repo = _FakeTowersRepo(
+        tower={"id": TOWER_ID},
+        insert_error=UniqueViolationError("duplicate"),
+    )
+    service = _service(repo)
+
+    with pytest.raises(ConflictException):
+        await service.create_wing(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            body=CreateTowerWingRequest(name="East Wing"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_floor_rejects_unknown_wing():
+    """Floor creation validates wing ownership."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, wing_belongs=False)
+    service = _service(repo)
+
+    with pytest.raises(ValidationException):
+        await service.create_floor(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            body=CreateFloorRequest(level_number=1, display_name="Ground", wing_id=WING_ID),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_floor_duplicate_code():
+    """Floor insert unique violation becomes ConflictException."""
+    repo = _FakeTowersRepo(
+        tower={"id": TOWER_ID},
+        insert_error=UniqueViolationError("duplicate"),
+    )
+    service = _service(repo)
+
+    with pytest.raises(ConflictException):
+        await service.create_floor(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            body=CreateFloorRequest(level_number=1, display_name="Ground"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_gate_not_found():
+    """Deleting missing gate raises NotFoundException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, delete_result=False)
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.delete_gate(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            gate_id="missing-gate",
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_lift_not_found():
+    """Deleting missing lift raises NotFoundException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, delete_result=False)
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.delete_lift(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            lift_id="missing-lift",
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_floor_not_found():
+    """Deleting missing floor raises NotFoundException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, delete_result=False)
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.delete_floor(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            floor_id="missing-floor",
+        )

@@ -16,7 +16,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.walk_in import (
     CreateWalkInRequest,
     RejectWalkInVisitUnitRequest,
+    ResidentWalkInVisitUnitListQuery,
     WalkInFlatInput,
+    WalkInListQuery,
 )
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -301,3 +303,245 @@ async def test_reject_visit_unit():
         event.get("event_type") == WalkInEventType.VISIT_UNIT_REJECTED.value
         for event in repo.events
     )
+
+
+@pytest.mark.asyncio
+async def test_create_walk_in_rejects_invalid_units():
+    """Create fails when flats do not validate against the project."""
+    repo = _FakeWalkInRepo()
+
+    async def _empty(**_kwargs):
+        return []
+
+    repo.fetch_units_for_flats = _empty  # type: ignore[method-assign]
+    service = _service(repo=repo)
+    body = CreateWalkInRequest(
+        visitor_first_name="Sushil",
+        visitor_phone_isd_code="+91",
+        visitor_phone_number="9876543210",
+        visitor_photo_paths=["org/photo.jpg"],
+        flats=[WalkInFlatInput(tower_id=TOWER_ID, unit_id=UNIT_ID)],
+    )
+
+    with pytest.raises(ValidationException):
+        await service.create_walk_in(project_id=PROJECT_ID, body=body)
+
+
+@pytest.mark.asyncio
+async def test_list_project_walk_ins():
+    """List serializes project walk-in summaries."""
+    repo = _FakeWalkInRepo()
+    service = _service(repo=repo)
+
+    items = await service.list_project_walk_ins(
+        project_id=PROJECT_ID,
+        query=WalkInListQuery(status=WalkInStatus.AWAITING),
+    )
+
+    assert items[0]["id"] == ENTRY_ID
+    assert items[0]["status"] == WalkInStatus.AWAITING.value
+    service.setup_service.ensure_project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_resident_visit_units():
+    """Resident list maps repository rows to API items."""
+    repo = _FakeWalkInRepo()
+    service = _service(repo=repo)
+
+    items = await service.list_resident_visit_units(
+        contact_id=CONTACT_ID,
+        query=ResidentWalkInVisitUnitListQuery(status=WalkInVisitUnitStatus.AWAITING),
+    )
+
+    assert items[0]["visit_unit_id"] == VISIT_UNIT_ID
+    assert items[0]["visitor_first_name"] == "Sushil"
+
+
+@pytest.mark.asyncio
+async def test_get_resident_walk_in_success():
+    """Resident detail succeeds when contact can act on a visit unit."""
+    repo = _FakeWalkInRepo()
+    service = _service(repo=repo)
+
+    detail = await service.get_resident_walk_in(
+        contact_id=CONTACT_ID,
+        walk_in_entry_id=ENTRY_ID,
+    )
+
+    assert detail["id"] == ENTRY_ID
+    assert detail["visit_units"][0]["id"] == VISIT_UNIT_ID
+
+
+@pytest.mark.asyncio
+async def test_get_resident_walk_in_not_accessible():
+    """Resident detail is hidden when contact has no linked flat."""
+    repo = _FakeWalkInRepo()
+    repo.resident_can_act_on_unit = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.get_resident_walk_in(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_enter_invalid_status_transition():
+    """Enter fails when header status does not allow entry."""
+    repo = _FakeWalkInRepo()
+    repo.entry = _entry_row(status=WalkInStatus.EXITED.value, approved_flats_count=1)
+    service = _service(repo=repo)
+
+    with pytest.raises(ValidationException):
+        await service.enter_walk_in(project_id=PROJECT_ID, walk_in_entry_id=ENTRY_ID)
+
+
+@pytest.mark.asyncio
+async def test_exit_walk_in_success():
+    """Exit marks visitor exited and records event."""
+    repo = _FakeWalkInRepo()
+    repo.entry = _entry_row(status=WalkInStatus.ENTERED.value, approved_flats_count=1)
+    service = _service(repo=repo)
+
+    result = await service.exit_walk_in(project_id=PROJECT_ID, walk_in_entry_id=ENTRY_ID)
+
+    assert result["status"] == WalkInStatus.EXITED.value
+    assert any(event.get("event_type") == WalkInEventType.EXITED.value for event in repo.events)
+
+
+@pytest.mark.asyncio
+async def test_exit_walk_in_invalid_status():
+    """Exit fails when visitor has not entered."""
+    repo = _FakeWalkInRepo()
+    service = _service(repo=repo)
+
+    with pytest.raises(ValidationException):
+        await service.exit_walk_in(project_id=PROJECT_ID, walk_in_entry_id=ENTRY_ID)
+
+
+@pytest.mark.asyncio
+async def test_approve_visit_unit_not_found():
+    """Approve raises when visit unit is missing."""
+    repo = _FakeWalkInRepo()
+    repo.get_visit_unit = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.approve_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_approve_visit_unit_not_awaiting():
+    """Approve rejects visit units that are not awaiting."""
+    repo = _FakeWalkInRepo()
+    repo.visit_units = [_visit_unit_row(status=WalkInVisitUnitStatus.APPROVED.value)]
+    service = _service(repo=repo)
+
+    with pytest.raises(ValidationException):
+        await service.approve_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_approve_visit_unit_not_accessible():
+    """Approve rejects when resident cannot act on the flat."""
+    repo = _FakeWalkInRepo()
+    repo.resident_can_act_on_unit = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    with pytest.raises(ValidationException):
+        await service.approve_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_approve_visit_unit_update_conflict():
+    """Approve surfaces race when status update returns nothing."""
+    repo = _FakeWalkInRepo()
+    repo.update_visit_unit_status = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    with pytest.raises(ValidationException):
+        await service.approve_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_reject_visit_unit_not_found():
+    """Reject raises when visit unit is missing."""
+    repo = _FakeWalkInRepo()
+    repo.get_visit_unit = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await service.reject_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+            body=RejectWalkInVisitUnitRequest(rejection_reason="No"),
+        )
+
+
+def test_serialize_event_non_dict_payload():
+    """Non-dict event payloads are normalized to empty dict."""
+    service = _service()
+    event = service._serialize_event(
+        {
+            "id": "event-1",
+            "event_type": WalkInEventType.REQUESTED.value,
+            "occurred_at": datetime.now(timezone.utc),
+            "payload": "not-a-dict",
+        }
+    )
+    assert event["payload"] == {}
+
+
+def test_derive_milestones_completed_states():
+    """Milestones reflect approved, entered, and exited states."""
+    service = _service()
+    now = datetime(2026, 7, 27, 10, 0, tzinfo=timezone.utc)
+    milestones = service._derive_milestones(
+        row=_entry_row(
+            status=WalkInStatus.EXITED.value,
+            entered_at=now,
+            exited_at=now,
+        ),
+        events=[
+            {
+                "event_type": WalkInEventType.VISIT_UNIT_APPROVED.value,
+                "occurred_at": now,
+            }
+        ],
+    )
+
+    by_key = {item["key"]: item for item in milestones}
+    assert by_key["requested"]["completed"] is True
+    assert by_key["approved"]["completed"] is True
+    assert by_key["entered"]["completed"] is True
+    assert by_key["exited"]["completed"] is True
+
+
+def test_format_contact_name():
+    """Contact name helper joins non-empty parts."""
+    assert (
+        WalkInService._format_contact_name(
+            {"prefix": "Mr", "first_name": "Resident", "last_name": "Owner"}
+        )
+        == "Mr Resident Owner"
+    )
+    assert WalkInService._format_contact_name({"first_name": "", "last_name": ""}) is None

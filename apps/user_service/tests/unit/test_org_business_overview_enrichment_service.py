@@ -17,6 +17,7 @@ from apps.user_service.app.constants.ai_overview_defaults import (
 )
 from apps.user_service.app.services.org_business_overview_enrichment_service import (
     OrgBusinessOverviewEnrichmentService,
+    _db_repository,
     _has_stored_overview_prompts,
     _is_safe_http_url,
     _log_strands_agent_failure,
@@ -1056,3 +1057,232 @@ def test_strands_response_text_and_parse_json_roundtrip():
     text = json.dumps(payload)
     assert _strands_response_text({"text": text}) == text
     assert _parse_json_object_text(text) == payload
+
+
+def test_normalize_website_url_http_and_bare_domain():
+    """Website normalization upgrades http and bare domains to https."""
+    assert _normalize_website_url("http://example.com") == "https://example.com"
+    assert _normalize_website_url("example.com") == "https://example.com"
+
+
+def test_parse_json_object_text_strips_markdown_fence():
+    """Markdown-fenced JSON is parsed by helper."""
+    raw = '```json\n{"a": 1}\n```'
+    assert _parse_json_object_text(raw) == {"a": 1}
+
+
+def test_should_enqueue_skips_empty_name(monkeypatch: pytest.MonkeyPatch):
+    """Enqueue guard rejects blank organization names."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.org_business_overview_enrichment_service."
+        "strands_enrichment_enabled",
+        lambda: True,
+    )
+    assert (
+        OrgBusinessOverviewEnrichmentService.should_enqueue_after_organization_created(
+            organization_id=ORG_ID,
+            organization_name="   ",
+            settings={},
+        )
+        is False
+    )
+
+
+def test_should_enqueue_skips_existing_business_overview(monkeypatch: pytest.MonkeyPatch):
+    """Enqueue guard skips when business overview already stored."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.org_business_overview_enrichment_service."
+        "strands_enrichment_enabled",
+        lambda: True,
+    )
+    settings = {AI_OVERVIEW_SETTINGS_KEY: {"business_overview": "Already set"}}
+    assert (
+        OrgBusinessOverviewEnrichmentService.should_enqueue_after_organization_created(
+            organization_id=ORG_ID,
+            organization_name="Acme",
+            settings=settings,
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_refetch_ai_overview_fields_end_to_end(monkeypatch: pytest.MonkeyPatch):
+    """refetch_ai_overview_fields orchestrates business overview and prompt refetch."""
+    org_row = {
+        "name": "Acme Corp",
+        "domain": "https://acme.example",
+        "settings": {
+            AI_OVERVIEW_SETTINGS_KEY: {"business_overview": "Stored overview"},
+        },
+    }
+    repo = _mock_org_repo(org_row=org_row)
+    with _strands_enabled_patch(), _iso_settings_patch():
+        monkeypatch.setattr(
+            OrgBusinessOverviewEnrichmentService,
+            "_fetch_business_overview",
+            AsyncMock(return_value="Fresh overview"),
+        )
+        monkeypatch.setattr(
+            OrgBusinessOverviewEnrichmentService,
+            "_generate_overview_prompts",
+            AsyncMock(return_value={"lead": _valid_prompt("lead")}),
+        )
+        monkeypatch.setattr(
+            "apps.user_service.app.services.organization_memory_service."
+            "invalidate_organization_memory_cache",
+            MagicMock(),
+        )
+        result = await OrgBusinessOverviewEnrichmentService.refetch_ai_overview_fields(
+            ORG_ID,
+            ["business_overview", "lead"],
+            organization_repository=repo,
+        )
+    assert "business_overview" in result
+    assert "overview_prompts" in result
+    repo.update_organization.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ensure_organization_website_discovers_and_persists(monkeypatch: pytest.MonkeyPatch):
+    """Missing website triggers discovery and persistence."""
+    repo = _mock_org_repo(org_row={"name": "Acme", "settings": {}})
+    with (
+        patch.object(
+            OrgBusinessOverviewEnrichmentService,
+            "_load_organization_website",
+            AsyncMock(return_value=None),
+        ),
+        patch.object(
+            OrgBusinessOverviewEnrichmentService,
+            "_resolve_website_url",
+            AsyncMock(return_value=("https://discovered.example", "discovered")),
+        ),
+    ):
+        website = await OrgBusinessOverviewEnrichmentService._ensure_organization_website(
+            ORG_ID,
+            "Acme",
+            organization_repository=repo,
+        )
+    assert website == "https://discovered.example"
+    repo.update_organization.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_db_repository_acquires_pool_connection(monkeypatch: pytest.MonkeyPatch):
+    """_db_repository opens pool connection when no repo is injected."""
+    fake_repo = _mock_org_repo(org_row={"name": "Acme"})
+    fake_conn = MagicMock()
+
+    @asynccontextmanager
+    async def _fake_acquire(_pool):
+        yield fake_conn
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.org_business_overview_enrichment_service.get_pool",
+        AsyncMock(return_value=MagicMock()),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.org_business_overview_enrichment_service.AcquireConnection",
+        _fake_acquire,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.org_business_overview_enrichment_service.OrganizationRepository",
+        lambda db_connection: fake_repo,
+    )
+    async with _db_repository(None) as repo:
+        assert repo is fake_repo
+
+
+@pytest.mark.asyncio
+async def test_process_enrichment_event_empty_name(monkeypatch: pytest.MonkeyPatch):
+    """Consumer exits early when sanitized organization name is blank."""
+    with _strands_enabled_patch():
+        pipeline = AsyncMock()
+        monkeypatch.setattr(
+            OrgBusinessOverviewEnrichmentService,
+            "_run_enrichment_pipeline",
+            pipeline,
+        )
+        await OrgBusinessOverviewEnrichmentService.process_enrichment_event(
+            organization_id=ORG_ID,
+            organization_name="   ",
+        )
+    pipeline.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_pipeline_no_overview_persists_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Pipeline stores default prompts when business overview fetch fails."""
+    defaults = AsyncMock()
+    monkeypatch.setattr(
+        OrgBusinessOverviewEnrichmentService,
+        "_resolve_website_url",
+        AsyncMock(return_value=("https://acme.example", "provided")),
+    )
+    monkeypatch.setattr(
+        OrgBusinessOverviewEnrichmentService,
+        "_persist_website_url",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        OrgBusinessOverviewEnrichmentService,
+        "_fetch_business_overview",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        OrgBusinessOverviewEnrichmentService,
+        "_persist_default_prompts",
+        defaults,
+    )
+    await OrgBusinessOverviewEnrichmentService._run_enrichment_pipeline(
+        ORG_ID,
+        "Acme",
+        organization_repository=_mock_org_repo(org_row={"settings": {}}),
+        organization_website="https://acme.example",
+    )
+    defaults.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_persist_ai_settings_no_org_or_empty_patch():
+    """Persist helpers no-op when org missing or patch empty."""
+    repo = _mock_org_repo(org_row=None)
+    await OrgBusinessOverviewEnrichmentService._persist_ai_settings(
+        ORG_ID,
+        organization_repository=repo,
+        business_overview=None,
+        overview_prompts=None,
+    )
+    repo.update_organization.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_load_business_overview_text_missing_paths():
+    """load_business_overview_text returns None for missing org/settings."""
+    repo = _mock_org_repo(org_row=None)
+    assert (
+        await OrgBusinessOverviewEnrichmentService._load_business_overview_text(
+            ORG_ID,
+            organization_repository=repo,
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_business_overview_generic_exception():
+    """Non-HTTP exceptions during overview fetch return None."""
+    with (
+        patch(
+            "apps.user_service.app.services.org_business_overview_enrichment_service.call_strands_agent",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        ),
+        _iso_settings_patch(),
+    ):
+        result = await OrgBusinessOverviewEnrichmentService._fetch_business_overview(
+            "https://acme.example"
+        )
+    assert result is None
