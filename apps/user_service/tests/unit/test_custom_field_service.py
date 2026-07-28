@@ -4176,3 +4176,258 @@ def test_field_cell_resolve_identity_optional_reconcile_nulls():
     service = CustomFieldService(db_connection=None)
     result = service._field_cell_resolve_identity(field_def, "bad", "name", True, "root")
     assert isinstance(result, dict)
+
+
+# ============================================================================
+# ADDITIONAL COVERAGE: merge/parse/reconcile edge branches
+# ============================================================================
+
+
+def test_find_field_cells_skips_non_dict_nodes():
+    """DFS instance lookup ignores non-dict cells in nested trees."""
+    service = CustomFieldService(db_connection=None)
+    roots = [
+        {
+            "field_id": "root",
+            "instance_id": "i-root",
+            "type": "object",
+            "sub_fields": [
+                "bad",
+                {"field_id": "leaf", "instance_id": "target", "type": "text", "value": "x"},
+            ],
+        }
+    ]
+    matches = service._find_field_cells_by_instance_id(roots, "target")
+    assert len(matches) == 1
+
+
+def test_apply_shortcut_patch_list_branch():
+    """Shortcut patch updates list-type cells via items merge."""
+    service = CustomFieldService(db_connection=None)
+    list_row_def = _sub_field_response("row", "row", "text", parent_id="list1")
+    list_def = _custom_field_response(
+        "list1",
+        "tags",
+        "list",
+        sub_fields=[list_row_def],
+    )
+    flat_defs = {"list1": list_def, "row": list_row_def}
+    roots = [
+        {
+            "field_id": "list1",
+            "instance_id": "i-list",
+            "type": "list",
+            "items": [
+                {
+                    "field_id": "row",
+                    "instance_id": "i-row",
+                    "type": "text",
+                    "value": "old",
+                }
+            ],
+        }
+    ]
+    service._apply_instance_id_shortcut_patch(
+        roots,
+        {"instance_id": "i-row", "value": "new"},
+        flat_defs,
+    )
+    assert roots[0]["items"][0]["value"] == "new"
+
+
+def test_apply_shortcut_patch_unknown_field_def_raises():
+    """Shortcut patch raises when stored cell field_id is not in definitions."""
+    service = CustomFieldService(db_connection=None)
+    roots = [{"field_id": "missing", "instance_id": "i1", "type": "text", "value": "x"}]
+    with pytest.raises(ValidationException):
+        service._apply_instance_id_shortcut_patch(
+            roots,
+            {"instance_id": "i1", "value": "y"},
+            {},
+        )
+
+
+def test_enforce_create_and_patch_helper_branches():
+    """Create/patch payload guards cover None inputs and nested enforcement."""
+    service = CustomFieldService(db_connection=None)
+    assert service._parse_roots_create_payload(None) == []
+    assert service._parse_patch_roots_payload(None) == []
+    service._enforce_create_no_server_keys("not-a-dict", "root")
+    service._enforce_patch_no_type_key("not-a-dict", "root")
+    with pytest.raises(ValidationException):
+        service._enforce_create_no_server_keys(
+            {"value": "x", "items": "bad"},
+            "root",
+        )
+    service._enforce_patch_no_type_key(
+        {"sub_fields": ["skip", {"value": "nested"}]},
+        "root",
+    )
+
+
+def test_parse_roots_storage_and_index_stored_roots():
+    """Storage parser accepts JSON string and indexes stored roots by field_id."""
+    service = CustomFieldService(db_connection=None)
+    cell = _root_cell("f1", "hello")
+    parsed = service._parse_roots_storage([cell])
+    assert parsed[0]["value"] == "hello"
+    indexed = CustomFieldService._index_stored_roots(parsed)
+    assert "f1" in indexed
+
+
+def test_shortcut_and_effective_reconcile_helpers():
+    """Shortcut instance id set and reconcile gating behave as expected."""
+    shortcuts = [{"instance_id": "i1"}, {"instance_id": None}]
+    explicit = CustomFieldService._shortcut_target_instance_ids(shortcuts)
+    assert explicit == frozenset({"i1"})
+    assert CustomFieldService._effective_reconcile(True, "i1", frozenset({"i1"})) is False
+    assert CustomFieldService._effective_reconcile(True, "i2", frozenset({"i1"})) is True
+
+
+def test_scalar_stale_and_nulled_reconcile_cells():
+    """Stale scalar detection and optional reconcile nulling cover object/list branches."""
+    service = CustomFieldService(db_connection=None)
+    _custom_field_response("f1", "name", "text")
+    stale_def = _custom_field_response(
+        "f2",
+        "status",
+        "dropdown",
+        type_config={"options": ["a", "b"]},
+    )
+    stored = _root_cell("f2", "gone", field_type="dropdown")
+    assert service._scalar_value_stale_against_def(stored, stale_def) is True
+    obj_def = _custom_field_response("f3", "meta", "object")
+    list_def = _custom_field_response("f4", "rows", "list")
+    nulled_obj = service._nulled_cell_for_optional_reconcile({"instance_id": "i3"}, obj_def)
+    nulled_list = service._nulled_cell_for_optional_reconcile({"instance_id": "i4"}, list_def)
+    assert nulled_obj["sub_fields"] == []
+    assert nulled_list["items"] == []
+    with pytest.raises(ValidationException):
+        service._nulled_on_optional_reconcile_or_raise(
+            ValidationException(message_key="x", custom_code=1),
+            for_reconcile=True,
+            field_def=_custom_field_response("req", "req", "text", is_required=True),
+            stored_cell={},
+        )
+
+
+def test_merge_for_update_append_required_missing_raises():
+    """Required root without stored cell raises during append-only merge."""
+    service = CustomFieldService(db_connection=None)
+    required_def = _custom_field_response("f1", "name", "text", is_required=True)
+    with pytest.raises(ValidationException):
+        service._merge_for_update_append_stored_only(required_def, None, [])
+
+
+@pytest.mark.asyncio
+async def test_merge_for_update_unknown_root_in_patch(monkeypatch):
+    """Patch referencing unknown root field_id raises ValidationException."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        _field_row("f1", "Name", "name", "text"),
+    ]
+    _patch_repo(monkeypatch, fake_repo)
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException):
+        await service.merge_for_update(
+            [{"field_id": "unknown", "value": "x"}],
+            [],
+            EntityType.CONTACT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_merge_for_update_required_explicit_null_raises(monkeypatch):
+    """Explicit null on required root during merge raises."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        _field_row("f1", "Name", "name", "text", is_required=True),
+    ]
+    _patch_repo(monkeypatch, fake_repo)
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException):
+        await service.merge_for_update(
+            [{"field_id": "f1", "value": None}],
+            [],
+            EntityType.CONTACT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_for_create_payload_by_id_branch(monkeypatch):
+    """validate_for_create accepts roots keyed by field_id in payload map."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        _field_row("f1", "Name", "name", "text", is_required=False),
+    ]
+    _patch_repo(monkeypatch, fake_repo)
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.validate_for_create(
+        [{"field_id": "f1", "value": "Ada"}],
+        EntityType.CONTACT,
+    )
+    assert result[0]["value"] == "Ada"
+
+
+def test_resolve_node_read_branches():
+    """resolve_fields_for_read covers dropdown stale, object/list child ordering."""
+    service = CustomFieldService(db_connection=None)
+    dropdown_def = _custom_field_response(
+        "d1",
+        "status",
+        "dropdown",
+        type_config={"options": ["open", "closed"]},
+    )
+    stale_dropdown = service._resolve_node_read_scalar(
+        dropdown_def,
+        _root_cell("d1", "invalid", field_type="dropdown"),
+        {"field_id": "d1"},
+        "dropdown",
+        "dropdown",
+    )
+    assert stale_dropdown.get("_stale") is True
+
+    sub_a = _sub_field_response("sa", "a", "text", parent_id="o1", sort_order=2)
+    sub_b = _sub_field_response("sb", "b", "text", parent_id="o1", sort_order=1)
+    obj_def = _custom_field_response("o1", "obj", "object", sub_fields=[sub_a, sub_b])
+    obj_read = service._resolve_node_read_object_children(
+        obj_def,
+        {
+            "sub_fields": [
+                _root_cell("sb", "second", instance_id="i-b"),
+                _root_cell("sa", "first", instance_id="i-a"),
+            ]
+        },
+        {"field_id": "o1"},
+    )
+    assert len(obj_read["sub_fields"]) == 2
+
+    list_row = _sub_field_response("lr", "row", "text", parent_id="l1")
+    list_def = _custom_field_response("l1", "rows", "list", sub_fields=[list_row])
+    list_read = service._resolve_node_read_list_children(
+        list_def,
+        {"items": [_root_cell("lr", "cell", instance_id="i-row")]},
+        {"field_id": "l1"},
+    )
+    assert list_read["items"][0]["value"] == "cell"
+
+
+def test_coerce_image_field_and_validate_required_fields():
+    """Image coercion and required-field validation cover remaining scalar branches."""
+    service = CustomFieldService(db_connection=None)
+    image_def = _defn(
+        "img",
+        "photo",
+        "image",
+        type_config={"multiple": False},
+    )
+    coerced = service._coerce_field_value(
+        "photo",
+        {"url": "https://cdn.example/x.png", "name": "x.png"},
+        image_def,
+    )
+    assert coerced["url"] == "https://cdn.example/x.png"
+
+    required_def = _defn("f1", "name", "text", is_required=True)
+    with pytest.raises(ValidationException):
+        service._validate_required_fields({"f1": required_def}, {})

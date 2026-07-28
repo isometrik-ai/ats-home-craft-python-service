@@ -1735,3 +1735,235 @@ async def test_maybe_store_profile_photo_download_failure(monkeypatch):
         existing_profile_photo_url=None,
     )
     assert key is None
+
+
+@pytest.mark.asyncio
+async def test_upload_profile_photo_to_r2(monkeypatch):
+    """Profile photo upload uses threaded R2 put_object."""
+    put_mock = MagicMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_r2_client",
+        lambda: MagicMock(put_object=put_mock),
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
+    await svc._upload_profile_photo_to_r2(
+        bucket="media-bucket",
+        object_key="contacts/org/c1/profile.png",
+        image_bytes=b"png",
+        content_type="image/png",
+    )
+    put_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_maybe_store_profile_photo_no_bucket(monkeypatch):
+    """Profile photo storage returns None when bucket is unset."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.shared_settings",
+        MagicMock(cloudflare_r2=MagicMock(bucket_name="")),
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
+    svc._download_profile_photo = AsyncMock(return_value=(b"x", "png", "image/png"))
+    key = await svc._maybe_store_profile_photo_from_enrichment(
+        enriched_profile={"personalInfo": {"profileUrl": "https://cdn.example.com/p.jpg"}},
+        contact_id="c-1",
+        organization_id="org-1",
+        existing_profile_photo_url=None,
+    )
+    assert key is None
+
+
+@pytest.mark.asyncio
+async def test_download_profile_photo_empty_bytes(monkeypatch):
+    """Download returns None when response body is empty."""
+
+    class _StreamResp:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aiter_bytes(self):
+            if False:
+                yield b""
+
+        def raise_for_status(self):
+            return None
+
+        @property
+        def headers(self):
+            return {"content-type": "image/png"}
+
+    class _Client:
+        def stream(self, method, url):
+            del method, url
+            return _StreamResp()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.httpx.AsyncClient",
+        lambda **kwargs: _Client(),
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
+    assert await svc._download_profile_photo(remote_url="https://cdn.example.com/p.jpg") is None
+
+
+def test_build_company_enrichment_update_exception_logged(monkeypatch):
+    """build_company_enrichment_update returns {} when mapping raises."""
+    monkeypatch.setattr(
+        ClientEnrichmentService,
+        "_build_simple_company_updates",
+        staticmethod(lambda _data: (_ for _ in ()).throw(RuntimeError("boom"))),
+    )
+    assert ClientEnrichmentService.build_company_enrichment_update({"companyName": "Acme"}) == {}
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_company_fetches_logo(monkeypatch):
+    """Company enrichment may fetch logo.dev and merge profile_photo_url."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.client_enrichment_enabled",
+        lambda: True,
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
+    svc.enrich_company = AsyncMock(return_value={"request_id": "req-1"})
+    svc._fetch_company_logo_public_url_best_effort = AsyncMock(
+        return_value="https://cdn.example/logo.png"
+    )
+    svc.update_client_enrichment_status = AsyncMock()
+    await svc.run_client_enrichment(
+        client_id="co-1",
+        organization_id="org-1",
+        client_type="company",
+        payload_data={"name": "Acme"},
+        entity_table="companies",
+    )
+    extra = svc.update_client_enrichment_status.await_args.kwargs.get("extra_update")
+    assert extra == {"profile_photo_url": "https://cdn.example/logo.png"}
+
+
+@pytest.mark.asyncio
+async def test_run_enrichment_logs_exception(monkeypatch):
+    """run_client_enrichment swallows API exceptions after logging."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.client_enrichment_enabled",
+        lambda: True,
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
+    svc.enrich_person = AsyncMock(side_effect=RuntimeError("network"))
+    await svc.run_client_enrichment(
+        client_id="c-1",
+        organization_id="org-1",
+        client_type="person",
+        payload_data={"first_name": "Jane", "last_name": "Doe"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_client_enrichment_status_with_extra(monkeypatch):
+    """update_client_enrichment_status merges extra_update fields."""
+    conn = MagicMock()
+    persist = AsyncMock()
+    monkeypatch.setattr(
+        ClientEnrichmentService,
+        "_persist_enrichment_status",
+        persist,
+    )
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
+    await svc.update_client_enrichment_status(
+        client_id="co-1",
+        organization_id="org-1",
+        request_id="req-1",
+        status="requested",
+        conn=conn,
+        entity_table="companies",
+        extra_update={"profile_photo_url": "https://cdn.example/logo.png"},
+    )
+    update_data = persist.await_args.kwargs["update_data"]
+    assert update_data["profile_photo_url"] == "https://cdn.example/logo.png"
+
+
+@pytest.mark.asyncio
+async def test_persist_enrichment_status_contacts_table(monkeypatch):
+    """_persist_enrichment_status updates contacts repository."""
+    conn = MagicMock()
+    repo = MagicMock()
+    repo.update_contact = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ContactsRepository",
+        lambda db_conn: repo,
+    )
+    await ClientEnrichmentService._persist_enrichment_status(
+        db_conn=conn,
+        entity_table="contacts",
+        entity_id="c-1",
+        organization_id="org-1",
+        update_data={"enrichment_status": "requested"},
+    )
+    repo.update_contact.assert_awaited_once()
+
+
+def test_merge_dict_list_and_string_helpers():
+    """Low-level merge/string helpers handle non-string and duplicate keys."""
+    from apps.user_service.app.services.client_enrichment_service import (
+        _merge_dict_list_by_key,
+        _normalize_str_key,
+        _trim_nonempty_str,
+    )
+
+    assert _normalize_str_key(123) == ""
+    assert _trim_nonempty_str("  ") is None
+    merged = _merge_dict_list_by_key(
+        enriched_items=[{"platform": "LinkedIn", "url": "https://li.example"}],
+        existing_items=[{"platform": "linkedin", "url": "https://old.example", "id": "1"}],
+        get_key=lambda item: _normalize_str_key(item.get("platform")),
+        merge_on_match=lambda existing, enriched: ({**existing, **enriched}, True),
+        build_enriched_only=lambda enriched: enriched,
+    )
+    assert merged[0]["url"] == "https://li.example"
+
+
+def test_map_helpers_skip_invalid_items():
+    """Mapping helpers ignore invalid list entries."""
+    assert ClientEnrichmentService._map_linked_pages(
+        ["bad", {"pageName": "Blog", "pageLink": "/b"}]
+    )
+    assert ClientEnrichmentService._map_key_people(["bad", {"name": "CEO"}])
+    assert ClientEnrichmentService._map_products(["bad", {"name": "Widget"}])
+    assert ClientEnrichmentService._map_social_profiles("bad") == []
+
+
+@pytest.mark.asyncio
+async def test_person_webhook_profile_photo_exception_continues(monkeypatch):
+    """Person webhook continues enrichment update when photo storage throws."""
+    conn = MagicMock()
+    repo = MagicMock()
+    repo.get_contact_for_update_by_enrichment_request_id = AsyncMock(
+        return_value={
+            "id": "c-1",
+            "organization_id": "org-1",
+            "additional_data": {},
+        }
+    )
+    repo.update_contact = AsyncMock()
+    svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
+    svc._maybe_store_profile_photo_from_enrichment = AsyncMock(side_effect=RuntimeError("r2 down"))
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.ContactsRepository",
+        lambda db_conn: repo,
+    )
+    result = await svc.process_person_enrichment_webhook(
+        conn,
+        {
+            "request_id": "req-1",
+            "enriched_profile": {"socialProfiles": {"linkedin": "https://li.example"}},
+        },
+    )
+    assert result == ("c-1", "org-1")
+    repo.update_contact.assert_awaited_once()

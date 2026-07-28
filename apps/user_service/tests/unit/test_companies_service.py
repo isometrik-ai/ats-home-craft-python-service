@@ -1272,3 +1272,258 @@ def test_extract_created_contact_json_string():
     )
     assert contact is not None
     assert contact_id == CONTACT_ID
+
+
+def test_extract_created_contact_invalid_json():
+    """Invalid contact JSON string falls back to contact_id only."""
+    svc = _service()
+    contact, contact_id = svc._extract_created_contact(
+        created={"contact": "{bad-json", "contact_id": CONTACT_ID}
+    )
+    assert contact is None
+    assert contact_id == CONTACT_ID
+
+
+def test_normalize_company_detail_edge_cases():
+    """Detail normalizers handle string JSON and non-dict nested values."""
+    from apps.user_service.app.services.companies_service import (
+        _coerce_company_detail_json_lists,
+        _normalize_company_additional_data,
+        _normalize_company_billing_preferences,
+        _normalize_company_detail_contacts,
+        _normalize_company_sales_intelligence,
+        _stringify_company_detail_uuids,
+    )
+
+    details = _company_row(
+        primary_contact_id=CONTACT_ID,
+        billing_preferences='{"currency":"USD"}',
+        additional_data='{"source":"import"}',
+        sales_intelligence='{"score":1}',
+        contacts=[{"id": CONTACT_ID, "phones": "[]"}],
+    )
+    _stringify_company_detail_uuids(details)
+    _coerce_company_detail_json_lists(details)
+    _normalize_company_billing_preferences(details)
+    _normalize_company_additional_data(details)
+    _normalize_company_sales_intelligence(details)
+    _normalize_company_detail_contacts(details)
+    assert isinstance(details["billing_preferences"], dict)
+    assert details["contacts"][0]["phones"] == []
+
+
+def test_schedule_enrichment_enabled(monkeypatch: pytest.MonkeyPatch):
+    """schedule_enrichment queues tasks when enrichment is enabled."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.client_enrichment_enabled",
+        lambda: True,
+    )
+    enrichment_mock = MagicMock()
+    enrichment_mock.run_client_enrichment = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.ClientEnrichmentService.from_settings",
+        lambda: enrichment_mock,
+    )
+    tasks = MagicMock()
+    CompaniesService.schedule_enrichment(
+        background_tasks=tasks,
+        enrichment_targets=[
+            {
+                "client_id": COMPANY_ID,
+                "organization_id": ORG_ID,
+                "client_type": "company",
+                "payload_data": {"name": "Acme"},
+            }
+        ],
+    )
+    tasks.add_task.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_create_lifecycle_events_skips_missing_entity_id():
+    """Lifecycle event creation skips entities without entity_id."""
+    event_service = MagicMock()
+    event_service.create_lifecycle_event = AsyncMock(return_value={"event_id": "e1"})
+    created = await CompaniesService.create_lifecycle_events_for_created_entities(
+        event_service=event_service,
+        created_entities=[{"entity_table": "companies", "action": "create"}],
+        organization_id=ORG_ID,
+        actor_user_id="admin-1",
+    )
+    assert created == []
+    event_service.create_lifecycle_event.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_company_unique_violation_external_contact(monkeypatch: pytest.MonkeyPatch):
+    """Unique violation on external_contact_id maps to ConflictException."""
+    from asyncpg import UniqueViolationError
+
+    _patch_custom_fields(monkeypatch)
+    repo = _FakeCompaniesRepo()
+    svc = _service(companies_repo=repo)
+
+    async def _raise_unique(**kwargs):
+        del kwargs
+        exc = UniqueViolationError("duplicate")
+        exc.constraint_name = "uq_contacts_org_external_contact_id"
+        raise exc
+
+    repo.create_company_with_optional_contact_link = _raise_unique
+    with pytest.raises(ConflictException):
+        await svc.create_company(CreateCompanyRequest(name="Acme Corp"))
+
+
+@pytest.mark.asyncio
+async def test_create_company_invalid_contact_association(monkeypatch: pytest.MonkeyPatch):
+    """Create with missing nested contact raises ValidationException."""
+    _patch_custom_fields(monkeypatch)
+    svc = _service()
+    body = MagicMock()
+    body.contact_association = MagicMock()
+    body.contact_association.add_association = None
+    body.contact_association.create_and_associate = MagicMock(contact=None)
+    with pytest.raises(ValidationException):
+        await svc._prepare_optional_company_contact_association(
+            body=body,
+            contact_phones_payload=[],
+            contact_social_pages_payload=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_company_notes_sales_intelligence_and_phones(monkeypatch: pytest.MonkeyPatch):
+    """Update merges notes, sales_intelligence, and phones into update payload."""
+    _patch_custom_fields(monkeypatch)
+    repo = _FakeCompaniesRepo(
+        for_update=_company_row(notes=[], phones=[]),
+        updated=_company_row(notes=[{"title": "T", "content": "C"}], phones=[{"id": "p1"}]),
+    )
+    svc = _service(companies_repo=repo)
+    body = UpdateCompanyRequest(
+        notes=[],
+        sales_intelligence={"score": 10},
+        phones=[],
+    )
+    body.model_fields_set.update({"notes"})
+    result = await svc.update_company(company_id=COMPANY_ID, body=body)
+    assert result["ok"] is True
+    assert repo.last_update_kwargs is not None
+
+
+@pytest.mark.asyncio
+async def test_update_company_custom_fields_merge(monkeypatch: pytest.MonkeyPatch):
+    """Custom fields merge writes when merged output differs from stored."""
+
+    class _MergeCFS:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        async def merge_for_update(self, patch, existing, entity_type):
+            del patch, entity_type
+            return [{"field_id": "cf1", "value": "new"}]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.CustomFieldService",
+        _MergeCFS,
+    )
+    repo = _FakeCompaniesRepo(
+        for_update=_company_row(custom_fields=[{"field_id": "cf1", "value": "old"}]),
+        updated=_company_row(custom_fields=[{"field_id": "cf1", "value": "new"}]),
+    )
+    svc = _service(companies_repo=repo)
+    await svc.update_company(
+        company_id=COMPANY_ID,
+        body=UpdateCompanyRequest(custom_fields=[{"field_id": "cf1", "value": "new"}]),
+    )
+    assert repo.last_update_kwargs["update_data"].get("custom_fields") is not None
+
+
+@pytest.mark.asyncio
+async def test_apply_company_addresses_update_replaces_row():
+    """Address update replaces matching row in snapshot when repo returns row."""
+    repo = _FakeCompaniesRepo()
+
+    async def _update(**kwargs):
+        return {"id": kwargs["address_id"], "city": "Updated", "country": "US"}
+
+    repo.update_company_address = _update
+    svc = _service(companies_repo=repo)
+    item = AddressUpdateItem(id="addr-1", city="Updated")
+    addresses = AddressesUpdate(update=[item])
+    result = await svc._apply_company_addresses_update(
+        company_id=COMPANY_ID,
+        addresses=addresses,
+        result_list=[{"id": "addr-1", "city": "Old", "country": "US"}],
+    )
+    assert result[0]["city"] == "Updated"
+
+
+@pytest.mark.asyncio
+async def test_create_contact_for_company_no_org(monkeypatch: pytest.MonkeyPatch):
+    """Creating contact without organization_id raises ValidationException."""
+    svc = CompaniesService(
+        db_connection=MagicMock(),
+        user_context=UserContext(user_id="u1", email="u1@example.com", organization_id=None),
+    )
+    svc.contacts_repo = _FakeContactsRepo()
+    from apps.user_service.app.schemas.contacts import CreateContactRequest
+
+    with pytest.raises(ValidationException):
+        await svc._create_contact_for_company_association(
+            create_contact=CreateContactRequest(
+                first_name="Jane", last_name="Doe", phones=[], social_pages=[]
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_contact_for_company_creation_failed(monkeypatch: pytest.MonkeyPatch):
+    """Empty create_contacts result raises ValidationException."""
+    _patch_custom_fields(monkeypatch)
+    svc = _service()
+    svc.contacts_repo.create_contacts = AsyncMock(return_value=[])
+    from apps.user_service.app.schemas.contacts import CreateContactRequest
+
+    with pytest.raises(ValidationException):
+        await svc._create_contact_for_company_association(
+            create_contact=CreateContactRequest(
+                first_name="Jane", last_name="Doe", phones=[], social_pages=[]
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_search_companies_with_embedding(monkeypatch: pytest.MonkeyPatch):
+    """Search adds vector_query when embedding is available."""
+    svc = _service()
+    typesense = MagicMock()
+    typesense.embed_query_text = AsyncMock(return_value=[0.1, 0.2])
+    typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
+    svc._typesense = typesense
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.shared_settings",
+        MagicMock(typesense=MagicMock(vector_distance_threshold=0.5)),
+    )
+    result = await svc.search_companies(query="Acme", page=1, page_size=10, status=None)
+    assert result["total"] == 0
+    assert "vector_query" in typesense.search.await_args.args[0]
+
+
+def test_schedule_company_enrichment_task(monkeypatch: pytest.MonkeyPatch):
+    """Company enrichment task schedules when enrichment inputs change."""
+    enrichment_mock = MagicMock()
+    enrichment_mock.run_client_enrichment = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.ClientEnrichmentService.from_settings",
+        lambda: enrichment_mock,
+    )
+    tasks = MagicMock()
+    body = UpdateCompanyRequest(name="Renamed")
+    CompaniesService._schedule_company_enrichment_task(
+        background_tasks=tasks,
+        company_id=COMPANY_ID,
+        organization_id=ORG_ID,
+        body=body,
+    )
+    tasks.add_task.assert_called_once()
