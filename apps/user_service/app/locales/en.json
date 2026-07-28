@@ -259,7 +259,8 @@
       "exactly_one_primary_phone": "Exactly one phone number must be marked as primary in the phones list.",
       "primary_email_phone_auth_mismatch": "The provided primary email and phone belong to different accounts.",
       "work_history_item_not_found": "Work history item not found",
-      "educational_history_item_not_found": "Educational history item not found"
+      "educational_history_item_not_found": "Educational history item not found",
+      "push_device_registration_failed": "Push device registration failed. Please try again."
     },
     "success": {
       "contact_created": "Contact created successfully.",
@@ -273,7 +274,9 @@
       "contact_vehicle_created": "Contact vehicle added successfully.",
       "contact_household_retrieved": "Contact household members retrieved successfully.",
       "contact_household_member_added": "Contact household member added successfully.",
-      "overview_retrieved": "Contact overview retrieved successfully."
+      "overview_retrieved": "Contact overview retrieved successfully.",
+      "push_device_registered": "Push device registered successfully.",
+      "push_device_unregistered": "Push device unregistered successfully."
     }
   },
   "audit_logs": {
