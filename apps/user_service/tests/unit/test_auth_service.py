@@ -912,7 +912,7 @@ async def test_select_organization_client_user(monkeypatch):
     class _FakeContactsRepo:
         async def is_active_contact_user_for_organization(self, **kwargs):
             del kwargs
-            return True
+            return "contact-1"
 
     monkeypatch.setattr(
         "apps.user_service.app.services.auth_service.SessionRepository",

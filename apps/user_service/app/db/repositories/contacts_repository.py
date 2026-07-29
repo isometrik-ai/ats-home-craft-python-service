@@ -136,13 +136,13 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         *,
         user_id: str,
         organization_id: str,
-    ) -> bool:
-        """Return True if the auth user is an active contact in the organization."""
+    ) -> str | None:
+        """Return the active contact id for the auth user in the organization, or None."""
         if not user_id or not organization_id:
-            return False
+            return None
         row = await self.db_connection.fetchval(
             """
-            SELECT 1
+            SELECT ct.id::text
             FROM contacts ct
             WHERE ct.user_id = $1::uuid
               AND ct.organization_id = $2::uuid
@@ -153,7 +153,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             organization_id,
             ClientStatus.DELETED.value,
         )
-        return row is not None
+        return str(row) if row else None
 
     async def create_contacts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Create contacts in bulk.
