@@ -359,7 +359,7 @@ class ContactUnitsRepository(BaseRepository):
         organization_id: str,
         unit_id: str,
     ) -> list[dict[str, Any]]:
-        """Mark pending/active Owner links on a unit as moved_out."""
+        """Mark pending/active unit allotment links as moved_out (any contact type)."""
         rows = await self.db_connection.fetch(
             """
             UPDATE contact_units cu
@@ -367,12 +367,8 @@ class ContactUnitsRepository(BaseRepository):
                 moved_out_at = COALESCE(cu.moved_out_at, now()),
                 is_default_login = false,
                 updated_at = now()
-            FROM contacts c
             WHERE cu.organization_id = $1::uuid
               AND cu.unit_id = $2::uuid
-              AND c.id = cu.contact_id
-              AND c.organization_id = cu.organization_id
-              AND c.contact_type = 'Owner'
               AND cu.status IN (
                   'pending'::contact_unit_status,
                   'active'::contact_unit_status

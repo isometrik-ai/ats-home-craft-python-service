@@ -43,8 +43,11 @@ LEFT JOIN LATERAL (
           'pending'::contact_unit_status
       )
       AND c.status = 'active'
-      AND c.contact_type = 'Owner'
-    ORDER BY cu.is_primary DESC, cu.sort_order, cu.created_at
+    ORDER BY
+        CASE WHEN c.contact_type = 'Owner' THEN 0 ELSE 1 END,
+        cu.is_primary DESC,
+        cu.sort_order,
+        cu.created_at
     LIMIT 1
 ) owner_row ON TRUE
 """

@@ -436,7 +436,7 @@ async def test_contact_exists():
 
 @pytest.mark.asyncio
 async def test_release_unit_owner_links():
-    """release_unit_owner_links marks owner links moved_out."""
+    """release_unit_owner_links marks pending/active allotment links moved_out."""
     conn = _FakeConn(rows=[{"id": CU_ID, "contact_id": CONTACT_ID, "status": "moved_out"}])
     repo = ContactUnitsRepository(db_connection=conn)
 
@@ -444,7 +444,8 @@ async def test_release_unit_owner_links():
 
     assert rows[0]["status"] == "moved_out"
     query, _ = conn.fetch_calls[0]
-    assert "c.contact_type = 'Owner'" in query
+    assert "contact_type" not in query
+    assert "'pending'::contact_unit_status" in query
 
 
 @pytest.mark.asyncio

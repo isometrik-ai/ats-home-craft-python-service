@@ -330,7 +330,7 @@ class ContactUnitsService:
         project_id: str | None = None,
         assign_date: date | None = None,
     ) -> dict[str, Any]:
-        """Assign or re-open a pending owner allotment and mark the unit occupied."""
+        """Assign or re-open a pending unit allotment and mark the unit occupied."""
         org_id = self.user_context.organization_id
         assert org_id
         unit = await self.repo.get_unit_project(
@@ -421,7 +421,7 @@ class ContactUnitsService:
         project_id: str,
         unit_id: str,
     ) -> dict[str, Any]:
-        """Remove the current Owner allotment from a unit and mark it vacant."""
+        """Remove the current unit allotment and mark the unit vacant."""
         org_id = self.user_context.organization_id
         assert org_id
         unit = await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
@@ -458,7 +458,7 @@ class ContactUnitsService:
         is_primary: bool = True,
         relationship: str = ContactUnitRelationship.SELF.value,
     ) -> dict[str, Any]:
-        """Replace the current Owner on a unit with a new contact."""
+        """Replace the current unit assignee with a new contact."""
         org_id = self.user_context.organization_id
         assert org_id
         await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)

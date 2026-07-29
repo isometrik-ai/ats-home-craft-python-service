@@ -544,7 +544,7 @@ class UnitsRepository(BaseRepository):
         organization_id: str,
         unit_id: str,
     ) -> dict[str, Any] | None:
-        """Return the Owner contact linked to a unit (pending or active allotment)."""
+        """Return the primary unit assignee contact (pending or active allotment)."""
         row = await self.db_connection.fetchrow(
             f"""
             SELECT

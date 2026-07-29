@@ -1061,6 +1061,7 @@ async def add_contact_household_member(
     summary="Pre-assign a unit to a contact (admin allotment)",
     description=(
         "Creates a pending contact_units row for contact onboarding. "
+        "Any contact type (Owner, Tenant, Family, etc.) may be assigned. "
         "Requires assign_date (YYYY-MM-DD)."
     ),
     responses=COMMON_ERROR_RESPONSES,

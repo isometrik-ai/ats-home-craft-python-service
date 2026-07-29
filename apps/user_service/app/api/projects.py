@@ -2452,7 +2452,7 @@ async def list_unit_passes(
     status_code=http_status.HTTP_200_OK,
     summary="Unassign owner from a unit",
     description=(
-        "Marks the current Owner contact_units link as moved_out and sets "
+        "Marks pending/active contact_units allotment links as moved_out and sets "
         "the unit inventory status to vacant."
     ),
     responses=COMMON_ERROR_RESPONSES,
@@ -2503,7 +2503,7 @@ async def unassign_unit_owner(
     status_code=http_status.HTTP_200_OK,
     summary="Reassign unit owner",
     description=(
-        "Replaces the current Owner on a unit with another contact in one step. "
+        "Replaces the current unit assignee with another contact in one step. "
         "Works for pending or active allotments and sets the unit to occupied."
     ),
     responses=COMMON_ERROR_RESPONSES,
