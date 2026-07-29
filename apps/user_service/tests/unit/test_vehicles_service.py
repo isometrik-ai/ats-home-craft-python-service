@@ -728,6 +728,116 @@ async def test_review_vehicle_update_returns_none():
 
 
 @pytest.mark.asyncio
+async def test_admin_delete_vehicle_pending_withdraws():
+    """Admin delete hard-deletes pending vehicle requests."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+        "project_id": "p1",
+    }
+    svc.repo.delete.return_value = {"id": "v1"}
+
+    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+
+    assert result is None
+    svc.repo.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_vehicle_approved_soft_removes():
+    """Admin delete soft-removes approved vehicles."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.APPROVED.value,
+        "project_id": "p1",
+        "parking_slot_id": None,
+    }
+    svc.repo.soft_remove.return_value = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "MH12AB1234",
+        "photo_paths": [],
+        "status": VehicleStatus.REMOVED.value,
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+
+    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+
+    assert result["status"] == VehicleStatus.REMOVED.value
+    svc.repo.soft_remove.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_vehicle_rejected_hard_deletes():
+    """Admin delete hard-deletes rejected vehicle records."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.REJECTED.value,
+        "project_id": "p1",
+    }
+    svc.repo.delete.return_value = {"id": "v1"}
+
+    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+
+    assert result is None
+    svc.repo.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
+    """Project-scoped admin delete resolves contact_id then removes vehicle."""
+    svc = _service()
+    svc.repo.get_by_project.return_value = {
+        "id": "v1",
+        "contact_id": "c1",
+        "status": VehicleStatus.APPROVED.value,
+        "project_id": "p1",
+        "parking_slot_id": None,
+    }
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "contact_id": "c1",
+        "status": VehicleStatus.APPROVED.value,
+        "project_id": "p1",
+        "parking_slot_id": None,
+    }
+    svc.repo.soft_remove.return_value = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "MH12AB1234",
+        "photo_paths": [],
+        "status": VehicleStatus.REMOVED.value,
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+
+    result = await svc.admin_delete_project_vehicle(project_id="p1", vehicle_id="v1")
+
+    svc.repo.get_by_project.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        vehicle_id="v1",
+    )
+    assert result["status"] == VehicleStatus.REMOVED.value
+
+
+@pytest.mark.asyncio
 async def test_complete_vehicles_step_not_found():
     """Complete step fails when contact unit is missing."""
     svc = _service()

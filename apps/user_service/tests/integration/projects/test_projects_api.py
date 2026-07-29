@@ -1776,3 +1776,25 @@ async def test_review_vehicle_request(monkeypatch, client):
     )
     body = assert_success(res, 200)
     assert body["data"]["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_delete_project_vehicle(monkeypatch, client):
+    """DELETE project vehicles removes a vehicle."""
+
+    _patch_projects_access(monkeypatch)
+
+    async def fake_admin_delete_project_vehicle(_self, *, project_id: str, vehicle_id: str):
+        del _self
+        assert project_id == PROJECT_ID
+        assert vehicle_id == VEHICLE_ID
+        return {**_FAKE_VEHICLE, "status": "removed"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.admin_delete_project_vehicle",
+        fake_admin_delete_project_vehicle,
+    )
+
+    res = await client.delete(f"/v1/projects/{PROJECT_ID}/vehicles/{VEHICLE_ID}")
+    body = assert_success(res, 200)
+    assert body["data"]["status"] == "removed"

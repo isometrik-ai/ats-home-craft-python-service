@@ -371,6 +371,69 @@ class VehiclesService:
             )
         return self._normalize_vehicle(row)
 
+    async def admin_delete_vehicle(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any] | None:
+        """Admin delete/remove a vehicle for a contact."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        existing = await self.repo.get_by_id(
+            organization_id=org_id,
+            contact_id=contact_id,
+            vehicle_id=vehicle_id,
+        )
+        if not existing:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        status = str(existing.get("status") or "")
+        if status == VehicleStatus.PENDING.value:
+            await self.withdraw_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+            return None
+        if status == VehicleStatus.APPROVED.value:
+            return await self.remove_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+        if status == VehicleStatus.REJECTED.value:
+            await self.repo.delete(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+            )
+            return None
+
+        raise ValidationException(
+            message_key="contact_onboarding.errors.vehicle_remove_not_allowed",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    async def admin_delete_project_vehicle(
+        self,
+        *,
+        project_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any] | None:
+        """Admin delete/remove a vehicle scoped to a project."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        existing = await self.repo.get_by_project(
+            organization_id=org_id,
+            project_id=project_id,
+            vehicle_id=vehicle_id,
+        )
+        if not existing:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return await self.admin_delete_vehicle(
+            contact_id=str(existing["contact_id"]),
+            vehicle_id=vehicle_id,
+        )
+
     async def list_project_vehicles(
         self,
         *,

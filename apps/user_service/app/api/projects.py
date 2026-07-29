@@ -3210,3 +3210,58 @@ async def review_project_vehicle_request(
         status_code=http_status.HTTP_200_OK,
         data=data,
     )
+
+
+@handle_api_exceptions("delete project vehicle")
+@router.delete(
+    "/{project_id}/vehicles/{vehicle_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Remove or delete a project vehicle",
+    description=(
+        "Admin removes a vehicle in the project. Pending and rejected requests are hard-deleted; "
+        "approved vehicles are soft-removed and any assigned parking slot is released."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="vehicles",
+    category="PROJECT_SETUP",
+)
+async def delete_project_vehicle(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    vehicle_id: str = Path(..., description="Vehicle identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Remove or delete a vehicle registered in a project (admin)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = VehiclesService(db_connection=db_connection, user_context=user_context)
+    data = await service.admin_delete_project_vehicle(
+        project_id=project_id,
+        vehicle_id=vehicle_id,
+    )
+    _set_audit(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Removed vehicle: {vehicle_id}",
+        old_data={"project_id": project_id, "vehicle_id": vehicle_id},
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.vehicle_deleted",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
+    )
