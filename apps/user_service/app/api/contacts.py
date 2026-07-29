@@ -781,8 +781,9 @@ async def enrich_contact(
     status_code=http_status.HTTP_200_OK,
     summary="List units assigned to a contact",
     description=(
-        "Returns contact_units rows for the contact with unit display fields. "
-        "Optional status filter; omit to return pending, active, and moved_out."
+        "Returns contact_units rows for the contact with unit display fields "
+        "including assign_date. Optional status filter; omit to return pending, "
+        "active, and moved_out."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -1058,7 +1059,10 @@ async def add_contact_household_member(
     "/{contact_id}/units",
     status_code=http_status.HTTP_201_CREATED,
     summary="Pre-assign a unit to a contact (admin allotment)",
-    description="Creates a pending contact_units row for contact onboarding.",
+    description=(
+        "Creates a pending contact_units row for contact onboarding. "
+        "Requires assign_date (YYYY-MM-DD)."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("30/minute")

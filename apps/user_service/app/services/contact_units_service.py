@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from typing import Any
 
 import asyncpg
@@ -39,6 +40,24 @@ class ContactUnitsService:
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
         self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
 
+    @staticmethod
+    def _format_assign_date(value: Any) -> str | None:
+        """Format assigned_at to an ISO date string for API responses."""
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value.date().isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, str):
+            return value[:10]
+        return str(value)[:10]
+
+    @staticmethod
+    def _assign_date_to_utc_datetime(assign_date: date) -> datetime:
+        """Convert an admin assign date to UTC midnight."""
+        return datetime.combine(assign_date, datetime.min.time(), tzinfo=timezone.utc)
+
     def _normalize_unit_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact_units row to API response shape."""
         return {
@@ -58,6 +77,7 @@ class ContactUnitsService:
             "contact_type": row.get("contact_type"),
             "first_name": row.get("first_name"),
             "last_name": row.get("last_name"),
+            "assign_date": self._format_assign_date(row.get("assigned_at")),
             "created_at": format_iso_datetime(row.get("created_at")),
         }
 
@@ -308,6 +328,7 @@ class ContactUnitsService:
         is_primary: bool,
         relationship: str,
         project_id: str | None = None,
+        assign_date: date | None = None,
     ) -> dict[str, Any]:
         """Assign or re-open a pending owner allotment and mark the unit occupied."""
         org_id = self.user_context.organization_id
@@ -359,12 +380,17 @@ class ContactUnitsService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
+        assigned_at = (
+            self._assign_date_to_utc_datetime(assign_date) if assign_date is not None else None
+        )
+
         if existing and existing.get("status") == ContactUnitStatus.MOVED_OUT.value:
             row = await self.repo.reactivate_allotment(
                 organization_id=org_id,
                 contact_unit_id=str(existing["id"]),
                 is_primary=is_primary,
                 relationship=relationship,
+                assigned_at=assigned_at,
             )
             if not row:
                 raise ValidationException(
@@ -379,6 +405,7 @@ class ContactUnitsService:
                 contact_id=contact_id,
                 is_primary=is_primary,
                 relationship=relationship,
+                assigned_at=assigned_at,
             )
 
         await self.units_repo.mark_unit_occupied(
@@ -464,9 +491,17 @@ class ContactUnitsService:
         body: AdminAssignUnitRequest,
     ) -> dict[str, Any]:
         """Admin pre-allotment: link a unit to a contact as pending."""
-        return await self._create_unit_allotment(
+        org_id = self.user_context.organization_id
+        assert org_id
+        row = await self._create_unit_allotment(
             unit_id=body.unit_id,
             contact_id=contact_id,
             is_primary=body.is_primary,
             relationship=body.relationship.value,
+            assign_date=body.assign_date,
         )
+        full = await self.repo.get_by_id(
+            organization_id=org_id,
+            contact_unit_id=str(row["id"]),
+        )
+        return self._normalize_unit_row(full or row)

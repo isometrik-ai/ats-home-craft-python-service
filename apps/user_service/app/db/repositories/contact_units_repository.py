@@ -43,6 +43,7 @@ SELECT
   c.contact_type,
   c.first_name,
   c.last_name,
+  cu.assigned_at,
   cu.created_at
 FROM contact_units cu
 JOIN units u ON u.id = cu.unit_id
@@ -394,6 +395,7 @@ class ContactUnitsRepository(BaseRepository):
         contact_unit_id: str,
         is_primary: bool,
         relationship: str,
+        assigned_at: Any | None = None,
     ) -> dict[str, Any] | None:
         """Re-open a moved_out contact_units row as pending."""
         row = await self.db_connection.fetchrow(
@@ -402,6 +404,7 @@ class ContactUnitsRepository(BaseRepository):
             SET status = $4::contact_unit_status,
                 is_primary = $5,
                 relationship = $6::contact_unit_relationship,
+                assigned_at = COALESCE($7::timestamptz, now()),
                 moved_out_at = NULL,
                 updated_at = now()
             WHERE organization_id = $1::uuid
@@ -415,6 +418,7 @@ class ContactUnitsRepository(BaseRepository):
             ContactUnitStatus.PENDING.value,
             is_primary,
             relationship,
+            assigned_at,
         )
         return dict(row) if row else None
 
@@ -702,17 +706,19 @@ class ContactUnitsRepository(BaseRepository):
         is_primary: bool = False,
         relationship: str = "self",
         status: str = ContactUnitStatus.PENDING.value,
+        assigned_at: Any | None = None,
     ) -> dict[str, Any]:
         """Insert a contact-unit allotment row."""
         row = await self.db_connection.fetchrow(
             """
             INSERT INTO contact_units (
                 organization_id, project_id, unit_id, contact_id,
-                is_primary, status, relationship
+                is_primary, status, relationship, assigned_at
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5,
-                $6::contact_unit_status, $7::contact_unit_relationship
+                $6::contact_unit_status, $7::contact_unit_relationship,
+                COALESCE($8::timestamptz, now())
             )
             RETURNING id::text AS id, status::text AS status
             """,
@@ -723,6 +729,7 @@ class ContactUnitsRepository(BaseRepository):
             is_primary,
             status,
             relationship,
+            assigned_at,
         )
         return dict(row)
 

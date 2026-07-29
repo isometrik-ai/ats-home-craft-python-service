@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -427,6 +427,7 @@ class AdminAssignUnitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     unit_id: str
+    assign_date: date
     is_primary: bool = False
     relationship: ContactUnitRelationship = ContactUnitRelationship.SELF
 
@@ -452,6 +453,7 @@ class ContactUnitAssignmentResponse(BaseModel):
     contact_type: str | None = None
     first_name: str | None = None
     last_name: str | None = None
+    assign_date: str | None = None
     created_at: str | None = None
 
 
