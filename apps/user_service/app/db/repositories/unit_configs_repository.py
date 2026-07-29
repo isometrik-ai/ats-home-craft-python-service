@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.db.repositories.units_repository import (
+    _UNIT_OWNER_LATERAL_JOIN,
+    _UNIT_OWNER_SELECT_COLUMNS,
+)
 
 _CONFIG_COLUMN_CASTS: dict[str, str] = {
     "config_kind": "::unit_config_kind",
@@ -182,12 +186,21 @@ class UnitConfigsRepository(BaseRepository):
     async def list_plot_items(
         self, *, organization_id: str, config_id: str
     ) -> list[dict[str, Any]]:
-        """List plot items for a config."""
+        """List plot items for a config with linked unit owner summary."""
         rows = await self.db_connection.fetch(
-            """
-            SELECT * FROM plot_config_items
-            WHERE organization_id = $1::uuid AND config_id = $2::uuid
-            ORDER BY sort_order, plot_no
+            f"""
+            SELECT
+                pci.*,
+                u.id AS unit_id,
+                u.status AS unit_status,
+                {_UNIT_OWNER_SELECT_COLUMNS}
+            FROM plot_config_items pci
+            LEFT JOIN units u
+                ON u.plot_item_id = pci.id
+               AND u.organization_id = pci.organization_id
+            {_UNIT_OWNER_LATERAL_JOIN}
+            WHERE pci.organization_id = $1::uuid AND pci.config_id = $2::uuid
+            ORDER BY pci.sort_order, pci.plot_no
             """,
             organization_id,
             config_id,

@@ -26,6 +26,7 @@ from apps.user_service.app.services.units_service import (
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.project_serialization import serialize_row
+from apps.user_service.app.utils.unit_list_serialization import build_unit_list_owner
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -266,7 +267,23 @@ class UnitConfigsService:
         rows = await self.configs_repo.list_plot_items(
             organization_id=self._org_id, config_id=config_id
         )
-        return [serialize_row(row) for row in rows]
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = serialize_row(row)
+            payload["owner"] = build_unit_list_owner(row)
+            payload["unit_id"] = str(row["unit_id"]) if row.get("unit_id") else None
+            payload["unit_status"] = row.get("unit_status")
+            for key in (
+                "owner_contact_id",
+                "owner_prefix",
+                "owner_first_name",
+                "owner_last_name",
+                "owner_phones",
+                "owner_emails",
+            ):
+                payload.pop(key, None)
+            items.append(payload)
+        return items
 
     async def delete_plot_item(
         self, *, project_id: str, config_id: str, item_id: str

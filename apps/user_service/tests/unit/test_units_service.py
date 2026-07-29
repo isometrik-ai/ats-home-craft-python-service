@@ -11,9 +11,6 @@ from apps.user_service.app.services.units_service import (
     UnitsService,
     build_location_label,
     build_plot_unit_code,
-    format_contact_display_name,
-    format_primary_contact_email,
-    format_primary_contact_phone,
     pick_unit_owner,
     plot_item_status_to_unit_status,
     resolve_carpet_area_sqft,
@@ -21,6 +18,11 @@ from apps.user_service.app.services.units_service import (
     resolve_unit_facing,
     resolve_unit_property_type,
     serialize_unit_list_item,
+)
+from apps.user_service.app.utils.unit_list_serialization import (
+    format_contact_display_name,
+    format_primary_contact_email,
+    format_primary_contact_phone,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
 
@@ -105,6 +107,34 @@ def test_resolve_unit_property_type_from_config_kind():
     assert resolve_unit_property_type({"plot_item_id": "plot-1"}) == "plots"
 
 
+def test_build_unit_list_owner_from_join_columns():
+    """Owner summary helper maps joined owner columns."""
+    from apps.user_service.app.utils.unit_list_serialization import (
+        build_unit_list_owner,
+    )
+
+    owner = build_unit_list_owner(
+        {
+            "owner_contact_id": "c-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+            "owner_phones": [
+                {
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "is_primary": True,
+                }
+            ],
+            "owner_emails": [{"email": "rajesh@example.com", "is_primary": True}],
+        }
+    )
+
+    assert owner is not None
+    assert owner["display_name"] == "Mr. Rajesh Kapoor"
+    assert owner["phone"] == "+919876543210"
+
+
 def test_serialize_unit_list_item_builds_registry_row():
     """Registry list row includes UI fields and owner summary."""
     item = serialize_unit_list_item(
@@ -184,6 +214,31 @@ def test_list_item_shows_owner_and_is_sold_when_vacant_but_allotted():
     assert item["status"] == "vacant"
     assert item["is_sold"] is True
     assert item["owner"]["contact_id"] == "c-1"
+
+
+def test_list_item_plot_with_non_owner_assignee():
+    """Plot list rows include assigned contact even when contact_type is not Owner."""
+    item = serialize_unit_list_item(
+        {
+            "id": "plot-unit-1",
+            "code": "PLT2-V-01",
+            "status": "occupied",
+            "sort_order": 0,
+            "resolved_property_type": "plots",
+            "resolved_config_kind": "plot",
+            "config_display_label": "30×50 Corner Villa Plot",
+            "owner_contact_id": "c-plot",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Ravi",
+            "owner_last_name": "Sharma",
+            "owner_phones": [],
+            "owner_emails": [],
+        }
+    )
+
+    assert item["property_type"] == "plots"
+    assert item["owner"]["contact_id"] == "c-plot"
+    assert item["owner"]["display_name"] == "Mr. Ravi Sharma"
 
 
 def test_list_item_occupied_without_owner():

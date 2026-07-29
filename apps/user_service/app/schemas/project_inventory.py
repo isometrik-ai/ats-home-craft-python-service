@@ -475,6 +475,7 @@ class InventorySummaryPlotItem(BaseModel):
     sort_order: int = Field(..., ge=0)
     unit_id: str | None = None
     unit_status: str | None = None
+    owner: UnitListOwner | None = None
 
 
 class InventorySummaryPlotConfig(BaseModel):

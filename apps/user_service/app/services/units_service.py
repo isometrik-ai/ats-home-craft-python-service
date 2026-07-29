@@ -39,60 +39,14 @@ from apps.user_service.app.services.inventory_service import (
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.project_serialization import serialize_row
+from apps.user_service.app.utils.unit_list_serialization import (
+    build_unit_list_owner,
+    format_contact_display_name,
+    format_primary_contact_email,
+    format_primary_contact_phone,
+)
 from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
-
-
-def format_contact_display_name(
-    *,
-    prefix: str | None,
-    first_name: str | None,
-    last_name: str | None,
-) -> str:
-    """Build a display name from contact name parts."""
-    return " ".join(
-        part
-        for part in [
-            (prefix or "").strip(),
-            (first_name or "").strip(),
-            (last_name or "").strip(),
-        ]
-        if part
-    ).strip()
-
-
-def _select_primary_jsonb_item(items: Any) -> dict[str, Any] | None:
-    """Return the primary JSONB list item, or the first item when none is primary."""
-    if not isinstance(items, list):
-        return None
-    for item in items:
-        if isinstance(item, dict) and item.get("is_primary"):
-            return item
-    for item in items:
-        if isinstance(item, dict):
-            return item
-    return None
-
-
-def format_primary_contact_phone(phones: Any) -> str | None:
-    """Return the primary phone number from a contact phones JSONB list."""
-    phone = _select_primary_jsonb_item(phones)
-    if not phone:
-        return None
-    isd_code = str(phone.get("phone_isd_code") or "").strip()
-    number = str(phone.get("phone_number") or "").strip()
-    if not number:
-        return None
-    return f"{isd_code}{number}".strip() if isd_code else number
-
-
-def format_primary_contact_email(emails: Any) -> str | None:
-    """Return the primary email address from a contact emails JSONB list."""
-    email_item = _select_primary_jsonb_item(emails)
-    if not email_item:
-        return None
-    email = str(email_item.get("email") or "").strip()
-    return email or None
 
 
 def build_plot_unit_code(*, config_code: str, plot_no: str) -> str:
@@ -160,21 +114,9 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
         floor_display_name=row.get("floor_display_name"),
         floor_level_number=row.get("floor_level_number"),
     )
-    owner_display_name = format_contact_display_name(
-        prefix=row.get("owner_prefix"),
-        first_name=row.get("owner_first_name"),
-        last_name=row.get("owner_last_name"),
-    )
     status = str(row.get("status") or "")
+    owner = build_unit_list_owner(row)
     owner_contact_id = row.get("owner_contact_id")
-    owner = None
-    if owner_contact_id:
-        owner = {
-            "contact_id": str(owner_contact_id),
-            "display_name": owner_display_name or None,
-            "phone": format_primary_contact_phone(row.get("owner_phones")),
-            "email": format_primary_contact_email(row.get("owner_emails")),
-        }
 
     config_display_label = (
         row.get("config_display_label") or row.get("config_name") or row.get("plot_description")

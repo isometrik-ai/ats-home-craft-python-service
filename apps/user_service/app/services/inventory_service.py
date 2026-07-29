@@ -23,6 +23,7 @@ from apps.user_service.app.schemas.project_inventory import (
     InventorySummaryPlotItem,
     InventorySummaryResponse,
     InventorySummaryUnit,
+    UnitListOwner,
     UpsertFloorInventoryRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
@@ -31,6 +32,7 @@ from apps.user_service.app.utils.project_serialization import (
     serialize_row,
     serialize_value,
 )
+from apps.user_service.app.utils.unit_list_serialization import build_unit_list_owner
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -169,6 +171,8 @@ def build_inventory_summary(
     items_by_config: dict[str, list[InventorySummaryPlotItem]] = defaultdict(list)
     for item in plot_items:
         config_id = str(item["config_id"])
+        owner_payload = build_unit_list_owner(item)
+        owner = UnitListOwner.model_validate(owner_payload) if owner_payload else None
         items_by_config[config_id].append(
             InventorySummaryPlotItem(
                 id=str(item["id"]),
@@ -180,6 +184,7 @@ def build_inventory_summary(
                 sort_order=int(item.get("sort_order") or 0),
                 unit_id=str(item["unit_id"]) if item.get("unit_id") else None,
                 unit_status=str(item["unit_status"]) if item.get("unit_status") else None,
+                owner=owner,
             )
         )
 

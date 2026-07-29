@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.db.repositories.units_repository import (
+    _UNIT_OWNER_LATERAL_JOIN,
+    _UNIT_OWNER_SELECT_COLUMNS,
+)
 
 
 class InventoryRepository(BaseRepository):
@@ -215,9 +219,9 @@ class InventoryRepository(BaseRepository):
     async def list_summary_plot_items(
         self, *, organization_id: str, project_id: str
     ) -> list[dict[str, Any]]:
-        """List plot items with optional linked unit status."""
+        """List plot items with optional linked unit status and owner summary."""
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
                 pci.id,
                 pci.config_id,
@@ -228,7 +232,8 @@ class InventoryRepository(BaseRepository):
                 pci.is_corner,
                 pci.sort_order,
                 u.id AS unit_id,
-                u.status AS unit_status
+                u.status AS unit_status,
+                {_UNIT_OWNER_SELECT_COLUMNS}
             FROM plot_config_items pci
             JOIN unit_configs uc
                 ON uc.id = pci.config_id
@@ -236,6 +241,7 @@ class InventoryRepository(BaseRepository):
             LEFT JOIN units u
                 ON u.plot_item_id = pci.id
                AND u.organization_id = pci.organization_id
+            {_UNIT_OWNER_LATERAL_JOIN}
             WHERE pci.organization_id = $1::uuid
               AND uc.project_id = $2::uuid
               AND uc.config_kind = 'plot'::unit_config_kind

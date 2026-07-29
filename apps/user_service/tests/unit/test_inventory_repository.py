@@ -233,3 +233,5 @@ async def test_list_summary_plot_items():
     assert items[0]["plot_no"] == "P-01"
     query, _ = conn.fetch_calls[0]
     assert "FROM plot_config_items pci" in query
+    assert "owner_row.owner_contact_id" in query
+    assert "contact_units cu" in query
