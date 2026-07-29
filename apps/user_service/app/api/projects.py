@@ -16,7 +16,9 @@ from apps.user_service.app.schemas.enums import (
     PropertyProjectStatus,
     PropertyType,
     UnitStatus,
+    VehicleFuelType,
     VehicleStatus,
+    VehicleType,
 )
 from apps.user_service.app.schemas.passes import AdminUnitPassListQuery
 from apps.user_service.app.schemas.project_inventory import (
@@ -3120,8 +3122,10 @@ async def delete_site_map_overlay(
     summary="List resident vehicle registration requests",
     description=(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
-        "profile_photo_url) and `unit` (code, location_label, property_type, config, floor, "
-        "status)."
+        "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
+        "status), and `parking_allotment` (slot number, status, facility) when assigned. "
+        "Optional `search` matches registration number or unit code/label. "
+        "Filter by `status`, `vehicle_type`, and `fuel_type`."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -3133,6 +3137,19 @@ async def list_project_vehicle_requests(
         default=None,
         description="Filter by vehicle status (pending, approved, rejected).",
     ),
+    vehicle_type: VehicleType | None = Query(
+        default=None,
+        description="Filter by vehicle type (two_wheeler, four_wheeler).",
+    ),
+    fuel_type: VehicleFuelType | None = Query(
+        default=None,
+        description="Filter by fuel type (non_ev, ev).",
+    ),
+    search: str | None = Query(
+        default=None,
+        min_length=1,
+        description="Search by vehicle registration number or unit code/label.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -3143,7 +3160,13 @@ async def list_project_vehicle_requests(
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
-    items = await service.list_project_vehicles(project_id=project_id, status=status)
+    items = await service.list_project_vehicles(
+        project_id=project_id,
+        status=status,
+        vehicle_type=vehicle_type,
+        fuel_type=fuel_type,
+        search=search,
+    )
     return list_response(
         request=request,
         items=items,
@@ -3206,6 +3229,61 @@ async def review_project_vehicle_request(
     return success_response(
         request=request,
         message_key="project_setup.success.vehicle_request_reviewed",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
+    )
+
+
+@handle_api_exceptions("delete project vehicle")
+@router.delete(
+    "/{project_id}/vehicles/{vehicle_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Remove or delete a project vehicle",
+    description=(
+        "Admin removes a vehicle in the project. Pending and rejected requests are hard-deleted; "
+        "approved vehicles are soft-removed and any assigned parking slot is released."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="vehicles",
+    category="PROJECT_SETUP",
+)
+async def delete_project_vehicle(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    vehicle_id: str = Path(..., description="Vehicle identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Remove or delete a vehicle registered in a project (admin)."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = VehiclesService(db_connection=db_connection, user_context=user_context)
+    data = await service.admin_delete_project_vehicle(
+        project_id=project_id,
+        vehicle_id=vehicle_id,
+    )
+    _set_audit(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Removed vehicle: {vehicle_id}",
+        old_data={"project_id": project_id, "vehicle_id": vehicle_id},
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.vehicle_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=data,

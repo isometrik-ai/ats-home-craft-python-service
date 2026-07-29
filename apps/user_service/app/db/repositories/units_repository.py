@@ -540,6 +540,7 @@ class UnitsRepository(BaseRepository):
                 cu.is_primary,
                 cu.relationship::text AS relationship,
                 cu.status::text AS status,
+                cu.assigned_at,
                 cu.created_at,
                 c.contact_type,
                 c.prefix,

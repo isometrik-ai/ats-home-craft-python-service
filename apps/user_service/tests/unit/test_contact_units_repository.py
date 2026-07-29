@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -331,11 +332,14 @@ async def test_insert_allotment():
         project_id=PROJECT_ID,
         unit_id=UNIT_ID,
         contact_id=CONTACT_ID,
+        assigned_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
     )
 
     assert row["id"] == CU_ID
-    query, _ = conn.fetchrow_calls[0]
+    query, args = conn.fetchrow_calls[0]
     assert "INSERT INTO contact_units" in query
+    assert "assigned_at" in query
+    assert args[-1] == datetime(2026, 7, 15, tzinfo=timezone.utc)
 
 
 @pytest.mark.asyncio

@@ -258,7 +258,7 @@ def build_unit_owner_detail(row: dict[str, Any]) -> dict[str, Any]:
     email = row.get("primary_email") or format_primary_contact_email(row.get("emails"))
     owner["phone"] = str(phone).strip() if phone else None
     owner["email"] = str(email).strip() if email else None
-    owner["assigned_at"] = format_iso_datetime(row.get("created_at"))
+    owner["assigned_at"] = format_iso_datetime(row.get("assigned_at") or row.get("created_at"))
     owner["contact_unit_status"] = row.get("status")
     return owner
 

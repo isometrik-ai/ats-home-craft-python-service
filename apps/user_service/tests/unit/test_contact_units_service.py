@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,6 +16,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+ASSIGN_DATE = date(2026, 7, 15)
+ASSIGNED_AT = datetime(2026, 7, 15, tzinfo=timezone.utc)
 
 
 def _mock_transaction(svc: ContactUnitsService) -> None:
@@ -75,6 +79,7 @@ async def test_list_contact_units_returns_all_by_default():
                 "is_primary": True,
                 "is_default_login": True,
                 "relationship": "self",
+                "assigned_at": ASSIGNED_AT,
                 "created_at": None,
             }
         ]
@@ -89,6 +94,7 @@ async def test_list_contact_units_returns_all_by_default():
     )
     assert items[0]["id"] == "cu-1"
     assert items[0]["code"] == "A-101"
+    assert items[0]["assign_date"] == "2026-07-15"
     assert "created_at" in items[0]
 
 
@@ -171,7 +177,7 @@ async def test_admin_assign_rejects_other_contact():
     svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
     svc.repo.unit_has_primary_occupant = AsyncMock(return_value=True)
     svc.repo.insert_allotment = AsyncMock()
-    body = AdminAssignUnitRequest(unit_id="unit-1", is_primary=True)
+    body = AdminAssignUnitRequest(unit_id="unit-1", assign_date=ASSIGN_DATE, is_primary=True)
 
     with pytest.raises(ValidationException):
         await svc.admin_assign_unit(contact_id="contact-1", body=body)
@@ -188,7 +194,7 @@ async def test_admin_assign_rejects_same_contact():
     svc.repo.get_by_unit_and_contact = AsyncMock(return_value={"id": "cu-1", "status": "pending"})
     svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
     svc.repo.insert_allotment = AsyncMock()
-    body = AdminAssignUnitRequest(unit_id="unit-1", is_primary=True)
+    body = AdminAssignUnitRequest(unit_id="unit-1", assign_date=ASSIGN_DATE, is_primary=True)
 
     with pytest.raises(ValidationException):
         await svc.admin_assign_unit(contact_id="contact-1", body=body)
@@ -205,8 +211,24 @@ async def test_admin_assign_unit_creates_pending_allotment():
     svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
     svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
     svc.repo.insert_allotment = AsyncMock(return_value={"id": "cu-1", "status": "pending"})
+    svc.repo.get_by_id = AsyncMock(
+        return_value={
+            "id": "cu-1",
+            "unit_id": "unit-1",
+            "project_id": "proj-1",
+            "contact_id": "contact-1",
+            "code": "A-101",
+            "status": "pending",
+            "is_primary": True,
+            "is_default_login": False,
+            "relationship": "self",
+            "assigned_at": ASSIGNED_AT,
+            "created_at": ASSIGNED_AT,
+        }
+    )
     body = AdminAssignUnitRequest(
         unit_id="unit-1",
+        assign_date=ASSIGN_DATE,
         is_primary=True,
         relationship=ContactUnitRelationship.SELF,
     )
@@ -220,13 +242,19 @@ async def test_admin_assign_unit_creates_pending_allotment():
         contact_id="contact-1",
         is_primary=True,
         relationship="self",
+        assigned_at=ASSIGNED_AT,
+    )
+    svc.repo.get_by_id.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_unit_id="cu-1",
     )
     svc.units_repo.mark_unit_occupied.assert_awaited_once_with(
         organization_id="org-1",
         project_id="proj-1",
         unit_id="unit-1",
     )
-    assert result == {"id": "cu-1", "status": "pending"}
+    assert result["id"] == "cu-1"
+    assert result["assign_date"] == "2026-07-15"
 
 
 @pytest.mark.asyncio

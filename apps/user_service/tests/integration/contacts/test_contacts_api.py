@@ -588,7 +588,7 @@ async def test_assign_unit(monkeypatch, client):
 
     res = await client.post(
         f"/v1/contacts/{CONTACT_ID}/units",
-        json={"unit_id": UNIT_ID},
+        json={"unit_id": UNIT_ID, "assign_date": "2026-07-15"},
     )
     assert_success(res, 201)
 

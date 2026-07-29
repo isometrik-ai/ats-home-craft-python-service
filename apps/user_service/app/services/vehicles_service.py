@@ -115,6 +115,18 @@ class VehiclesService:
         "unit_resolved_config_kind",
     )
 
+    _PARKING_ROW_KEYS = (
+        "parking_slot_row_id",
+        "parking_slot_number",
+        "parking_slot_status",
+        "parking_facility_id",
+        "parking_facility_name",
+        "parking_facility_location_type",
+        "parking_facility_floor_level",
+        "parking_facility_wing",
+        "parking_facility_tower_id",
+    )
+
     def _build_unit_owner(self, row: dict[str, Any]) -> dict[str, Any] | None:
         """Build owner summary for a vehicle's unit."""
         if not row.get("owner_contact_id"):
@@ -169,6 +181,34 @@ class VehiclesService:
         unit_item.pop("owner", None)
         return unit_item
 
+    def _build_parking_allotment(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build parking slot summary when a slot is assigned to the vehicle."""
+        slot_id = row.get("parking_slot_row_id") or row.get("parking_slot_id")
+        slot_number = row.get("parking_slot_number")
+        if not slot_id or slot_number is None:
+            return None
+        facility = None
+        facility_id = row.get("parking_facility_id")
+        if facility_id:
+            facility = {
+                "id": str(facility_id),
+                "name": row.get("parking_facility_name") or "",
+                "location_type": row.get("parking_facility_location_type"),
+                "floor_level": row.get("parking_facility_floor_level"),
+                "wing": row.get("parking_facility_wing"),
+                "tower_id": (
+                    str(row["parking_facility_tower_id"])
+                    if row.get("parking_facility_tower_id")
+                    else None
+                ),
+            }
+        return {
+            "id": str(slot_id),
+            "slot_number": int(slot_number),
+            "status": row.get("parking_slot_status") or "assigned",
+            "facility": facility,
+        }
+
     def _serialize_admin_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a project vehicle row to the admin list API contract."""
         payload = self._normalize_project_vehicle(row)
@@ -179,7 +219,8 @@ class VehiclesService:
         out = self._normalize_vehicle(row)
         out["owner"] = self._build_unit_owner(row)
         out["unit"] = self._build_vehicle_unit(row)
-        for key in (*self._OWNER_ROW_KEYS, *self._UNIT_ROW_KEYS):
+        out["parking_allotment"] = self._build_parking_allotment(row)
+        for key in (*self._OWNER_ROW_KEYS, *self._UNIT_ROW_KEYS, *self._PARKING_ROW_KEYS):
             out.pop(key, None)
         return out
 
@@ -371,19 +412,91 @@ class VehiclesService:
             )
         return self._normalize_vehicle(row)
 
+    async def admin_delete_vehicle(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any] | None:
+        """Admin delete/remove a vehicle for a contact."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        existing = await self.repo.get_by_id(
+            organization_id=org_id,
+            contact_id=contact_id,
+            vehicle_id=vehicle_id,
+        )
+        if not existing:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        status = str(existing.get("status") or "")
+        if status == VehicleStatus.PENDING.value:
+            await self.withdraw_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+            return None
+        if status == VehicleStatus.APPROVED.value:
+            return await self.remove_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+        if status == VehicleStatus.REJECTED.value:
+            await self.repo.delete(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+            )
+            return None
+
+        raise ValidationException(
+            message_key="contact_onboarding.errors.vehicle_remove_not_allowed",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    async def admin_delete_project_vehicle(
+        self,
+        *,
+        project_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any] | None:
+        """Admin delete/remove a vehicle scoped to a project."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        existing = await self.repo.get_by_project(
+            organization_id=org_id,
+            project_id=project_id,
+            vehicle_id=vehicle_id,
+        )
+        if not existing:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return await self.admin_delete_vehicle(
+            contact_id=str(existing["contact_id"]),
+            vehicle_id=vehicle_id,
+        )
+
     async def list_project_vehicles(
         self,
         *,
         project_id: str,
         status: VehicleStatus | None = None,
+        vehicle_type: VehicleType | None = None,
+        fuel_type: VehicleFuelType | None = None,
+        search: str | None = None,
     ) -> list[dict[str, Any]]:
         """List vehicles for a project (admin)."""
         org_id = self.user_context.organization_id
         assert org_id
+        normalized_search = search.strip() if search else None
+        if normalized_search == "":
+            normalized_search = None
         rows = await self.repo.list_by_project(
             organization_id=org_id,
             project_id=project_id,
             status=status.value if status else None,
+            vehicle_type=vehicle_type.value if vehicle_type else None,
+            fuel_type=fuel_type.value if fuel_type else None,
+            search=normalized_search,
         )
         return [self._serialize_admin_vehicle(row) for row in rows]
 

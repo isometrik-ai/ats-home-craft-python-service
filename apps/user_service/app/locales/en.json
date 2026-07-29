@@ -429,6 +429,7 @@
       "parking_slots_retrieved": "Parking slots retrieved successfully.",
       "vehicle_requests_retrieved": "Vehicle requests retrieved successfully.",
       "vehicle_request_reviewed": "Vehicle request reviewed successfully.",
+      "vehicle_deleted": "Vehicle removed successfully.",
       "unit_created": "Unit created successfully.",
       "unit_updated": "Unit updated successfully.",
       "unit_deleted": "Unit deleted successfully.",
