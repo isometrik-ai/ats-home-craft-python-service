@@ -118,6 +118,7 @@ class WalkInService:
             requested_at=format_iso_datetime(row.get("requested_at")) or "",
             entered_at=format_iso_datetime(row.get("entered_at")),
             exited_at=format_iso_datetime(row.get("exited_at")),
+            visitor_photo_paths=list(row.get("visitor_photo_paths") or []),
         ).model_dump()
 
     @staticmethod
@@ -214,7 +215,6 @@ class WalkInService:
             summary["primary_unit_label"] = first.get("unit_label") or first.get("unit_code")
         detail = WalkInDetailResponse(
             **summary,
-            visitor_photo_paths=list(row.get("visitor_photo_paths") or []),
             vehicle_photo_paths=list(row.get("vehicle_photo_paths") or []),
             visit_units=[self._serialize_visit_unit(unit) for unit in visit_units],
             events=serialized_events,
@@ -230,25 +230,45 @@ class WalkInService:
         """Update header status and approved count after resident action."""
         org_id = self.user_context.organization_id
         assert org_id
+        entry = await self.repo.get_entry(
+            organization_id=org_id,
+            walk_in_entry_id=walk_in_entry_id,
+        )
+        if not entry:
+            return
+
         counts = await self.repo.count_visit_units_by_status(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
         )
         approved_count = int(counts.get("approved_count") or 0)
+        awaiting_count = int(counts.get("awaiting_count") or 0)
+        rejected_count = int(counts.get("rejected_count") or 0)
+        current_status = str(entry.get("status"))
         new_status: str | None = None
+
         if approved_count > 0:
-            entry = await self.repo.get_entry(
-                organization_id=org_id,
-                walk_in_entry_id=walk_in_entry_id,
-            )
-            if entry and str(entry.get("status")) == WalkInStatus.AWAITING.value:
+            if current_status == WalkInStatus.AWAITING.value:
                 new_status = WalkInStatus.APPROVED.value
+        elif awaiting_count == 0 and rejected_count > 0:
+            if current_status == WalkInStatus.AWAITING.value:
+                new_status = WalkInStatus.CANCELLED.value
+
         await self.repo.update_entry_header(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
             status=new_status,
             approved_flats_count=approved_count,
         )
+
+        if new_status == WalkInStatus.CANCELLED.value:
+            await self.repo.insert_event(
+                organization_id=org_id,
+                walk_in_entry_id=walk_in_entry_id,
+                event_type=WalkInEventType.CANCELLED.value,
+                actor_type=WalkInActorType.SYSTEM.value,
+                payload={"reason": "all_visit_units_rejected"},
+            )
 
     async def create_walk_in(
         self,

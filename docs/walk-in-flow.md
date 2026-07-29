@@ -71,12 +71,13 @@ Full DDL: [ADR 0008 § Schema](./adr/0008-walk-in-entries.md#schema-proposed).
 
 ### Header status (`walk_in_entries.status`)
 
-| Status     | When                                                       |
-| ---------- | ---------------------------------------------------------- |
-| `awaiting` | Created; no visit unit approved yet                        |
-| `approved` | ≥1 visit unit approved; ready for security to mark entered |
-| `entered`  | Security marked visitor inside                             |
-| `exited`   | Security marked visitor left (terminal)                    |
+| Status      | When                                                       |
+| ----------- | ---------------------------------------------------------- |
+| `awaiting`  | Created; no visit unit approved yet                        |
+| `approved`  | ≥1 visit unit approved; ready for security to mark entered |
+| `entered`   | Security marked visitor inside                             |
+| `exited`    | Security marked visitor left (terminal)                    |
+| `cancelled` | All visit units rejected with none awaiting or approved    |
 
 ### Visit unit status (`walk_in_visit_units.status`)
 
@@ -92,7 +93,7 @@ security POST (flats[])
        ▼
    awaiting ── any visit unit approved ──► approved ── enter ──► entered ── exit ──► exited
        │
-       └── all visit units rejected ──► stays awaiting (cannot enter)
+       └── all visit units rejected ──► cancelled (cannot enter)
 ```
 
 ______________________________________________________________________

@@ -29,20 +29,7 @@ CASE
 END
 """
 
-_LIST_UNITS_FROM_SQL = """
-FROM units u
-LEFT JOIN towers t
-    ON t.id = u.tower_id
-   AND t.organization_id = u.organization_id
-LEFT JOIN floors f
-    ON f.id = u.floor_id
-   AND f.organization_id = u.organization_id
-LEFT JOIN unit_configs uc
-    ON uc.id = u.config_id
-   AND uc.organization_id = u.organization_id
-LEFT JOIN plot_config_items pci
-    ON pci.id = u.plot_item_id
-   AND pci.organization_id = u.organization_id
+_UNIT_OWNER_LATERAL_JOIN = """
 LEFT JOIN LATERAL (
     SELECT
         c.id AS owner_contact_id,
@@ -62,13 +49,39 @@ LEFT JOIN LATERAL (
           'pending'::contact_unit_status
       )
       AND c.status = 'active'
-      AND c.contact_type = 'Owner'
     ORDER BY
+        CASE WHEN c.contact_type = 'Owner' THEN 0 ELSE 1 END,
         cu.is_primary DESC,
         cu.sort_order,
         cu.created_at
     LIMIT 1
 ) owner_row ON TRUE
+"""
+
+_UNIT_OWNER_SELECT_COLUMNS = """
+              owner_row.owner_contact_id,
+              owner_row.owner_prefix,
+              owner_row.owner_first_name,
+              owner_row.owner_last_name,
+              owner_row.owner_phones,
+              owner_row.owner_emails
+"""
+
+_LIST_UNITS_FROM_SQL = f"""
+FROM units u
+LEFT JOIN towers t
+    ON t.id = u.tower_id
+   AND t.organization_id = u.organization_id
+LEFT JOIN floors f
+    ON f.id = u.floor_id
+   AND f.organization_id = u.organization_id
+LEFT JOIN unit_configs uc
+    ON uc.id = u.config_id
+   AND uc.organization_id = u.organization_id
+LEFT JOIN plot_config_items pci
+    ON pci.id = u.plot_item_id
+   AND pci.organization_id = u.organization_id
+{_UNIT_OWNER_LATERAL_JOIN}
 """
 
 _OWNER_PRIMARY_PHONE_SQL = """
@@ -297,7 +310,7 @@ class UnitsRepository(BaseRepository):
                 uc.display_label AS config_display_label,
                 uc.name AS config_name,
                 pci.description AS plot_description,
-                owner_row.owner_contact_id,
+                owner_row.owner_contact_id::text AS owner_contact_id,
                 owner_row.owner_prefix,
                 owner_row.owner_first_name,
                 owner_row.owner_last_name,
@@ -531,7 +544,7 @@ class UnitsRepository(BaseRepository):
         organization_id: str,
         unit_id: str,
     ) -> dict[str, Any] | None:
-        """Return the Owner contact linked to a unit (pending or active allotment)."""
+        """Return the primary unit assignee contact (pending or active allotment)."""
         row = await self.db_connection.fetchrow(
             f"""
             SELECT
@@ -561,8 +574,11 @@ class UnitsRepository(BaseRepository):
                   'pending'::contact_unit_status
               )
               AND c.status = 'active'
-              AND c.contact_type = 'Owner'
-            ORDER BY cu.is_primary DESC, cu.sort_order, cu.created_at
+            ORDER BY
+                CASE WHEN c.contact_type = 'Owner' THEN 0 ELSE 1 END,
+                cu.is_primary DESC,
+                cu.sort_order,
+                cu.created_at
             LIMIT 1
             """,
             organization_id,

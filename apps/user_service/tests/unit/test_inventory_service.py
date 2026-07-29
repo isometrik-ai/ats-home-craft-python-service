@@ -168,6 +168,49 @@ def test_build_inventory_summary_header_and_buildings():
     assert summary["plot_configs"][0]["items"][0]["plot_no"] == "P-01"
 
 
+def test_build_inventory_summary_plot_items_include_owner():
+    """Plot items in summary include nested owner when linked unit is allotted."""
+    plot_configs = [{"id": "plot-cfg", "name": "Phase 1", "code": "P1"}]
+    plot_items = [
+        {
+            "id": "plot-1",
+            "config_id": "plot-cfg",
+            "plot_no": "P-01",
+            "size_sqft": 2400,
+            "status": "empty",
+            "is_corner": False,
+            "sort_order": 1,
+            "unit_id": "unit-1",
+            "unit_status": "occupied",
+            "owner_contact_id": "owner-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+            "owner_phones": [
+                {
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "is_primary": True,
+                }
+            ],
+            "owner_emails": [{"email": "rajesh@example.com", "is_primary": True}],
+        }
+    ]
+
+    summary = build_inventory_summary(
+        project_id="project-1",
+        towers=[],
+        units=[],
+        floors=[],
+        plot_configs=plot_configs,
+        plot_items=plot_items,
+    )
+
+    plot_item = summary["plot_configs"][0]["items"][0]
+    assert plot_item["owner"]["display_name"] == "Mr. Rajesh Kapoor"
+    assert plot_item["owner"]["phone"] == "+919876543210"
+
+
 def test_summary_excludes_parking():
     """Parking slots are returned but excluded from inventory totals."""
     tower = _tower(tower_id="tower-a", name="Tower A", code="A")

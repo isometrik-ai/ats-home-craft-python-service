@@ -746,6 +746,37 @@ async def test_approve_request_success(mock_contacts_cls: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+@patch("apps.user_service.app.services.tenant_requests_service.ContactsService")
+async def test_approve_request_parses_json_string_phones(mock_contacts_cls: MagicMock) -> None:
+    """Approve parses tenant_phones/emails when JSONB columns arrive as strings."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(
+        status=TenantRequestStatus.READY_TO_APPROVE.value,
+        tenant_phones=(
+            '[{"phone_number": "9967887657", "phone_isd_code": "+91", "is_primary": true}]'
+        ),
+        tenant_emails='[{"email": "tenant@example.com", "is_primary": true}]',
+    )
+    mock_contacts_cls.return_value.create_contact = AsyncMock(
+        return_value={"contact_id": "tenant-contact-1"}
+    )
+    svc = _service(repo=repo)
+
+    response = await svc.approve_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        body=_approve_body(),
+    )
+
+    assert response.status == TenantRequestStatus.APPROVED.value
+    create_call = mock_contacts_cls.return_value.create_contact.await_args
+    assert create_call is not None
+    payload = create_call.args[0]
+    assert payload.phones[0].phone_number == "9967887657"
+    assert payload.emails[0].email == "tenant@example.com"
+
+
+@pytest.mark.asyncio
 async def test_approve_request_not_ready() -> None:
     """Only ready-to-approve requests can be approved."""
     svc = _service()
