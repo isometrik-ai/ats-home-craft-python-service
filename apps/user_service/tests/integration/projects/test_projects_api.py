@@ -1739,8 +1739,8 @@ async def test_list_vehicle_requests(monkeypatch, client):
 
     _patch_projects_access(monkeypatch)
 
-    async def fake_list_vehicles(_self, *, project_id: str, status=None):
-        del _self, status
+    async def fake_list_vehicles(_self, *, project_id: str, status=None, search=None, **kwargs):
+        del _self, status, search, kwargs
         return [_FAKE_VEHICLE]
 
     monkeypatch.setattr(
@@ -1751,6 +1751,60 @@ async def test_list_vehicle_requests(monkeypatch, client):
     res = await client.get(f"/v1/projects/{PROJECT_ID}/vehicle-requests")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == VEHICLE_ID
+
+
+@pytest.mark.asyncio
+async def test_list_vehicle_requests_with_search(monkeypatch, client):
+    """GET vehicle-requests forwards search query to service."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, str | None] = {}
+
+    async def fake_list_vehicles(_self, *, project_id: str, status=None, search=None, **kwargs):
+        del _self, status
+        captured["search"] = search
+        captured.update(kwargs)
+        return [_FAKE_VEHICLE]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.list_project_vehicles",
+        fake_list_vehicles,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/vehicle-requests",
+        params={"search": "MH01"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"][0]["id"] == VEHICLE_ID
+    assert captured["search"] == "MH01"
+
+
+@pytest.mark.asyncio
+async def test_list_vehicle_requests_with_vehicle_type_and_fuel_type(monkeypatch, client):
+    """GET vehicle-requests forwards vehicle_type and fuel_type to service."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_list_vehicles(_self, *, project_id: str, status=None, search=None, **kwargs):
+        del _self, status, search
+        captured.update(kwargs)
+        return [_FAKE_VEHICLE]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.list_project_vehicles",
+        fake_list_vehicles,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/vehicle-requests",
+        params={"vehicle_type": "four_wheeler", "fuel_type": "ev"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"][0]["id"] == VEHICLE_ID
+    assert captured["vehicle_type"].value == "four_wheeler"
+    assert captured["fuel_type"].value == "ev"
 
 
 @pytest.mark.asyncio

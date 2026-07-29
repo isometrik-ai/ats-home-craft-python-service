@@ -99,6 +99,29 @@ _VEHICLE_UNIT_SELECT_COLUMNS = f"""
               {_RESOLVED_CONFIG_KIND_SQL} AS unit_resolved_config_kind
 """
 
+_VEHICLE_PARKING_JOINS = """
+LEFT JOIN facility_parking_slots fps
+    ON fps.id = v.parking_slot_id
+   AND fps.organization_id = v.organization_id
+   AND fps.project_id = v.project_id
+LEFT JOIN facilities pf
+    ON pf.id = fps.facility_id
+   AND pf.organization_id = fps.organization_id
+   AND pf.project_id = fps.project_id
+"""
+
+_VEHICLE_PARKING_SELECT_COLUMNS = """
+              fps.id::text AS parking_slot_row_id,
+              fps.slot_number AS parking_slot_number,
+              fps.status::text AS parking_slot_status,
+              fps.facility_id::text AS parking_facility_id,
+              pf.name AS parking_facility_name,
+              pf.location_type::text AS parking_facility_location_type,
+              pf.floor_level AS parking_facility_floor_level,
+              pf.wing AS parking_facility_wing,
+              pf.tower_id::text AS parking_facility_tower_id
+"""
+
 
 class VehiclesRepository(BaseRepository):
     """Database operations for public.vehicles."""
@@ -424,28 +447,46 @@ class VehiclesRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         status: str | None = None,
+        vehicle_type: str | None = None,
+        fuel_type: str | None = None,
         include_removed: bool = True,
+        search: str | None = None,
     ) -> list[dict[str, Any]]:
         """List vehicles for a project (admin view)."""
         removed_filter = "" if include_removed else f"AND {_ACTIVE_VEHICLE_FILTER}"
+        search_filter = ""
+        args: list[Any] = [organization_id, project_id, status, vehicle_type, fuel_type]
+        if search:
+            args.append(f"%{search}%")
+            idx = len(args)
+            search_filter = f"""
+              AND (
+                  v.registration_number ILIKE ${idx}
+                  OR u.code ILIKE ${idx}
+                  OR COALESCE(u.unit_label, '') ILIKE ${idx}
+              )
+            """
         rows = await self.db_connection.fetch(
             f"""
             SELECT
               {self._VEHICLE_SELECT_COLUMNS},
               {_VEHICLE_UNIT_SELECT_COLUMNS},
-              {_VEHICLE_OWNER_SELECT_COLUMNS}
+              {_VEHICLE_OWNER_SELECT_COLUMNS},
+              {_VEHICLE_PARKING_SELECT_COLUMNS}
             FROM vehicles v
             {_VEHICLE_UNIT_JOINS}
+            {_VEHICLE_PARKING_JOINS}
             {_VEHICLE_OWNER_LATERAL_JOIN}
             WHERE v.organization_id = $1::uuid
               AND v.project_id = $2::uuid
               AND ($3::vehicle_status IS NULL OR v.status = $3::vehicle_status)
+              AND ($4::vehicle_type IS NULL OR v.vehicle_type = $4::vehicle_type)
+              AND ($5::vehicle_fuel_type IS NULL OR v.fuel_type = $5::vehicle_fuel_type)
               {removed_filter}
+              {search_filter}
             ORDER BY v.created_at DESC, v.sort_order
             """,
-            organization_id,
-            project_id,
-            status,
+            *args,
         )
         return [dict(row) for row in rows]
 

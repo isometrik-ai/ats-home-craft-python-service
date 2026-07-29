@@ -199,6 +199,30 @@ class VehicleUnitSummary(BaseModel):
     sort_order: int = 0
 
 
+class VehicleParkingFacilitySummary(BaseModel):
+    """Parking facility summary on admin vehicle request rows."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str
+    location_type: str | None = None
+    floor_level: str | None = None
+    wing: str | None = None
+    tower_id: str | None = None
+
+
+class VehicleParkingAllotmentSummary(BaseModel):
+    """Assigned parking slot summary on admin vehicle request rows."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    slot_number: int
+    status: str
+    facility: VehicleParkingFacilitySummary | None = None
+
+
 class VehicleOwnerSummary(BaseModel):
     """Unit owner summary on admin vehicle request rows."""
 
@@ -237,6 +261,7 @@ class VehicleResponse(BaseModel):
     updated_at: str
     unit: VehicleUnitSummary | None = None
     owner: VehicleOwnerSummary | None = None
+    parking_allotment: VehicleParkingAllotmentSummary | None = None
 
 
 class ReviewVehicleRequest(BaseModel):

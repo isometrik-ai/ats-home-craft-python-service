@@ -16,7 +16,9 @@ from apps.user_service.app.schemas.enums import (
     PropertyProjectStatus,
     PropertyType,
     UnitStatus,
+    VehicleFuelType,
     VehicleStatus,
+    VehicleType,
 )
 from apps.user_service.app.schemas.passes import AdminUnitPassListQuery
 from apps.user_service.app.schemas.project_inventory import (
@@ -3120,8 +3122,10 @@ async def delete_site_map_overlay(
     summary="List resident vehicle registration requests",
     description=(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
-        "profile_photo_url) and `unit` (code, location_label, property_type, config, floor, "
-        "status)."
+        "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
+        "status), and `parking_allotment` (slot number, status, facility) when assigned. "
+        "Optional `search` matches registration number or unit code/label. "
+        "Filter by `status`, `vehicle_type`, and `fuel_type`."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -3133,6 +3137,19 @@ async def list_project_vehicle_requests(
         default=None,
         description="Filter by vehicle status (pending, approved, rejected).",
     ),
+    vehicle_type: VehicleType | None = Query(
+        default=None,
+        description="Filter by vehicle type (two_wheeler, four_wheeler).",
+    ),
+    fuel_type: VehicleFuelType | None = Query(
+        default=None,
+        description="Filter by fuel type (non_ev, ev).",
+    ),
+    search: str | None = Query(
+        default=None,
+        min_length=1,
+        description="Search by vehicle registration number or unit code/label.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -3143,7 +3160,13 @@ async def list_project_vehicle_requests(
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
-    items = await service.list_project_vehicles(project_id=project_id, status=status)
+    items = await service.list_project_vehicles(
+        project_id=project_id,
+        status=status,
+        vehicle_type=vehicle_type,
+        fuel_type=fuel_type,
+        search=search,
+    )
     return list_response(
         request=request,
         items=items,

@@ -326,8 +326,51 @@ async def test_list_by_project_with_status_filter():
     assert len(rows) == 1
     query, args = _sql_args(conn.fetch)
     assert "v.status = $3::vehicle_status" in query
+    assert "v.vehicle_type = $4::vehicle_type" in query
+    assert "v.fuel_type = $5::vehicle_fuel_type" in query
     assert "deleted_at IS NULL" in query
-    assert args == (ORG_ID, PROJECT_ID, "pending")
+    assert args == (ORG_ID, PROJECT_ID, "pending", None, None)
+
+
+@pytest.mark.asyncio
+async def test_list_by_project_with_search():
+    """list_by_project filters by registration number or unit code/label."""
+    conn = _mock_conn(rows=[_vehicle_row()])
+    repo = VehiclesRepository(db_connection=conn)
+
+    await repo.list_by_project(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        search="MH01",
+    )
+
+    query, args = _sql_args(conn.fetch)
+    assert "v.registration_number ILIKE $6" in query
+    assert "u.code ILIKE $6" in query
+    assert "u.unit_label" in query
+    assert "facility_parking_slots fps" in query
+    assert "facilities pf" in query
+    assert "parking_slot_number" in query
+    assert args == (ORG_ID, PROJECT_ID, None, None, None, "%MH01%")
+
+
+@pytest.mark.asyncio
+async def test_list_by_project_with_vehicle_type_and_fuel_type():
+    """list_by_project filters by vehicle type and fuel type."""
+    conn = _mock_conn(rows=[_vehicle_row()])
+    repo = VehiclesRepository(db_connection=conn)
+
+    await repo.list_by_project(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        vehicle_type="four_wheeler",
+        fuel_type="ev",
+    )
+
+    query, args = _sql_args(conn.fetch)
+    assert "v.vehicle_type = $4::vehicle_type" in query
+    assert "v.fuel_type = $5::vehicle_fuel_type" in query
+    assert args == (ORG_ID, PROJECT_ID, None, "four_wheeler", "ev")
 
 
 @pytest.mark.asyncio

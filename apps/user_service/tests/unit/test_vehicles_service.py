@@ -158,6 +158,16 @@ async def test_list_project_vehicles_includes_owner_and_unit():
             "unit_plot_description": None,
             "unit_resolved_property_type": "residential",
             "unit_resolved_config_kind": "apartment",
+            "parking_slot_id": "slot-1",
+            "parking_slot_row_id": "slot-1",
+            "parking_slot_number": 12,
+            "parking_slot_status": "assigned",
+            "parking_facility_id": "fac-1",
+            "parking_facility_name": "Basement Parking",
+            "parking_facility_location_type": "tower",
+            "parking_facility_floor_level": "B1",
+            "parking_facility_wing": "A",
+            "parking_facility_tower_id": "tower-1",
         }
     ]
 
@@ -176,8 +186,14 @@ async def test_list_project_vehicles_includes_owner_and_unit():
     assert items[0]["unit"]["status"] == "occupied"
     assert "owner" in items[0]
     assert "unit" in items[0]
+    assert items[0]["parking_allotment"]["id"] == "slot-1"
+    assert items[0]["parking_allotment"]["slot_number"] == 12
+    assert items[0]["parking_allotment"]["status"] == "assigned"
+    assert items[0]["parking_allotment"]["facility"]["name"] == "Basement Parking"
+    assert items[0]["parking_allotment"]["facility"]["floor_level"] == "B1"
     assert "unit_code" not in items[0]
     assert "owner_contact_id" not in items[0]
+    assert "parking_slot_number" not in items[0]
 
 
 @pytest.mark.asyncio
@@ -207,6 +223,7 @@ async def test_vehicle_owner_unit_keys_missing():
     assert items[0]["owner"] is None
     assert items[0]["unit"]["id"] == "u1"
     assert items[0]["unit"]["code"] == ""
+    assert items[0]["parking_allotment"] is None
 
 
 @pytest.mark.asyncio
@@ -432,6 +449,24 @@ async def test_review_vehicle_rejects_pending_only():
 
 
 @pytest.mark.asyncio
+async def test_list_project_vehicles_passes_search():
+    """Admin list passes search filter to repository."""
+    svc = _service()
+    svc.repo.list_by_project.return_value = []
+
+    await svc.list_project_vehicles(project_id="p1", search="  A-101  ")
+
+    svc.repo.list_by_project.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        status=None,
+        vehicle_type=None,
+        fuel_type=None,
+        search="A-101",
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_project_vehicles_filters_status():
     """Admin list passes status filter to repository."""
     svc = _service()
@@ -443,6 +478,33 @@ async def test_list_project_vehicles_filters_status():
         organization_id="org-1",
         project_id="p1",
         status=VehicleStatus.PENDING.value,
+        vehicle_type=None,
+        fuel_type=None,
+        search=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_project_vehicles_passes_vehicle_type_and_fuel_type():
+    """Admin list passes vehicle type and fuel type filters to repository."""
+    from apps.user_service.app.schemas.enums import VehicleFuelType, VehicleType
+
+    svc = _service()
+    svc.repo.list_by_project.return_value = []
+
+    await svc.list_project_vehicles(
+        project_id="p1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        fuel_type=VehicleFuelType.EV,
+    )
+
+    svc.repo.list_by_project.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        status=None,
+        vehicle_type=VehicleType.FOUR_WHEELER.value,
+        fuel_type=VehicleFuelType.EV.value,
+        search=None,
     )
 
 
@@ -457,6 +519,13 @@ async def test_complete_vehicles_step():
     await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")
 
     svc.unit_onboarding_repo.complete_step.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_parking_allotment_returns_none_without_slot():
+    """Rows without an assigned parking slot skip nested parking summary."""
+    svc = _service()
+    assert svc._build_parking_allotment({"parking_slot_id": None}) is None
 
 
 @pytest.mark.asyncio
