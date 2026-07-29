@@ -869,8 +869,14 @@ class TenantRequestsService:
             user_context=self.user_context,
             supabase_client=self.supabase_client,
         )
-        phones = [Phone.model_validate(item) for item in list(row.get("tenant_phones") or [])]
-        emails = [Email.model_validate(item) for item in list(row.get("tenant_emails") or [])]
+        phones = [
+            Phone.model_validate(item)
+            for item in parse_json_any(row.get("tenant_phones"), default=[]) or []
+        ]
+        emails = [
+            Email.model_validate(item)
+            for item in parse_json_any(row.get("tenant_emails"), default=[]) or []
+        ]
         create_result = await contacts_service.create_contact(
             CreateContactRequest(
                 contact_type=ContactType.TENANT,
