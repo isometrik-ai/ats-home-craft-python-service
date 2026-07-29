@@ -145,12 +145,12 @@ class WalkInSummaryResponse(BaseModel):
     requested_at: str
     entered_at: str | None = None
     exited_at: str | None = None
+    visitor_photo_paths: list[str] = Field(default_factory=list)
 
 
 class WalkInDetailResponse(WalkInSummaryResponse):
     """Full walk-in detail with visit units and timeline."""
 
-    visitor_photo_paths: list[str] = Field(default_factory=list)
     vehicle_photo_paths: list[str] = Field(default_factory=list)
     visit_units: list[WalkInVisitUnitResponse] = Field(default_factory=list)
     events: list[WalkInEventResponse] = Field(default_factory=list)

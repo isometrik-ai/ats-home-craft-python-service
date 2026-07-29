@@ -299,9 +299,39 @@ async def test_reject_visit_unit():
         body=RejectWalkInVisitUnitRequest(rejection_reason="Not expecting anyone"),
     )
 
+    assert repo.entry["status"] == WalkInStatus.CANCELLED.value
     assert any(
         event.get("event_type") == WalkInEventType.VISIT_UNIT_REJECTED.value
         for event in repo.events
+    )
+    assert any(event.get("event_type") == WalkInEventType.CANCELLED.value for event in repo.events)
+
+
+@pytest.mark.asyncio
+async def test_reject_last_awaiting_unit_keeps_header_awaiting_when_others_pending():
+    """Rejecting one flat on a multi-flat visit leaves header awaiting while others pending."""
+    repo = _FakeWalkInRepo()
+
+    async def _reject(**_kwargs):
+        repo.visit_units[0] = _visit_unit_row(status=WalkInVisitUnitStatus.REJECTED.value)
+        return repo.visit_units[0]
+
+    repo.update_visit_unit_status = _reject  # type: ignore[method-assign]
+    repo.count_visit_units_by_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={"approved_count": 0, "awaiting_count": 1, "rejected_count": 1}
+    )
+    service = _service(repo=repo)
+
+    await service.reject_visit_unit(
+        contact_id=CONTACT_ID,
+        walk_in_entry_id=ENTRY_ID,
+        visit_unit_id=VISIT_UNIT_ID,
+        body=RejectWalkInVisitUnitRequest(rejection_reason="Not now"),
+    )
+
+    assert repo.entry["status"] == WalkInStatus.AWAITING.value
+    assert not any(
+        event.get("event_type") == WalkInEventType.CANCELLED.value for event in repo.events
     )
 
 
@@ -340,6 +370,7 @@ async def test_list_project_walk_ins():
 
     assert items[0]["id"] == ENTRY_ID
     assert items[0]["status"] == WalkInStatus.AWAITING.value
+    assert items[0]["visitor_photo_paths"] == ["org/photo.jpg"]
     service.setup_service.ensure_project.assert_awaited_once()
 
 
