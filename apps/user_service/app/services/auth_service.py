@@ -1317,13 +1317,15 @@ class AuthService:
         """
         session_repository = SessionRepository(db_connection=self.db_connection)
         org_member_isometrik_user_id: str | None = None
+        contact_id: str | None = None
 
         if user_type == SelectOrganizationType.CLIENT:
             contacts_repository = ContactsRepository(db_connection=self.db_connection)
-            is_member = await contacts_repository.is_active_contact_user_for_organization(
+            contact_id = await contacts_repository.is_active_contact_user_for_organization(
                 user_id=user_id,
                 organization_id=organization_id,
             )
+            is_member = bool(contact_id)
         else:
             organization_member_repository = OrganizationMemberRepository(
                 db_connection=self.db_connection
@@ -1371,9 +1373,12 @@ class AuthService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
+        isometrik_user_identifier = (
+            contact_id if user_type == SelectOrganizationType.CLIENT else user_id
+        )
         # Get isometrik details for the organization (best-effort; never blocks the API)
         isometrik_details = await get_isometrik_details(
-            user_id=user_id,
+            user_id=isometrik_user_identifier,
             organization_id=organization_id,
             organization_repository=self.organization_repository,
             organization_member_repository=organization_member_repository
@@ -1403,13 +1408,15 @@ class AuthService:
         """
         session_repository = SessionRepository(db_connection=self.db_connection)
         org_member_isometrik_user_id: str | None = None
+        contact_id: str | None = None
 
         if user_type == SelectOrganizationType.CLIENT:
             contacts_repository = ContactsRepository(db_connection=self.db_connection)
-            is_member = await contacts_repository.is_active_contact_user_for_organization(
+            contact_id = await contacts_repository.is_active_contact_user_for_organization(
                 user_id=user_id,
                 organization_id=organization_id,
             )
+            is_member = bool(contact_id)
         else:
             organization_member_repository = OrganizationMemberRepository(
                 db_connection=self.db_connection
@@ -1446,8 +1453,11 @@ class AuthService:
                 organization_id=organization_id,
             )
 
+        isometrik_user_identifier = (
+            contact_id if user_type == SelectOrganizationType.CLIENT else user_id
+        )
         isometrik_details = await get_isometrik_details(
-            user_id=user_id,
+            user_id=isometrik_user_identifier,
             organization_id=organization_id,
             organization_repository=self.organization_repository,
             organization_member_repository=organization_member_repository
