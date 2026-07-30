@@ -421,6 +421,7 @@ class VehiclesRepository(BaseRepository):
         organization_id: str,
         contact_id: str,
         vehicle_id: str,
+        rejection_reason: str | None = None,
     ) -> dict[str, Any] | None:
         """Soft-delete an approved vehicle (status removed)."""
         row = await self.db_connection.fetchrow(
@@ -428,6 +429,7 @@ class VehiclesRepository(BaseRepository):
             UPDATE vehicles
             SET status = 'removed'::vehicle_status,
                 parking_slot_id = NULL,
+                rejection_reason = COALESCE($4, rejection_reason),
                 deleted_at = now(),
                 status_updated_at = now(),
                 updated_at = now()
@@ -441,6 +443,7 @@ class VehiclesRepository(BaseRepository):
             organization_id,
             contact_id,
             vehicle_id,
+            rejection_reason,
         )
         return dict(row) if row else None
 

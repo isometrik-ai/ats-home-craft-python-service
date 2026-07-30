@@ -302,12 +302,14 @@ async def test_soft_remove_vehicle():
         organization_id=ORG_ID,
         contact_id=CONTACT_ID,
         vehicle_id=VEHICLE_ID,
+        rejection_reason="Invalid documents",
     )
 
     assert removed["status"] == "removed"
-    query, _ = _sql_args(conn.fetchrow)
+    query, args = _sql_args(conn.fetchrow)
     assert "status = 'removed'::vehicle_status" in query
-    assert "deleted_at = now()" in query
+    assert "rejection_reason = COALESCE($4, rejection_reason)" in query
+    assert args[3] == "Invalid documents"
 
 
 @pytest.mark.asyncio

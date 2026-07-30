@@ -402,7 +402,13 @@ class VehiclesService:
             vehicle_id=vehicle_id,
         )
 
-    async def remove_vehicle(self, *, contact_id: str, vehicle_id: str) -> dict[str, Any]:
+    async def remove_vehicle(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+        rejection_reason: str | None = None,
+    ) -> dict[str, Any]:
         """Soft-remove an approved vehicle (status removed, row retained)."""
         org_id = self.user_context.organization_id
         assert org_id
@@ -437,6 +443,7 @@ class VehiclesService:
             organization_id=org_id,
             contact_id=contact_id,
             vehicle_id=vehicle_id,
+            rejection_reason=rejection_reason,
         )
         if not row:
             raise NotFoundException(
@@ -450,6 +457,7 @@ class VehiclesService:
         *,
         contact_id: str,
         vehicle_id: str,
+        rejection_reason: str,
     ) -> dict[str, Any] | None:
         """Admin delete/remove a vehicle for a contact."""
         org_id = self.user_context.organization_id
@@ -467,11 +475,34 @@ class VehiclesService:
 
         status = str(existing.get("status") or "")
         if status == VehicleStatus.PENDING.value:
-            await self.withdraw_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+            await self.repo.update(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                update_data={
+                    "status": VehicleStatus.REJECTED.value,
+                    "rejection_reason": rejection_reason,
+                },
+            )
+            await self.repo.delete(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+            )
             return None
         if status == VehicleStatus.APPROVED.value:
-            return await self.remove_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+            return await self.remove_vehicle(
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                rejection_reason=rejection_reason,
+            )
         if status == VehicleStatus.REJECTED.value:
+            await self.repo.update(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                update_data={"rejection_reason": rejection_reason},
+            )
             await self.repo.delete(
                 organization_id=org_id,
                 contact_id=contact_id,
@@ -489,6 +520,7 @@ class VehiclesService:
         *,
         project_id: str,
         vehicle_id: str,
+        rejection_reason: str,
     ) -> dict[str, Any] | None:
         """Admin delete/remove a vehicle scoped to a project."""
         org_id = self.user_context.organization_id
@@ -506,6 +538,7 @@ class VehiclesService:
         return await self.admin_delete_vehicle(
             contact_id=str(existing["contact_id"]),
             vehicle_id=vehicle_id,
+            rejection_reason=rejection_reason,
         )
 
     async def list_project_vehicles(

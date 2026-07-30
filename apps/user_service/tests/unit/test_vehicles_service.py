@@ -824,18 +824,32 @@ async def test_review_vehicle_update_returns_none():
 
 @pytest.mark.asyncio
 async def test_admin_delete_vehicle_pending_withdraws():
-    """Admin delete hard-deletes pending vehicle requests."""
+    """Admin delete hard-deletes pending vehicle requests after recording reason."""
     svc = _service()
     svc.repo.get_by_id.return_value = {
         "id": "v1",
         "status": VehicleStatus.PENDING.value,
         "project_id": "p1",
     }
+    svc.repo.update.return_value = {"id": "v1"}
     svc.repo.delete.return_value = {"id": "v1"}
 
-    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+    result = await svc.admin_delete_vehicle(
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="Duplicate request",
+    )
 
     assert result is None
+    svc.repo.update.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+        update_data={
+            "status": VehicleStatus.REJECTED.value,
+            "rejection_reason": "Duplicate request",
+        },
+    )
     svc.repo.delete.assert_awaited_once()
 
 
@@ -859,16 +873,26 @@ async def test_admin_delete_vehicle_approved_soft_removes():
         "registration_number": "MH12AB1234",
         "photo_paths": [],
         "status": VehicleStatus.REMOVED.value,
+        "rejection_reason": "Invalid documents",
         "status_updated_at": "2026-07-16T10:00:00Z",
         "created_at": "2026-07-16T09:00:00Z",
         "updated_at": "2026-07-16T10:00:00Z",
         "sort_order": 0,
     }
 
-    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+    result = await svc.admin_delete_vehicle(
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="Invalid documents",
+    )
 
     assert result["status"] == VehicleStatus.REMOVED.value
-    svc.repo.soft_remove.assert_awaited_once()
+    svc.repo.soft_remove.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="Invalid documents",
+    )
 
 
 @pytest.mark.asyncio
@@ -880,11 +904,17 @@ async def test_admin_delete_vehicle_rejected_hard_deletes():
         "status": VehicleStatus.REJECTED.value,
         "project_id": "p1",
     }
+    svc.repo.update.return_value = {"id": "v1"}
     svc.repo.delete.return_value = {"id": "v1"}
 
-    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+    result = await svc.admin_delete_vehicle(
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="No longer needed",
+    )
 
     assert result is None
+    svc.repo.update.assert_awaited_once()
     svc.repo.delete.assert_awaited_once()
 
 
@@ -922,7 +952,11 @@ async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
         "sort_order": 0,
     }
 
-    result = await svc.admin_delete_project_vehicle(project_id="p1", vehicle_id="v1")
+    result = await svc.admin_delete_project_vehicle(
+        project_id="p1",
+        vehicle_id="v1",
+        rejection_reason="Invalid registration",
+    )
 
     svc.repo.get_by_project.assert_awaited_once_with(
         organization_id="org-1",

@@ -10,7 +10,10 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+from apps.user_service.app.schemas.contact_onboarding import (
+    DeleteProjectVehicleRequest,
+    ReviewVehicleRequest,
+)
 from apps.user_service.app.schemas.enums import (
     ParkingSlotStatus,
     PropertyProjectStatus,
@@ -3244,7 +3247,8 @@ async def review_project_vehicle_request(
     summary="Remove or delete a project vehicle",
     description=(
         "Admin removes a vehicle in the project. Pending and rejected requests are hard-deleted; "
-        "approved vehicles are soft-removed and any assigned parking slot is released."
+        "approved vehicles are soft-removed and any assigned parking slot is released. "
+        "Requires rejection_reason in the request body."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -3262,6 +3266,7 @@ async def delete_project_vehicle(
     vehicle_id: str = Path(..., description="Vehicle identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
+    body: DeleteProjectVehicleRequest = Body(...),
 ):
     """Remove or delete a vehicle registered in a project (admin)."""
     user_context = await check_permissions(
@@ -3273,6 +3278,7 @@ async def delete_project_vehicle(
     data = await service.admin_delete_project_vehicle(
         project_id=project_id,
         vehicle_id=vehicle_id,
+        rejection_reason=body.rejection_reason,
     )
     _set_audit(
         request,
@@ -3281,7 +3287,7 @@ async def delete_project_vehicle(
         requested_id=vehicle_id,
         description=f"Removed vehicle: {vehicle_id}",
         old_data={"project_id": project_id, "vehicle_id": vehicle_id},
-        new_data=data,
+        new_data={**(data or {}), "rejection_reason": body.rejection_reason},
     )
     return success_response(
         request=request,

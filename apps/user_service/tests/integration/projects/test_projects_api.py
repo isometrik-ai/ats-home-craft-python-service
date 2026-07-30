@@ -1838,17 +1838,23 @@ async def test_delete_project_vehicle(monkeypatch, client):
 
     _patch_projects_access(monkeypatch)
 
-    async def fake_admin_delete_project_vehicle(_self, *, project_id: str, vehicle_id: str):
+    async def fake_admin_delete_project_vehicle(
+        _self, *, project_id: str, vehicle_id: str, rejection_reason: str
+    ):
         del _self
         assert project_id == PROJECT_ID
         assert vehicle_id == VEHICLE_ID
-        return {**_FAKE_VEHICLE, "status": "removed"}
+        assert rejection_reason == "Invalid registration"
+        return {**_FAKE_VEHICLE, "status": "removed", "rejection_reason": rejection_reason}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.vehicles_service.VehiclesService.admin_delete_project_vehicle",
         fake_admin_delete_project_vehicle,
     )
 
-    res = await client.delete(f"/v1/projects/{PROJECT_ID}/vehicles/{VEHICLE_ID}")
+    res = await client.delete(
+        f"/v1/projects/{PROJECT_ID}/vehicles/{VEHICLE_ID}",
+        json={"rejection_reason": "Invalid registration"},
+    )
     body = assert_success(res, 200)
     assert body["data"]["status"] == "removed"

@@ -299,6 +299,14 @@ class ReviewVehicleRequest(BaseModel):
         return self
 
 
+class DeleteProjectVehicleRequest(BaseModel):
+    """Admin removes a project vehicle with a documented reason."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rejection_reason: str = Field(..., min_length=1, max_length=500)
+
+
 class VehicleModelOption(BaseModel):
     """Vehicle model picker option."""
 
