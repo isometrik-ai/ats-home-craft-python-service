@@ -140,13 +140,13 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         *,
         user_id: str,
         organization_id: str,
-    ) -> str | None:
-        """Return the active contact id for the auth user in the organization, or None."""
+    ) -> tuple[str | None, str | None]:
+        """Return active contact id and isometrik_user_id for the auth user in the org."""
         if not user_id or not organization_id:
-            return None
-        row = await self.db_connection.fetchval(
+            return None, None
+        row = await self.db_connection.fetchrow(
             """
-            SELECT ct.id::text
+            SELECT ct.id::text AS id, ct.isometrik_user_id
             FROM contacts ct
             WHERE ct.user_id = $1::uuid
               AND ct.organization_id = $2::uuid
@@ -157,7 +157,12 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             organization_id,
             ClientStatus.DELETED.value,
         )
-        return str(row) if row else None
+        if not row:
+            return None, None
+        contact_id = str(row["id"])
+        raw_iso = row.get("isometrik_user_id")
+        isometrik_user_id = str(raw_iso) if raw_iso else None
+        return contact_id, isometrik_user_id
 
     async def create_contacts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Create contacts in bulk.

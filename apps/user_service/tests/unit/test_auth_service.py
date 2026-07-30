@@ -802,6 +802,7 @@ async def test_select_organization_member_success(monkeypatch):
     )
 
     assert result.isometrik_details is not None
+    assert result.isometrik_details.user_id == "iso-member-1"
 
 
 @pytest.mark.asyncio
@@ -912,7 +913,7 @@ async def test_select_organization_client_user(monkeypatch):
     class _FakeContactsRepo:
         async def is_active_contact_user_for_organization(self, **kwargs):
             del kwargs
-            return "contact-1"
+            return "contact-1", "iso-contact-1"
 
     monkeypatch.setattr(
         "apps.user_service.app.services.auth_service.SessionRepository",

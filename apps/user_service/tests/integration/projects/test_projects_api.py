@@ -1852,7 +1852,8 @@ async def test_delete_project_vehicle(monkeypatch, client):
         fake_admin_delete_project_vehicle,
     )
 
-    res = await client.delete(
+    res = await client.request(
+        "DELETE",
         f"/v1/projects/{PROJECT_ID}/vehicles/{VEHICLE_ID}",
         json={"rejection_reason": "Invalid registration"},
     )

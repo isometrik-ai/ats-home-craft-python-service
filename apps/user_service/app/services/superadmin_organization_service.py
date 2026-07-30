@@ -35,6 +35,7 @@ from apps.user_service.app.schemas.superadmin_organizations import (
     SuperadminOrganizationListResult,
     SuperadminOrgOwnerAdmin,
 )
+from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.services.organization_service import OrganizationService
 from apps.user_service.app.services.session_management_service import (
     SessionManagementService,
@@ -282,12 +283,24 @@ class SuperadminOrganizationService:
             org_member_repo = OrganizationMemberRepository(
                 db_connection=self._org_repo.db_connection
             )
+            (
+                _is_member,
+                org_member_isometrik_user_id,
+            ) = await org_member_repo.get_active_membership_isometrik_user_id(
+                user_id=user_id,
+                organization_id=organization_id,
+            )
             isometrik_details = await get_isometrik_details(
                 user_id=user_id,
                 organization_id=organization_id,
                 organization_repository=self._org_repo,
                 organization_member_repository=org_member_repo,
             )
+            if isometrik_details is not None:
+                isometrik_details = AuthService._with_membership_isometrik_user(
+                    isometrik_details,
+                    org_member_isometrik_user_id,
+                )
             return SelectOrganizationResponse(isometrik_details=isometrik_details)
         except Exception as exc:
             logger.warning(

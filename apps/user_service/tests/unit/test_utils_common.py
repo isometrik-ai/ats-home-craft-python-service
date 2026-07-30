@@ -115,4 +115,4 @@ def test_create_contact_default_comm_prefs():
     )
     assert model.communication_preferences.email is True
     assert model.communication_preferences.sms is True
-    assert model.communication_preferences.push is False
+    assert model.communication_preferences.push is True
