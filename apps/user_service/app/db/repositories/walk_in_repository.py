@@ -522,6 +522,22 @@ class WalkInRepository(BaseRepository):
         )
         return row is not None
 
+    async def list_resident_recipients_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return distinct resident contacts on a unit that have Supabase user ids."""
+        from apps.user_service.app.db.repositories.contacts_repository import (
+            ContactsRepository,
+        )
+
+        return await ContactsRepository(self.db_connection).list_unit_resident_recipients(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+
     async def list_resident_visit_units(
         self,
         *,

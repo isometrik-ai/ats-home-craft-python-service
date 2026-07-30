@@ -138,6 +138,12 @@ class _FakeEventsRepo:
         return self._has_open_check_in
 
 
+class _FakePushDispatcher:
+    async def send_to_unit_residents(self, **kwargs):
+        del kwargs
+        return 1
+
+
 def _service(
     *,
     passes_repo: _FakePassesRepo | None = None,
@@ -152,6 +158,7 @@ def _service(
     svc.passes_repo = passes_repo or _FakePassesRepo()
     svc.events_repo = events_repo or _FakeEventsRepo()
     svc.towers_repo = towers_repo or _FakeTowersRepo()
+    svc._push_dispatcher = _FakePushDispatcher()
     return svc
 
 

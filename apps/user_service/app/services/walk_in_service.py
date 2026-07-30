@@ -27,12 +27,20 @@ from apps.user_service.app.schemas.walk_in import (
     WalkInVisitUnitResponse,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.push_notification_dispatch import (
+    PushNotificationDispatcher,
+    contact_display_name,
+    unit_label_from_row,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ValidationException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("walk_in_service")
 
 _ENTER_ALLOWED_HEADER_STATUSES = {
     WalkInStatus.AWAITING.value,
@@ -48,6 +56,7 @@ class WalkInService:
         *,
         db_connection: asyncpg.Connection,
         user_context: UserContext,
+        push_dispatcher: PushNotificationDispatcher | None = None,
     ) -> None:
         self.db_connection = db_connection
         self.user_context = user_context
@@ -55,6 +64,243 @@ class WalkInService:
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
             user_context=user_context,
+        )
+        self._push_dispatcher = push_dispatcher
+
+    def _push(self) -> PushNotificationDispatcher:
+        """Lazy-init push dispatcher for walk-in notifications."""
+        if self._push_dispatcher is None:
+            self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
+        return self._push_dispatcher
+
+    def _walk_in_push_data(
+        self,
+        *,
+        project_id: str,
+        walk_in_entry_id: str,
+        visit_unit_id: str | None,
+        unit_id: str | None,
+        tower_id: str | None,
+    ) -> dict[str, Any]:
+        """Shared deep-link payload for walk-in push notifications."""
+        data: dict[str, Any] = {
+            "walk_in_entry_id": walk_in_entry_id,
+            "project_id": project_id,
+            "screen": "walk_in_detail",
+        }
+        if visit_unit_id:
+            data["visit_unit_id"] = visit_unit_id
+        if unit_id:
+            data["unit_id"] = unit_id
+        if tower_id:
+            data["tower_id"] = tower_id
+        return data
+
+    def _walk_in_push_options(
+        self,
+        *,
+        visit_unit_id: str,
+        suffix: str,
+        recipient_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Shared delivery options for walk-in push notifications."""
+        idempotency_key = f"walk_in:{visit_unit_id}:{suffix}"
+        if recipient_user_id:
+            idempotency_key = f"{idempotency_key}:{recipient_user_id}"
+        return {
+            "priority": "PRIORITY_HIGH",
+            "collapse_key": f"walk_in:{visit_unit_id}",
+            "ttl_seconds": 3600,
+            "click_action": "OPEN_WALK_IN",
+            "idempotency_key": idempotency_key,
+        }
+
+    async def _notify_visit_unit_awaiting(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        walk_in_entry_id: str,
+        visit_unit_id: str,
+        unit_id: str,
+        tower_id: str,
+        unit_label: str,
+        actor_user_id: str,
+    ) -> None:
+        """Notify residents on a flat that a walk-in awaits their approval."""
+        actor = {"user_id": actor_user_id, "display_name": "Gate Security"}
+        await self._push().send_to_unit_residents(
+            organization_id=organization_id,
+            unit_id=unit_id,
+            message_key="notifications.push.walk_in.awaiting",
+            notification_type="NOTIFICATION_TYPE_WALK_IN",
+            feed_type="walk_in",
+            params={"unit_label": unit_label},
+            data=self._walk_in_push_data(
+                project_id=project_id,
+                walk_in_entry_id=walk_in_entry_id,
+                visit_unit_id=visit_unit_id,
+                unit_id=unit_id,
+                tower_id=tower_id,
+            ),
+            actor=actor,
+            entity={"kind": "walk_in", "id": walk_in_entry_id},
+            options=self._walk_in_push_options(
+                visit_unit_id=visit_unit_id,
+                suffix="awaiting",
+            ),
+        )
+
+    async def _notify_security_walk_in_update(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        walk_in_entry_id: str,
+        visit_unit_id: str,
+        unit_id: str,
+        tower_id: str,
+        unit_label: str,
+        recipient_user_id: str,
+        message_key: str,
+        idempotency_suffix: str,
+        actor_user_id: str | None,
+        actor_name: str,
+    ) -> None:
+        """Notify the security user who created the walk-in about resident action."""
+        actor = {"user_id": actor_user_id or "", "display_name": actor_name}
+        await self._push().send_to_user(
+            organization_id=organization_id,
+            recipient_user_id=recipient_user_id,
+            message_key=message_key,
+            notification_type="NOTIFICATION_TYPE_WALK_IN",
+            feed_type="walk_in",
+            params={"unit_label": unit_label, "actor_name": actor_name},
+            data=self._walk_in_push_data(
+                project_id=project_id,
+                walk_in_entry_id=walk_in_entry_id,
+                visit_unit_id=visit_unit_id,
+                unit_id=unit_id,
+                tower_id=tower_id,
+            ),
+            actor=actor,
+            entity={"kind": "walk_in", "id": walk_in_entry_id},
+            options=self._walk_in_push_options(
+                visit_unit_id=visit_unit_id,
+                suffix=idempotency_suffix,
+                recipient_user_id=recipient_user_id,
+            ),
+            check_push_preference=False,
+        )
+
+    async def _notify_walk_in_entered(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        walk_in_entry_id: str,
+    ) -> None:
+        """Notify residents on approved flats that the visitor has entered."""
+        visit_units = await self.repo.list_visit_units(
+            organization_id=organization_id,
+            walk_in_entry_id=walk_in_entry_id,
+        )
+        for visit_unit in visit_units:
+            if str(visit_unit.get("status")) != WalkInVisitUnitStatus.APPROVED.value:
+                continue
+            visit_unit_id = str(visit_unit.get("id") or "")
+            unit_id = str(visit_unit.get("unit_id") or "")
+            if not visit_unit_id or not unit_id:
+                continue
+            await self._push().send_to_unit_residents(
+                organization_id=organization_id,
+                unit_id=unit_id,
+                message_key="notifications.push.walk_in.entered",
+                notification_type="NOTIFICATION_TYPE_WALK_IN",
+                feed_type="walk_in",
+                data=self._walk_in_push_data(
+                    project_id=project_id,
+                    walk_in_entry_id=walk_in_entry_id,
+                    visit_unit_id=visit_unit_id,
+                    unit_id=unit_id,
+                    tower_id=str(visit_unit.get("tower_id") or ""),
+                ),
+                entity={"kind": "walk_in", "id": walk_in_entry_id},
+                options=self._walk_in_push_options(
+                    visit_unit_id=visit_unit_id,
+                    suffix="entered",
+                ),
+            )
+
+    async def _notify_walk_in_created(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        walk_in_entry_id: str,
+        actor_user_id: str,
+        validated_units: list[dict[str, Any]],
+        visit_units: list[dict[str, Any]],
+    ) -> None:
+        """Notify residents for each newly created awaiting visit unit."""
+        validated_by_unit = {str(row["unit_id"]): row for row in validated_units}
+        for visit_unit in visit_units:
+            unit_id = str(visit_unit.get("unit_id") or "")
+            visit_unit_id = str(visit_unit.get("id") or "")
+            if not unit_id or not visit_unit_id:
+                continue
+            unit_row = validated_by_unit.get(unit_id, visit_unit)
+            await self._notify_visit_unit_awaiting(
+                organization_id=organization_id,
+                project_id=project_id,
+                walk_in_entry_id=walk_in_entry_id,
+                visit_unit_id=visit_unit_id,
+                unit_id=unit_id,
+                tower_id=str(visit_unit.get("tower_id") or unit_row.get("tower_id") or ""),
+                unit_label=unit_label_from_row(unit_row),
+                actor_user_id=actor_user_id,
+            )
+
+    async def _notify_resident_visit_unit_action(
+        self,
+        *,
+        entry_row: dict[str, Any],
+        visit_unit: dict[str, Any],
+        contact_id: str,
+        actor_label: str | None,
+        message_key: str,
+        idempotency_suffix: str,
+    ) -> None:
+        """Notify security when a resident approves or rejects a visit unit."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        recipient_user_id = str(entry_row.get("requested_by_user_id") or "").strip()
+        if not recipient_user_id:
+            return
+        contact = await self._push().contacts_repo.get_contact_for_update(
+            contact_id=contact_id,
+            organization_id=org_id,
+        )
+        actor_name = (actor_label or "").strip()
+        if not actor_name and contact:
+            actor_name = contact_display_name(contact) or ""
+        actor_name = actor_name or "A resident"
+        actor_user_id = str((contact or {}).get("user_id") or self.user_context.user_id or "")
+        visit_unit_id = str(visit_unit.get("id") or "")
+        unit_id = str(visit_unit.get("unit_id") or "")
+        await self._notify_security_walk_in_update(
+            organization_id=org_id,
+            project_id=str(entry_row.get("project_id") or ""),
+            walk_in_entry_id=str(entry_row.get("id") or ""),
+            visit_unit_id=visit_unit_id,
+            unit_id=unit_id,
+            tower_id=str(visit_unit.get("tower_id") or ""),
+            unit_label=unit_label_from_row(visit_unit),
+            recipient_user_id=recipient_user_id,
+            message_key=message_key,
+            idempotency_suffix=idempotency_suffix,
+            actor_user_id=actor_user_id,
+            actor_name=actor_name,
         )
 
     @staticmethod
@@ -311,14 +557,16 @@ class WalkInService:
             gate_id=body.gate_id,
         )
         entry_id = str(entry["id"])
+        created_visit_units: list[dict[str, Any]] = []
         for index, flat in enumerate(body.flats):
-            await self.repo.insert_visit_unit(
+            visit_unit = await self.repo.insert_visit_unit(
                 organization_id=org_id,
                 walk_in_entry_id=entry_id,
                 tower_id=flat.tower_id,
                 unit_id=flat.unit_id,
                 sort_order=index,
             )
+            created_visit_units.append(visit_unit)
         await self.repo.insert_event(
             organization_id=org_id,
             walk_in_entry_id=entry_id,
@@ -326,6 +574,14 @@ class WalkInService:
             actor_type=WalkInActorType.STAFF.value,
             actor_user_id=str(user_id),
             payload={"flats_count": len(body.flats)},
+        )
+        await self._notify_walk_in_created(
+            organization_id=org_id,
+            project_id=project_id,
+            walk_in_entry_id=entry_id,
+            actor_user_id=str(user_id),
+            validated_units=validated,
+            visit_units=created_visit_units,
         )
         return await self._serialize_detail(entry)
 
@@ -399,6 +655,11 @@ class WalkInService:
             event_type=WalkInEventType.ENTERED.value,
             actor_type=WalkInActorType.STAFF.value,
             actor_user_id=str(user_id),
+        )
+        await self._notify_walk_in_entered(
+            organization_id=org_id,
+            project_id=project_id,
+            walk_in_entry_id=walk_in_entry_id,
         )
         return await self._serialize_detail(updated or row)
 
@@ -567,6 +828,14 @@ class WalkInService:
             walk_in_entry_id=walk_in_entry_id,
         )
         row = await self._get_entry_or_raise(walk_in_entry_id=walk_in_entry_id)
+        await self._notify_resident_visit_unit_action(
+            entry_row=row,
+            visit_unit=visit_unit,
+            contact_id=contact_id,
+            actor_label=actor_label,
+            message_key="notifications.push.walk_in.approved",
+            idempotency_suffix="approved",
+        )
         return await self._serialize_detail(row)
 
     async def reject_visit_unit(
@@ -637,4 +906,12 @@ class WalkInService:
             walk_in_entry_id=walk_in_entry_id,
         )
         row = await self._get_entry_or_raise(walk_in_entry_id=walk_in_entry_id)
+        await self._notify_resident_visit_unit_action(
+            entry_row=row,
+            visit_unit=visit_unit,
+            contact_id=contact_id,
+            actor_label=actor_label,
+            message_key="notifications.push.walk_in.rejected",
+            idempotency_suffix="rejected",
+        )
         return await self._serialize_detail(row)

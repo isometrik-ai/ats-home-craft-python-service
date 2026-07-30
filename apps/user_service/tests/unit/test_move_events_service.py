@@ -156,17 +156,25 @@ class _FakeContactUnitsRepo:
         return {"id": kwargs["contact_unit_id"], "status": "moved_out"}
 
 
+class _FakePushDispatcher:
+    async def send_to_contact(self, **kwargs):
+        del kwargs
+        return None
+
+
 def _service(
     move_repo: _FakeMoveEventsRepo | None = None,
     contact_units_repo: _FakeContactUnitsRepo | None = None,
 ) -> MoveEventsService:
     """Build MoveEventsService with fakes."""
-    return MoveEventsService(
+    service = MoveEventsService(
         db_connection=MagicMock(),
         user_context=_user_context(),
         move_events_repository=move_repo or _FakeMoveEventsRepo(),
         contact_units_repository=contact_units_repo or _FakeContactUnitsRepo(),
     )
+    service._push_dispatcher = _FakePushDispatcher()
+    return service
 
 
 @pytest.mark.asyncio

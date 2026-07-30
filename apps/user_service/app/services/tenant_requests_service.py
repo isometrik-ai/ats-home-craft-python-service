@@ -40,6 +40,10 @@ from apps.user_service.app.schemas.tenant_requests import (
 )
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.push_notification_dispatch import (
+    PushNotificationDispatcher,
+    unit_label_from_row,
+)
 from apps.user_service.app.services.units_service import (
     format_contact_display_name,
     format_primary_contact_email,
@@ -88,6 +92,12 @@ class TenantRequestsService:
             db_connection=db_connection,
             user_context=user_context,
         )
+        self._push_dispatcher: PushNotificationDispatcher | None = None
+
+    def _push(self) -> PushNotificationDispatcher:
+        if self._push_dispatcher is None:
+            self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
+        return self._push_dispatcher
 
     async def _ensure_project(self, *, project_id: str) -> None:
         """Raise when the project is missing or outside the organization."""
@@ -485,6 +495,24 @@ class TenantRequestsService:
             actor_contact_id=owner_contact_id,
         )
         row = await self._get_request_or_raise(tenant_request_id=request_id)
+        await self._push().send_to_org_members(
+            organization_id=org_id,
+            message_key="notifications.push.tenant_request.submitted",
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            params={"unit_label": unit_label_from_row({"unit_id": body.unit_id})},
+            data={
+                "tenant_request_id": request_id,
+                "project_id": str(unit["project_id"]),
+                "unit_id": body.unit_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": f"tenant_request:{request_id}:submitted",
+            },
+        )
         return await self._serialize_detail(row)
 
     async def list_owner_requests(
@@ -766,6 +794,23 @@ class TenantRequestsService:
             project_id=project_id,
             tenant_request_id=tenant_request_id,
         )
+        await self._push().send_to_contact(
+            organization_id=org_id,
+            contact_id=str(row.get("submitted_by_contact_id") or ""),
+            message_key="notifications.push.tenant_request.document_verified",
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            data={
+                "tenant_request_id": tenant_request_id,
+                "project_id": project_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": tenant_request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": f"tenant_request:{tenant_request_id}:document_verified:{document_id}",
+            },
+        )
         return await self._serialize_detail(row)
 
     async def reject_document(
@@ -914,4 +959,27 @@ class TenantRequestsService:
             payload={"tenant_contact_id": tenant_contact_id},
         )
         row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        unit_label = unit_label_from_row(unit or {"unit_id": unit_id})
+        await self._push().send_to_contact(
+            organization_id=org_id,
+            contact_id=str(row.get("submitted_by_contact_id") or ""),
+            message_key="notifications.push.tenant_request.approved",
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            params={"unit_label": unit_label},
+            data={
+                "tenant_request_id": tenant_request_id,
+                "project_id": project_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": tenant_request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": f"tenant_request:{tenant_request_id}:approved",
+            },
+        )
         return await self._serialize_detail(row)

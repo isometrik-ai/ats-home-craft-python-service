@@ -72,7 +72,7 @@ class CommunicationPreferences(BaseModel):
 
     email: bool = Field(default=True, description="Receive email notifications.")
     sms: bool = Field(default=True, description="Receive SMS notifications.")
-    push: bool = Field(default=False, description="Receive push notifications.")
+    push: bool = Field(default=True, description="Receive push notifications.")
 
 
 class ContactLeadAssociation(BaseModel):

@@ -21,6 +21,9 @@ from apps.user_service.app.schemas.enums import (
     PassValidityType,
 )
 from apps.user_service.app.schemas.gate_passes import CheckInRequest, CheckOutRequest
+from apps.user_service.app.services.push_notification_dispatch import (
+    PushNotificationDispatcher,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     NotFoundException,
@@ -48,6 +51,50 @@ class PassVerificationService:
         self.passes_repo = PassesRepository(db_connection)
         self.events_repo = PassEventsRepository(db_connection)
         self.towers_repo = TowersRepository(db_connection)
+        self._push_dispatcher: PushNotificationDispatcher | None = None
+
+    def _push(self) -> PushNotificationDispatcher:
+        if self._push_dispatcher is None:
+            self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
+        return self._push_dispatcher
+
+    async def _notify_household_pass_event(
+        self,
+        *,
+        pass_row: dict[str, Any],
+        message_key: str,
+        idempotency_suffix: str,
+    ) -> None:
+        """Notify household members on the pass unit when entry is not private."""
+        if bool(pass_row.get("is_private")):
+            return
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit_id = str(pass_row.get("unit_id") or "")
+        pass_id = str(pass_row.get("id") or "")
+        host_contact_id = str(pass_row.get("host_contact_id") or "")
+        if not unit_id or not pass_id:
+            return
+        visitor_name = str(pass_row.get("guest_name") or "Visitor").strip() or "Visitor"
+        await self._push().send_to_unit_residents(
+            organization_id=org_id,
+            unit_id=unit_id,
+            exclude_contact_ids={host_contact_id} if host_contact_id else None,
+            message_key=message_key,
+            notification_type="NOTIFICATION_TYPE_PASS",
+            feed_type="pass",
+            params={"visitor_name": visitor_name},
+            data={
+                "pass_id": pass_id,
+                "unit_id": unit_id,
+                "screen": "pass_detail",
+            },
+            entity={"kind": "pass", "id": pass_id},
+            options={
+                "click_action": "OPEN_PASS",
+                "idempotency_key": f"pass:{pass_id}:{idempotency_suffix}",
+            },
+        )
 
     @staticmethod
     def _now() -> datetime:
@@ -296,6 +343,11 @@ class PassVerificationService:
             pass_id=pass_id,
         )
         refreshed = await self._get_pass_or_404(pass_id=pass_id)
+        await self._notify_household_pass_event(
+            pass_row=refreshed,
+            message_key="notifications.push.pass.checked_in",
+            idempotency_suffix="checked_in",
+        )
         return {
             "event": self._normalize_event(event),
             "entry_count": int(
@@ -345,6 +397,11 @@ class PassVerificationService:
             )
 
         refreshed = await self._get_pass_or_404(pass_id=pass_id)
+        await self._notify_household_pass_event(
+            pass_row=refreshed,
+            message_key="notifications.push.pass.checked_out",
+            idempotency_suffix="checked_out",
+        )
         return {
             "event": self._normalize_event(event),
             "pass_status": str(refreshed.get("status") or ""),
