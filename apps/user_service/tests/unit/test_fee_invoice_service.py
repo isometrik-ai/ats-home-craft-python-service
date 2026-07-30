@@ -121,6 +121,12 @@ class _FakeEventsRepo:
         return data
 
 
+class _FakePushDispatcher:
+    async def send_to_contact_unit_primary(self, **kwargs):
+        del kwargs
+        return None
+
+
 def _service(**kwargs) -> FeeInvoiceService:
     """Build a FeeInvoiceService with fake repositories."""
     service = FeeInvoiceService.__new__(FeeInvoiceService)
@@ -132,6 +138,7 @@ def _service(**kwargs) -> FeeInvoiceService:
     service.invoices_repo = kwargs.get("invoices_repo", _FakeInvoicesRepo())
     service.events_repo = kwargs.get("events_repo", _FakeEventsRepo())
     service.db_connection = kwargs.get("db_connection")
+    service._push_dispatcher = _FakePushDispatcher()
     return service
 
 

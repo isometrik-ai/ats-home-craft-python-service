@@ -879,3 +879,25 @@ class OrganizationMemberRepository:
             OrganizationMemberStatus.DELETED.value,
             OrganizationMemberStatus.DELETED.value,
         )
+
+    async def list_active_member_user_ids(
+        self,
+        *,
+        organization_id: str,
+    ) -> list[str]:
+        """Return distinct Supabase user ids for active organization members."""
+        if not organization_id:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT user_id::text AS user_id
+            FROM organization_members
+            WHERE organization_id = $1::uuid
+              AND status = $2
+              AND user_id IS NOT NULL
+            ORDER BY user_id
+            """,
+            organization_id,
+            OrganizationMemberStatus.ACTIVE.value,
+        )
+        return [str(row["user_id"]) for row in rows if row.get("user_id")]

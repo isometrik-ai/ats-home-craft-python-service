@@ -20,6 +20,10 @@ from apps.user_service.app.schemas.move_events import (
     MoveEventResponse,
     UpdateMoveEventRequest,
 )
+from apps.user_service.app.services.push_notification_dispatch import (
+    PushNotificationDispatcher,
+    unit_label_from_row,
+)
 from apps.user_service.app.services.units_service import format_contact_display_name
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
@@ -41,6 +45,12 @@ class MoveEventsService:
         self.user_context = user_context
         self.move_events_repo = move_events_repository or MoveEventsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self._push_dispatcher: PushNotificationDispatcher | None = None
+
+    def _push(self) -> PushNotificationDispatcher:
+        if self._push_dispatcher is None:
+            self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
+        return self._push_dispatcher
 
     @staticmethod
     def _format_date(value: Any) -> str:
@@ -224,6 +234,34 @@ class MoveEventsService:
                 message_key="move_events.errors.move_event_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await self._push().send_to_contact(
+            organization_id=organization_id,
+            contact_id=str(body.contact_id),
+            message_key="notifications.push.move.recorded",
+            notification_type="NOTIFICATION_TYPE_MOVE",
+            feed_type="move",
+            params={
+                "move_type": move_type.replace("_", " "),
+                "unit_label": unit_label_from_row(
+                    {
+                        "unit_id": body.unit_id,
+                        "unit_label": row.get("unit_label"),
+                        "unit_code": row.get("unit_code"),
+                    }
+                ),
+            },
+            data={
+                "move_event_id": str(row.get("id") or inserted["id"]),
+                "project_id": str(unit["project_id"]),
+                "unit_id": body.unit_id,
+                "screen": "move_event_detail",
+            },
+            entity={"kind": "move_event", "id": str(row.get("id") or inserted["id"])},
+            options={
+                "click_action": "OPEN_MOVE",
+                "idempotency_key": f"move:{row.get('id') or inserted['id']}:recorded",
+            },
+        )
         return self._serialize_row(row)
 
     async def list_move_events(

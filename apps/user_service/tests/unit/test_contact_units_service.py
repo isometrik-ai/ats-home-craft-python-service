@@ -305,19 +305,44 @@ async def test_reassign_unit_owner_replaces_owner():
     svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
     svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
     svc.repo.insert_allotment = AsyncMock(return_value={"id": "cu-2", "status": "pending"})
+    svc.repo.get_by_id = AsyncMock(
+        return_value={
+            "id": "cu-2",
+            "unit_id": "unit-1",
+            "project_id": "proj-1",
+            "contact_id": "contact-new",
+            "code": "A-101",
+            "status": "pending",
+            "is_primary": True,
+            "is_default_login": False,
+            "relationship": "self",
+            "assigned_at": ASSIGNED_AT,
+            "created_at": ASSIGNED_AT,
+        }
+    )
 
     result = await svc.reassign_unit_owner(
         project_id="proj-1",
         unit_id="unit-1",
         contact_id="contact-new",
+        assign_date=ASSIGN_DATE,
     )
 
     svc.repo.release_unit_owner_links.assert_awaited_once()
-    svc.repo.insert_allotment.assert_awaited_once()
+    svc.repo.insert_allotment.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="proj-1",
+        unit_id="unit-1",
+        contact_id="contact-new",
+        is_primary=True,
+        relationship="self",
+        assigned_at=ASSIGNED_AT,
+    )
     svc.units_repo.mark_unit_occupied.assert_awaited_once()
     assert result["contact_id"] == "contact-new"
     assert result["previous_contact_id"] == "contact-old"
     assert result["unit_status"] == "occupied"
+    assert result["assign_date"] == "2026-07-15"
 
 
 @pytest.mark.asyncio

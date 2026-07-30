@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,12 +16,27 @@ from libs.shared_utils.http_exceptions import (
 )
 
 
-def _service() -> VehiclesService:
+class _FakePushDispatcher:
+    def __init__(self) -> None:
+        self.org_calls: list[dict[str, Any]] = []
+        self.contact_calls: list[dict[str, Any]] = []
+
+    async def send_to_org_members(self, **kwargs):
+        self.org_calls.append(kwargs)
+        return 1
+
+    async def send_to_contact(self, **kwargs):
+        self.contact_calls.append(kwargs)
+        return None
+
+
+def _service(*, push: _FakePushDispatcher | None = None) -> VehiclesService:
     """Build VehiclesService with mocked dependencies."""
     svc = VehiclesService(db_connection=MagicMock(), user_context=MagicMock())
     svc.user_context.organization_id = "org-1"
     svc.repo = AsyncMock()
     svc.parking_slots_repo = AsyncMock()
+    svc._push_dispatcher = push or _FakePushDispatcher()
     return svc
 
 
@@ -393,6 +409,9 @@ async def test_create_vehicle_success():
     create_kwargs = svc.repo.create.await_args.kwargs
     assert create_kwargs["registration_number"] == "MH12AB1234"
     assert result["project_id"] == "p1"
+    push = svc._push_dispatcher
+    assert len(push.org_calls) == 1
+    assert push.org_calls[0]["message_key"] == "notifications.push.vehicle.submitted"
 
 
 @pytest.mark.asyncio
@@ -405,6 +424,7 @@ async def test_review_vehicle_approves_and_assigns_slot():
         "id": "v1",
         "status": VehicleStatus.PENDING.value,
         "project_id": "p1",
+        "contact_id": "c1",
     }
     svc.parking_slots_repo.get_slot.return_value = {"id": "slot-1", "status": "available"}
     svc.parking_slots_repo.assign_slot.return_value = True
@@ -430,6 +450,9 @@ async def test_review_vehicle_approves_and_assigns_slot():
 
     svc.parking_slots_repo.assign_slot.assert_awaited_once()
     assert result["status"] == VehicleStatus.APPROVED.value
+    push = svc._push_dispatcher
+    assert len(push.contact_calls) == 1
+    assert push.contact_calls[0]["message_key"] == "notifications.push.vehicle.approved"
 
 
 @pytest.mark.asyncio
@@ -778,6 +801,9 @@ async def test_review_vehicle_reject_success():
 
     assert result["status"] == VehicleStatus.REJECTED.value
     svc.parking_slots_repo.assign_slot.assert_not_called()
+    push = svc._push_dispatcher
+    assert len(push.contact_calls) == 1
+    assert push.contact_calls[0]["message_key"] == "notifications.push.vehicle.rejected"
 
 
 @pytest.mark.asyncio
@@ -798,18 +824,32 @@ async def test_review_vehicle_update_returns_none():
 
 @pytest.mark.asyncio
 async def test_admin_delete_vehicle_pending_withdraws():
-    """Admin delete hard-deletes pending vehicle requests."""
+    """Admin delete hard-deletes pending vehicle requests after recording reason."""
     svc = _service()
     svc.repo.get_by_id.return_value = {
         "id": "v1",
         "status": VehicleStatus.PENDING.value,
         "project_id": "p1",
     }
+    svc.repo.update.return_value = {"id": "v1"}
     svc.repo.delete.return_value = {"id": "v1"}
 
-    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+    result = await svc.admin_delete_vehicle(
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="Duplicate request",
+    )
 
     assert result is None
+    svc.repo.update.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+        update_data={
+            "status": VehicleStatus.REJECTED.value,
+            "rejection_reason": "Duplicate request",
+        },
+    )
     svc.repo.delete.assert_awaited_once()
 
 
@@ -833,16 +873,26 @@ async def test_admin_delete_vehicle_approved_soft_removes():
         "registration_number": "MH12AB1234",
         "photo_paths": [],
         "status": VehicleStatus.REMOVED.value,
+        "rejection_reason": "Invalid documents",
         "status_updated_at": "2026-07-16T10:00:00Z",
         "created_at": "2026-07-16T09:00:00Z",
         "updated_at": "2026-07-16T10:00:00Z",
         "sort_order": 0,
     }
 
-    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+    result = await svc.admin_delete_vehicle(
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="Invalid documents",
+    )
 
     assert result["status"] == VehicleStatus.REMOVED.value
-    svc.repo.soft_remove.assert_awaited_once()
+    svc.repo.soft_remove.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="Invalid documents",
+    )
 
 
 @pytest.mark.asyncio
@@ -854,11 +904,17 @@ async def test_admin_delete_vehicle_rejected_hard_deletes():
         "status": VehicleStatus.REJECTED.value,
         "project_id": "p1",
     }
+    svc.repo.update.return_value = {"id": "v1"}
     svc.repo.delete.return_value = {"id": "v1"}
 
-    result = await svc.admin_delete_vehicle(contact_id="c1", vehicle_id="v1")
+    result = await svc.admin_delete_vehicle(
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason="No longer needed",
+    )
 
     assert result is None
+    svc.repo.update.assert_awaited_once()
     svc.repo.delete.assert_awaited_once()
 
 
@@ -896,7 +952,11 @@ async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
         "sort_order": 0,
     }
 
-    result = await svc.admin_delete_project_vehicle(project_id="p1", vehicle_id="v1")
+    result = await svc.admin_delete_project_vehicle(
+        project_id="p1",
+        vehicle_id="v1",
+        rejection_reason="Invalid registration",
+    )
 
     svc.repo.get_by_project.assert_awaited_once_with(
         organization_id="org-1",

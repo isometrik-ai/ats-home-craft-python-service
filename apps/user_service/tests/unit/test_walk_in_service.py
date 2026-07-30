@@ -50,6 +50,7 @@ def _entry_row(**overrides: Any) -> dict[str, Any]:
         "status": WalkInStatus.AWAITING.value,
         "flats_count": 1,
         "approved_flats_count": 0,
+        "requested_by_user_id": "staff-user",
         "requested_at": now,
         "entered_at": None,
         "exited_at": None,
@@ -158,6 +159,17 @@ class _FakeWalkInRepo:
     async def resident_can_act_on_unit(self, **_kwargs) -> bool:
         return True
 
+    async def list_resident_recipients_for_unit(self, **_kwargs) -> list[dict[str, Any]]:
+        return [
+            {
+                "user_id": "resident-user-1",
+                "contact_id": CONTACT_ID,
+                "first_name": "Jane",
+                "last_name": "Resident",
+                "additional_data": {"preferred_language": "en"},
+            }
+        ]
+
     async def list_resident_visit_units(self, **_kwargs) -> list[dict[str, Any]]:
         return [
             {
@@ -181,8 +193,29 @@ class _FakeWalkInRepo:
         ]
 
 
-def _service(*, repo: _FakeWalkInRepo | None = None) -> WalkInService:
+class _FakePushDispatcher:
+    def __init__(self) -> None:
+        self.unit_calls: list[dict[str, Any]] = []
+        self.user_calls: list[dict[str, Any]] = []
+        self.contacts_repo = MagicMock()
+        self.contacts_repo.get_contact_for_update = AsyncMock(return_value=None)
+
+    async def send_to_unit_residents(self, **kwargs):
+        self.unit_calls.append(kwargs)
+        return 1
+
+    async def send_to_user(self, **kwargs):
+        self.user_calls.append(kwargs)
+        return None
+
+
+def _service(
+    *,
+    repo: _FakeWalkInRepo | None = None,
+    push_dispatcher: _FakePushDispatcher | None = None,
+) -> WalkInService:
     """Build WalkInService with injected fake repository."""
+    push = push_dispatcher or _FakePushDispatcher()
     service = WalkInService(
         db_connection=MagicMock(),
         user_context=UserContext(
@@ -190,6 +223,7 @@ def _service(*, repo: _FakeWalkInRepo | None = None) -> WalkInService:
             email="guard@example.com",
             organization_id=ORG_ID,
         ),
+        push_dispatcher=push,  # type: ignore[arg-type]
     )
     service.repo = repo or _FakeWalkInRepo()
     service.setup_service = AsyncMock()
@@ -216,6 +250,31 @@ async def test_create_walk_in_inserts_entry_and_visit_units():
     assert len(result["visit_units"]) == 1
     assert repo.events[0]["event_type"] == WalkInEventType.REQUESTED.value
     service.setup_service.ensure_project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_walk_in_notifies_residents_for_each_visit_unit():
+    """Create sends awaiting push to residents on each targeted flat."""
+    repo = _FakeWalkInRepo()
+    push = _FakePushDispatcher()
+    service = _service(repo=repo, push_dispatcher=push)
+    body = CreateWalkInRequest(
+        visitor_first_name="Sushil",
+        visitor_phone_isd_code="+91",
+        visitor_phone_number="9876543210",
+        visitor_photo_paths=["org/photo.jpg"],
+        flats=[WalkInFlatInput(tower_id=TOWER_ID, unit_id=UNIT_ID)],
+    )
+
+    await service.create_walk_in(project_id=PROJECT_ID, body=body)
+
+    assert len(push.unit_calls) == 1
+    call = push.unit_calls[0]
+    assert call["message_key"] == "notifications.push.walk_in.awaiting"
+    assert call["params"] == {"unit_label": "A-2102"}
+    assert call["data"]["walk_in_entry_id"] == ENTRY_ID
+    assert call["data"]["visit_unit_id"] == VISIT_UNIT_ID
+    assert call["options"]["click_action"] == "OPEN_WALK_IN"
 
 
 @pytest.mark.asyncio

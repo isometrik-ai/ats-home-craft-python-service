@@ -178,17 +178,19 @@ async def test_get_contact_ids_by_user_ids():
 @pytest.mark.asyncio
 async def test_is_active_contact_user_true():
     """Active contact user check scopes by org and status."""
-    conn = _FakeConn(val="c1")
+    conn = _FakeConn(row={"id": "c1", "isometrik_user_id": "iso-contact-1"})
     repo = ContactsRepository(db_connection=conn)
 
-    contact_id = await repo.is_active_contact_user_for_organization(
+    contact_id, isometrik_user_id = await repo.is_active_contact_user_for_organization(
         user_id="u1",
         organization_id=ORG_ID,
     )
 
     assert contact_id == "c1"
-    query, args = conn.fetchval_calls[0]
+    assert isometrik_user_id == "iso-contact-1"
+    query, args = conn.fetchrow_calls[0]
     assert "FROM contacts ct" in query
+    assert "isometrik_user_id" in query
     assert args[0] == "u1"
     assert args[1] == ORG_ID
 
@@ -257,11 +259,10 @@ async def test_is_active_contact_user_missing_ids():
     conn = _async_mock_conn()
     repo = ContactsRepository(db_connection=conn)
 
-    assert (
-        await repo.is_active_contact_user_for_organization(user_id="", organization_id=ORG_ID)
-        is None
-    )
-    conn.fetchval.assert_not_called()
+    assert await repo.is_active_contact_user_for_organization(
+        user_id="", organization_id=ORG_ID
+    ) == (None, None)
+    conn.fetchrow.assert_not_called()
 
 
 @pytest.mark.asyncio

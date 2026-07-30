@@ -14,9 +14,16 @@ class _FakeConn:
 
     def __init__(self):
         self.fetchrow_calls = []
+        self.fetch_calls = []
         self.execute_calls = []
         self.fetchrow_result = None
+        self.fetch_result = []
         self.execute_result = "DELETE 2"
+
+    async def fetch(self, query, *args):
+        """Record fetch calls."""
+        self.fetch_calls.append((query.strip(), args))
+        return self.fetch_result
 
     async def fetchrow(self, query, *args):
         """Record fetchrow calls."""
@@ -127,3 +134,35 @@ async def test_delete_by_user_scoped():
     assert "DELETE FROM user_push_tokens" in query
     assert "user_id = $1" in query
     assert args == ("user-1",)
+
+
+@pytest.mark.asyncio
+async def test_list_push_tokens_for_user_returns_distinct_tokens():
+    """list_push_tokens_for_user returns ordered distinct push tokens."""
+    conn = _FakeConn()
+    conn.fetch_result = [
+        {"push_token": "token-a"},
+        {"push_token": "token-b"},
+    ]
+    repo = UserPushTokensRepository(db_connection=conn)
+
+    tokens = await repo.list_push_tokens_for_user(
+        organization_id="org-1",
+        user_id="user-1",
+    )
+
+    assert tokens == ["token-a", "token-b"]
+    query, args = conn.fetch_calls[0]
+    assert "SELECT DISTINCT push_token" in query
+    assert "FROM user_push_tokens" in query
+    assert args == ("org-1", "user-1")
+
+
+@pytest.mark.asyncio
+async def test_list_push_tokens_for_user_empty_scope():
+    """list_push_tokens_for_user returns empty list for missing ids."""
+    conn = _FakeConn()
+    repo = UserPushTokensRepository(db_connection=conn)
+
+    assert await repo.list_push_tokens_for_user(organization_id="", user_id="user-1") == []
+    assert await repo.list_push_tokens_for_user(organization_id="org-1", user_id="") == []

@@ -92,6 +92,30 @@ class UserPushTokensRepository(BaseRepository):
         )
         return row is not None
 
+    async def list_push_tokens_for_user(
+        self,
+        *,
+        organization_id: str,
+        user_id: str,
+    ) -> list[str]:
+        """Return distinct non-empty FCM tokens registered for an org-scoped user."""
+        if not organization_id or not user_id:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT push_token
+            FROM user_push_tokens
+            WHERE organization_id = $1::uuid
+              AND user_id = $2::uuid
+              AND push_token IS NOT NULL
+              AND btrim(push_token) <> ''
+            ORDER BY push_token
+            """,
+            organization_id,
+            user_id,
+        )
+        return [str(row["push_token"]) for row in rows if row.get("push_token")]
+
     async def delete_by_user(
         self,
         *,

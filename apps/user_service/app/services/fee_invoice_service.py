@@ -32,6 +32,9 @@ from apps.user_service.app.services.fee_calculation_service import (
     fee_rate_input_from_row,
     resolve_area_sqft_from_unit_row,
 )
+from apps.user_service.app.services.push_notification_dispatch import (
+    PushNotificationDispatcher,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.project_serialization import serialize_row
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
@@ -50,6 +53,12 @@ class FeeInvoiceService:
         self.invoices_repo = MaintenanceFeeInvoicesRepository(db_connection)
         self.events_repo = MaintenanceFeeInvoiceEventsRepository(db_connection)
         self.db_connection = db_connection
+        self._push_dispatcher: PushNotificationDispatcher | None = None
+
+    def _push(self) -> PushNotificationDispatcher:
+        if self._push_dispatcher is None:
+            self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
+        return self._push_dispatcher
 
     async def _ensure_project(self, project_id: str) -> dict[str, Any]:
         """Load a project or raise not-found."""
@@ -305,6 +314,31 @@ class FeeInvoiceService:
                     "actor_user_id": self._user_id,
                 }
             )
+            contact_unit_id = row.get("contact_unit_id")
+            if contact_unit_id:
+                invoice_number = str(row.get("invoice_number") or row["id"])
+                await self._push().send_to_contact_unit_primary(
+                    organization_id=self._org_id,
+                    contact_unit_id=str(contact_unit_id),
+                    message_key="notifications.push.fee.invoice_issued",
+                    notification_type="NOTIFICATION_TYPE_FEE",
+                    feed_type="fee",
+                    params={
+                        "invoice_number": invoice_number,
+                        "amount": str(convert_minor_to_major(int(row["amount_minor"]))),
+                        "due_date": str(row.get("due_date") or ""),
+                    },
+                    data={
+                        "invoice_id": str(row["id"]),
+                        "project_id": project_id,
+                        "screen": "fee_invoice_detail",
+                    },
+                    entity={"kind": "fee_invoice", "id": str(row["id"])},
+                    options={
+                        "click_action": "OPEN_FEE",
+                        "idempotency_key": f"fee:{row['id']}:issued",
+                    },
+                )
             created.append(row["id"])
         return {"created_count": len(created), "skipped_count": skipped, "invoice_ids": created}
 
@@ -348,6 +382,27 @@ class FeeInvoiceService:
                     "metadata": {"reminder_number": reminders_sent},
                 }
             )
+            contact_unit_id = row.get("contact_unit_id")
+            if contact_unit_id:
+                invoice_number = str(row.get("invoice_number") or row["id"])
+                await self._push().send_to_contact_unit_primary(
+                    organization_id=self._org_id,
+                    contact_unit_id=str(contact_unit_id),
+                    message_key="notifications.push.fee.payment_reminder",
+                    notification_type="NOTIFICATION_TYPE_FEE",
+                    feed_type="fee",
+                    params={"invoice_number": invoice_number},
+                    data={
+                        "invoice_id": str(row["id"]),
+                        "project_id": str(row.get("project_id") or ""),
+                        "screen": "fee_invoice_detail",
+                    },
+                    entity={"kind": "fee_invoice", "id": str(row["id"])},
+                    options={
+                        "click_action": "OPEN_FEE",
+                        "idempotency_key": f"fee:{row['id']}:reminder:{reminders_sent}",
+                    },
+                )
             processed += 1
         return {"processed_count": processed}
 

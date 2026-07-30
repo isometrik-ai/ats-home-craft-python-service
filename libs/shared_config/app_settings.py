@@ -161,6 +161,15 @@ class GraphitiSettings(BaseSettings):
     )
 
 
+class NotificationSettings(BaseSettings):
+    """notification-service gRPC push delivery settings."""
+
+    enabled: bool = config("NOTIFICATION_ENABLED", default=False)
+    grpc_target: str = config("NOTIFICATION_GRPC_TARGET", default="notification-service:50051")
+    grpc_timeout_ms: int = config("NOTIFICATION_GRPC_TIMEOUT_MS", default=3000)
+    raise_on_failure: bool = config("NOTIFICATION_RAISE_ON_FAILURE", default=False)
+
+
 class TelemetrySettings(BaseSettings):
     """OpenTelemetry / SigNoz telemetry settings."""
 
@@ -230,6 +239,7 @@ class SharedAppSettings(BaseSettings):
     typesense: TypesenseSettings = TypesenseSettings()
     agentmail: AgentMailSettings = AgentMailSettings()
     graphiti: GraphitiSettings = GraphitiSettings()
+    notification: NotificationSettings = NotificationSettings()
     telemetry: TelemetrySettings = TelemetrySettings()
     environment: EnvironmentOption = config("ENVIRONMENT", default=EnvironmentOption.LOCAL)
     log_level: LogLevelOption = config("LOG_LEVEL", default=LogLevelOption.INFO.value)

@@ -11,7 +11,11 @@ from apps.user_service.app.db.repositories.base_repository import (
     BaseRepository,
     rows_with_default_address_data,
 )
-from apps.user_service.app.schemas.enums import ClientStatus, ContactType
+from apps.user_service.app.schemas.enums import (
+    WALK_IN_RESIDENT_CONTACT_TYPES,
+    ClientStatus,
+    ContactType,
+)
 from apps.user_service.app.utils.common_utils import parse_json_any
 from libs.shared_utils.custom_field_filtering import build_dropdown_jsonb_where
 from libs.shared_utils.http_exceptions import NotFoundException
@@ -136,13 +140,13 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         *,
         user_id: str,
         organization_id: str,
-    ) -> str | None:
-        """Return the active contact id for the auth user in the organization, or None."""
+    ) -> tuple[str | None, str | None]:
+        """Return active contact id and isometrik_user_id for the auth user in the org."""
         if not user_id or not organization_id:
-            return None
-        row = await self.db_connection.fetchval(
+            return None, None
+        row = await self.db_connection.fetchrow(
             """
-            SELECT ct.id::text
+            SELECT ct.id::text AS id, ct.isometrik_user_id
             FROM contacts ct
             WHERE ct.user_id = $1::uuid
               AND ct.organization_id = $2::uuid
@@ -153,7 +157,12 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             organization_id,
             ClientStatus.DELETED.value,
         )
-        return str(row) if row else None
+        if not row:
+            return None, None
+        contact_id = str(row["id"])
+        raw_iso = row.get("isometrik_user_id")
+        isometrik_user_id = str(raw_iso) if raw_iso else None
+        return contact_id, isometrik_user_id
 
     async def create_contacts(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Create contacts in bulk.
@@ -1191,6 +1200,75 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 "websites",
             ),
         )
+
+    async def list_unit_resident_recipients(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """Return distinct resident contacts on a unit that have Supabase user ids."""
+        if not organization_id or not unit_id:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT ON (c.user_id)
+              c.user_id::text AS user_id,
+              c.id::text AS contact_id,
+              c.prefix,
+              c.first_name,
+              c.last_name,
+              c.additional_data
+            FROM contact_units cu
+            JOIN contacts c
+              ON c.id = cu.contact_id
+             AND c.organization_id = cu.organization_id
+            WHERE cu.organization_id = $1::uuid
+              AND cu.unit_id = $2::uuid
+              AND cu.status = 'active'::contact_unit_status
+              AND c.status <> 'deleted'
+              AND c.contact_type = ANY($3::text[])
+              AND c.user_id IS NOT NULL
+            ORDER BY c.user_id, c.updated_at DESC
+            """,
+            organization_id,
+            unit_id,
+            list(WALK_IN_RESIDENT_CONTACT_TYPES),
+        )
+        return [dict(row) for row in rows]
+
+    async def get_push_recipient_for_contact_unit(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Return primary contact push recipient for a contact_units row."""
+        if not organization_id or not contact_unit_id:
+            return None
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+              c.user_id::text AS user_id,
+              c.id::text AS contact_id,
+              c.prefix,
+              c.first_name,
+              c.last_name,
+              c.additional_data
+            FROM contact_units cu
+            JOIN contacts c
+              ON c.id = cu.contact_id
+             AND c.organization_id = cu.organization_id
+            WHERE cu.organization_id = $1::uuid
+              AND cu.id = $2::uuid
+              AND c.user_id IS NOT NULL
+              AND c.status <> 'deleted'
+            LIMIT 1
+            """,
+            organization_id,
+            contact_unit_id,
+        )
+        return dict(row) if row else None
 
     async def insert_contact(self, contact_data: dict[str, Any]) -> dict[str, Any]:
         """Insert one property-management contact row and return it."""

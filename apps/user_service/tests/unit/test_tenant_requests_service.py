@@ -313,6 +313,16 @@ class _FakeContactUnitsRepo:
         return {"id": "link-1"}
 
 
+class _FakePushDispatcher:
+    async def send_to_org_members(self, **kwargs):
+        del kwargs
+        return 1
+
+    async def send_to_contact(self, **kwargs):
+        del kwargs
+        return None
+
+
 def _service(
     *,
     repo: _FakeTenantRequestsRepo | None = None,
@@ -327,6 +337,7 @@ def _service(
         contact_units_repository=contact_units_repo or _FakeContactUnitsRepo(),
     )
     service.setup_service = AsyncMock()
+    service._push_dispatcher = _FakePushDispatcher()
     return service
 
 

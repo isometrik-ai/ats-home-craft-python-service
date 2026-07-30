@@ -32,6 +32,10 @@ from apps.user_service.app.schemas.enums import (
     VehicleStatus,
     VehicleType,
 )
+from apps.user_service.app.services.push_notification_dispatch import (
+    PushNotificationDispatcher,
+    unit_label_from_row,
+)
 from apps.user_service.app.services.units_service import (
     format_contact_display_name,
     format_primary_contact_email,
@@ -62,6 +66,12 @@ class VehiclesService:
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
         self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
+        self._push_dispatcher: PushNotificationDispatcher | None = None
+
+    def _push(self) -> PushNotificationDispatcher:
+        if self._push_dispatcher is None:
+            self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
+        return self._push_dispatcher
 
     def _normalize_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a vehicles row to API response shape."""
@@ -299,7 +309,30 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.vehicle_registration_duplicate",
                 custom_code=CustomStatusCode.CONFLICT,
             ) from exc
-        return self._normalize_vehicle(row)
+        normalized = self._normalize_vehicle(row)
+        await self._push().send_to_org_members(
+            organization_id=org_id,
+            message_key="notifications.push.vehicle.submitted",
+            notification_type="NOTIFICATION_TYPE_VEHICLE",
+            feed_type="vehicle",
+            params={
+                "registration_number": normalized.get("registration_number")
+                or body.registration_number,
+                "unit_label": unit_label_from_row({"unit_id": body.unit_id}),
+            },
+            data={
+                "vehicle_id": normalized.get("id"),
+                "project_id": project_id,
+                "unit_id": body.unit_id,
+                "screen": "vehicle_request_detail",
+            },
+            entity={"kind": "vehicle", "id": str(normalized.get("id") or "")},
+            options={
+                "click_action": "OPEN_VEHICLE_REQUEST",
+                "idempotency_key": f"vehicle:{normalized.get('id')}:submitted",
+            },
+        )
+        return normalized
 
     async def update_vehicle(
         self,
@@ -369,7 +402,13 @@ class VehiclesService:
             vehicle_id=vehicle_id,
         )
 
-    async def remove_vehicle(self, *, contact_id: str, vehicle_id: str) -> dict[str, Any]:
+    async def remove_vehicle(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+        rejection_reason: str | None = None,
+    ) -> dict[str, Any]:
         """Soft-remove an approved vehicle (status removed, row retained)."""
         org_id = self.user_context.organization_id
         assert org_id
@@ -404,6 +443,7 @@ class VehiclesService:
             organization_id=org_id,
             contact_id=contact_id,
             vehicle_id=vehicle_id,
+            rejection_reason=rejection_reason,
         )
         if not row:
             raise NotFoundException(
@@ -417,6 +457,7 @@ class VehiclesService:
         *,
         contact_id: str,
         vehicle_id: str,
+        rejection_reason: str,
     ) -> dict[str, Any] | None:
         """Admin delete/remove a vehicle for a contact."""
         org_id = self.user_context.organization_id
@@ -434,11 +475,34 @@ class VehiclesService:
 
         status = str(existing.get("status") or "")
         if status == VehicleStatus.PENDING.value:
-            await self.withdraw_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+            await self.repo.update(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                update_data={
+                    "status": VehicleStatus.REJECTED.value,
+                    "rejection_reason": rejection_reason,
+                },
+            )
+            await self.repo.delete(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+            )
             return None
         if status == VehicleStatus.APPROVED.value:
-            return await self.remove_vehicle(contact_id=contact_id, vehicle_id=vehicle_id)
+            return await self.remove_vehicle(
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                rejection_reason=rejection_reason,
+            )
         if status == VehicleStatus.REJECTED.value:
+            await self.repo.update(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                update_data={"rejection_reason": rejection_reason},
+            )
             await self.repo.delete(
                 organization_id=org_id,
                 contact_id=contact_id,
@@ -456,6 +520,7 @@ class VehiclesService:
         *,
         project_id: str,
         vehicle_id: str,
+        rejection_reason: str,
     ) -> dict[str, Any] | None:
         """Admin delete/remove a vehicle scoped to a project."""
         org_id = self.user_context.organization_id
@@ -473,6 +538,7 @@ class VehiclesService:
         return await self.admin_delete_vehicle(
             contact_id=str(existing["contact_id"]),
             vehicle_id=vehicle_id,
+            rejection_reason=rejection_reason,
         )
 
     async def list_project_vehicles(
@@ -574,7 +640,32 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.vehicle_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return self._normalize_vehicle(row)
+        normalized = self._normalize_vehicle(row)
+        message_key = (
+            "notifications.push.vehicle.approved"
+            if body.status == VehicleStatus.APPROVED
+            else "notifications.push.vehicle.rejected"
+        )
+        suffix = "approved" if body.status == VehicleStatus.APPROVED else "rejected"
+        await self._push().send_to_contact(
+            organization_id=org_id,
+            contact_id=str(vehicle.get("contact_id") or ""),
+            message_key=message_key,
+            notification_type="NOTIFICATION_TYPE_VEHICLE",
+            feed_type="vehicle",
+            params={"registration_number": normalized.get("registration_number") or ""},
+            data={
+                "vehicle_id": normalized.get("id"),
+                "project_id": project_id,
+                "screen": "vehicle_detail",
+            },
+            entity={"kind": "vehicle", "id": str(normalized.get("id") or "")},
+            options={
+                "click_action": "OPEN_VEHICLE",
+                "idempotency_key": f"vehicle:{normalized.get('id')}:{suffix}",
+            },
+        )
+        return normalized
 
     async def complete_vehicles_step(
         self,

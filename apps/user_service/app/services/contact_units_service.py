@@ -455,6 +455,7 @@ class ContactUnitsService:
         project_id: str,
         unit_id: str,
         contact_id: str,
+        assign_date: date,
         is_primary: bool = True,
         relationship: str = ContactUnitRelationship.SELF.value,
     ) -> dict[str, Any]:
@@ -474,7 +475,13 @@ class ContactUnitsService:
                 contact_id=contact_id,
                 is_primary=is_primary,
                 relationship=relationship,
+                assign_date=assign_date,
             )
+        full = await self.repo.get_by_id(
+            organization_id=org_id,
+            contact_unit_id=str(row["id"]),
+        )
+        normalized = self._normalize_unit_row(full or row)
         return {
             "id": row["id"],
             "status": row["status"],
@@ -482,6 +489,7 @@ class ContactUnitsService:
             "previous_contact_id": released[0]["contact_id"] if released else None,
             "released_contact_unit_ids": [item["id"] for item in released],
             "unit_status": "occupied",
+            "assign_date": normalized.get("assign_date"),
         }
 
     async def admin_assign_unit(

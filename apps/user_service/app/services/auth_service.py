@@ -28,6 +28,7 @@ from apps.user_service.app.schemas.auth import (
     AuthResponse,
     ChangePasswordResponse,
     ForgotPasswordResponse,
+    IsometrikDetails,
     PasswordResponse,
     RefreshSessionResponse,
     SelectOrganizationResponse,
@@ -117,6 +118,20 @@ class AuthService:
             OrganizationRepository(db_connection=db_connection) if db_connection else None
         )
         self.supabase_client = sb_client
+
+    @staticmethod
+    def _with_membership_isometrik_user(
+        isometrik_details: IsometrikDetails | None,
+        isometrik_user_id: str | None,
+    ) -> IsometrikDetails | None:
+        """Attach org-member or contact isometrik_user_id to isometrik_details."""
+        if isometrik_details is None:
+            return None
+        return isometrik_details.model_copy(
+            update={
+                "user_id": isometrik_user_id,
+            }
+        )
 
     # UTILITY METHODS
     @staticmethod
@@ -943,12 +958,24 @@ class AuthService:
             return None
         try:
             org_member_repo = OrganizationMemberRepository(db_connection=self.db_connection)
+            (
+                _is_member,
+                org_member_isometrik_user_id,
+            ) = await org_member_repo.get_active_membership_isometrik_user_id(
+                user_id=user_id,
+                organization_id=old_org_id,
+            )
             isometrik_details = await get_isometrik_details(
                 user_id=user_id,
                 organization_id=old_org_id,
                 organization_repository=self.organization_repository,
                 organization_member_repository=org_member_repo,
             )
+            if isometrik_details is not None:
+                isometrik_details = self._with_membership_isometrik_user(
+                    isometrik_details,
+                    org_member_isometrik_user_id,
+                )
             return SelectOrganizationResponse(isometrik_details=isometrik_details)
         except Exception as exc:
             logger.warning(
@@ -1318,10 +1345,15 @@ class AuthService:
         session_repository = SessionRepository(db_connection=self.db_connection)
         org_member_isometrik_user_id: str | None = None
         contact_id: str | None = None
+        contact_isometrik_user_id: str | None = None
+        organization_member_repository: OrganizationMemberRepository | None = None
 
         if user_type == SelectOrganizationType.CLIENT:
             contacts_repository = ContactsRepository(db_connection=self.db_connection)
-            contact_id = await contacts_repository.is_active_contact_user_for_organization(
+            (
+                contact_id,
+                contact_isometrik_user_id,
+            ) = await contacts_repository.is_active_contact_user_for_organization(
                 user_id=user_id,
                 organization_id=organization_id,
             )
@@ -1386,11 +1418,15 @@ class AuthService:
             else None,
         )
 
-        # Match profile API: expose organization_members.isometrik_user_id as user_id.
-        if user_type != SelectOrganizationType.CLIENT and isometrik_details is not None:
-            isometrik_details = isometrik_details.model_copy(
-                update={"user_id": org_member_isometrik_user_id}
-            )
+        isometrik_user_id = (
+            contact_isometrik_user_id
+            if user_type == SelectOrganizationType.CLIENT
+            else org_member_isometrik_user_id
+        )
+        isometrik_details = self._with_membership_isometrik_user(
+            isometrik_details,
+            isometrik_user_id,
+        )
 
         return SelectOrganizationResponse(isometrik_details=isometrik_details)
 
@@ -1409,10 +1445,15 @@ class AuthService:
         session_repository = SessionRepository(db_connection=self.db_connection)
         org_member_isometrik_user_id: str | None = None
         contact_id: str | None = None
+        contact_isometrik_user_id: str | None = None
+        organization_member_repository: OrganizationMemberRepository | None = None
 
         if user_type == SelectOrganizationType.CLIENT:
             contacts_repository = ContactsRepository(db_connection=self.db_connection)
-            contact_id = await contacts_repository.is_active_contact_user_for_organization(
+            (
+                contact_id,
+                contact_isometrik_user_id,
+            ) = await contacts_repository.is_active_contact_user_for_organization(
                 user_id=user_id,
                 organization_id=organization_id,
             )
@@ -1465,9 +1506,14 @@ class AuthService:
             else None,
         )
 
-        if user_type != SelectOrganizationType.CLIENT and isometrik_details is not None:
-            isometrik_details = isometrik_details.model_copy(
-                update={"user_id": org_member_isometrik_user_id}
-            )
+        isometrik_user_id = (
+            contact_isometrik_user_id
+            if user_type == SelectOrganizationType.CLIENT
+            else org_member_isometrik_user_id
+        )
+        isometrik_details = self._with_membership_isometrik_user(
+            isometrik_details,
+            isometrik_user_id,
+        )
 
         return SelectOrganizationResponse(isometrik_details=isometrik_details)

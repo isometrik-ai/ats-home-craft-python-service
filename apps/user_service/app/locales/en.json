@@ -816,5 +816,81 @@
       "visit_unit_approved": "Walk-in approved for your flat.",
       "visit_unit_rejected": "Walk-in rejected for your flat."
     }
+  },
+  "notifications": {
+    "push": {
+      "walk_in": {
+        "awaiting": {
+          "title": "Walk-in approval needed",
+          "body": "Security registered a visitor for {unit_label}"
+        },
+        "approved": {
+          "title": "Walk-in approved",
+          "body": "{actor_name} approved the visitor for {unit_label}"
+        },
+        "rejected": {
+          "title": "Walk-in rejected",
+          "body": "{actor_name} rejected the visitor for {unit_label}"
+        },
+        "entered": {
+          "title": "Visitor entered",
+          "body": "The walk-in visitor has been marked as entered"
+        }
+      },
+      "pass": {
+        "checked_in": {
+          "title": "Visitor checked in",
+          "body": "{visitor_name} checked in at the gate"
+        },
+        "checked_out": {
+          "title": "Visitor checked out",
+          "body": "{visitor_name} checked out at the gate"
+        }
+      },
+      "tenant_request": {
+        "submitted": {
+          "title": "New tenant request",
+          "body": "A tenant request was submitted for {unit_label}"
+        },
+        "document_verified": {
+          "title": "Document verified",
+          "body": "An admin verified a document on your tenant request"
+        },
+        "approved": {
+          "title": "Tenant request approved",
+          "body": "Your tenant request for {unit_label} was approved"
+        }
+      },
+      "fee": {
+        "invoice_issued": {
+          "title": "New invoice",
+          "body": "Invoice {invoice_number} of {amount} is due on {due_date}"
+        },
+        "payment_reminder": {
+          "title": "Payment reminder",
+          "body": "Invoice {invoice_number} is overdue"
+        }
+      },
+      "move": {
+        "recorded": {
+          "title": "Move event recorded",
+          "body": "A {move_type} was recorded for {unit_label}"
+        }
+      },
+      "vehicle": {
+        "submitted": {
+          "title": "Vehicle request pending review",
+          "body": "{registration_number} was submitted for {unit_label}"
+        },
+        "approved": {
+          "title": "Vehicle approved",
+          "body": "Your vehicle {registration_number} was approved"
+        },
+        "rejected": {
+          "title": "Vehicle request rejected",
+          "body": "Your vehicle {registration_number} was rejected"
+        }
+      }
+    }
   }
 }
