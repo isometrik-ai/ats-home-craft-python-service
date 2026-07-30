@@ -2504,7 +2504,8 @@ async def unassign_unit_owner(
     summary="Reassign unit owner",
     description=(
         "Replaces the current unit assignee with another contact in one step. "
-        "Works for pending or active allotments and sets the unit to occupied."
+        "Works for pending or active allotments and sets the unit to occupied. "
+        "Requires assign_date (YYYY-MM-DD)."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -2535,6 +2536,7 @@ async def reassign_unit_owner(
         project_id=project_id,
         unit_id=unit_id,
         contact_id=body.contact_id,
+        assign_date=body.assign_date,
         is_primary=body.is_primary,
         relationship=body.relationship.value,
     )

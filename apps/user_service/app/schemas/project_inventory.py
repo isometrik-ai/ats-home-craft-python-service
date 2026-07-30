@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -255,6 +256,7 @@ class ReassignUnitOwnerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     contact_id: str
+    assign_date: date
     is_primary: bool = True
     relationship: ContactUnitRelationship = ContactUnitRelationship.SELF
 
@@ -270,6 +272,7 @@ class UnitOwnerChangeResponse(BaseModel):
     previous_contact_id: str | None = None
     released_contact_unit_ids: list[str] = Field(default_factory=list)
     unit_status: str
+    assign_date: str | None = None
 
 
 class CreateUnitDocumentRequest(BaseModel):
