@@ -25,6 +25,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     UpdateVehicleRequest,
     ValidateHouseholdInvitationRequest,
     VehicleCatalogResponse,
+    VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import VehicleType
 from apps.user_service.app.services.contact_onboarding_service import (
@@ -460,6 +461,45 @@ async def create_vehicle(
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
         data=data,
+    )
+
+
+@handle_api_exceptions("get contact vehicle detail")
+@router.get(
+    "/vehicles/{vehicle_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get vehicle detail",
+    description=(
+        "Returns one vehicle registered by the authenticated contact, including "
+        "assigned unit summary and parking slot allotment when approved."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_vehicle_detail(
+    request: Request,
+    vehicle_id: str = Path(..., description="Vehicle identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Get vehicle detail for the authenticated contact."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    vehicles_service = VehiclesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await vehicles_service.get_vehicle_detail(
+        contact_id=str(contact["id"]),
+        vehicle_id=vehicle_id,
+    )
+    payload = VehicleResponse.model_validate(data).model_dump(mode="json", exclude_none=True)
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.vehicle_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=payload,
     )
 
 

@@ -127,6 +127,26 @@ async def test_get_by_id_missing():
 
 
 @pytest.mark.asyncio
+async def test_get_detail_by_contact():
+    """get_detail_by_contact joins unit and parking slot data."""
+    conn = _mock_conn(row=_vehicle_row())
+    repo = VehiclesRepository(db_connection=conn)
+
+    vehicle = await repo.get_detail_by_contact(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        vehicle_id=VEHICLE_ID,
+    )
+
+    assert vehicle["registration_number"] == "ABC-123"
+    query, args = _sql_args(conn.fetchrow)
+    assert "unit_code" in query
+    assert "parking_slot_number" in query
+    assert "deleted_at IS NULL" in query
+    assert args == (ORG_ID, CONTACT_ID, VEHICLE_ID)
+
+
+@pytest.mark.asyncio
 async def test_create_vehicle():
     """create inserts vehicle and returns row."""
     conn = _mock_conn(row=_vehicle_row())

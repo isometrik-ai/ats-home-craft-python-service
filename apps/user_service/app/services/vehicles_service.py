@@ -277,6 +277,27 @@ class VehiclesService:
         )
         return [self._normalize_vehicle(row) for row in rows]
 
+    async def get_vehicle_detail(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any]:
+        """Return one vehicle with unit and parking slot details for the contact."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        row = await self.repo.get_detail_by_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+            vehicle_id=vehicle_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return self._serialize_admin_vehicle(row)
+
     async def create_vehicle(
         self,
         *,

@@ -278,6 +278,34 @@ _FAKE_VEHICLE = {
     "status": "pending",
 }
 
+_FAKE_VEHICLE_DETAIL = {
+    **_FAKE_VEHICLE,
+    "organization_id": "org-1",
+    "project_id": "proj-1",
+    "contact_id": CONTACT_ID,
+    "photo_paths": [],
+    "status_updated_at": "2026-07-16T10:00:00Z",
+    "created_at": "2026-07-16T09:00:00Z",
+    "updated_at": "2026-07-16T10:00:00Z",
+    "sort_order": 0,
+    "unit": {
+        "id": "unit-1",
+        "code": "A-101",
+        "location_label": "Tower A · F10",
+        "status": "occupied",
+    },
+    "parking_allotment": {
+        "id": "slot-1",
+        "slot_number": 12,
+        "status": "assigned",
+        "facility": {
+            "id": "fac-1",
+            "name": "Basement Parking",
+            "floor_level": "B1",
+        },
+    },
+}
+
 
 @pytest.mark.asyncio
 async def test_list_properties(monkeypatch, client):
@@ -407,6 +435,30 @@ async def test_list_vehicles(monkeypatch, client):
     res = await client.get("/v1/contact-onboarding/vehicles")
     body = assert_success(res, 200)
     assert body["data"][0]["registration_number"] == "MH12AB1234"
+
+
+@pytest.mark.asyncio
+async def test_get_vehicle_detail(monkeypatch, client):
+    """GET /contact-onboarding/vehicles/{id} returns vehicle with parking slot."""
+
+    _patch_contact_context(monkeypatch)
+
+    async def fake_get_detail(_self, *, contact_id: str, vehicle_id: str):
+        del _self
+        assert contact_id == CONTACT_ID
+        assert vehicle_id == "veh-1"
+        return _FAKE_VEHICLE_DETAIL
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.get_vehicle_detail",
+        fake_get_detail,
+    )
+
+    res = await client.get("/v1/contact-onboarding/vehicles/veh-1")
+    body = assert_success(res, 200)
+    assert body["data"]["registration_number"] == "MH12AB1234"
+    assert body["data"]["parking_allotment"]["slot_number"] == 12
+    assert body["data"]["unit"]["code"] == "A-101"
 
 
 @pytest.mark.asyncio

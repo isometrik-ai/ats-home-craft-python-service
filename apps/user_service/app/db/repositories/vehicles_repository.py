@@ -247,6 +247,35 @@ class VehiclesRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def get_detail_by_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one vehicle with unit and parking slot joins for the contact."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+              {self._VEHICLE_SELECT_COLUMNS},
+              {_VEHICLE_UNIT_SELECT_COLUMNS},
+              {_VEHICLE_PARKING_SELECT_COLUMNS}
+            FROM vehicles v
+            {_VEHICLE_UNIT_JOINS}
+            {_VEHICLE_PARKING_JOINS}
+            WHERE v.organization_id = $1::uuid
+              AND v.contact_id = $2::uuid
+              AND v.id = $3::uuid
+              AND {_ACTIVE_VEHICLE_FILTER}
+            LIMIT 1
+            """,
+            organization_id,
+            contact_id,
+            vehicle_id,
+        )
+        return dict(row) if row else None
+
     async def create(
         self,
         *,

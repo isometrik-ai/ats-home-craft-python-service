@@ -213,6 +213,75 @@ async def test_list_project_vehicles_includes_owner_and_unit():
 
 
 @pytest.mark.asyncio
+async def test_get_vehicle_detail_includes_unit_and_parking():
+    """Contact vehicle detail includes unit and parking slot summaries."""
+    svc = _service()
+    svc.repo.get_detail_by_contact.return_value = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "ABC123",
+        "photo_paths": [],
+        "status": VehicleStatus.APPROVED.value,
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+        "unit_code": "A-1802",
+        "unit_label": None,
+        "unit_status": "occupied",
+        "unit_tower_id": "tower-1",
+        "unit_config_id": "cfg-1",
+        "unit_plot_item_id": None,
+        "unit_sort_order": 1,
+        "unit_tower_name": "Tower A",
+        "unit_tower_type": "residential",
+        "unit_floor_display_name": "F18",
+        "unit_floor_level_number": 18,
+        "unit_config_kind": "apartment",
+        "unit_config_display_label": "2BHK Standard",
+        "unit_config_name": "2BHK Standard",
+        "unit_plot_description": None,
+        "unit_resolved_property_type": "residential",
+        "unit_resolved_config_kind": "apartment",
+        "parking_slot_id": "slot-1",
+        "parking_slot_row_id": "slot-1",
+        "parking_slot_number": 12,
+        "parking_slot_status": "assigned",
+        "parking_facility_id": "fac-1",
+        "parking_facility_name": "Basement Parking",
+        "parking_facility_location_type": "tower",
+        "parking_facility_floor_level": "B1",
+        "parking_facility_wing": "A",
+        "parking_facility_tower_id": "tower-1",
+    }
+
+    item = await svc.get_vehicle_detail(contact_id="c1", vehicle_id="v1")
+
+    assert item["unit"]["code"] == "A-1802"
+    assert item["parking_allotment"]["slot_number"] == 12
+    assert item["parking_allotment"]["facility"]["name"] == "Basement Parking"
+    svc.repo.get_detail_by_contact.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_vehicle_detail_not_found():
+    """Missing vehicle raises not found."""
+    svc = _service()
+    svc.repo.get_detail_by_contact.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await svc.get_vehicle_detail(contact_id="c1", vehicle_id="missing")
+
+
+@pytest.mark.asyncio
 async def test_vehicle_owner_unit_keys_missing():
     """Owner and unit keys are present even when join data is absent."""
     svc = _service()
