@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 
@@ -55,6 +56,19 @@ def format_primary_contact_email(emails: Any) -> str | None:
         return None
     email = str(email_item.get("email") or "").strip()
     return email or None
+
+
+def format_assign_date(value: Any) -> str | None:
+    """Format contact_units.assigned_at to YYYY-MM-DD for API responses."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value[:10]
+    return str(value)[:10]
 
 
 def build_unit_list_owner(row: dict[str, Any]) -> dict[str, Any] | None:

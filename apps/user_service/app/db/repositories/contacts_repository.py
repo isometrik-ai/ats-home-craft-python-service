@@ -39,6 +39,60 @@ CONTACT_JSONB_COLUMNS: frozenset[str] = frozenset(
 
 CONTACT_ADDRESS_JSONB_COLUMNS: frozenset[str] = frozenset({"address_data"})
 
+_CONTACT_CREATED_BY_NAME_SQL = """
+NULLIF(
+  TRIM(
+    COALESCE(
+      NULLIF(
+        TRIM(
+          COALESCE(creator_om.first_name, '')
+          || ' '
+          || COALESCE(creator_om.last_name, '')
+        ),
+        ''
+      ),
+      NULLIF(
+        TRIM(
+          COALESCE(creator_ct.prefix, '')
+          || CASE
+               WHEN creator_ct.prefix IS NOT NULL
+                AND creator_ct.first_name IS NOT NULL THEN ' '
+               ELSE ''
+             END
+          || COALESCE(creator_ct.first_name, '')
+          || CASE
+               WHEN creator_ct.last_name IS NOT NULL THEN ' '
+               ELSE ''
+             END
+          || COALESCE(creator_ct.last_name, '')
+        ),
+        ''
+      ),
+      NULLIF(creator_au.email::text, '')
+    )
+  ),
+  ''
+) AS created_by_name
+"""
+
+_CONTACT_CREATED_BY_JOINS_SQL = """
+LEFT JOIN organization_members creator_om
+  ON creator_om.user_id = ct.created_by
+ AND creator_om.organization_id = ct.organization_id
+ AND creator_om.status <> 'deleted'
+LEFT JOIN LATERAL (
+  SELECT c.prefix, c.first_name, c.last_name
+  FROM contacts c
+  WHERE c.user_id = ct.created_by
+    AND c.organization_id = ct.organization_id
+    AND c.status <> 'deleted'
+  ORDER BY c.created_at ASC
+  LIMIT 1
+) creator_ct ON TRUE
+LEFT JOIN auth.users creator_au
+  ON creator_au.id = ct.created_by
+"""
+
 CONTACT_DETAIL_JSONB_LIST_FIELDS: tuple[str, ...] = (
     "phones",
     "emails",
@@ -178,6 +232,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             "id",
             "user_id",
             "isometrik_user_id",
+            "created_by",
             "status",
             "prefix",
             "first_name",
@@ -313,7 +368,8 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 notes,
                 custom_fields,
                 additional_data,
-                social_pages
+                social_pages,
+                created_by
               )
               VALUES (
                 $1::uuid,
@@ -339,7 +395,8 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 COALESCE($22::jsonb, '[]'::jsonb),
                 COALESCE($23::jsonb, '{}'::jsonb),
                 COALESCE($24::jsonb, '{}'::jsonb),
-                COALESCE($25::jsonb, '{}'::jsonb)
+                COALESCE($25::jsonb, '{}'::jsonb),
+                $30::uuid
               )
               RETURNING *
             ),
@@ -516,6 +573,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             bool(make_primary),
             ClientStatus.DELETED.value,
             addresses_json,
+            contact_data.get("created_by"),
         )
         if not fetched_row:
             return {"contact_id": None, "company_id": None, "contact": None}
@@ -578,17 +636,19 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         while locking the `contacts` row for consistency in update flows.
         """
         fetched_row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
               ct.*,
               NULLIF(au.email::text, '') AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
               COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
-              COALESCE(roles.roles, '[]'::jsonb) AS roles
+              COALESCE(roles.roles, '[]'::jsonb) AS roles,
+              {_CONTACT_CREATED_BY_NAME_SQL}
             FROM contacts ct
             LEFT JOIN auth.users au
               ON au.id = ct.user_id
+            {_CONTACT_CREATED_BY_JOINS_SQL}
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
                 jsonb_build_object(
@@ -844,17 +904,19 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
     ) -> dict[str, Any] | None:
         """Get a contact + linked companies + addresses in one round trip."""
         fetched_row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
               ct.*,
               NULLIF(au.email::text, '') AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
               COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
-              COALESCE(roles.roles, '[]'::jsonb) AS roles
+              COALESCE(roles.roles, '[]'::jsonb) AS roles,
+              {_CONTACT_CREATED_BY_NAME_SQL}
             FROM contacts ct
             LEFT JOIN auth.users au
               ON au.id = ct.user_id
+            {_CONTACT_CREATED_BY_JOINS_SQL}
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
                 jsonb_build_object(
@@ -958,17 +1020,19 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             return None
 
         fetched_row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
               ct.*,
               NULLIF(au.email::text, '') AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
               COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
-              COALESCE(roles.roles, '[]'::jsonb) AS roles
+              COALESCE(roles.roles, '[]'::jsonb) AS roles,
+              {_CONTACT_CREATED_BY_NAME_SQL}
             FROM contacts ct
             LEFT JOIN auth.users au
               ON au.id = ct.user_id
+            {_CONTACT_CREATED_BY_JOINS_SQL}
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
                 jsonb_build_object(
@@ -1418,6 +1482,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             "description",
             "websites",
             "notes",
+            "created_by",
         ]
         present = [col for col in columns if col in contact_data]
         if "organization_id" not in present:

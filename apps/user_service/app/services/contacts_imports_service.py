@@ -1032,6 +1032,7 @@ class ContactsImportService:
                 "organization_id": event.organization_id,
                 "user_id": user_id,
                 "isometrik_user_id": isometrik_user_id,
+                "created_by": event.requested_by or None,
                 "status": "active",
                 "prefix": model.prefix,
                 "first_name": model.first_name,

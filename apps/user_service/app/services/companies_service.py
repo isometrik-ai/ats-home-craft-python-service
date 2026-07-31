@@ -1101,6 +1101,7 @@ class CompaniesService:
                 {
                     "organization_id": org_id,
                     "status": ClientStatus.ACTIVE.value,
+                    "created_by": self.user_context.user_id or None,
                     "user_id": user_id,
                     "isometrik_user_id": isometrik_user_id,
                     "prefix": create_contact.prefix,

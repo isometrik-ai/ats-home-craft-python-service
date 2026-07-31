@@ -37,7 +37,8 @@ LEFT JOIN LATERAL (
         c.first_name AS owner_first_name,
         c.last_name AS owner_last_name,
         c.phones AS owner_phones,
-        c.emails AS owner_emails
+        c.emails AS owner_emails,
+        cu.assigned_at AS owner_assigned_at
     FROM contact_units cu
     JOIN contacts c
         ON c.id = cu.contact_id
@@ -316,6 +317,7 @@ class UnitsRepository(BaseRepository):
                 owner_row.owner_last_name,
                 owner_row.owner_phones,
                 owner_row.owner_emails,
+                owner_row.owner_assigned_at,
                 {_RESOLVED_PROPERTY_TYPE_SQL} AS resolved_property_type,
                 {_RESOLVED_CONFIG_KIND_SQL} AS resolved_config_kind
             {_LIST_UNITS_FROM_SQL}
@@ -519,6 +521,7 @@ class UnitsRepository(BaseRepository):
                 cu.is_primary,
                 cu.relationship::text AS relationship,
                 cu.status::text AS status,
+                cu.assigned_at,
                 (
                   SELECT cr.role_type::text
                   FROM contact_roles cr
