@@ -46,7 +46,7 @@ def _patch_contact_context(monkeypatch) -> None:
         del current_user, db_connection, request
         return admin_context(org_id="org-123"), {
             "id": CONTACT_ID,
-            "contact_type": "owner",
+            "roles": [{"role_type": "Owner", "status": "active"}],
         }
 
     monkeypatch.setattr(
@@ -64,7 +64,7 @@ async def test_get_onboarding_status(monkeypatch, client):
     async def fake_get_status(_self, *, contact_id: str, contact_type: str):
         del _self
         assert contact_id == CONTACT_ID
-        assert contact_type == "owner"
+        assert contact_type == "Owner"
         return _FAKE_STATUS
 
     monkeypatch.setattr(

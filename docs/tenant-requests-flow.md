@@ -6,7 +6,7 @@
 > [`contact-onboarding-flow.md`](./contact-onboarding-flow.md), [`move-events-flow.md`](./move-events-flow.md),
 > and [`passes-flow.md`](./passes-flow.md).
 >
-> Schema and architecture rationale: [ADR 0007](./adr/0007-tenant-requests.md).
+> Schema and architecture rationale: [ADR 0007](./adr/0007-tenant-requests.md), [ADR 0010](./adr/0010-contact-roles.md) (roles).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Owner API prefix:** `/v1/contact-onboarding/tenant-requests`
@@ -17,26 +17,27 @@ ______________________________________________________________________
 
 ## 1. What this flow does
 
-An **owner** (`contacts.contact_type = Owner`) who has an **active unit assignment** can submit
+A **primary occupant** (`contact_units.relationship = self`) who has an **active unit assignment** can submit
 a **tenant request** for that unit: prospective tenant profile, three documents, and an intended
 move-in date. A **community admin** reviews each document independently, then approves or rejects
 the request.
 
 On **approval**:
 
-1. A real **`contacts`** row is created (`contact_type = Tenant`).
-1. A **`contact_units`** link is created (`status = active`, tenant as primary occupant).
+1. A real **`contacts`** row is created (identity only).
+1. A **`contact_units`** link is created (`status = active`, `relationship = self`, tenant as primary occupant).
+1. An active **`contact_roles`** row is created (`role_type = Tenant`, scoped to the unit).
 1. The request moves to **`approved`** and appears in history forever.
 
 ### Business rules (must enforce)
 
-| Rule                                    | Enforcement                                             |
-| --------------------------------------- | ------------------------------------------------------- |
-| **One in-flight request per unit**      | Partial unique index + service check before create      |
-| **One active approved tenant per unit** | Partial unique index; supersede previous on new approve |
-| **Past history visible**                | Never hard-delete requests; `superseded` retains row    |
-| **Owner can only act on owned units**   | Join `contact_units` where owner contact is active      |
-| **Three documents required to submit**  | `id_proof`, `rental_agreement`, `police_verification`   |
+| Rule                                           | Enforcement                                             |
+| ---------------------------------------------- | ------------------------------------------------------- |
+| **One in-flight request per unit**             | Partial unique index + service check before create      |
+| **One active approved tenant per unit**        | Partial unique index; supersede previous on new approve |
+| **Past history visible**                       | Never hard-delete requests; `superseded` retains row    |
+| **Submitter must be primary occupant on unit** | `contact_units` active link with `relationship = self`  |
+| **Three documents required to submit**         | `id_proof`, `rental_agreement`, `police_verification`   |
 
 ### Screen → capability map
 
@@ -162,7 +163,8 @@ ______________________________________________________________________
 ### 4.1 Preconditions
 
 - Owner logged in (JWT → `contacts`).
-- Owner has **`contact_type = Owner`** (or active owner link — confirm with product).
+- Owner has an **active `contact_roles` row** with `role_type = Owner` on the unit (or active owner
+  `contact_units` link — product may allow co-owners later).
 - Target unit: owner has **`contact_units.status = active`** for that `unit_id`.
 - No other in-flight request on that unit.
 - If unit already has an approved tenant, owner may still submit — approval will **supersede** the
@@ -286,8 +288,9 @@ Transactional steps:
 
 1. Assert `status = ready_to_approve`.
 1. If unit has current approved request → supersede old + `moved_out` old tenant link.
-1. `ContactsService.create_contact` (`contact_type = Tenant`, `provision_auth = !portal_access`).
-1. `contact_units` insert (tenant, `is_primary = true`, `status = active`).
+1. `ContactsService.create_contact` (identity; auth provisioned from `portal_access` on the request).
+1. `contact_units` insert (tenant, `is_primary = true`, `status = active`, `relationship = self`).
+1. `contact_roles` insert (`role_type = Tenant`, `status = active`, linked to unit + `contact_unit_id`).
 1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`, **`move_in_date`** (from request body).
 1. Append `approved` + `tenant_added` events.
 

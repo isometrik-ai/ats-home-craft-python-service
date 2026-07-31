@@ -27,7 +27,6 @@ from apps.user_service.app.schemas.enums import (
     ClientStatus,
     ContactBloodGroup,
     ContactGender,
-    ContactType,
 )
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -467,7 +466,6 @@ async def test_update_contact_all_scalar_fields_and_no_row(monkeypatch) -> None:
     )
 
     body = UpdateContactRequest(
-        contact_type=ContactType.OWNER,
         portal_access=True,
         additional_data={"k": "v"},
         sales_intelligence={"score": 1},

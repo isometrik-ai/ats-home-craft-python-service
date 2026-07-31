@@ -6,7 +6,6 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
-from apps.user_service.app.schemas.enums import WALK_IN_RESIDENT_CONTACT_TYPES
 from apps.user_service.app.utils.common_utils import serialize_jsonb_param
 
 
@@ -502,23 +501,20 @@ class WalkInRepository(BaseRepository):
         contact_id: str,
         unit_id: str,
     ) -> bool:
-        """True when contact is Owner/Family/Tenant with active link to unit."""
+        """True when contact has an active link to the unit."""
         row = await self.db_connection.fetchval(
             """
             SELECT 1
             FROM contact_units cu
-            JOIN contacts c ON c.id = cu.contact_id
             WHERE cu.organization_id = $1::uuid
               AND cu.contact_id = $2::uuid
               AND cu.unit_id = $3::uuid
               AND cu.status = 'active'::contact_unit_status
-              AND c.contact_type = ANY($4::text[])
             LIMIT 1
             """,
             organization_id,
             contact_id,
             unit_id,
-            list(WALK_IN_RESIDENT_CONTACT_TYPES),
         )
         return row is not None
 
@@ -580,18 +576,15 @@ class WalkInRepository(BaseRepository):
               AND EXISTS (
                 SELECT 1
                 FROM contact_units cu
-                JOIN contacts c ON c.id = cu.contact_id
                 WHERE cu.organization_id = vu.organization_id
                   AND cu.unit_id = vu.unit_id
                   AND cu.contact_id = $3::uuid
                   AND cu.status = 'active'::contact_unit_status
-                  AND c.contact_type = ANY($4::text[])
               )
             ORDER BY e.requested_at DESC, vu.sort_order
             """,
             organization_id,
             status,
             contact_id,
-            list(WALK_IN_RESIDENT_CONTACT_TYPES),
         )
         return [dict(row) for row in rows]

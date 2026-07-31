@@ -98,9 +98,15 @@ async def get_onboarding_status(
         user_context=user_context,
         sb_client=None,
     )
+    roles = contact.get("roles") or []
+    role_type = ""
+    if isinstance(roles, list) and roles:
+        first = roles[0]
+        if isinstance(first, dict):
+            role_type = str(first.get("role_type") or "")
     data = await service.get_status(
         contact_id=str(contact["id"]),
-        contact_type=str(contact.get("contact_type") or ""),
+        contact_type=role_type,
     )
     return success_response(
         request=request,

@@ -38,6 +38,9 @@ from apps.user_service.app.db.repositories import (
 from apps.user_service.app.db.repositories.companies_repository import (
     COMPANY_JSONB_COLUMNS,
 )
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contacts_repository import (
     CONTACT_JSONB_COLUMNS,
 )
@@ -56,7 +59,7 @@ from apps.user_service.app.schemas.enums import (
     ClientStatus,
     CompanyEventType,
     ContactEventType,
-    ContactStatus,
+    ContactType,
     EntityType,
     IsometrikRole,
     KafkaTopics,
@@ -430,6 +433,7 @@ class ContactsService:
         self.companies_repo = CompaniesRepository(db_connection)
         self.cc_repo = ContactCompaniesRepository(db_connection)
         self.org_repo = OrganizationRepository(db_connection)
+        self.contact_roles_repo = ContactRolesRepository(db_connection)
         self._typesense: TypesenseService | None = None
 
     @property
@@ -1061,17 +1065,28 @@ class ContactsService:
                 ) from exc
             raise
 
+    @staticmethod
+    def _resolve_create_email(body: CreateContactRequest) -> str:
+        """Return normalized primary email from top-level email or emails jsonb."""
+        email_norm = (body.email or "").strip().lower()
+        if email_norm:
+            return email_norm
+        return next(
+            (item.email.strip().lower() for item in (body.emails or []) if item.is_primary),
+            "",
+        )
+
+    @staticmethod
+    def _normalize_full_phone_from_parts(*, phone_isd_code: str | None, phone_number: str) -> str:
+        """Return digits-only full phone from ISD code and local number."""
+        return re.sub(r"\D", "", f"{phone_isd_code or ''}{phone_number}")
+
     async def create_contact(
         self,
         body: CreateContactRequest,
-        *,
-        provision_auth: bool = True,
     ) -> dict[str, Any]:
         """Create a contact with optional company link (and optional primary designation)."""
         # pylint: disable=too-complex
-        if getattr(body, "contact_type", None) is not None:
-            return await self._create_property_contact(body, provision_auth=provision_auth)
-
         org_id = self.user_context.organization_id
         (
             company_id,
@@ -1082,7 +1097,7 @@ class ContactsService:
 
         # Feature: on contact creation only, when no company is selected/provided,
         # infer a company name from email domain (excluding consumer mail providers).
-        email_norm = (body.email or "").strip().lower()
+        email_norm = self._resolve_create_email(body)
         (
             company_id,
             company_data,
@@ -1101,7 +1116,8 @@ class ContactsService:
         company_name = (company_data or {}).get("name") if company_data else None
 
         # Align with legacy behavior: prevent org-level duplicate emails when email is provided.
-        await self._assert_contact_email_unique(organization_id=org_id, email=email_norm)
+        if email_norm:
+            await self._assert_contact_email_unique(organization_id=org_id, email=email_norm)
 
         # Custom fields: validate/normalize exactly as existing behavior.
         validated_custom_fields = await self._validate_custom_fields_for_create(body.custom_fields)
@@ -1116,9 +1132,19 @@ class ContactsService:
         org_name = str(organization.get("name") or shared_settings.company_name or "")
 
         contact_id = str(uuid.uuid4())
+        primary_phone = self._select_primary_phone(body.phones)
+        full_phone = (
+            self._normalize_full_phone_from_parts(
+                phone_isd_code=primary_phone.phone_isd_code,
+                phone_number=primary_phone.phone_number,
+            )
+            if primary_phone is not None
+            else None
+        )
         user_id, isometrik_user_id, created_password = await self._provision_identity(
             contact_id=contact_id,
-            email=email_norm,
+            email=email_norm or None,
+            phone=full_phone or None,
             first_name=body.first_name,
             last_name=body.last_name,
             prefix=body.prefix,
@@ -1141,6 +1167,11 @@ class ContactsService:
         social_pages_payload = list_payloads["social_pages"]
         websites_payload = list_payloads["websites"]
         notes_payload = [n.model_dump() for n in (getattr(body, "notes", None) or [])]
+        emails_payload = [
+            email.model_dump(mode="json", exclude_none=True) for email in (body.emails or [])
+        ]
+        if not emails_payload and email_norm:
+            emails_payload = [{"email": email_norm, "is_primary": True}]
 
         # Persist intake_stage on the contact when provided (for downstream indexing/filters).
         additional_data_payload = dict(body.additional_data or {})
@@ -1155,10 +1186,12 @@ class ContactsService:
         # Prepare JSONB params once at the service layer
         jsonb_inputs: dict[str, Any] = {
             "phones": phones_payload,
+            "emails": emails_payload,
             "notes": notes_payload,
             "custom_fields": validated_custom_fields,
             "additional_data": additional_data_payload,
             "social_pages": social_pages_payload,
+            "communication_preferences": body.communication_preferences.model_dump(),
         }
         jsonb_params: dict[str, Any] = {}
         for field_name, field_value in jsonb_inputs.items():
@@ -1169,10 +1202,12 @@ class ContactsService:
             )
 
         phones_jsonb = jsonb_params["phones"]
+        emails_jsonb = jsonb_params["emails"]
         notes_jsonb = jsonb_params["notes"]
         custom_fields_jsonb = jsonb_params["custom_fields"]
         additional_data_jsonb = jsonb_params["additional_data"]
         social_pages_jsonb = jsonb_params["social_pages"]
+        communication_preferences_jsonb = jsonb_params["communication_preferences"]
 
         created = await self._create_contact_with_company_link_or_conflict(
             organization_id=org_id,
@@ -1181,18 +1216,23 @@ class ContactsService:
             contact_payload={
                 "id": contact_id,
                 "status": ClientStatus.ACTIVE.value,
+                "portal_access": body.portal_access,
                 "prefix": body.prefix,
                 "first_name": body.first_name,
                 "middle_name": body.middle_name,
                 "last_name": body.last_name,
                 "title": body.title,
                 "date_of_birth": body.date_of_birth,
+                "gender": body.gender.value if body.gender else None,
+                "blood_group": body.blood_group.value if body.blood_group else None,
+                "communication_preferences": communication_preferences_jsonb,
                 "profile_photo_url": body.profile_photo_url,
                 "external_contact_id": self._normalize_external_contact_id(
                     body.external_contact_id
                 ),
                 "email": email_norm,
                 "phones": phones_jsonb,
+                "emails": emails_jsonb,
                 "tags": body.tags,
                 "notes": notes_jsonb,
                 "custom_fields": custom_fields_jsonb,
@@ -1211,6 +1251,13 @@ class ContactsService:
             raise ValidationException(
                 message_key="contacts.errors.contact_creation_failed",
                 custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+            )
+
+        if body.contact_type in {ContactType.VENDOR, ContactType.STAFF}:
+            await self.contact_roles_repo.insert_role(
+                organization_id=org_id,
+                contact_id=str(contact_id),
+                role_type=body.contact_type.value,
             )
 
         await self._create_addresses_if_any(contact_id=contact_id, addresses=body.addresses)
@@ -1593,9 +1640,6 @@ class ContactsService:
             value = getattr(body, body_attr, None)
             if value is not None:
                 update_data[column_name] = value.value if hasattr(value, "value") else value
-
-        if body.contact_type is not None:
-            update_data["contact_type"] = body.contact_type.value
 
         if "portal_access" in body.model_fields_set:
             update_data["portal_access"] = body.portal_access
@@ -2423,107 +2467,6 @@ class ContactsService:
                 ContactSummaryResponse.model_validate(summary_row).model_dump(exclude_none=True)
             )
         return items
-
-    async def _create_property_contact(
-        self,
-        body: CreateContactRequest,
-        *,
-        provision_auth: bool = True,
-    ) -> dict[str, Any]:
-        """Create a property-management contact (onboarding / unit allotment flows)."""
-        org_id = self.user_context.organization_id
-        if body.contact_type is None:
-            raise ValidationException(
-                message_key="contacts.errors.contact_type_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        validated_custom_fields = await self._validate_custom_fields_for_create(body.custom_fields)
-        contact_id = str(uuid.uuid4())
-        user_id: str | None = None
-        isometrik_user_id: str | None = None
-
-        primary_phone = next((phone for phone in body.phones if phone.is_primary), None)
-        if not primary_phone:
-            raise ValidationException(
-                message_key="contacts.errors.exactly_one_primary_phone",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        emails = body.emails or []
-        primary_email = next(
-            (item.email.strip().lower() for item in emails if item.is_primary),
-            None,
-        )
-        full_phone = re.sub(
-            r"\D",
-            "",
-            f"{primary_phone.phone_isd_code}{primary_phone.phone_number}",
-        )
-
-        if provision_auth:
-            user_id, isometrik_user_id, _ = await self._provision_contact_auth_identity(
-                contact_id=contact_id,
-                first_name=body.first_name,
-                last_name=body.last_name,
-                prefix=body.prefix,
-                phone=full_phone or None,
-                email=primary_email,
-            )
-
-        phones_payload = [
-            phone.model_dump(exclude_none=True) if hasattr(phone, "model_dump") else dict(phone)
-            for phone in body.phones
-        ]
-        emails_payload = [email.model_dump(exclude_none=True) for email in emails]
-
-        contact_row = {
-            "id": contact_id,
-            "organization_id": org_id,
-            "user_id": user_id,
-            "isometrik_user_id": isometrik_user_id,
-            "status": ContactStatus.ACTIVE.value,
-            "contact_type": body.contact_type.value,
-            "portal_access": body.portal_access,
-            "prefix": body.prefix,
-            "first_name": body.first_name,
-            "middle_name": body.middle_name,
-            "last_name": body.last_name,
-            "title": body.title,
-            "date_of_birth": body.date_of_birth,
-            "gender": body.gender.value if body.gender else None,
-            "blood_group": body.blood_group.value if body.blood_group else None,
-            "communication_preferences": body.communication_preferences.model_dump(),
-            "profile_photo_url": body.profile_photo_url,
-            "phones": phones_payload,
-            "emails": emails_payload,
-            "tags": body.tags,
-            "custom_fields": validated_custom_fields,
-            "additional_data": body.additional_data,
-            "social_pages": [
-                page.model_dump(mode="json", exclude_none=True) for page in body.social_pages
-            ],
-            "websites": [
-                website.model_dump(mode="json", exclude_none=True) for website in body.websites
-            ],
-            "notes": [note.model_dump() for note in body.notes],
-        }
-
-        try:
-            inserted = await self.contacts_repo.insert_contact(contact_row)
-        except UniqueViolationError as exc:
-            if getattr(exc, "constraint_name", None) == "uq_contacts_user_org":
-                raise ConflictException(
-                    message_key="contacts.errors.contact_user_already_exists",
-                    custom_code=CustomStatusCode.CONFLICT,
-                ) from exc
-            raise
-
-        return {
-            "contact_id": contact_id,
-            "old_data": None,
-            "new_data": inserted,
-        }
 
     async def provision_auth_for_existing_contact(
         self,

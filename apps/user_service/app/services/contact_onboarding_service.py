@@ -11,6 +11,9 @@ from apps.user_service.app.db.repositories.contact_onboarding_repository import 
     CONTACT_LEVEL_STEP_KEYS,
     ContactOnboardingRepository,
 )
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
     UNIT_ONBOARDING_STEP_KEYS,
     ContactUnitOnboardingRepository,
@@ -31,7 +34,7 @@ from apps.user_service.app.schemas.contacts import (
 )
 from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
-    ContactType,
+    ContactUnitRelationship,
     ContactUnitStatus,
     HouseholdInvitationStatus,
     HouseholdMemberStatus,
@@ -83,6 +86,7 @@ class ContactOnboardingService:
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self.vehicles_repo = VehiclesRepository(db_connection)
         self.contacts_repo = ContactsRepository(db_connection)
+        self.contact_roles_repo = ContactRolesRepository(db_connection)
         self.contact_units_service = ContactUnitsService(
             db_connection=db_connection,
             user_context=user_context,
@@ -97,22 +101,11 @@ class ContactOnboardingService:
             supabase_client=supabase_client,
         )
 
-    async def _ensure_onboarding(
-        self,
-        contact_id: str,
-        *,
-        contact_type: str | None = None,
-    ) -> None:
-        """Ensure wizard steps exist for the contact (profile-only for Family)."""
+    async def _ensure_onboarding(self, contact_id: str) -> None:
+        """Ensure wizard steps exist (profile-only for household-only contacts)."""
         org_id = self.user_context.organization_id
         assert org_id
-        if contact_type is None:
-            contact = await self.contacts_repo.get_contact_details(
-                contact_id=contact_id,
-                organization_id=org_id,
-            )
-            contact_type = str(contact.get("contact_type") or "") if contact else ""
-        if contact_type == ContactType.FAMILY.value:
+        if await self._is_household_only_contact(contact_id):
             await self.onboarding_repo.ensure_profile_step(
                 organization_id=org_id,
                 contact_id=contact_id,
@@ -123,10 +116,24 @@ class ContactOnboardingService:
             contact_id=contact_id,
         )
 
-    @staticmethod
-    def _is_family_contact(contact_type: str | None) -> bool:
-        """True when the contact is a household family member."""
-        return contact_type == ContactType.FAMILY.value
+    async def _is_household_only_contact(self, contact_id: str) -> bool:
+        """True when every open unit link is a household member (relationship != self)."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        links = await self.contact_units_repo.list_by_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+            statuses=[
+                ContactUnitStatus.ACTIVE.value,
+                ContactUnitStatus.PENDING.value,
+            ],
+        )
+        if not links:
+            return False
+        return all(
+            str(link.get("relationship") or "") != ContactUnitRelationship.SELF.value
+            for link in links
+        )
 
     def _normalize_step(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact_onboarding_steps row to API response shape."""
@@ -215,21 +222,15 @@ class ContactOnboardingService:
         self,
         *,
         contact_id: str,
-        contact_type: str | None = None,
+        contact_type: str | None = None,  # — kept for API compatibility
     ) -> dict[str, Any]:
         """Return wizard progress and derived current step."""
         org_id = self.user_context.organization_id
         assert org_id
-        if contact_type is None:
-            contact = await self.contacts_repo.get_contact_details(
-                contact_id=contact_id,
-                organization_id=org_id,
-            )
-            contact_type = str(contact.get("contact_type") or "") if contact else ""
 
-        await self._ensure_onboarding(contact_id, contact_type=contact_type)
+        await self._ensure_onboarding(contact_id)
 
-        if self._is_family_contact(contact_type):
+        if await self._is_household_only_contact(contact_id):
             steps = await self.onboarding_repo.list_profile_step(
                 organization_id=org_id,
                 contact_id=contact_id,
@@ -661,7 +662,6 @@ class ContactOnboardingService:
 
         create_result = await contacts_service.create_contact(
             CreateContactRequest(
-                contact_type=ContactType.FAMILY,
                 portal_access=body.portal_access,
                 first_name=body.first_name,
                 last_name=body.last_name,
@@ -669,7 +669,6 @@ class ContactOnboardingService:
                 phones=body.phones,
                 emails=body.emails or [],
             ),
-            provision_auth=not body.portal_access,
         )
         family_contact_id = create_result["contact_id"]
         link_status = (
@@ -684,6 +683,14 @@ class ContactOnboardingService:
             contact_id=family_contact_id,
             relationship=body.relationship.value,
             status=link_status,
+        )
+        await self.contact_roles_repo.insert_family_role(
+            organization_id=org_id,
+            contact_id=family_contact_id,
+            project_id=str(unit["project_id"]),
+            unit_id=body.unit_id,
+            contact_unit_id=str(link["id"]),
+            relationship=body.relationship.value,
         )
 
         member_status = HouseholdMemberStatus.JOINED.value
@@ -713,7 +720,7 @@ class ContactOnboardingService:
             "invitation_id": invitation_data.get("invitation_id") if invitation_data else None,
             "phone_masked": invitation_data.get("phone_masked") if invitation_data else None,
             "invite_url": invitation_data.get("invite_url") if invitation_data else None,
-            "contact": create_result["new_data"],
+            # "contact": create_result["new_data"],
         }
 
     async def resend_household_invitation(

@@ -171,6 +171,7 @@ class _FakeContactUnitsRepo:
         household_member: dict[str, Any] | None = None,
         household_link: dict[str, Any] | None = None,
         link_count: int = 0,
+        contact_unit_links: list[dict[str, Any]] | None = None,
     ):
         self.active_count = active_count
         self.has_default = has_default
@@ -181,6 +182,7 @@ class _FakeContactUnitsRepo:
         self.household_member = household_member
         self.household_link = household_link
         self.link_count = link_count
+        self.contact_unit_links = contact_unit_links or []
 
     async def count_active_units(self, **_kwargs):
         """Return configured active unit count."""
@@ -250,6 +252,10 @@ class _FakeContactUnitsRepo:
         """Return configured link count for orphan detection."""
         return getattr(self, "link_count", 0)
 
+    async def list_by_contact(self, **_kwargs):
+        """Return configured unit links for onboarding mode detection."""
+        return getattr(self, "contact_unit_links", [])
+
 
 def _service(
     onboarding_repo: _FakeOnboardingRepo | None = None,
@@ -266,8 +272,10 @@ def _service(
     svc.contact_units_repo = contact_units_repo or _FakeContactUnitsRepo()
     svc.contacts_repo = MagicMock()
     svc.contacts_repo.get_contact_details = AsyncMock(
-        return_value={"contact_type": ContactType.OWNER.value},
+        return_value={"roles": [{"role_type": ContactType.OWNER.value}]},
     )
+    svc.contact_roles_repo = AsyncMock()
+    svc.contact_roles_repo.insert_family_role = AsyncMock(return_value={"id": "role-1"})
     svc.contact_units_service = MagicMock()
     svc.vehicles_service = MagicMock()
     return svc
@@ -293,8 +301,8 @@ def _terminal_contact_steps() -> list[dict[str, Any]]:
 
 
 @pytest.mark.asyncio
-async def test_get_status_family_contact_profile_only():
-    """Family contacts only see the complete_profile onboarding step."""
+async def test_get_status_household_contact_profile_only():
+    """Household-only contacts only see the complete_profile onboarding step."""
     repo = _FakeOnboardingRepo(
         profile_steps=[
             {
@@ -304,12 +312,12 @@ async def test_get_status_family_contact_profile_only():
             }
         ]
     )
-    svc = _service(onboarding_repo=repo)
-
-    result = await svc.get_status(
-        contact_id="contact-1",
-        contact_type=ContactType.FAMILY.value,
+    units_repo = _FakeContactUnitsRepo(
+        contact_unit_links=[{"relationship": ContactUnitRelationship.SPOUSE.value}],
     )
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    result = await svc.get_status(contact_id="contact-1")
 
     assert result["setup_current_step"] == ContactOnboardingStep.COMPLETE_PROFILE.value
     assert result["steps"] == [
@@ -325,8 +333,8 @@ async def test_get_status_family_contact_profile_only():
 
 
 @pytest.mark.asyncio
-async def test_get_status_family_contact_completed():
-    """Family onboarding is complete once profile is done."""
+async def test_get_status_household_contact_completed():
+    """Household onboarding is complete once profile is done."""
     repo = _FakeOnboardingRepo(
         profile_steps=[
             {
@@ -336,12 +344,12 @@ async def test_get_status_family_contact_completed():
             }
         ]
     )
-    svc = _service(onboarding_repo=repo)
-
-    result = await svc.get_status(
-        contact_id="contact-1",
-        contact_type=ContactType.FAMILY.value,
+    units_repo = _FakeContactUnitsRepo(
+        contact_unit_links=[{"relationship": ContactUnitRelationship.CHILD.value}],
     )
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    result = await svc.get_status(contact_id="contact-1")
 
     assert result["setup_current_step"] is None
     assert result["is_completed"] is True

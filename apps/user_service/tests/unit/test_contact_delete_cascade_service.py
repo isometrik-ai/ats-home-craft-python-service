@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from apps.user_service.app.schemas.enums import ContactType, VehicleStatus
+from apps.user_service.app.schemas.enums import VehicleStatus
 from apps.user_service.app.services.contact_delete_cascade_service import (
     ContactDeleteCascadeService,
 )
@@ -59,8 +59,8 @@ def _service() -> ContactDeleteCascadeService:
 
 
 @pytest.mark.asyncio
-async def test_owner_delete_vacates_units_and_cancels_open_requests():
-    """Owner delete releases occupants, vacates units, and cancels in-flight requests."""
+async def test_primary_occupant_delete_vacates_units_and_cancels_open_requests():
+    """Primary occupant delete releases occupants, vacates units, and cancels in-flight requests."""
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
         {
@@ -68,6 +68,7 @@ async def test_owner_delete_vacates_units_and_cancels_open_requests():
             "unit_id": "unit-1",
             "project_id": "project-1",
             "status": "active",
+            "relationship": "self",
         }
     ]
     svc.contact_units_repo.release_all_open_links_for_unit.return_value = [
@@ -82,7 +83,7 @@ async def test_owner_delete_vacates_units_and_cancels_open_requests():
 
     await svc.cascade_before_soft_delete(
         contact_id="owner-1",
-        contact={"contact_type": ContactType.OWNER.value},
+        contact={},
     )
 
     svc.tenant_requests_repo.update_request_status.assert_awaited_once()
@@ -111,8 +112,8 @@ async def test_owner_delete_vacates_units_and_cancels_open_requests():
 
 
 @pytest.mark.asyncio
-async def test_owner_delete_cleans_all_unit_vehicles_and_passes():
-    """Owner delete removes vehicles and passes created by any household member."""
+async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes():
+    """Primary occupant delete removes vehicles and passes created by any household member."""
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
         {
@@ -120,6 +121,7 @@ async def test_owner_delete_cleans_all_unit_vehicles_and_passes():
             "unit_id": "unit-1",
             "project_id": "project-1",
             "status": "active",
+            "relationship": "self",
         }
     ]
     svc.vehicles_repo.list_by_unit.return_value = [
@@ -138,7 +140,7 @@ async def test_owner_delete_cleans_all_unit_vehicles_and_passes():
 
     await svc.cascade_before_soft_delete(
         contact_id="owner-1",
-        contact={"contact_type": ContactType.OWNER.value},
+        contact={},
     )
 
     svc.vehicles_repo.soft_remove.assert_awaited_once_with(
@@ -155,8 +157,8 @@ async def test_owner_delete_cleans_all_unit_vehicles_and_passes():
 
 
 @pytest.mark.asyncio
-async def test_owner_delete_soft_deletes_family_without_remaining_links():
-    """Owner delete soft-deletes household family contacts with no other unit links."""
+async def test_primary_occupant_delete_soft_deletes_household_without_remaining_links():
+    """Primary occupant delete soft-deletes household contacts with no other unit links."""
     svc = _service()
     svc.contact_units_repo.list_household_by_primary.return_value = [{"contact_id": "family-abc"}]
     svc.contact_units_repo.list_open_links_for_contact = AsyncMock(
@@ -167,6 +169,7 @@ async def test_owner_delete_soft_deletes_family_without_remaining_links():
                     "unit_id": "unit-1",
                     "project_id": "project-1",
                     "status": "active",
+                    "relationship": "self",
                 }
             ],
             [],
@@ -174,7 +177,6 @@ async def test_owner_delete_soft_deletes_family_without_remaining_links():
     )
     svc.contacts_repo.get_contact_for_update.return_value = {
         "id": "family-abc",
-        "contact_type": ContactType.FAMILY.value,
         "status": "active",
         "user_id": "family-user-1",
     }
@@ -185,7 +187,7 @@ async def test_owner_delete_soft_deletes_family_without_remaining_links():
     ) as revoke_sessions:
         await svc.cascade_before_soft_delete(
             contact_id="owner-1",
-            contact={"contact_type": ContactType.OWNER.value},
+            contact={},
         )
 
     svc.contacts_repo.soft_delete_contact.assert_awaited_once_with(
@@ -200,8 +202,8 @@ async def test_owner_delete_soft_deletes_family_without_remaining_links():
 
 
 @pytest.mark.asyncio
-async def test_owner_delete_keeps_family_with_remaining_unit_links():
-    """Owner delete skips family contacts that still belong to another unit."""
+async def test_primary_occupant_delete_keeps_household_with_remaining_unit_links():
+    """Primary occupant delete skips household contacts that still belong to another unit."""
     svc = _service()
     svc.contact_units_repo.list_household_by_primary.return_value = [{"contact_id": "family-abc"}]
     svc.contact_units_repo.list_open_links_for_contact = AsyncMock(
@@ -212,6 +214,7 @@ async def test_owner_delete_keeps_family_with_remaining_unit_links():
                     "unit_id": "unit-1",
                     "project_id": "project-1",
                     "status": "active",
+                    "relationship": "self",
                 }
             ],
             [
@@ -220,28 +223,37 @@ async def test_owner_delete_keeps_family_with_remaining_unit_links():
                     "unit_id": "unit-2",
                     "project_id": "project-2",
                     "status": "active",
+                    "relationship": "spouse",
                 }
             ],
         ]
     )
     svc.contacts_repo.get_contact_for_update.return_value = {
         "id": "family-abc",
-        "contact_type": ContactType.FAMILY.value,
         "status": "active",
     }
 
     await svc.cascade_before_soft_delete(
         contact_id="owner-1",
-        contact={"contact_type": ContactType.OWNER.value},
+        contact={},
     )
 
     svc.contacts_repo.soft_delete_contact.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_family_delete_releases_link_without_vehicle_or_pass_cleanup():
-    """Family delete moves out the member but keeps unit vehicles and passes."""
+async def test_household_delete_releases_link_without_vehicle_or_pass_cleanup():
+    """Household delete moves out the member but keeps unit vehicles and passes."""
     svc = _service()
+    svc.contact_units_repo.list_open_links_for_contact.return_value = [
+        {
+            "id": "cu-family",
+            "unit_id": "unit-1",
+            "project_id": "project-1",
+            "contact_id": "family-abc",
+            "relationship": "spouse",
+        }
+    ]
     svc.contact_units_repo.release_open_links_for_contact.return_value = [
         {
             "id": "cu-family",
@@ -253,7 +265,7 @@ async def test_family_delete_releases_link_without_vehicle_or_pass_cleanup():
 
     await svc.cascade_before_soft_delete(
         contact_id="family-abc",
-        contact={"contact_type": ContactType.FAMILY.value},
+        contact={},
     )
 
     svc.contact_units_repo.release_open_links_for_contact.assert_awaited_once()
@@ -270,8 +282,21 @@ async def test_family_delete_releases_link_without_vehicle_or_pass_cleanup():
 
 @pytest.mark.asyncio
 async def test_tenant_delete_releases_links_and_vehicles():
-    """Tenant delete moves out contact_units and removes approved vehicles."""
+    """Approved tenant delete moves out contact_units and removes approved vehicles."""
     svc = _service()
+    svc.contact_units_repo.list_open_links_for_contact.return_value = [
+        {
+            "id": "cu-tenant",
+            "unit_id": "unit-1",
+            "project_id": "project-1",
+            "contact_id": "tenant-1",
+            "relationship": "self",
+        }
+    ]
+    svc.tenant_requests_repo.find_active_approved_for_unit_by_tenant.return_value = {
+        "id": "req-1",
+        "contact_unit_id": "cu-tenant",
+    }
     svc.contact_units_repo.release_open_links_for_contact.return_value = [
         {
             "id": "cu-tenant",
@@ -292,7 +317,7 @@ async def test_tenant_delete_releases_links_and_vehicles():
 
     await svc.cascade_before_soft_delete(
         contact_id="tenant-1",
-        contact={"contact_type": ContactType.TENANT.value},
+        contact={},
     )
 
     svc.contact_units_repo.release_open_links_for_contact.assert_awaited_once()
@@ -303,14 +328,26 @@ async def test_tenant_delete_releases_links_and_vehicles():
 
 @pytest.mark.asyncio
 async def test_tenant_delete_cancels_active_passes():
-    """Active visitor passes hosted by a tenant are cancelled."""
+    """Active visitor passes hosted by an approved tenant are cancelled."""
     svc = _service()
+    svc.contact_units_repo.list_open_links_for_contact.return_value = [
+        {
+            "id": "cu-tenant",
+            "unit_id": "unit-1",
+            "project_id": "project-1",
+            "relationship": "self",
+        }
+    ]
+    svc.tenant_requests_repo.find_active_approved_for_unit_by_tenant.return_value = {
+        "id": "req-1",
+        "contact_unit_id": "cu-tenant",
+    }
     svc.passes_repo.list_active_ids_for_host.return_value = ["pass-1"]
     svc.passes_repo.cancel.return_value = {"id": "pass-1", "status": "cancelled"}
 
     await svc.cascade_before_soft_delete(
         contact_id="tenant-1",
-        contact={"contact_type": ContactType.TENANT.value},
+        contact={},
     )
 
     svc.passes_repo.cancel.assert_awaited_once()

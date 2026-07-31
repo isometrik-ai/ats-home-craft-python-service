@@ -2169,8 +2169,8 @@ def _property_contact_body(**overrides) -> CreateContactRequest:
 
 
 @pytest.mark.asyncio
-async def test_create_property_contact_success(monkeypatch):
-    """Property contact create provisions auth and inserts contact row."""
+async def test_create_contact_with_phones_and_emails(monkeypatch):
+    """Create contact provisions auth and persists phones/emails jsonb."""
     repo = _FakeContactsRepo()
     svc = ContactsService(
         db_connection=MagicMock(),
@@ -2178,11 +2178,16 @@ async def test_create_property_contact_success(monkeypatch):
         supabase_client=MagicMock(),
     )
     svc.contacts_repo = repo  # type: ignore[assignment]
+    svc.companies_repo = _FakeCompaniesRepo()  # type: ignore[assignment]
     svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
     monkeypatch.setattr(
         svc,
         "_validate_custom_fields_for_create",
         AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"projectId": "p1"},
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.create_user",
@@ -2203,75 +2208,40 @@ async def test_create_property_contact_success(monkeypatch):
         lambda db_connection: mock_user_repo,
     )
 
-    result = await svc._create_property_contact(_property_contact_body(), provision_auth=True)
+    result = await svc.create_contact(_property_contact_body())
 
     assert result["contact_id"]
-    assert result["new_data"]["first_name"] == "Jane"
-    assert repo.last_insert_contact["user_id"] == USER_ID
+    contact_data = repo.last_create_kwargs["contact_data"]
+    assert contact_data["first_name"] == "Jane"
+    assert contact_data["user_id"] == USER_ID
+    assert "contact_type" not in contact_data
+    assert contact_data["emails"] is not None
 
 
 @pytest.mark.asyncio
-async def test_create_property_contact_without_auth():
-    """Property contact create skips auth when provision_auth is false."""
-    repo = _FakeContactsRepo()
-    svc = _service(contacts_repo=repo)
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        svc,
-        "_validate_custom_fields_for_create",
-        AsyncMock(return_value=[]),
-    )
-    try:
-        result = await svc._create_property_contact(
-            _property_contact_body(),
-            provision_auth=False,
-        )
-        assert result["new_data"]["user_id"] is None
-    finally:
-        monkeypatch.undo()
-
-
-@pytest.mark.asyncio
-async def test_create_property_contact_missing_type():
-    """Property contact create requires contact_type."""
-    svc = _service()
+async def test_create_contact_requires_email_or_phone():
+    """Create contact requires email, primary emails entry, or phones."""
     with pytest.raises(ValidationException):
-        await svc._create_property_contact(
-            CreateContactRequest(
-                first_name="Jane",
-                phones=[Phone(phone_number="1", phone_isd_code="+1", is_primary=True)],
-            ),
-            provision_auth=False,
+        CreateContactRequest(first_name="Jane")
+
+
+@pytest.mark.asyncio
+async def test_create_contact_requires_primary_phone_when_phones_present():
+    """Create contact requires exactly one primary phone when phones are provided."""
+    with pytest.raises(ValidationException):
+        CreateContactRequest(
+            contact_type=ContactType.OWNER,
+            first_name="Jane",
+            phones=[
+                Phone(phone_number="111", phone_isd_code="+1", is_primary=True),
+                Phone(phone_number="222", phone_isd_code="+1", is_primary=True),
+            ],
         )
 
 
 @pytest.mark.asyncio
-async def test_create_property_contact_missing_primary_phone():
-    """Property contact create requires exactly one primary phone."""
-    svc = _service()
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setattr(
-        svc,
-        "_validate_custom_fields_for_create",
-        AsyncMock(return_value=[]),
-    )
-    try:
-        with pytest.raises(ValidationException):
-            await svc._create_property_contact(
-                CreateContactRequest(
-                    contact_type=ContactType.OWNER,
-                    first_name="Jane",
-                    phones=[],
-                ),
-                provision_auth=False,
-            )
-    finally:
-        monkeypatch.undo()
-
-
-@pytest.mark.asyncio
-async def test_create_property_contact_no_supabase():
-    """Property contact create with auth requires Supabase client."""
+async def test_create_contact_no_supabase():
+    """Create contact with auth requires Supabase client."""
     svc = _service()
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
@@ -2281,17 +2251,16 @@ async def test_create_property_contact_no_supabase():
     )
     try:
         with pytest.raises(ServiceUnavailableException):
-            await svc._create_property_contact(_property_contact_body(), provision_auth=True)
+            await svc.create_contact(_property_contact_body())
     finally:
         monkeypatch.undo()
 
 
 @pytest.mark.asyncio
-async def test_create_property_contact_user_org_conflict():
-    """Property contact insert maps uq_contacts_user_org to ConflictException."""
-    repo = _FakeContactsRepo()
-    repo.insert_contact = AsyncMock(  # type: ignore[method-assign]
-        side_effect=_unique_violation("uq_contacts_user_org"),
+async def test_create_contact_user_org_conflict():
+    """Create contact maps uq_contacts_user_org to ConflictException."""
+    repo = _FakeContactsRepo(
+        create_raises=_unique_violation("uq_contacts_user_org"),
     )
     svc = ContactsService(
         db_connection=MagicMock(),
@@ -2299,9 +2268,14 @@ async def test_create_property_contact_user_org_conflict():
         supabase_client=MagicMock(),
     )
     svc.contacts_repo = repo  # type: ignore[assignment]
+    svc.companies_repo = _FakeCompaniesRepo()  # type: ignore[assignment]
     svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(svc, "_validate_custom_fields_for_create", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"projectId": "p1"},
+    )
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.create_user",
         AsyncMock(return_value={"id": USER_ID}),
@@ -2318,7 +2292,7 @@ async def test_create_property_contact_user_org_conflict():
     )
     try:
         with pytest.raises(ConflictException):
-            await svc._create_property_contact(_property_contact_body(), provision_auth=True)
+            await svc.create_contact(_property_contact_body())
     finally:
         monkeypatch.undo()
 

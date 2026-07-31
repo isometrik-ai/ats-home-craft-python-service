@@ -44,7 +44,7 @@ LEFT JOIN LATERAL (
       )
       AND c.status = 'active'
     ORDER BY
-        CASE WHEN c.contact_type = 'Owner' THEN 0 ELSE 1 END,
+        CASE WHEN cu.relationship = 'self'::contact_unit_relationship THEN 0 ELSE 1 END,
         cu.is_primary DESC,
         cu.sort_order,
         cu.created_at

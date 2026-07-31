@@ -81,19 +81,38 @@ def test_resolve_unit_facing_by_kind():
 
 
 def test_pick_unit_owner_prefers_primary():
-    """Owner selection prefers primary, then Owner type."""
+    """Primary occupant selection prefers is_primary, then relationship=self."""
     residents = [
         {
             "contact_id": "c1",
             "contact_unit_id": "cu1",
             "is_primary": False,
-            "contact_type": "Owner",
+            "relationship": "self",
         },
         {
             "contact_id": "c2",
             "contact_unit_id": "cu2",
             "is_primary": True,
-            "contact_type": "Tenant",
+            "relationship": "self",
+        },
+    ]
+    assert pick_unit_owner(residents)["contact_id"] == "c2"
+
+
+def test_pick_unit_owner_prefers_self_relationship():
+    """When no primary flag, prefer relationship=self over household links."""
+    residents = [
+        {
+            "contact_id": "c1",
+            "contact_unit_id": "cu1",
+            "is_primary": False,
+            "relationship": "spouse",
+        },
+        {
+            "contact_id": "c2",
+            "contact_unit_id": "cu2",
+            "is_primary": False,
+            "relationship": "self",
         },
     ]
     assert pick_unit_owner(residents)["contact_id"] == "c2"

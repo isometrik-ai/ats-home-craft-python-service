@@ -28,7 +28,7 @@ from apps.user_service.app.db.repositories.units_repository import UnitsReposito
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.enums import (
     ClientStatus,
-    ContactType,
+    ContactUnitRelationship,
     PassActorType,
     PassEventType,
     TenantRequestEventType,
@@ -62,6 +62,20 @@ class ContactDeleteCascadeService:
         self.tenant_requests_repo = TenantRequestsRepository(db_connection)
         self.household_invitations_repo = HouseholdInvitationsRepository(db_connection)
 
+    @staticmethod
+    def _split_open_links(
+        open_links: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Partition open links into primary occupant (self) vs household."""
+        primary: list[dict[str, Any]] = []
+        household: list[dict[str, Any]] = []
+        for link in open_links:
+            if str(link.get("relationship") or "") == ContactUnitRelationship.SELF.value:
+                primary.append(link)
+            else:
+                household.append(link)
+        return primary, household
+
     async def cascade_before_soft_delete(
         self,
         *,
@@ -71,19 +85,38 @@ class ContactDeleteCascadeService:
         """Clean up operational links before the contact row is soft-deleted."""
         org_id = self.user_context.organization_id
         assert org_id
+        del contact
 
-        contact_type = str(contact.get("contact_type") or "")
+        open_links = await self.contact_units_repo.list_open_links_for_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        primary_links, household_links = self._split_open_links(open_links)
+        is_approved_tenant = await self._is_approved_tenant_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
 
-        if contact_type == ContactType.OWNER.value:
-            await self._release_owner_holdings(
+        if primary_links and not is_approved_tenant:
+            await self._release_primary_holdings(
                 organization_id=org_id,
                 contact_id=contact_id,
+                primary_links=primary_links,
             )
             await self._cancel_inflight_tenant_requests(
                 organization_id=org_id,
                 submitted_by_contact_id=contact_id,
             )
-        elif contact_type == ContactType.FAMILY.value:
+        elif primary_links and is_approved_tenant:
+            await self._release_occupant_scoped_assets(
+                organization_id=org_id,
+                contact_id=contact_id,
+            )
+            await self._supersede_approved_tenant_requests(
+                organization_id=org_id,
+                tenant_contact_id=contact_id,
+            )
+        elif household_links:
             released = await self.contact_units_repo.release_open_links_for_contact(
                 organization_id=org_id,
                 contact_id=contact_id,
@@ -93,21 +126,45 @@ class ContactDeleteCascadeService:
                 contact_unit_ids=[row["id"] for row in released],
             )
         else:
-            await self._release_vehicles(organization_id=org_id, contact_id=contact_id)
-            await self._cancel_passes(organization_id=org_id, contact_id=contact_id)
-            released = await self.contact_units_repo.release_open_links_for_contact(
+            await self._release_occupant_scoped_assets(
                 organization_id=org_id,
                 contact_id=contact_id,
             )
-            await self._cancel_household_invitations(
+            await self._supersede_approved_tenant_requests(
                 organization_id=org_id,
-                contact_unit_ids=[row["id"] for row in released],
+                tenant_contact_id=contact_id,
             )
-            if contact_type == ContactType.TENANT.value:
-                await self._supersede_approved_tenant_requests(
-                    organization_id=org_id,
-                    tenant_contact_id=contact_id,
-                )
+
+    async def _is_approved_tenant_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> bool:
+        """True when the contact is the active approved tenant on a unit."""
+        existing = await self.tenant_requests_repo.find_active_approved_for_unit_by_tenant(
+            organization_id=organization_id,
+            tenant_contact_id=contact_id,
+        )
+        return existing is not None
+
+    async def _release_occupant_scoped_assets(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> None:
+        """Release vehicles, passes, and unit links scoped to one occupant."""
+        await self._release_vehicles(organization_id=organization_id, contact_id=contact_id)
+        await self._cancel_passes(organization_id=organization_id, contact_id=contact_id)
+        released = await self.contact_units_repo.release_open_links_for_contact(
+            organization_id=organization_id,
+            contact_id=contact_id,
+        )
+        await self._cancel_household_invitations(
+            organization_id=organization_id,
+            contact_unit_ids=[row["id"] for row in released],
+        )
 
     async def _release_vehicles(self, *, organization_id: str, contact_id: str) -> None:
         """Withdraw pending vehicles and soft-remove approved ones with slot release."""
@@ -229,7 +286,7 @@ class ContactDeleteCascadeService:
         organization_id: str,
         submitted_by_contact_id: str,
     ) -> None:
-        """Cancel open tenant requests submitted by a deleted owner."""
+        """Cancel open tenant requests submitted by a deleted primary occupant."""
         now = datetime.now(timezone.utc)
         request_ids = await self.tenant_requests_repo.list_inflight_ids_for_submitter(
             organization_id=organization_id,
@@ -285,17 +342,14 @@ class ContactDeleteCascadeService:
             payload={"reason": "tenant_contact_deleted"},
         )
 
-    async def _release_owner_holdings(
+    async def _release_primary_holdings(
         self,
         *,
         organization_id: str,
         contact_id: str,
+        primary_links: list[dict[str, Any]],
     ) -> None:
-        """Vacate owned units and move out all occupants on those units."""
-        owner_links = await self.contact_units_repo.list_open_links_for_contact(
-            organization_id=organization_id,
-            contact_id=contact_id,
-        )
+        """Vacate units where the contact is primary occupant and move out all occupants."""
         household_members = await self.contact_units_repo.list_household_by_primary(
             organization_id=organization_id,
             primary_contact_id=contact_id,
@@ -304,7 +358,7 @@ class ContactDeleteCascadeService:
             str(row["contact_id"]) for row in household_members if row.get("contact_id")
         }
         unit_projects: dict[str, str] = {}
-        for link in owner_links:
+        for link in primary_links:
             unit_projects[str(link["unit_id"])] = str(link["project_id"])
 
         for unit_id, project_id in unit_projects.items():
@@ -334,37 +388,35 @@ class ContactDeleteCascadeService:
                 unit_id=unit_id,
             )
 
-        await self._soft_delete_orphaned_family_contacts(
+        await self._soft_delete_orphaned_household_contacts(
             organization_id=organization_id,
             contact_ids=family_contact_ids,
         )
 
-    async def _soft_delete_orphaned_family_contacts(
+    async def _soft_delete_orphaned_household_contacts(
         self,
         *,
         organization_id: str,
         contact_ids: set[str],
     ) -> None:
-        """Soft-delete household family contacts with no remaining unit links."""
-        for family_contact_id in contact_ids:
+        """Soft-delete household contacts with no remaining unit links."""
+        for household_contact_id in contact_ids:
             contact = await self.contacts_repo.get_contact_for_update(
-                contact_id=family_contact_id,
+                contact_id=household_contact_id,
                 organization_id=organization_id,
             )
             if not contact:
                 continue
             if str(contact.get("status") or "") == ClientStatus.DELETED.value:
                 continue
-            if str(contact.get("contact_type") or "") != ContactType.FAMILY.value:
-                continue
             remaining_links = await self.contact_units_repo.list_open_links_for_contact(
                 organization_id=organization_id,
-                contact_id=family_contact_id,
+                contact_id=household_contact_id,
             )
             if remaining_links:
                 continue
             await self.contacts_repo.soft_delete_contact(
-                contact_id=family_contact_id,
+                contact_id=household_contact_id,
                 organization_id=organization_id,
             )
             await revoke_contact_portal_sessions(

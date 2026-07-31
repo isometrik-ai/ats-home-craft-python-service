@@ -367,7 +367,9 @@ async def test_resident_can_act_on_unit():
         contact_id=CONTACT_ID,
         unit_id=UNIT_ID,
     )
-    assert "contact_units cu" in conn.fetchval_calls[0][0]
+    query, _ = conn.fetchval_calls[0]
+    assert "contact_units cu" in query
+    assert "contact_type" not in query
 
     conn.fetchval_result = None
     assert not await repo.resident_can_act_on_unit(
@@ -392,4 +394,5 @@ async def test_list_resident_visit_units():
     query, args = conn.fetch_calls[0]
     assert "::walk_in_visit_unit_status" in query
     assert args[1] == "awaiting"
+    assert "contact_type" not in query
     assert args[2] == CONTACT_ID

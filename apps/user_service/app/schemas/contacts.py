@@ -158,14 +158,17 @@ class CreateContactRequest(BaseModel):
     - contact only
     - contact + link to existing company (optionally primary)
     - contact + create new company + link (optionally primary)
-    - property-management onboarding (contact_type + emails jsonb)
+    - optional org-scoped role (Vendor / Staff) via contact_type
     """
 
     model_config = ConfigDict(extra="forbid")
 
     contact_type: ContactType | None = Field(
         None,
-        description="Property contact type (Owner, Tenant, etc.). Required for onboarding flows.",
+        description=(
+            "Optional org-scoped role (Vendor / Staff) stored in contact_roles. "
+            "Owner / Tenant / Family / Guest are assigned when a unit is linked."
+        ),
     )
     # core identity/person fields
     email: str | None = Field(None, description="Contact email address (CRM create).")
@@ -231,31 +234,32 @@ class CreateContactRequest(BaseModel):
 
     @field_validator("phones")
     @classmethod
-    def validate_property_primary_phone(
+    def validate_primary_phone_when_present(
         cls, phones: list[PhoneInput | Phone], info
     ) -> list[PhoneInput | Phone]:
-        """Require exactly one primary phone for property-management creates."""
-        contact_type = info.data.get("contact_type")
-        if contact_type is not None and phones:
+        """Require exactly one primary phone when any phones are provided."""
+        del info
+        if phones:
             return _validate_exactly_one_primary_phone(phones)
         return phones
 
     @model_validator(mode="after")
     def validate_email_for_create(self) -> "CreateContactRequest":
-        """Ensure CRM creates have email; property flows may use emails jsonb only."""
-        if self.contact_type is not None:
-            if not self.phones:
-                raise ValidationException(
-                    message_key="contacts.errors.exactly_one_primary_phone",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
-                )
+        """Require a top-level email, a primary emails[] entry, or at least one phone."""
+        if (self.email or "").strip():
             return self
-        if not (self.email or "").strip():
-            raise ValidationException(
-                message_key="contacts.errors.email_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return self
+        primary_email = next(
+            (item.email.strip() for item in self.emails if item.is_primary),
+            None,
+        )
+        if primary_email:
+            return self
+        if self.phones:
+            return self
+        raise ValidationException(
+            message_key="contacts.errors.email_required",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
 
 
 class CreateContactRequestStandalone(BaseModel):
@@ -315,7 +319,10 @@ class ListContactsRequest(BaseModel):
 
     search: str | None = Field(default=None, min_length=2)
     status: ClientStatus | None = None
-    contact_type: ContactType | None = None
+    contact_type: ContactType | None = Field(
+        default=None,
+        description="Filter contacts that have an active contact_roles row of this type.",
+    )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
     dropdown_filters: list[DropdownCustomFieldFilter] = Field(default_factory=list)
@@ -351,7 +358,6 @@ class UpdateContactRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: ClientStatus | None = None
-    contact_type: ContactType | None = None
     portal_access: bool | None = None
     prefix: str | None = None
     first_name: str | None = None
@@ -497,6 +503,22 @@ class ContactCompanyUpdate(BaseModel):
         return self
 
 
+class ContactRoleResponse(BaseModel):
+    """One contact_roles assignment (unit- or org-scoped)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str | None = None
+    role_type: str
+    status: str | None = None
+    project_id: str | None = None
+    unit_id: str | None = None
+    relationship: str | None = None
+    started_at: Any | None = None
+    ended_at: Any | None = None
+    contact_unit_id: str | None = None
+
+
 class ContactSummaryResponse(BaseModel):
     """Contact list/search item."""
 
@@ -505,7 +527,7 @@ class ContactSummaryResponse(BaseModel):
     id: str
     organization_id: str
     status: ClientStatus
-    contact_type: str | None = None
+    role_types: list[str] = Field(default_factory=list)
     portal_access: bool = True
     first_name: str | None = None
     last_name: str | None = None
@@ -539,7 +561,7 @@ class ContactDetailsResponse(BaseModel):
     id: str
     organization_id: str
     status: ClientStatus
-    contact_type: str | None = None
+    roles: list[ContactRoleResponse] = Field(default_factory=list)
     portal_access: bool = True
     user_id: str | None = None
     isometrik_user_id: str | None = None

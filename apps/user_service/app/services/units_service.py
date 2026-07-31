@@ -13,6 +13,7 @@ from apps.user_service.app.db.repositories.maintenance_fee_invoices_repository i
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import (
+    ContactUnitRelationship,
     ProjectSetupStep,
     PropertyType,
     UnitStatus,
@@ -162,17 +163,14 @@ def resolve_unit_property_type(row: dict[str, Any]) -> str | None:
 
 
 def pick_unit_owner(residents: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Choose the owner row from active unit residents."""
+    """Choose the primary occupant row from active unit residents."""
     if not residents:
         return None
     for row in residents:
         if row.get("is_primary"):
             return row
     for row in residents:
-        if row.get("contact_type") == "Owner":
-            return row
-    for row in residents:
-        if row.get("contact_type") != "Family":
+        if row.get("relationship") == ContactUnitRelationship.SELF.value:
             return row
     return residents[0]
 

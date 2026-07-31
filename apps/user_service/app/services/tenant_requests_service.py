@@ -9,6 +9,9 @@ import asyncpg
 from asyncpg import UniqueViolationError
 from supabase import AsyncClient
 
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
@@ -88,6 +91,7 @@ class TenantRequestsService:
         self.supabase_client = supabase_client
         self.repo = tenant_requests_repository or TenantRequestsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self.contact_roles_repo = ContactRolesRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
             user_context=user_context,
@@ -400,15 +404,15 @@ class TenantRequestsService:
         owner_contact_id: str,
         unit_id: str,
     ) -> dict[str, Any]:
-        """Ensure the owner has an active link to the unit and return unit metadata."""
+        """Ensure the contact has an active primary-occupant link to the unit and return metadata."""
         org_id = self.user_context.organization_id
         assert org_id
-        is_owner = await self.contact_units_repo.owner_has_active_unit(
+        is_primary_occupant = await self.contact_units_repo.owner_has_active_unit(
             organization_id=org_id,
             owner_contact_id=owner_contact_id,
             unit_id=unit_id,
         )
-        if not is_owner:
+        if not is_primary_occupant:
             raise ValidationException(
                 message_key="tenant_requests.errors.unit_not_owned",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -894,6 +898,11 @@ class TenantRequestsService:
                 contact_unit_id=str(existing["contact_unit_id"]),
                 event_date=now.date(),
             )
+            await self.contact_roles_repo.end_active_roles_for_unit(
+                organization_id=org_id,
+                unit_id=unit_id,
+                role_types=[ContactType.TENANT.value],
+            )
             await self.repo.update_request_status(
                 organization_id=org_id,
                 tenant_request_id=str(existing["id"]),
@@ -924,14 +933,12 @@ class TenantRequestsService:
         ]
         create_result = await contacts_service.create_contact(
             CreateContactRequest(
-                contact_type=ContactType.TENANT,
                 portal_access=bool(row.get("portal_access")),
                 first_name=row.get("tenant_first_name"),
                 last_name=row.get("tenant_last_name"),
                 phones=phones,
                 emails=emails or [],
             ),
-            provision_auth=not bool(row.get("portal_access")),
         )
         tenant_contact_id = str(create_result["contact_id"])
         link = await self.contact_units_repo.insert_primary_occupant_link(
@@ -939,6 +946,18 @@ class TenantRequestsService:
             project_id=str(row["project_id"]),
             unit_id=unit_id,
             contact_id=tenant_contact_id,
+        )
+        await self.contact_roles_repo.end_active_roles_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+            role_types=[ContactType.TENANT.value],
+        )
+        await self.contact_roles_repo.insert_tenant_role(
+            organization_id=org_id,
+            contact_id=tenant_contact_id,
+            project_id=str(row["project_id"]),
+            unit_id=unit_id,
+            contact_unit_id=str(link["id"]),
         )
         await self.repo.update_request_status(
             organization_id=org_id,

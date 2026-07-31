@@ -203,8 +203,8 @@ async def test_create_lifecycle_events_empty_items() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_property_contact_org_not_found(monkeypatch) -> None:
-    """Property contact auth provisioning fails when organization is missing."""
+async def test_create_contact_org_not_found_for_phone_only_body(monkeypatch) -> None:
+    """Phone-only create fails when organization is missing."""
     org_repo = MagicMock()
     org_repo.get_organization_by_id = AsyncMock(return_value=None)
     svc = ContactsService(
@@ -215,21 +215,30 @@ async def test_create_property_contact_org_not_found(monkeypatch) -> None:
     svc.contacts_repo = MagicMock()
     svc.org_repo = org_repo
     monkeypatch.setattr(svc, "_validate_custom_fields_for_create", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        svc,
+        "_prepare_optional_contact_company_association",
+        AsyncMock(return_value=(None, None, None, False)),
+    )
+    monkeypatch.setattr(
+        svc,
+        "_apply_inferred_company_assoc_on_create",
+        AsyncMock(return_value=(None, None, None, False)),
+    )
 
     with pytest.raises(NotFoundException):
-        await svc._create_property_contact(
+        await svc.create_contact(
             CreateContactRequest(
                 contact_type=ContactType.OWNER,
                 first_name="Jane",
                 phones=[Phone(phone_number="9876543210", phone_isd_code="+91", is_primary=True)],
             ),
-            provision_auth=True,
         )
 
 
 @pytest.mark.asyncio
-async def test_create_property_contact_auth_user_failure(monkeypatch) -> None:
-    """Property contact raises when Supabase user creation fails."""
+async def test_create_contact_auth_user_failure(monkeypatch) -> None:
+    """Unified create raises when Supabase user creation fails."""
     org_repo = MagicMock()
     org_repo.get_organization_by_id = AsyncMock(return_value={"id": ORG_ID, "settings": "{}"})
     svc = ContactsService(
@@ -240,6 +249,16 @@ async def test_create_property_contact_auth_user_failure(monkeypatch) -> None:
     svc.contacts_repo = MagicMock()
     svc.org_repo = org_repo
     monkeypatch.setattr(svc, "_validate_custom_fields_for_create", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        svc,
+        "_prepare_optional_contact_company_association",
+        AsyncMock(return_value=(None, None, None, False)),
+    )
+    monkeypatch.setattr(
+        svc,
+        "_apply_inferred_company_assoc_on_create",
+        AsyncMock(return_value=(None, None, None, False)),
+    )
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.create_user",
         AsyncMock(return_value=None),
@@ -252,13 +271,12 @@ async def test_create_property_contact_auth_user_failure(monkeypatch) -> None:
     )
 
     with pytest.raises(ServiceUnavailableException):
-        await svc._create_property_contact(
+        await svc.create_contact(
             CreateContactRequest(
                 contact_type=ContactType.OWNER,
                 first_name="Jane",
                 phones=[Phone(phone_number="9876543210", phone_isd_code="+91", is_primary=True)],
             ),
-            provision_auth=True,
         )
 
 

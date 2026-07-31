@@ -6,8 +6,9 @@ and know exactly where to change things.
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **API prefix:** `/v1/contact-onboarding`
-- **DB schema:** `ats-home-craft-supabase` (migrations `20260629110000_*` enums, `20260629111000_*` tables)
-- **Full column reference:** `ats-home-craft-supabase/docs/resident-onboarding-schema.md`
+- **DB schema:** `ats-home-craft-supabase` (migrations `20260629110000_*` enums, `20260629111000_*` tables, `2026073112*_contact_roles_*`)
+- **Role model:** [ADR 0010](./adr/0010-contact-roles.md)
+- **Full column reference:** `ats-home-craft-supabase/docs/resident-onboarding-schema.md`, `contact-roles-schema.md`
 
 > Naming note: this feature was renamed from "resident onboarding" to "contact onboarding" in
 > the code. The **migration/seed/doc filenames still say `resident_onboarding`** (renaming an
@@ -25,9 +26,14 @@ authorization is "you can only touch your own onboarding".
 
 Progress is tracked in two places:
 
-- **Family members:** contacts with `contact_type = Family` (household invitees) only receive
+- **Household members:** contacts linked with `contact_units.relationship != self` only receive
   the `complete_profile` step. `GET /status` returns that single step with empty `unit_onboarding`.
-  Full owner onboarding (properties, unit steps, review) applies to Owner/Tenant contacts only.
+  Full primary-occupant onboarding (properties, unit steps, review) applies when the contact has
+  at least one `relationship = self` link (or no links yet during initial onboarding).
+
+- **Role labels** (`Owner`, `Tenant`, `Family`, …) live in **`contact_roles`**, not on `contacts`.
+  Unit-scoped roles are assigned when a unit is linked (allotment, tenant approve, household).
+  See [ADR 0010](./adr/0010-contact-roles.md).
 
 - **`contact_onboarding_steps`** — contact-level steps: profile, property selection, default unit, review.
 
@@ -228,7 +234,8 @@ Enforced in `contact_onboarding_service.py` and related services:
 - **Household requires an assigned unit:** adding a member checks the primary contact has an
   active link to that unit (`contact_onboarding.errors.unit_not_assigned`) and the unit exists
   (`contact_onboarding.errors.unit_not_found`).
-- **Household removal is ownership‑scoped:** removing a member only works on a `Family` link
+- **Household removal is primary‑occupant scoped:** removing a member only works on a household link
+  (`contact_units.relationship != self`) on a unit the primary contact occupies.
   that sits on a unit the primary contact actively owns
   (`contact_onboarding.errors.household_member_not_found`). The `contact_units` link is deleted,
   any pending invitation is cancelled, and if the family contact has no remaining links it is

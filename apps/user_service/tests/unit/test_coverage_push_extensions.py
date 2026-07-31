@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import types
 from datetime import datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -555,24 +556,47 @@ async def test_process_delete_request_approve_integration(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_contact_routes_to_property_flow(monkeypatch):
-    """create_contact delegates to property flow when contact_type is set."""
+async def test_create_contact_omits_contact_type_from_payload(monkeypatch):
+    """create_contact no longer persists contact_type on contacts row."""
     svc = ContactsService(db_connection=MagicMock(), user_context=_org_ctx())
+    monkeypatch.setattr(svc, "_validate_custom_fields_for_create", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         svc,
-        "_create_property_contact",
-        AsyncMock(return_value={"contact_id": CONTACT_ID, "new_data": {"id": CONTACT_ID}}),
+        "_prepare_optional_contact_company_association",
+        AsyncMock(return_value=(None, None, None, False)),
     )
+
+    async def _echo_inference(**kwargs):
+        return (
+            kwargs["company_id"],
+            kwargs["company_data"],
+            kwargs["company_addresses"],
+            kwargs["make_primary"],
+        )
+
+    monkeypatch.setattr(svc, "_apply_inferred_company_assoc_on_create", _echo_inference)
+    monkeypatch.setattr(svc, "_provision_identity", AsyncMock(return_value=(None, None, None)))
+    captured: dict[str, Any] = {}
+
+    async def _fake_create(**kwargs):
+        captured.update(kwargs)
+        return {"contact_id": CONTACT_ID, "company_id": None, "contact": {"id": CONTACT_ID}}
+
+    monkeypatch.setattr(svc, "_create_contact_with_company_link_or_conflict", _fake_create)
+    svc.org_repo = MagicMock()
+    svc.org_repo.get_organization_by_id = AsyncMock(return_value={"id": ORG_ID, "name": "Org"})
+    svc.contact_roles_repo = MagicMock()
+    svc.contact_roles_repo.insert_role = AsyncMock()
 
     result = await svc.create_contact(
         CreateContactRequest(
-            contact_type=ContactType.OWNER,
             first_name="Jane",
             phones=[Phone(phone_number="1", phone_isd_code="+1", is_primary=True)],
-        )
+        ),
     )
 
     assert result["contact_id"] == CONTACT_ID
+    assert "contact_type" not in captured["contact_payload"]
 
 
 @pytest.mark.asyncio
