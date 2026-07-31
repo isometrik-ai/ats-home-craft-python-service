@@ -597,6 +597,7 @@ async def test_create_contact_omits_contact_type_from_payload(monkeypatch):
 
     assert result["contact_id"] == CONTACT_ID
     assert "contact_type" not in captured["contact_payload"]
+    assert captured["contact_payload"]["created_by"] == svc.user_context.user_id
 
 
 @pytest.mark.asyncio

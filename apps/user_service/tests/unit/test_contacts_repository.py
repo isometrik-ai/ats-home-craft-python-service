@@ -310,6 +310,7 @@ async def test_create_contact_with_optional_company_link():
     assert result["company_id"] == "co1"
     query, _ = _sql_args(conn.fetchrow)
     assert "WITH company_exists AS" in query
+    assert "created_by" in query
 
 
 @pytest.mark.asyncio

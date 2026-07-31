@@ -606,6 +606,8 @@ class ContactDetailsResponse(BaseModel):
     )
     addresses: list[dict[str, Any]] = Field(default_factory=list)
 
+    created_by: str | None = None
+    created_by_name: str | None = None
     created_at: str
     updated_at: str
 

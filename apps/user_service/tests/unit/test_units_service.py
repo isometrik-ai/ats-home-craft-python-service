@@ -219,6 +219,8 @@ def test_format_primary_contact_phone_and_email():
 
 def test_list_item_shows_owner_and_is_sold_when_vacant_but_allotted():
     """Vacant units with an active Owner allotment remain sold in the registry."""
+    from datetime import datetime, timezone
+
     item = serialize_unit_list_item(
         {
             "id": "unit-1",
@@ -227,12 +229,14 @@ def test_list_item_shows_owner_and_is_sold_when_vacant_but_allotted():
             "sort_order": 0,
             "owner_contact_id": "c-1",
             "owner_first_name": "Ajay",
+            "owner_assigned_at": datetime(2026, 7, 15, tzinfo=timezone.utc),
         }
     )
 
     assert item["status"] == "vacant"
     assert item["is_sold"] is True
     assert item["owner"]["contact_id"] == "c-1"
+    assert item["assign_date"] == "2026-07-15"
 
 
 def test_list_item_plot_with_non_owner_assignee():
@@ -274,6 +278,7 @@ def test_list_item_occupied_without_owner():
     assert item["status"] == "occupied"
     assert item["is_sold"] is True
     assert item["owner"] is None
+    assert item["assign_date"] is None
 
 
 @pytest.mark.asyncio
@@ -418,6 +423,7 @@ async def test_get_unit_detail_builds_payload():
         "emails": [{"email": "rajesh@example.com", "is_primary": True}],
         "primary_phone": "+919876543210",
         "primary_email": "rajesh@example.com",
+        "assigned_at": "2026-07-15T00:00:00+00:00",
     }
     service.units_repo.count_unit_vehicles.return_value = (1, 1)
     service.invoices_repo = AsyncMock()
@@ -439,6 +445,8 @@ async def test_get_unit_detail_builds_payload():
     assert data["owner"]["display_name"] == "Mr. Rajesh Kapoor"
     assert data["owner"]["phone"] == "+919876543210"
     assert data["owner"]["email"] == "rajesh@example.com"
+    assert data["owner"]["assign_date"] == "2026-07-15"
+    assert data["assign_date"] == "2026-07-15"
     assert data["location_label"] == "Tower A · F18"
     assert data["carpet_area_sqft"] == 1080.0
     assert data["parking_entitlement"] == 2

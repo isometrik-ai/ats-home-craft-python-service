@@ -1216,6 +1216,7 @@ class ContactsService:
             contact_payload={
                 "id": contact_id,
                 "status": ClientStatus.ACTIVE.value,
+                "created_by": self.user_context.user_id or None,
                 "portal_access": body.portal_access,
                 "prefix": body.prefix,
                 "first_name": body.first_name,
@@ -2137,7 +2138,7 @@ class ContactsService:
     @staticmethod
     def _stringify_contact_detail_uuids(details: dict[str, Any]) -> None:
         """Normalize UUID columns on a contact detail dict to strings for JSON responses."""
-        for uuid_field_name in ("id", "organization_id", "user_id"):
+        for uuid_field_name in ("id", "organization_id", "user_id", "created_by"):
             field_value = details.get(uuid_field_name)
             if field_value is not None and not isinstance(field_value, str):
                 details[uuid_field_name] = str(field_value)
@@ -2206,9 +2207,20 @@ class ContactsService:
         details["updated_at"] = format_iso_datetime(details.get("updated_at")) or ""
         details["last_enriched_at"] = format_iso_datetime(details.get("last_enriched_at"))
 
+    @staticmethod
+    def _normalize_contact_detail_creator(details: dict[str, Any]) -> None:
+        """Normalize created_by display fields on contact details."""
+        created_by_name = details.get("created_by_name")
+        if isinstance(created_by_name, str):
+            created_by_name = created_by_name.strip() or None
+        else:
+            created_by_name = None
+        details["created_by_name"] = created_by_name
+
     def _normalize_contact_details(self, details: dict[str, Any]) -> dict[str, Any]:
         """Normalize DB contact details to the API response shape."""
         self._stringify_contact_detail_uuids(details)
+        self._normalize_contact_detail_creator(details)
         self._coerce_contact_detail_json_lists(details)
         self._normalize_contact_detail_scalar_arrays(details)
         self._normalize_contact_detail_additional_data(details)

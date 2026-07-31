@@ -275,6 +275,8 @@ def _contact_detail(**overrides) -> dict[str, Any]:
         "notes": [{"title": "Note", "content": "Hello"}],
         "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
         "updated_at": datetime(2026, 1, 2, tzinfo=timezone.utc),
+        "created_by": USER_ID,
+        "created_by_name": "Admin User",
     }
     row.update(overrides)
     return row
@@ -427,6 +429,8 @@ async def test_get_contact_details_found():
     assert result["id"] == CONTACT_ID
     assert result["organization_id"] == ORG_ID
     assert result["created_at"] == "2026-01-01T00:00:00+00:00"
+    assert result["created_by"] == USER_ID
+    assert result["created_by_name"] == "Admin User"
 
 
 @pytest.mark.asyncio
@@ -1978,6 +1982,13 @@ async def test_get_contact_details_normalizes_json_strings():
     assert isinstance(result["phones"], list)
     assert result["additional_data"]["tier"] == "gold"
     assert result["companies"][0]["name"] == "Acme"
+
+
+def test_normalize_contact_detail_creator_strips_empty_name():
+    """Empty created_by_name becomes null in API responses."""
+    details = {"created_by": "user-1", "created_by_name": "   "}
+    ContactsService._normalize_contact_detail_creator(details)
+    assert details["created_by_name"] is None
 
 
 def test_normalize_contact_list_row_parses_json():

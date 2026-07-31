@@ -669,6 +669,7 @@
       "profile_updated": "Profile updated successfully.",
       "profile_retrieved": "Profile retrieved successfully.",
       "vehicles_retrieved": "Vehicles retrieved successfully.",
+      "vehicle_retrieved": "Vehicle retrieved successfully.",
       "vehicle_catalog_retrieved": "Vehicle options retrieved successfully.",
       "vehicle_created": "Vehicle added successfully.",
       "vehicle_updated": "Vehicle updated successfully.",

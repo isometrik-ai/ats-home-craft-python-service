@@ -364,6 +364,8 @@ ______________________________________________________________________
         "contact_unit_id": "UUID"
       }
     ],
+    "created_by": "UUID",
+    "created_by_name": "Priya Verma",
     "user_id": "UUID",
     "isometrik_user_id": "string",
     "prefix": "string",
@@ -397,6 +399,7 @@ ______________________________________________________________________
 Notes:
 
 - **`roles`** includes active and ended assignments from `contact_roles` (unit- and org-scoped).
+- **`created_by`** / **`created_by_name`** identify the auth user who created the contact (staff, import owner, or resident). Omitted on list/search responses. Legacy rows may have null values.
 - There is no `contact_type` field on the contact row; use `roles[].role_type` for labels.
 
 ______________________________________________________________________

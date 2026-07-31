@@ -42,6 +42,7 @@ from apps.user_service.app.utils.common_utils import UserContext, format_iso_dat
 from apps.user_service.app.utils.project_serialization import serialize_row
 from apps.user_service.app.utils.unit_list_serialization import (
     build_unit_list_owner,
+    format_assign_date,
     format_contact_display_name,
     format_primary_contact_email,
     format_primary_contact_phone,
@@ -118,6 +119,7 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
     status = str(row.get("status") or "")
     owner = build_unit_list_owner(row)
     owner_contact_id = row.get("owner_contact_id")
+    assign_date = format_assign_date(row.get("owner_assigned_at"))
 
     config_display_label = (
         row.get("config_display_label") or row.get("config_name") or row.get("plot_description")
@@ -137,6 +139,7 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
         "tower_id": str(row["tower_id"]) if row.get("tower_id") else None,
         "config_id": str(row["config_id"]) if row.get("config_id") else None,
         "owner": owner,
+        "assign_date": assign_date,
         "status": status,
         "is_sold": resolve_is_sold(
             status=status,
@@ -177,6 +180,7 @@ def pick_unit_owner(residents: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def build_unit_detail_person(row: dict[str, Any]) -> dict[str, Any]:
     """Build a unit detail person payload from a contact_units join row."""
+    assigned_at_raw = row.get("assigned_at") or row.get("created_at")
     return {
         "contact_id": str(row["contact_id"]),
         "contact_unit_id": str(row["contact_unit_id"]),
@@ -188,6 +192,7 @@ def build_unit_detail_person(row: dict[str, Any]) -> dict[str, Any]:
         "contact_type": row.get("contact_type") or "",
         "relationship": row.get("relationship") or "",
         "is_primary": bool(row.get("is_primary")),
+        "assign_date": format_assign_date(assigned_at_raw),
     }
 
 
@@ -198,7 +203,9 @@ def build_unit_owner_detail(row: dict[str, Any]) -> dict[str, Any]:
     email = row.get("primary_email") or format_primary_contact_email(row.get("emails"))
     owner["phone"] = str(phone).strip() if phone else None
     owner["email"] = str(email).strip() if email else None
-    owner["assigned_at"] = format_iso_datetime(row.get("assigned_at") or row.get("created_at"))
+    assigned_at_raw = row.get("assigned_at") or row.get("created_at")
+    owner["assigned_at"] = format_iso_datetime(assigned_at_raw)
+    owner["assign_date"] = format_assign_date(assigned_at_raw)
     owner["contact_unit_status"] = row.get("status")
     return owner
 
@@ -421,6 +428,7 @@ class UnitsService:
             "code": row.get("code") or "",
             "unit_label": row.get("unit_label"),
             "status": status,
+            "assign_date": owner.get("assign_date") if owner else None,
             "occupancy_label": resolve_occupancy_label(status),
             "is_sold": resolve_is_sold(
                 status=status,

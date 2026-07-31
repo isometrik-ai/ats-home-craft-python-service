@@ -317,6 +317,7 @@ class UnitListItemResponse(BaseModel):
     tower_id: str | None = None
     config_id: str | None = None
     owner: UnitListOwner | None = None
+    assign_date: str | None = None
     status: UnitStatus
     is_sold: bool = False
     sort_order: int = Field(default=0, ge=0)
@@ -576,6 +577,7 @@ class UnitDetailPerson(BaseModel):
     is_primary: bool = False
     phone: str | None = None
     email: str | None = None
+    assign_date: str | None = None
     assigned_at: str | None = None
     contact_unit_status: str | None = None
 
@@ -600,6 +602,7 @@ class UnitDetailResponse(BaseModel):
     code: str
     unit_label: str | None = None
     status: str
+    assign_date: str | None = None
     occupancy_label: str
     is_sold: bool
     is_parking: bool = False
