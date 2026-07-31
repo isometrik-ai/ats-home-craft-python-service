@@ -60,6 +60,9 @@ def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService
     svc.onboarding_repo.list_steps = AsyncMock(return_value=_completed_profile_steps())
     svc.unit_onboarding_repo.ensure_steps_for_units = AsyncMock()
     svc.repo.set_default_login = AsyncMock(return_value={"id": "cu-1"})
+    svc.contact_roles_repo = AsyncMock()
+    svc.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
+    svc.contact_roles_repo.insert_owner_role = AsyncMock(return_value={"id": "role-1"})
     return svc
 
 

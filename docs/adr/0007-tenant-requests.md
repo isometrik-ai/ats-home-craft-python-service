@@ -1,13 +1,13 @@
 # ADR 0007: Tenant requests — owner submit, admin review
 
-|                  |                                                                                                                                                                      |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted (Phase 1)                                                                                                                                                   |
-| **Date**         | 2026-07-22                                                                                                                                                           |
-| **Authors**      | Home Craft platform team                                                                                                                                             |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`contacts`, `contact_units`), [ADR 0002](./0002-resident-onboarding-implementation.md), [ADR 0005](./0005-move-events.md) |
-| **Related docs** | [tenant-requests-flow.md](../tenant-requests-flow.md), [contact-onboarding-flow.md](../contact-onboarding-flow.md)                                                   |
-| **Migrations**   | `20260722150000_tenant_requests_enums.sql`, `20260722151000_tenant_requests_tables.sql` (to be created in `ats-home-craft-supabase`)                                 |
+|                  |                                                                                                                                                                                                                             |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted (Phase 1)                                                                                                                                                                                                          |
+| **Date**         | 2026-07-22                                                                                                                                                                                                                  |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                    |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`contacts`, `contact_units`), [ADR 0010](./0010-contact-roles.md) (`contact_roles`), [ADR 0002](./0002-resident-onboarding-implementation.md), [ADR 0005](./0005-move-events.md) |
+| **Related docs** | [tenant-requests-flow.md](../tenant-requests-flow.md), [contact-onboarding-flow.md](../contact-onboarding-flow.md)                                                                                                          |
+| **Migrations**   | `20260722150000_tenant_requests_enums.sql`, `20260722151000_tenant_requests_tables.sql` (to be created in `ats-home-craft-supabase`)                                                                                        |
 
 ______________________________________________________________________
 
@@ -46,7 +46,7 @@ tenancy.
 - Multi-tenancy via **`organization_id`** on every new table and query.
 - **Primary occupant actor** = logged-in **`contacts`** row with an active `contact_units`
   link where `relationship = self` — resolved via `extract_onboarding_contact_context()`.
-  `contact_type` is an optional tag only. No `*_MANAGEMENT_*` RBAC on owner routes.
+  Role labels live in **`contact_roles`**, not on `contacts`. No `*_MANAGEMENT_*` RBAC on owner routes.
 - **Admin actor** = `organization_member` via `check_permissions(contacts_management.*)` —
   same as move events / contacts admin.
 - Reuse **`contacts`**, **`contact_units`**, **`units`** — do not duplicate person or inventory.
@@ -86,10 +86,10 @@ jsonb). The backend **does not** create a `contacts` row at submit time.
 
 On **approval**, the service:
 
-1. Creates (or reuses) a **`contacts`** row with `contact_type = Tenant` via
-   `ContactsService.create_contact` / `_provision_contact_auth_identity` (same as household).
+1. Creates (or reuses) a **`contacts`** row via `ContactsService.create_contact` (identity only).
 1. Creates **`contact_units`** for the unit with `status = active`, `is_primary = true`,
    `relationship = self` (tenant is the primary occupant).
+1. Inserts an active **`contact_roles`** row (`role_type = Tenant`, scoped to the unit).
 1. Sets `tenant_requests.tenant_contact_id` and `tenant_requests.contact_unit_id`.
 1. Appends `tenant_added` event.
 
@@ -174,9 +174,10 @@ primary occupant; owner link remains but typically `is_primary = false`).
 Owner routes validate:
 
 1. JWT → `contacts` via `extract_onboarding_contact_context()`.
-1. `contact_type = Owner` (or active owner link on the unit — product may allow co-owners later).
+1. Active **`contact_roles`** row with `role_type = Owner` on the request unit (or active owner
+   `contact_units` link — product may allow co-owners later).
 1. Active `contact_units` row: `contact_id = owner`, `unit_id = request.unit_id`,
-   `status = active`, owner contact type.
+   `status = active`, `relationship = self`.
 
 Admin routes use **`contacts_management.view`** (list/detail) and **`contacts_management.edit`**
 (document verify, approve, reject).

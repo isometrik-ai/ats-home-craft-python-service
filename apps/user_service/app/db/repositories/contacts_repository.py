@@ -52,6 +52,7 @@ CONTACT_DETAIL_JSONB_LIST_FIELDS: tuple[str, ...] = (
     "addresses",
     "work_history",
     "educational_history",
+    "roles",
 )
 
 
@@ -285,7 +286,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               WHERE $3::uuid IS NOT NULL
                 AND co.id = $3::uuid
                 AND co.organization_id = $2::uuid
-                AND co.status != $29::text
+                AND co.status != $28::text
             ),
             contact AS (
               INSERT INTO contacts (
@@ -294,7 +295,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 user_id,
                 isometrik_user_id,
                 status,
-                contact_type,
                 portal_access,
                 gender,
                 blood_group,
@@ -321,26 +321,25 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 $4::uuid,
                 $5::text,
                 $6::text,
-                $7::text,
-                COALESCE($8::boolean, false),
-                $9::public.contact_gender,
-                $10::public.contact_blood_group,
-                COALESCE($11::jsonb, '{}'::jsonb),
+                COALESCE($7::boolean, false),
+                $8::public.contact_gender,
+                $9::public.contact_blood_group,
+                COALESCE($10::jsonb, '{}'::jsonb),
+                $11::text,
                 $12::text,
                 $13::text,
                 $14::text,
                 $15::text,
-                $16::text,
-                $17::date,
+                $16::date,
+                $17::text,
                 $18::text,
-                $19::text,
+                COALESCE($19::jsonb, '[]'::jsonb),
                 COALESCE($20::jsonb, '[]'::jsonb),
-                COALESCE($21::jsonb, '[]'::jsonb),
-                COALESCE($22::text[], '{}'::text[]),
-                COALESCE($23::jsonb, '[]'::jsonb),
+                COALESCE($21::text[], '{}'::text[]),
+                COALESCE($22::jsonb, '[]'::jsonb),
+                COALESCE($23::jsonb, '{}'::jsonb),
                 COALESCE($24::jsonb, '{}'::jsonb),
-                COALESCE($25::jsonb, '{}'::jsonb),
-                COALESCE($26::jsonb, '{}'::jsonb)
+                COALESCE($25::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),
@@ -369,7 +368,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               )
               SELECT
                 $2::uuid,
-                CASE WHEN $28::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                CASE WHEN $27::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
                 c.status,
                 c.name,
                 c.industry,
@@ -388,7 +387,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 c.description,
                 c.custom_fields,
                 c.additional_data
-              FROM jsonb_to_recordset(COALESCE($27::jsonb, '[]'::jsonb)) AS c(
+              FROM jsonb_to_recordset(COALESCE($26::jsonb, '[]'::jsonb)) AS c(
                 status text,
                 name text,
                 industry text,
@@ -448,7 +447,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 a.address_type,
                 COALESCE(a.address_data, '{}'::jsonb) AS address_data,
                 a.is_primary
-              FROM jsonb_to_recordset(COALESCE($30::jsonb, '[]'::jsonb)) AS a(
+              FROM jsonb_to_recordset(COALESCE($29::jsonb, '[]'::jsonb)) AS a(
                 place_id text,
                 address_line1 text,
                 address_line2 text,
@@ -463,7 +462,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 is_primary boolean
               )
               WHERE (SELECT id FROM company) IS NOT NULL
-                AND $30::jsonb IS NOT NULL
+                AND $29::jsonb IS NOT NULL
               RETURNING 1
             ),
             membership AS (
@@ -479,7 +478,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                   updated_at = NOW()
               WHERE id = (SELECT id FROM company)
                 AND organization_id = $2::uuid
-                AND $28::boolean IS TRUE
+                AND $27::boolean IS TRUE
                 AND (SELECT id FROM company) IS NOT NULL
               RETURNING 1
             )
@@ -494,7 +493,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             contact_data.get("user_id"),
             contact_data.get("isometrik_user_id"),
             contact_data.get("status"),
-            contact_data.get("contact_type"),
             contact_data.get("portal_access"),
             contact_data.get("gender"),
             contact_data.get("blood_group"),
@@ -586,10 +584,30 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               NULLIF(au.email::text, '') AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
-              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses
+              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
+              COALESCE(roles.roles, '[]'::jsonb) AS roles
             FROM contacts ct
             LEFT JOIN auth.users au
               ON au.id = ct.user_id
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id', cr.id::text,
+                  'role_type', cr.role_type::text,
+                  'status', cr.status::text,
+                  'project_id', cr.project_id::text,
+                  'unit_id', cr.unit_id::text,
+                  'relationship', cr.relationship::text,
+                  'started_at', cr.started_at,
+                  'ended_at', cr.ended_at,
+                  'contact_unit_id', cr.contact_unit_id::text
+                )
+                ORDER BY cr.started_at DESC
+              ) AS roles
+              FROM contact_roles cr
+              WHERE cr.contact_id = ct.id
+                AND cr.organization_id = ct.organization_id
+            ) roles ON TRUE
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
                 jsonb_build_object(
@@ -832,10 +850,30 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               NULLIF(au.email::text, '') AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
-              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses
+              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
+              COALESCE(roles.roles, '[]'::jsonb) AS roles
             FROM contacts ct
             LEFT JOIN auth.users au
               ON au.id = ct.user_id
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id', cr.id::text,
+                  'role_type', cr.role_type::text,
+                  'status', cr.status::text,
+                  'project_id', cr.project_id::text,
+                  'unit_id', cr.unit_id::text,
+                  'relationship', cr.relationship::text,
+                  'started_at', cr.started_at,
+                  'ended_at', cr.ended_at,
+                  'contact_unit_id', cr.contact_unit_id::text
+                )
+                ORDER BY cr.started_at DESC
+              ) AS roles
+              FROM contact_roles cr
+              WHERE cr.contact_id = ct.id
+                AND cr.organization_id = ct.organization_id
+            ) roles ON TRUE
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
                 jsonb_build_object(
@@ -926,10 +964,30 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               NULLIF(au.email::text, '') AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
-              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses
+              COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
+              COALESCE(roles.roles, '[]'::jsonb) AS roles
             FROM contacts ct
             LEFT JOIN auth.users au
               ON au.id = ct.user_id
+            LEFT JOIN LATERAL (
+              SELECT jsonb_agg(
+                jsonb_build_object(
+                  'id', cr.id::text,
+                  'role_type', cr.role_type::text,
+                  'status', cr.status::text,
+                  'project_id', cr.project_id::text,
+                  'unit_id', cr.unit_id::text,
+                  'relationship', cr.relationship::text,
+                  'started_at', cr.started_at,
+                  'ended_at', cr.ended_at,
+                  'contact_unit_id', cr.contact_unit_id::text
+                )
+                ORDER BY cr.started_at DESC
+              ) AS roles
+              FROM contact_roles cr
+              WHERE cr.contact_id = ct.id
+                AND cr.organization_id = ct.organization_id
+            ) roles ON TRUE
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
                 jsonb_build_object(
@@ -1031,7 +1089,17 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             args.append(status)
             next_param_index += 1
         if contact_type:
-            where.append(f"contact_type = ${next_param_index}")
+            where.append(
+                f"""EXISTS (
+                  SELECT 1
+                  FROM contact_roles cr
+                  WHERE cr.contact_id = ct.id
+                    AND cr.organization_id = ct.organization_id
+                    AND cr.role_type = ${next_param_index}::public.contact_role_type
+                    AND cr.status = 'active'::public.contact_role_status
+                    AND cr.ended_at IS NULL
+                )"""
+            )
             args.append(contact_type)
             next_param_index += 1
         if search:
@@ -1083,7 +1151,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.id::text AS id,
               ct.organization_id::text AS organization_id,
               ct.status,
-              ct.contact_type,
+              COALESCE(roles.role_types, ARRAY[]::text[]) AS role_types,
               ct.first_name,
               ct.last_name,
               ct.title,
@@ -1099,6 +1167,15 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             LEFT JOIN auth.users au ON au.id = ct.user_id
             LEFT JOIN company_names_by_contact cn
               ON cn.contact_id = ct.id
+            LEFT JOIN LATERAL (
+              SELECT array_agg(DISTINCT cr.role_type::text ORDER BY cr.role_type::text)
+                AS role_types
+              FROM contact_roles cr
+              WHERE cr.contact_id = ct.id
+                AND cr.organization_id = ct.organization_id
+                AND cr.status = 'active'::public.contact_role_status
+                AND cr.ended_at IS NULL
+            ) roles ON TRUE
             WHERE {where_sql}
             ORDER BY ct.created_at DESC
             OFFSET ${next_param_index} LIMIT ${next_param_index + 1}
@@ -1114,14 +1191,14 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         organization_id: str,
         status: str | None,
     ) -> dict[str, int]:
-        """Return overview card counts grouped by contact_type for an organization."""
+        """Return overview card counts from active contact_roles for an organization."""
         args: list[Any] = [organization_id]
-        where = ["organization_id = $1::uuid"]
+        where = ["ct.organization_id = $1::uuid"]
         if status:
-            where.append("status = $2")
+            where.append("ct.status = $2")
             args.append(status)
         else:
-            where.append("status <> $2")
+            where.append("ct.status <> $2")
             args.append(ClientStatus.DELETED.value)
 
         where_sql = " AND ".join(where)
@@ -1129,10 +1206,37 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             f"""
             SELECT
               COUNT(*) AS total,
-              COUNT(*) FILTER (WHERE contact_type = ${len(args) + 1}) AS owners,
-              COUNT(*) FILTER (WHERE contact_type = ${len(args) + 2}) AS tenants,
-              COUNT(*) FILTER (WHERE contact_type = ${len(args) + 3}) AS vendors
-            FROM contacts
+              COUNT(*) FILTER (
+                WHERE EXISTS (
+                  SELECT 1 FROM contact_roles cr
+                  WHERE cr.contact_id = ct.id
+                    AND cr.organization_id = ct.organization_id
+                    AND cr.role_type = ${len(args) + 1}::public.contact_role_type
+                    AND cr.status = 'active'::public.contact_role_status
+                    AND cr.ended_at IS NULL
+                )
+              ) AS owners,
+              COUNT(*) FILTER (
+                WHERE EXISTS (
+                  SELECT 1 FROM contact_roles cr
+                  WHERE cr.contact_id = ct.id
+                    AND cr.organization_id = ct.organization_id
+                    AND cr.role_type = ${len(args) + 2}::public.contact_role_type
+                    AND cr.status = 'active'::public.contact_role_status
+                    AND cr.ended_at IS NULL
+                )
+              ) AS tenants,
+              COUNT(*) FILTER (
+                WHERE EXISTS (
+                  SELECT 1 FROM contact_roles cr
+                  WHERE cr.contact_id = ct.id
+                    AND cr.organization_id = ct.organization_id
+                    AND cr.role_type = ${len(args) + 3}::public.contact_role_type
+                    AND cr.status = 'active'::public.contact_role_status
+                    AND cr.ended_at IS NULL
+                )
+              ) AS vendors
+            FROM contacts ct
             WHERE {where_sql}
             """,
             *args,
@@ -1293,7 +1397,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             "user_id",
             "isometrik_user_id",
             "status",
-            "contact_type",
             "portal_access",
             "prefix",
             "first_name",
@@ -1319,8 +1422,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         present = [col for col in columns if col in contact_data]
         if "organization_id" not in present:
             raise ValueError("organization_id is required")
-        if "contact_type" not in present:
-            raise ValueError("contact_type is required")
 
         col_sql = ", ".join(present)
         placeholders = ", ".join(f"${idx + 1}" for idx in range(len(present)))

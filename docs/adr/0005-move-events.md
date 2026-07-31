@@ -1,13 +1,13 @@
 # ADR 0005: Move events — move-in / move-out records
 
-|                  |                                                                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted                                                                                                                         |
-| **Date**         | 2026-07-20                                                                                                                       |
-| **Authors**      | Home Craft platform team                                                                                                         |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0002](./0002-resident-onboarding-implementation.md) |
-| **Related docs** | [move-events-flow.md](../move-events-flow.md) (build guide), [contact-onboarding-flow.md](../contact-onboarding-flow.md)         |
-| **Migrations**   | `20260720150000_move_events_enums.sql`, `20260720151000_move_events_tables.sql`                                                  |
+|                  |                                                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted                                                                                                                                                      |
+| **Date**         | 2026-07-20                                                                                                                                                    |
+| **Authors**      | Home Craft platform team                                                                                                                                      |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0002](./0002-resident-onboarding-implementation.md)                              |
+| **Related docs** | [move-events-flow.md](../move-events-flow.md) (build guide), [contact-onboarding-flow.md](../contact-onboarding-flow.md), [ADR 0010](./0010-contact-roles.md) |
+| **Migrations**   | `20260720150000_move_events_enums.sql`, `20260720151000_move_events_tables.sql`                                                                               |
 
 ______________________________________________________________________
 
@@ -89,7 +89,8 @@ and possible re-move-in).
 
 - **Type** column (`Apartment` / `Commercial` / `Plot`) = the unit's config kind
   (`units.config_id → unit_configs.kind`, `UnitConfigKind`).
-- **Contact role** (`Owner` / `Tenant`) = `contacts.contact_type` (or the `contact_units.relationship`).
+- **Contact role** (`Owner` / `Tenant`) = active row in **`contact_roles`** for the unit
+  (`role_type`, `status = active`). See [ADR 0010](./0010-contact-roles.md).
 - **Unit label** = `units.code` + tower/building name.
 
 The list query **joins** these; nothing is copied onto `move_events` except the fee/date/notes that
@@ -193,7 +194,8 @@ Constraint: `CHECK (fee_amount IS NULL OR fee_amount >= 0)`.
 | ---------------------- | ----------------------------------------------------------- |
 | `units`                | unit label/code, `project_id` derivation, tower + type join |
 | `unit_configs`         | the "Type" column (`kind`: apartment / commercial / plot)   |
-| `contacts`             | the person moving + their role (`contact_type`)             |
+| `contacts`             | the person moving (identity)                                |
+| `contact_roles`        | active Owner/Tenant label for list “Role” column            |
 | `contact_units`        | current occupancy — synced on record (active / moved_out)   |
 | `towers`               | tower/building name in the unit label                       |
 | `organization_members` | acting community admin (RBAC + `recorded_by_user_id`)       |

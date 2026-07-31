@@ -272,8 +272,10 @@ def _service(
     svc.contact_units_repo = contact_units_repo or _FakeContactUnitsRepo()
     svc.contacts_repo = MagicMock()
     svc.contacts_repo.get_contact_details = AsyncMock(
-        return_value={"contact_type": ContactType.OWNER.value},
+        return_value={"roles": [{"role_type": ContactType.OWNER.value}]},
     )
+    svc.contact_roles_repo = AsyncMock()
+    svc.contact_roles_repo.insert_family_role = AsyncMock(return_value={"id": "role-1"})
     svc.contact_units_service = MagicMock()
     svc.vehicles_service = MagicMock()
     return svc

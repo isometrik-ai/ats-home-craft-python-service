@@ -78,7 +78,8 @@ column reference and rationale in [ADR 0005](./adr/0005-move-events.md).
 | -------------------------- | ------------------------------------------------------------------------------ |
 | `move_events` (new)        | One move-in / move-out record: unit, contact, type, date, fee, notes, docs     |
 | `units` (existing)         | Unit label/code + `project_id`; join `unit_configs.kind` for the "Type" column |
-| `contacts` (existing)      | The person moving + their role (`contact_type`: Owner / Tenant)                |
+| `contacts` (existing)      | The person moving (identity)                                                   |
+| `contact_roles` (existing) | Active role on the unit (`Owner` / `Tenant`) — joined for list “Role” column   |
 | `contact_units` (existing) | Current occupancy — synced on each record (`active` / `moved_out`)             |
 
 Key enum (Postgres `move_event_type` + `schemas/enums.py` `MoveEventType`): `move_in` / `move_out`,

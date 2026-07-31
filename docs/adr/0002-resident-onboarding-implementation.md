@@ -449,19 +449,20 @@ POST /steps/vehicles/complete   OR mark in POST /vehicles flow when user taps Co
 ### Step 5 — Household
 
 ```text
-GET  /household   → family contacts via contact_units where contact_type = Family
-POST /household   → create Family contact + contact_unit row
+GET  /household   → family contacts via active contact_roles (role_type = Family) + contact_units
+POST /household   → create contact + contact_unit row + contact_roles (Family)
 ```
 
-Reuse `ContactsService.create_contact` with:
+Reuse `ContactsService.create_contact` for identity, then link unit and role:
 
 ```python
+# 1) Identity
 CreateContactRequest(
-    contact_type=ContactType.FAMILY,
     portal_access=body.portal_access,
     first_name=...,
     phones=...,
 )
+# 2) contact_units + contact_roles (Family) via onboarding service
 ```
 
 ### Step 6 — Choose unit

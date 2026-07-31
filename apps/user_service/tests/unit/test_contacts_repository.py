@@ -591,7 +591,6 @@ async def test_insert_contact_success():
         row={
             "id": "c1",
             "organization_id": ORG_ID,
-            "contact_type": ContactType.OWNER.value,
             "phones": "[]",
             "emails": "[]",
         }
@@ -602,7 +601,6 @@ async def test_insert_contact_success():
         {
             "id": "c1",
             "organization_id": ORG_ID,
-            "contact_type": ContactType.OWNER.value,
             "phones": [],
             "emails": [],
         }
@@ -619,7 +617,7 @@ async def test_insert_contact_missing_organization_id():
     repo = ContactsRepository(db_connection=_async_mock_conn())
 
     with pytest.raises(ValueError, match="organization_id"):
-        await repo.insert_contact({"contact_type": ContactType.OWNER.value})
+        await repo.insert_contact({"first_name": "Jane"})
 
 
 @pytest.mark.asyncio

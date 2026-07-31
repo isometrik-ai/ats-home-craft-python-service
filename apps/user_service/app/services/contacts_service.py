@@ -38,6 +38,9 @@ from apps.user_service.app.db.repositories import (
 from apps.user_service.app.db.repositories.companies_repository import (
     COMPANY_JSONB_COLUMNS,
 )
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contacts_repository import (
     CONTACT_JSONB_COLUMNS,
 )
@@ -56,6 +59,7 @@ from apps.user_service.app.schemas.enums import (
     ClientStatus,
     CompanyEventType,
     ContactEventType,
+    ContactType,
     EntityType,
     IsometrikRole,
     KafkaTopics,
@@ -429,6 +433,7 @@ class ContactsService:
         self.companies_repo = CompaniesRepository(db_connection)
         self.cc_repo = ContactCompaniesRepository(db_connection)
         self.org_repo = OrganizationRepository(db_connection)
+        self.contact_roles_repo = ContactRolesRepository(db_connection)
         self._typesense: TypesenseService | None = None
 
     @property
@@ -1203,7 +1208,6 @@ class ContactsService:
         additional_data_jsonb = jsonb_params["additional_data"]
         social_pages_jsonb = jsonb_params["social_pages"]
         communication_preferences_jsonb = jsonb_params["communication_preferences"]
-        contact_type_value = body.contact_type.value if body.contact_type is not None else ""
 
         created = await self._create_contact_with_company_link_or_conflict(
             organization_id=org_id,
@@ -1212,7 +1216,6 @@ class ContactsService:
             contact_payload={
                 "id": contact_id,
                 "status": ClientStatus.ACTIVE.value,
-                "contact_type": contact_type_value,
                 "portal_access": body.portal_access,
                 "prefix": body.prefix,
                 "first_name": body.first_name,
@@ -1248,6 +1251,13 @@ class ContactsService:
             raise ValidationException(
                 message_key="contacts.errors.contact_creation_failed",
                 custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
+            )
+
+        if body.contact_type in {ContactType.VENDOR, ContactType.STAFF}:
+            await self.contact_roles_repo.insert_role(
+                organization_id=org_id,
+                contact_id=str(contact_id),
+                role_type=body.contact_type.value,
             )
 
         await self._create_addresses_if_any(contact_id=contact_id, addresses=body.addresses)
@@ -1630,9 +1640,6 @@ class ContactsService:
             value = getattr(body, body_attr, None)
             if value is not None:
                 update_data[column_name] = value.value if hasattr(value, "value") else value
-
-        if body.contact_type is not None:
-            update_data["contact_type"] = body.contact_type.value
 
         if "portal_access" in body.model_fields_set:
             update_data["portal_access"] = body.portal_access

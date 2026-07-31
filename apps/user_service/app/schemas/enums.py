@@ -414,7 +414,7 @@ class ClientStatus(str, Enum):
 
 
 class ContactType(str, Enum):
-    """Contact type stored on public.contacts.contact_type."""
+    """Contact role type (Postgres public.contact_role_type / contact_roles.role_type)."""
 
     OWNER = "Owner"
     TENANT = "Tenant"
@@ -422,6 +422,14 @@ class ContactType(str, Enum):
     GUEST = "Guest"
     VENDOR = "Vendor"
     STAFF = "Staff"
+
+
+class ContactRoleStatus(str, Enum):
+    """Lifecycle status for public.contact_roles (Postgres contact_role_status)."""
+
+    ACTIVE = "active"
+    ENDED = "ended"
+    CANCELLED = "cancelled"
 
 
 class ContactGender(str, Enum):

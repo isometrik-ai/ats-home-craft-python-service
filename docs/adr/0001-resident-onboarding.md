@@ -1,12 +1,12 @@
 # ADR 0001: Resident onboarding schema and backend model
 
-|                  |                                                                                                                                                                                                |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted                                                                                                                                                                                       |
-| **Date**         | 2026-06-29                                                                                                                                                                                     |
-| **Authors**      | Home Craft platform team                                                                                                                                                                       |
-| **Related docs** | [resident-onboarding-schema.md](../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md), [project-setup-schema.md](../../../ats-home-craft-supabase/docs/project-setup-schema.md) |
-| **Migrations**   | `20260629110000_resident_onboarding_enums.sql`, `20260629111000_resident_onboarding_tables.sql`, `20260629112000_contacts_profile_fields.sql`                                                  |
+|                  |                                                                                                                                                                                                                                                                                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted                                                                                                                                                                                                                                                                                 |
+| **Date**         | 2026-06-29                                                                                                                                                                                                                                                                               |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                 |
+| **Related docs** | [resident-onboarding-schema.md](../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md), [contact-roles-schema.md](../../../ats-home-craft-supabase/docs/contact-roles-schema.md), [project-setup-schema.md](../../../ats-home-craft-supabase/docs/project-setup-schema.md) |
+| **Migrations**   | `20260629110000_resident_onboarding_enums.sql`, `20260629111000_resident_onboarding_tables.sql`, `20260629112000_contacts_profile_fields.sql`                                                                                                                                            |
 
 ______________________________________________________________________
 
@@ -23,7 +23,9 @@ Constraints:
 
 - Multi-tenancy via `organization_id` on all property-related data (same pattern as Project Setup and `contacts`).
 - **`organization_members`** is staff RBAC only — mobile residents must not be modeled there.
-- **`contacts`** already exists with `contact_type` (`Owner`, `Tenant`, `Family`, …), phone/email, DOB, and **`portal_access`** provisioning (auth user + Isometrik) in `ContactsService`.
+- **`contacts`** already exists for person identity (name, phone/email, DOB) and **`portal_access`**
+  provisioning (auth user + Isometrik) in `ContactsService`. Role labels (`Owner`, `Tenant`, …)
+  live in **`contact_roles`** ([ADR 0010](./0010-contact-roles.md)).
 - Unit inventory already lives in **`units`** from Project Setup — onboarding must reference it, not duplicate it.
 - RLS is enabled on new tables but **policies are deferred**; backend uses `service_role` until policies are added (same as Project Setup phase 1).
 
@@ -33,12 +35,13 @@ ______________________________________________________________________
 
 ### 1. Reuse `contacts` as the person root — no `residents` table
 
-All people in the onboarding flow (primary user and family members) are **`contacts`** rows:
+All people in the onboarding flow (primary user and family members) are **`contacts`** rows.
+Unit-scoped roles are recorded in **`contact_roles`** when units are linked:
 
-| Person        | `contact_type`      | Notes                         |
-| ------------- | ------------------- | ----------------------------- |
-| Primary user  | `Owner` or `Tenant` | Logged-in resident            |
-| Family member | `Family`            | Created during household step |
+| Person        | `contact_roles.role_type` | Notes                         |
+| ------------- | ------------------------- | ----------------------------- |
+| Primary user  | `Owner` or `Tenant`       | Set on unit allotment / claim |
+| Family member | `Family`                  | Set when household link added |
 
 Auth resolution:
 
@@ -101,7 +104,8 @@ Step status reuses **`setup_step_status`** from Project Setup (`not_started`, `i
 | `vehicles`           | CRUD per contact                                                |
 | `contact-onboarding` | Get/update step status, complete wizard                         |
 
-Household members continue to use **`POST /contacts`** with `contact_type: Family` and `portal_access` toggle.
+Household members use **`POST /contacts`** (identity) plus a **`contact_units`** link and a
+**`contact_roles`** row (`role_type = Family`) from the onboarding household step.
 
 ### 6. Domain boundaries (explicit non-goals)
 
@@ -145,7 +149,7 @@ ______________________________________________________________________
 | Alternative                                     | Why rejected                                                                           |
 | ----------------------------------------------- | -------------------------------------------------------------------------------------- |
 | New **`residents`** table                       | Duplicates `contacts` identity, phones, and portal provisioning                        |
-| **`household_members`** table                   | Extra person store; family fits `contacts` + `contact_type = Family`                   |
+| **`household_members`** table                   | Extra person store; family fits `contacts` + `contact_units` + `contact_roles`         |
 | Profile fields in **`additional_data`**         | No type safety; harder to query and validate; replaced by dedicated columns            |
 | **`portal_access` only in API** (not DB)        | Cannot query/filter contacts without portal access; household toggle needs persistence |
 | Merge residents into **`organization_members`** | Conflates staff RBAC with end-user residents                                           |

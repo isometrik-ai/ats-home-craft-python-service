@@ -2214,7 +2214,7 @@ async def test_create_contact_with_phones_and_emails(monkeypatch):
     contact_data = repo.last_create_kwargs["contact_data"]
     assert contact_data["first_name"] == "Jane"
     assert contact_data["user_id"] == USER_ID
-    assert contact_data["contact_type"] == ContactType.OWNER.value
+    assert "contact_type" not in contact_data
     assert contact_data["emails"] is not None
 
 

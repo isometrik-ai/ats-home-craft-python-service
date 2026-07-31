@@ -11,6 +11,9 @@ from apps.user_service.app.db.repositories.contact_onboarding_repository import 
     CONTACT_LEVEL_STEP_KEYS,
     ContactOnboardingRepository,
 )
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
     UNIT_ONBOARDING_STEP_KEYS,
     ContactUnitOnboardingRepository,
@@ -83,6 +86,7 @@ class ContactOnboardingService:
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self.vehicles_repo = VehiclesRepository(db_connection)
         self.contacts_repo = ContactsRepository(db_connection)
+        self.contact_roles_repo = ContactRolesRepository(db_connection)
         self.contact_units_service = ContactUnitsService(
             db_connection=db_connection,
             user_context=user_context,
@@ -679,6 +683,14 @@ class ContactOnboardingService:
             contact_id=family_contact_id,
             relationship=body.relationship.value,
             status=link_status,
+        )
+        await self.contact_roles_repo.insert_family_role(
+            organization_id=org_id,
+            contact_id=family_contact_id,
+            project_id=str(unit["project_id"]),
+            unit_id=body.unit_id,
+            contact_unit_id=str(link["id"]),
+            relationship=body.relationship.value,
         )
 
         member_status = HouseholdMemberStatus.JOINED.value

@@ -9,6 +9,9 @@ import asyncpg
 from asyncpg import UniqueViolationError
 from supabase import AsyncClient
 
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
@@ -18,6 +21,7 @@ from apps.user_service.app.db.repositories.tenant_requests_repository import (
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import (
+    ContactType,
     TenantRequestDocumentStatus,
     TenantRequestEventType,
     TenantRequestListBucket,
@@ -87,6 +91,7 @@ class TenantRequestsService:
         self.supabase_client = supabase_client
         self.repo = tenant_requests_repository or TenantRequestsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self.contact_roles_repo = ContactRolesRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
             user_context=user_context,
@@ -893,6 +898,11 @@ class TenantRequestsService:
                 contact_unit_id=str(existing["contact_unit_id"]),
                 event_date=now.date(),
             )
+            await self.contact_roles_repo.end_active_roles_for_unit(
+                organization_id=org_id,
+                unit_id=unit_id,
+                role_types=[ContactType.TENANT.value],
+            )
             await self.repo.update_request_status(
                 organization_id=org_id,
                 tenant_request_id=str(existing["id"]),
@@ -936,6 +946,18 @@ class TenantRequestsService:
             project_id=str(row["project_id"]),
             unit_id=unit_id,
             contact_id=tenant_contact_id,
+        )
+        await self.contact_roles_repo.end_active_roles_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+            role_types=[ContactType.TENANT.value],
+        )
+        await self.contact_roles_repo.insert_tenant_role(
+            organization_id=org_id,
+            contact_id=tenant_contact_id,
+            project_id=str(row["project_id"]),
+            unit_id=unit_id,
+            contact_unit_id=str(link["id"]),
         )
         await self.repo.update_request_status(
             organization_id=org_id,

@@ -556,8 +556,8 @@ async def test_process_delete_request_approve_integration(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_contact_persists_contact_type_for_resident_body(monkeypatch):
-    """create_contact uses the unified CRM insert path for resident payloads."""
+async def test_create_contact_omits_contact_type_from_payload(monkeypatch):
+    """create_contact no longer persists contact_type on contacts row."""
     svc = ContactsService(db_connection=MagicMock(), user_context=_org_ctx())
     monkeypatch.setattr(svc, "_validate_custom_fields_for_create", AsyncMock(return_value=[]))
     monkeypatch.setattr(
@@ -585,17 +585,18 @@ async def test_create_contact_persists_contact_type_for_resident_body(monkeypatc
     monkeypatch.setattr(svc, "_create_contact_with_company_link_or_conflict", _fake_create)
     svc.org_repo = MagicMock()
     svc.org_repo.get_organization_by_id = AsyncMock(return_value={"id": ORG_ID, "name": "Org"})
+    svc.contact_roles_repo = MagicMock()
+    svc.contact_roles_repo.insert_role = AsyncMock()
 
     result = await svc.create_contact(
         CreateContactRequest(
-            contact_type=ContactType.OWNER,
             first_name="Jane",
             phones=[Phone(phone_number="1", phone_isd_code="+1", is_primary=True)],
         ),
     )
 
     assert result["contact_id"] == CONTACT_ID
-    assert captured["contact_payload"]["contact_type"] == ContactType.OWNER.value
+    assert "contact_type" not in captured["contact_payload"]
 
 
 @pytest.mark.asyncio

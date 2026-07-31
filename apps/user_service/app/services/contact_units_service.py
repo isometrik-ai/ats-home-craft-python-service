@@ -11,6 +11,9 @@ from asyncpg.exceptions import UniqueViolationError
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
     ContactOnboardingRepository,
 )
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
     ContactUnitOnboardingRepository,
 )
@@ -21,6 +24,7 @@ from apps.user_service.app.db.repositories.units_repository import UnitsReposito
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
+    ContactType,
     ContactUnitRelationship,
     ContactUnitStatus,
 )
@@ -39,6 +43,7 @@ class ContactUnitsService:
         self.units_repo = UnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
         self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
+        self.contact_roles_repo = ContactRolesRepository(db_connection)
 
     @staticmethod
     def _format_assign_date(value: Any) -> str | None:
@@ -413,6 +418,19 @@ class ContactUnitsService:
             project_id=str(unit["project_id"]),
             unit_id=unit_id,
         )
+        if relationship == ContactUnitRelationship.SELF.value:
+            await self.contact_roles_repo.end_active_roles_for_unit(
+                organization_id=org_id,
+                unit_id=unit_id,
+                role_types=[ContactType.OWNER.value, ContactType.TENANT.value],
+            )
+            await self.contact_roles_repo.insert_owner_role(
+                organization_id=org_id,
+                contact_id=contact_id,
+                project_id=str(unit["project_id"]),
+                unit_id=unit_id,
+                contact_unit_id=str(row["id"]),
+            )
         return row
 
     async def unassign_unit_owner(
@@ -436,6 +454,11 @@ class ContactUnitsService:
                     message_key="project_setup.errors.unit_owner_not_assigned",
                     custom_code=CustomStatusCode.NOT_FOUND,
                 )
+            await self.contact_roles_repo.end_active_roles_for_unit(
+                organization_id=org_id,
+                unit_id=unit_id,
+                role_types=[ContactType.OWNER.value, ContactType.TENANT.value],
+            )
 
             await self.units_repo.mark_unit_vacant(
                 organization_id=org_id,

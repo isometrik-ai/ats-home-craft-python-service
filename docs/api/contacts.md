@@ -74,10 +74,16 @@ This is a **production-ready API reference** for the Contacts module. It focuses
 
 Creates a contact. Optionally links **one** company (existing or created inline) and can set membership as primary.
 
+**Contact roles:** optional `contact_type` on create assigns an **org-scoped** role only (`Vendor` or
+`Staff`) in `contact_roles`. Unit-scoped roles (`Owner`, `Tenant`, `Family`, `Guest`) are assigned
+when a unit is linked (allotment, tenant approve, household) — not via bare contact create.
+See [ADR 0010](../adr/0010-contact-roles.md).
+
 ### Request body (all fields shown)
 
 ```json
 {
+  "contact_type": "Vendor",
   "email": "john@example.com",
   "portal_access": false,
   "prefix": "Mr",
@@ -220,6 +226,7 @@ ______________________________________________________________________
 
 - `search` (optional, min 2)
 - `status` (optional): `active|inactive|prospect|deleted`
+- `contact_type` (optional): `Owner|Tenant|Family|Guest|Vendor|Staff` — filters contacts with an **active** matching row in `contact_roles`
 - `page` (default 1)
 - `page_size` (default 20, max 100)
 
@@ -236,6 +243,7 @@ ______________________________________________________________________
       "id": "UUID",
       "organization_id": "UUID",
       "status": "active",
+      "role_types": ["Owner"],
       "first_name": "string",
       "last_name": "string",
       "title": "string",
@@ -253,6 +261,11 @@ ______________________________________________________________________
   "total_pages": 1
 }
 ```
+
+Notes:
+
+- **`role_types`** lists distinct active role labels from `contact_roles` (e.g. `["Owner"]`, `["Vendor"]`).
+- Use query/body param **`contact_type`** to filter the list by an active role.
 
 ______________________________________________________________________
 
@@ -316,7 +329,7 @@ Returns overview card counts for the Contacts registry dashboard (Total Contacts
 Notes:
 
 - Counts are org-scoped aggregates (same RBAC as list/search: `contacts_management.view`).
-- Typed sub-counts (`owners`, `tenants`, `vendors`) are subsets of `total`; contacts with other or null `contact_type` contribute to `total` only.
+- Typed sub-counts (`owners`, `tenants`, `vendors`) are derived from **active** rows in `contact_roles`; contacts with only other roles (e.g. `Family`, `Staff`) contribute to `total` only.
 
 ______________________________________________________________________
 
@@ -338,6 +351,19 @@ ______________________________________________________________________
     "id": "UUID",
     "organization_id": "UUID",
     "status": "active",
+    "roles": [
+      {
+        "id": "UUID",
+        "role_type": "Owner",
+        "status": "active",
+        "project_id": "UUID",
+        "unit_id": "UUID",
+        "relationship": null,
+        "started_at": "2026-01-01T00:00:00Z",
+        "ended_at": null,
+        "contact_unit_id": "UUID"
+      }
+    ],
     "user_id": "UUID",
     "isometrik_user_id": "string",
     "prefix": "string",
@@ -367,6 +393,11 @@ ______________________________________________________________________
   }
 }
 ```
+
+Notes:
+
+- **`roles`** includes active and ended assignments from `contact_roles` (unit- and org-scoped).
+- There is no `contact_type` field on the contact row; use `roles[].role_type` for labels.
 
 ______________________________________________________________________
 

@@ -338,6 +338,9 @@ def _service(
     )
     service.setup_service = AsyncMock()
     service._push_dispatcher = _FakePushDispatcher()
+    service.contact_roles_repo = AsyncMock()
+    service.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
+    service.contact_roles_repo.insert_tenant_role = AsyncMock(return_value={"id": "role-1"})
     return service
 
 

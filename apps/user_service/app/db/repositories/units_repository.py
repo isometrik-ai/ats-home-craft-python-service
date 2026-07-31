@@ -519,7 +519,17 @@ class UnitsRepository(BaseRepository):
                 cu.is_primary,
                 cu.relationship::text AS relationship,
                 cu.status::text AS status,
-                c.contact_type,
+                (
+                  SELECT cr.role_type::text
+                  FROM contact_roles cr
+                  WHERE cr.organization_id = cu.organization_id
+                    AND cr.contact_id = cu.contact_id
+                    AND cr.unit_id = cu.unit_id
+                    AND cr.status = 'active'::public.contact_role_status
+                    AND cr.ended_at IS NULL
+                  ORDER BY cr.started_at DESC
+                  LIMIT 1
+                ) AS contact_type,
                 c.prefix,
                 c.first_name,
                 c.last_name
@@ -555,7 +565,17 @@ class UnitsRepository(BaseRepository):
                 cu.status::text AS status,
                 cu.assigned_at,
                 cu.created_at,
-                c.contact_type,
+                (
+                  SELECT cr.role_type::text
+                  FROM contact_roles cr
+                  WHERE cr.organization_id = cu.organization_id
+                    AND cr.contact_id = cu.contact_id
+                    AND cr.unit_id = cu.unit_id
+                    AND cr.status = 'active'::public.contact_role_status
+                    AND cr.ended_at IS NULL
+                  ORDER BY cr.started_at DESC
+                  LIMIT 1
+                ) AS contact_type,
                 c.prefix,
                 c.first_name,
                 c.last_name,

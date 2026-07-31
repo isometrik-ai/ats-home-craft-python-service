@@ -40,7 +40,17 @@ SELECT
   t.name AS tower_name,
   f.display_name AS floor_name,
   uc.display_label AS config_label,
-  c.contact_type,
+  (
+    SELECT cr.role_type::text
+    FROM contact_roles cr
+    WHERE cr.organization_id = cu.organization_id
+      AND cr.contact_id = cu.contact_id
+      AND cr.unit_id = cu.unit_id
+      AND cr.status = 'active'::public.contact_role_status
+      AND cr.ended_at IS NULL
+    ORDER BY cr.started_at DESC
+    LIMIT 1
+  ) AS contact_type,
   c.first_name,
   c.last_name,
   cu.assigned_at,

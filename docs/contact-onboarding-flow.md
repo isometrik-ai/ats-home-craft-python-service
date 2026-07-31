@@ -6,8 +6,9 @@ and know exactly where to change things.
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **API prefix:** `/v1/contact-onboarding`
-- **DB schema:** `ats-home-craft-supabase` (migrations `20260629110000_*` enums, `20260629111000_*` tables)
-- **Full column reference:** `ats-home-craft-supabase/docs/resident-onboarding-schema.md`
+- **DB schema:** `ats-home-craft-supabase` (migrations `20260629110000_*` enums, `20260629111000_*` tables, `2026073112*_contact_roles_*`)
+- **Role model:** [ADR 0010](./adr/0010-contact-roles.md)
+- **Full column reference:** `ats-home-craft-supabase/docs/resident-onboarding-schema.md`, `contact-roles-schema.md`
 
 > Naming note: this feature was renamed from "resident onboarding" to "contact onboarding" in
 > the code. The **migration/seed/doc filenames still say `resident_onboarding`** (renaming an
@@ -30,7 +31,9 @@ Progress is tracked in two places:
   Full primary-occupant onboarding (properties, unit steps, review) applies when the contact has
   at least one `relationship = self` link (or no links yet during initial onboarding).
 
-- **`contact_type`** on `contacts` is an optional CRM/resident **tag** only — not used for access control.
+- **Role labels** (`Owner`, `Tenant`, `Family`, …) live in **`contact_roles`**, not on `contacts`.
+  Unit-scoped roles are assigned when a unit is linked (allotment, tenant approve, household).
+  See [ADR 0010](./adr/0010-contact-roles.md).
 
 - **`contact_onboarding_steps`** — contact-level steps: profile, property selection, default unit, review.
 

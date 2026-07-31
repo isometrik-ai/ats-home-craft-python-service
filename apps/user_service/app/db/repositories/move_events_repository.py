@@ -31,7 +31,21 @@ SELECT
   c.first_name AS contact_first_name,
   c.last_name AS contact_last_name,
   c.prefix AS contact_prefix,
-  COALESCE(cu.relationship::text, c.contact_type::text) AS contact_role
+  COALESCE(
+    (
+      SELECT cr.role_type::text
+      FROM contact_roles cr
+      WHERE cr.contact_unit_id = me.contact_unit_id
+         OR (
+           cr.contact_id = me.contact_id
+           AND cr.unit_id = me.unit_id
+           AND cr.status = 'active'::public.contact_role_status
+         )
+      ORDER BY cr.started_at DESC
+      LIMIT 1
+    ),
+    cu.relationship::text
+  ) AS contact_role
 FROM move_events me
 JOIN units u ON u.id = me.unit_id
 JOIN contacts c ON c.id = me.contact_id
