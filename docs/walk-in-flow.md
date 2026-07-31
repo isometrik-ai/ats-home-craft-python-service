@@ -21,7 +21,8 @@ A **security guard** creates a **walk-in visit** when a guest arrives without a 
 The visit can target **one or many flats** (e.g. a courier with parcels for 3 units). Security fills
 visitor details **once** and lists each flat with **`tower_id` + `unit_id`**.
 
-Each flat is a **visit unit** (`walk_in_visit_units`) that its residents (Owner / Family / Tenant) approve or
+Each flat is a **visit unit** (`walk_in_visit_units`) that its residents (any contact with an **active**
+`contact_units` link on that flat) approve or
 reject **independently**. The security list shows **one card per visit** with **`flats_count`**.
 
 ### Product rules (confirmed)

@@ -179,7 +179,7 @@ Store visitor fields on **`walk_in_entries`** only. Visit units carry flat targe
 ### 5. Who may approve a visit unit
 
 Resident may act only on visit units where they have an **active `contact_units`** link to
-`visit_unit.unit_id` and `contact_type IN ('Owner', 'Family', 'Tenant')`.
+`visit_unit.unit_id` (any relationship; `contact_type` is not checked).
 
 Record `approved_by_contact_id` / `rejected_by_contact_id` on the **visit unit** row.
 

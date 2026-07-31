@@ -231,31 +231,32 @@ class CreateContactRequest(BaseModel):
 
     @field_validator("phones")
     @classmethod
-    def validate_property_primary_phone(
+    def validate_primary_phone_when_present(
         cls, phones: list[PhoneInput | Phone], info
     ) -> list[PhoneInput | Phone]:
-        """Require exactly one primary phone for property-management creates."""
-        contact_type = info.data.get("contact_type")
-        if contact_type is not None and phones:
+        """Require exactly one primary phone when any phones are provided."""
+        del info
+        if phones:
             return _validate_exactly_one_primary_phone(phones)
         return phones
 
     @model_validator(mode="after")
     def validate_email_for_create(self) -> "CreateContactRequest":
-        """Ensure CRM creates have email; property flows may use emails jsonb only."""
-        if self.contact_type is not None:
-            if not self.phones:
-                raise ValidationException(
-                    message_key="contacts.errors.exactly_one_primary_phone",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
-                )
+        """Require a top-level email, a primary emails[] entry, or at least one phone."""
+        if (self.email or "").strip():
             return self
-        if not (self.email or "").strip():
-            raise ValidationException(
-                message_key="contacts.errors.email_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return self
+        primary_email = next(
+            (item.email.strip() for item in self.emails if item.is_primary),
+            None,
+        )
+        if primary_email:
+            return self
+        if self.phones:
+            return self
+        raise ValidationException(
+            message_key="contacts.errors.email_required",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
 
 
 class CreateContactRequestStandalone(BaseModel):

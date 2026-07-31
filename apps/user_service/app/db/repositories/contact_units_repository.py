@@ -155,23 +155,23 @@ class ContactUnitsRepository(BaseRepository):
         owner_contact_id: str,
         unit_id: str,
     ) -> bool:
-        """True when an Owner contact has an active link to the unit."""
+        """True when contact has an active primary-occupant link (relationship=self) to the unit."""
         row = await self.db_connection.fetchval(
             """
             SELECT 1
             FROM contact_units cu
-            JOIN contacts c ON c.id = cu.contact_id
             WHERE cu.organization_id = $1::uuid
               AND cu.contact_id = $2::uuid
               AND cu.unit_id = $3::uuid
               AND cu.status = $4::contact_unit_status
-              AND c.contact_type = 'Owner'
+              AND cu.relationship = $5::contact_unit_relationship
             LIMIT 1
             """,
             organization_id,
             owner_contact_id,
             unit_id,
             ContactUnitStatus.ACTIVE.value,
+            ContactUnitRelationship.SELF.value,
         )
         return row is not None
 
@@ -274,7 +274,8 @@ class ContactUnitsRepository(BaseRepository):
                 cu.id::text AS id,
                 cu.unit_id::text AS unit_id,
                 cu.project_id::text AS project_id,
-                cu.status::text AS status
+                cu.status::text AS status,
+                cu.relationship::text AS relationship
             FROM contact_units cu
             WHERE cu.organization_id = $1::uuid
               AND cu.contact_id = $2::uuid
@@ -791,12 +792,13 @@ class ContactUnitsRepository(BaseRepository):
         primary_contact_id: str,
         unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Family contacts linked to units the primary contact owns."""
+        """Household contacts (relationship != self) linked to units the primary occupies."""
         args: list[Any] = [
             organization_id,
             primary_contact_id,
             ContactUnitStatus.ACTIVE.value,
             [ContactUnitStatus.ACTIVE.value, ContactUnitStatus.PENDING.value],
+            ContactUnitRelationship.SELF.value,
         ]
         unit_filter = ""
         if unit_id:
@@ -830,7 +832,7 @@ class ContactUnitsRepository(BaseRepository):
               AND primary_cu.contact_id = $2::uuid
               AND primary_cu.status = $3::contact_unit_status
               AND cu.contact_id != $2::uuid
-              AND c.contact_type = 'Family'
+              AND cu.relationship <> $5::contact_unit_relationship
               AND cu.status = ANY($4::contact_unit_status[])
               {unit_filter}
             ORDER BY cu.created_at
@@ -846,9 +848,9 @@ class ContactUnitsRepository(BaseRepository):
         primary_contact_id: str,
         contact_unit_id: str,
     ) -> dict[str, Any] | None:
-        """Fetch a household link if it belongs to a unit the primary owns.
+        """Fetch a household link if it belongs to a unit the primary occupies.
 
-        Ensures the target link is a Family contact (not the primary's own link)
+        Ensures the target link is a household member (relationship != self)
         on a unit the primary contact is actively linked to.
         """
         row = await self.db_connection.fetchrow(
@@ -858,14 +860,13 @@ class ContactUnitsRepository(BaseRepository):
               cu.contact_id::text AS contact_id,
               cu.unit_id::text AS unit_id
             FROM contact_units cu
-            JOIN contacts c ON c.id = cu.contact_id
             JOIN contact_units primary_cu
               ON primary_cu.unit_id = cu.unit_id
              AND primary_cu.organization_id = cu.organization_id
             WHERE cu.organization_id = $1::uuid
               AND cu.id = $2::uuid
               AND cu.contact_id != $3::uuid
-              AND c.contact_type = 'Family'
+              AND cu.relationship <> $5::contact_unit_relationship
               AND primary_cu.contact_id = $3::uuid
               AND primary_cu.status = $4::contact_unit_status
             LIMIT 1
@@ -874,6 +875,7 @@ class ContactUnitsRepository(BaseRepository):
             contact_unit_id,
             primary_contact_id,
             ContactUnitStatus.ACTIVE.value,
+            ContactUnitRelationship.SELF.value,
         )
         return dict(row) if row else None
 
@@ -914,7 +916,7 @@ class ContactUnitsRepository(BaseRepository):
               AND primary_cu.status = $3::contact_unit_status
               AND cu.id = $4::uuid
               AND cu.contact_id != $2::uuid
-              AND c.contact_type = 'Family'
+              AND cu.relationship <> $6::contact_unit_relationship
               AND cu.status = ANY($5::contact_unit_status[])
             LIMIT 1
             """,
@@ -923,6 +925,7 @@ class ContactUnitsRepository(BaseRepository):
             ContactUnitStatus.ACTIVE.value,
             contact_unit_id,
             [ContactUnitStatus.ACTIVE.value, ContactUnitStatus.PENDING.value],
+            ContactUnitRelationship.SELF.value,
         )
         return dict(row) if row else None
 

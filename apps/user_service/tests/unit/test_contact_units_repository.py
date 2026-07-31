@@ -357,6 +357,7 @@ async def test_list_household_by_primary_with_unit_filter():
     assert rows[0]["contact_unit_id"] == CU_ID
     query, args = conn.fetch_calls[0]
     assert "primary_cu.unit_id" in query
+    assert "cu.relationship <>" in query
     assert UNIT_ID in args
 
 
@@ -391,7 +392,7 @@ async def test_get_unit_project():
 
 @pytest.mark.asyncio
 async def test_owner_has_active_unit():
-    """Owner active unit check joins contacts.contact_type."""
+    """Primary occupant check uses contact_units.relationship=self."""
     conn = _FakeConn(val=1)
     repo = ContactUnitsRepository(db_connection=conn)
 
@@ -404,7 +405,8 @@ async def test_owner_has_active_unit():
         is True
     )
     query, _ = conn.fetchval_calls[0]
-    assert "c.contact_type = 'Owner'" in query
+    assert "cu.relationship = $5::contact_unit_relationship" in query
+    assert "contact_type" not in query
 
 
 @pytest.mark.asyncio
@@ -636,4 +638,5 @@ async def test_list_household_by_primary_without_unit_filter():
     assert rows[0]["contact_unit_id"] == CU_ID
     query, args = conn.fetch_calls[0]
     assert "AND primary_cu.unit_id = $" not in query
-    assert len(args) == 4
+    assert len(args) == 5
+    assert "self" in args

@@ -1548,15 +1548,6 @@ class WalkInActorType(str, Enum):
     SYSTEM = "system"
 
 
-WALK_IN_RESIDENT_CONTACT_TYPES: frozenset[str] = frozenset(
-    {
-        ContactType.OWNER.value,
-        ContactType.FAMILY.value,
-        ContactType.TENANT.value,
-    }
-)
-
-
 # ============================================================================
 # FEE CONFIGURATION ENUMS — mirror Postgres project_fee enums
 # ============================================================================

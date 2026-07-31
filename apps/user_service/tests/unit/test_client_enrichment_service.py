@@ -1597,9 +1597,12 @@ async def test_enrich_company_delegates_to_post(monkeypatch):
 @pytest.mark.asyncio
 async def test_fetch_company_logo_too_large_returns_none(monkeypatch):
     """Oversized logo.dev payloads are treated as non-fatal failures."""
+    from apps.user_service.app.services.client_enrichment_service import (
+        _MAX_PROFILE_PHOTO_BYTES,
+    )
 
     class _Resp:
-        content = b"x" * (1024 * 1024 + 1)
+        content = b"x" * (_MAX_PROFILE_PHOTO_BYTES + 1)
 
         def raise_for_status(self):
             return None
@@ -1621,7 +1624,11 @@ async def test_fetch_company_logo_too_large_returns_none(monkeypatch):
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.client_enrichment_service.httpx.AsyncClient",
-        lambda timeout: _Client(),
+        lambda **kwargs: _Client(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.client_enrichment_service.get_r2_client",
+        MagicMock(),
     )
     svc = ClientEnrichmentService(base_url="http://e", webhook_url="http://w", timeout_seconds=5.0)
     url = await svc._fetch_company_logo_public_url_best_effort(

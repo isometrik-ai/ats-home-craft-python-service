@@ -25,9 +25,12 @@ authorization is "you can only touch your own onboarding".
 
 Progress is tracked in two places:
 
-- **Family members:** contacts with `contact_type = Family` (household invitees) only receive
+- **Household members:** contacts linked with `contact_units.relationship != self` only receive
   the `complete_profile` step. `GET /status` returns that single step with empty `unit_onboarding`.
-  Full owner onboarding (properties, unit steps, review) applies to Owner/Tenant contacts only.
+  Full primary-occupant onboarding (properties, unit steps, review) applies when the contact has
+  at least one `relationship = self` link (or no links yet during initial onboarding).
+
+- **`contact_type`** on `contacts` is an optional CRM/resident **tag** only — not used for access control.
 
 - **`contact_onboarding_steps`** — contact-level steps: profile, property selection, default unit, review.
 
@@ -228,7 +231,8 @@ Enforced in `contact_onboarding_service.py` and related services:
 - **Household requires an assigned unit:** adding a member checks the primary contact has an
   active link to that unit (`contact_onboarding.errors.unit_not_assigned`) and the unit exists
   (`contact_onboarding.errors.unit_not_found`).
-- **Household removal is ownership‑scoped:** removing a member only works on a `Family` link
+- **Household removal is primary‑occupant scoped:** removing a member only works on a household link
+  (`contact_units.relationship != self`) on a unit the primary contact occupies.
   that sits on a unit the primary contact actively owns
   (`contact_onboarding.errors.household_member_not_found`). The `contact_units` link is deleted,
   any pending invitation is cancelled, and if the family contact has no remaining links it is

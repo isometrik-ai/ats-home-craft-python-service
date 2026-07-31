@@ -44,9 +44,9 @@ tenancy.
 ### Constraints (carried from ADR 0001 / 0003 / 0005)
 
 - Multi-tenancy via **`organization_id`** on every new table and query.
-- **Owner actor** = logged-in **`contacts`** row (`contact_type = Owner`) resolved via
-  `extract_onboarding_contact_context()` — same as contact onboarding / passes. No
-  `*_MANAGEMENT_*` RBAC on owner routes.
+- **Primary occupant actor** = logged-in **`contacts`** row with an active `contact_units`
+  link where `relationship = self` — resolved via `extract_onboarding_contact_context()`.
+  `contact_type` is an optional tag only. No `*_MANAGEMENT_*` RBAC on owner routes.
 - **Admin actor** = `organization_member` via `check_permissions(contacts_management.*)` —
   same as move events / contacts admin.
 - Reuse **`contacts`**, **`contact_units`**, **`units`** — do not duplicate person or inventory.

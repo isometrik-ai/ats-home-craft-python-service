@@ -17,26 +17,26 @@ ______________________________________________________________________
 
 ## 1. What this flow does
 
-An **owner** (`contacts.contact_type = Owner`) who has an **active unit assignment** can submit
+A **primary occupant** (`contact_units.relationship = self`) who has an **active unit assignment** can submit
 a **tenant request** for that unit: prospective tenant profile, three documents, and an intended
 move-in date. A **community admin** reviews each document independently, then approves or rejects
 the request.
 
 On **approval**:
 
-1. A real **`contacts`** row is created (`contact_type = Tenant`).
-1. A **`contact_units`** link is created (`status = active`, tenant as primary occupant).
+1. A real **`contacts`** row is created (optional `contact_type` tag only).
+1. A **`contact_units`** link is created (`status = active`, `relationship = self`, tenant as primary occupant).
 1. The request moves to **`approved`** and appears in history forever.
 
 ### Business rules (must enforce)
 
-| Rule                                    | Enforcement                                             |
-| --------------------------------------- | ------------------------------------------------------- |
-| **One in-flight request per unit**      | Partial unique index + service check before create      |
-| **One active approved tenant per unit** | Partial unique index; supersede previous on new approve |
-| **Past history visible**                | Never hard-delete requests; `superseded` retains row    |
-| **Owner can only act on owned units**   | Join `contact_units` where owner contact is active      |
-| **Three documents required to submit**  | `id_proof`, `rental_agreement`, `police_verification`   |
+| Rule                                           | Enforcement                                             |
+| ---------------------------------------------- | ------------------------------------------------------- |
+| **One in-flight request per unit**             | Partial unique index + service check before create      |
+| **One active approved tenant per unit**        | Partial unique index; supersede previous on new approve |
+| **Past history visible**                       | Never hard-delete requests; `superseded` retains row    |
+| **Submitter must be primary occupant on unit** | `contact_units` active link with `relationship = self`  |
+| **Three documents required to submit**         | `id_proof`, `rental_agreement`, `police_verification`   |
 
 ### Screen → capability map
 

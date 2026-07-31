@@ -31,10 +31,13 @@ SELECT
   c.first_name AS contact_first_name,
   c.last_name AS contact_last_name,
   c.prefix AS contact_prefix,
-  c.contact_type::text AS contact_role
+  COALESCE(cu.relationship::text, c.contact_type::text) AS contact_role
 FROM move_events me
 JOIN units u ON u.id = me.unit_id
 JOIN contacts c ON c.id = me.contact_id
+LEFT JOIN contact_units cu
+  ON cu.id = me.contact_unit_id
+ AND cu.organization_id = me.organization_id
 LEFT JOIN towers t ON t.id = u.tower_id
 LEFT JOIN unit_configs uc ON uc.id = u.config_id
 WHERE me.organization_id = $1::uuid

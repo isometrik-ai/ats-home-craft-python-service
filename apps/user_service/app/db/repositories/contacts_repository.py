@@ -12,7 +12,6 @@ from apps.user_service.app.db.repositories.base_repository import (
     rows_with_default_address_data,
 )
 from apps.user_service.app.schemas.enums import (
-    WALK_IN_RESIDENT_CONTACT_TYPES,
     ClientStatus,
     ContactType,
 )
@@ -286,7 +285,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               WHERE $3::uuid IS NOT NULL
                 AND co.id = $3::uuid
                 AND co.organization_id = $2::uuid
-                AND co.status != $23::text
+                AND co.status != $29::text
             ),
             contact AS (
               INSERT INTO contacts (
@@ -295,6 +294,11 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 user_id,
                 isometrik_user_id,
                 status,
+                contact_type,
+                portal_access,
+                gender,
+                blood_group,
+                communication_preferences,
                 prefix,
                 first_name,
                 middle_name,
@@ -304,6 +308,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 profile_photo_url,
                 external_contact_id,
                 phones,
+                emails,
                 tags,
                 notes,
                 custom_fields,
@@ -317,19 +322,25 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 $5::text,
                 $6::text,
                 $7::text,
-                $8::text,
-                $9::text,
-                $10::text,
-                $11::text,
-                $12::date,
+                COALESCE($8::boolean, false),
+                $9::public.contact_gender,
+                $10::public.contact_blood_group,
+                COALESCE($11::jsonb, '{}'::jsonb),
+                $12::text,
                 $13::text,
                 $14::text,
-                COALESCE($15::jsonb, '[]'::jsonb),
-                COALESCE($16::text[], '{}'::text[]),
-                COALESCE($17::jsonb, '[]'::jsonb),
-                COALESCE($18::jsonb, '{}'::jsonb),
-                COALESCE($19::jsonb, '{}'::jsonb),
-                COALESCE($20::jsonb, '{}'::jsonb)
+                $15::text,
+                $16::text,
+                $17::date,
+                $18::text,
+                $19::text,
+                COALESCE($20::jsonb, '[]'::jsonb),
+                COALESCE($21::jsonb, '[]'::jsonb),
+                COALESCE($22::text[], '{}'::text[]),
+                COALESCE($23::jsonb, '[]'::jsonb),
+                COALESCE($24::jsonb, '{}'::jsonb),
+                COALESCE($25::jsonb, '{}'::jsonb),
+                COALESCE($26::jsonb, '{}'::jsonb)
               )
               RETURNING *
             ),
@@ -358,7 +369,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               )
               SELECT
                 $2::uuid,
-                CASE WHEN $22::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
+                CASE WHEN $28::boolean IS TRUE THEN (SELECT id FROM contact) ELSE NULL END,
                 c.status,
                 c.name,
                 c.industry,
@@ -377,7 +388,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 c.description,
                 c.custom_fields,
                 c.additional_data
-              FROM jsonb_to_recordset(COALESCE($21::jsonb, '[]'::jsonb)) AS c(
+              FROM jsonb_to_recordset(COALESCE($27::jsonb, '[]'::jsonb)) AS c(
                 status text,
                 name text,
                 industry text,
@@ -437,7 +448,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 a.address_type,
                 COALESCE(a.address_data, '{}'::jsonb) AS address_data,
                 a.is_primary
-              FROM jsonb_to_recordset(COALESCE($24::jsonb, '[]'::jsonb)) AS a(
+              FROM jsonb_to_recordset(COALESCE($30::jsonb, '[]'::jsonb)) AS a(
                 place_id text,
                 address_line1 text,
                 address_line2 text,
@@ -452,7 +463,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 is_primary boolean
               )
               WHERE (SELECT id FROM company) IS NOT NULL
-                AND $24::jsonb IS NOT NULL
+                AND $30::jsonb IS NOT NULL
               RETURNING 1
             ),
             membership AS (
@@ -468,7 +479,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                   updated_at = NOW()
               WHERE id = (SELECT id FROM company)
                 AND organization_id = $2::uuid
-                AND $22::boolean IS TRUE
+                AND $28::boolean IS TRUE
                 AND (SELECT id FROM company) IS NOT NULL
               RETURNING 1
             )
@@ -483,6 +494,11 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             contact_data.get("user_id"),
             contact_data.get("isometrik_user_id"),
             contact_data.get("status"),
+            contact_data.get("contact_type"),
+            contact_data.get("portal_access"),
+            contact_data.get("gender"),
+            contact_data.get("blood_group"),
+            contact_data.get("communication_preferences"),
             contact_data.get("prefix"),
             contact_data.get("first_name"),
             contact_data.get("middle_name"),
@@ -492,6 +508,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             contact_data.get("profile_photo_url"),
             contact_data.get("external_contact_id"),
             contact_data.get("phones"),
+            contact_data.get("emails"),
             contact_data.get("tags"),
             contact_data.get("notes"),
             contact_data.get("custom_fields"),
@@ -1227,13 +1244,11 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               AND cu.unit_id = $2::uuid
               AND cu.status = 'active'::contact_unit_status
               AND c.status <> 'deleted'
-              AND c.contact_type = ANY($3::text[])
               AND c.user_id IS NOT NULL
             ORDER BY c.user_id, c.updated_at DESC
             """,
             organization_id,
             unit_id,
-            list(WALK_IN_RESIDENT_CONTACT_TYPES),
         )
         return [dict(row) for row in rows]
 

@@ -18,7 +18,6 @@ from apps.user_service.app.db.repositories.tenant_requests_repository import (
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import (
-    ContactType,
     TenantRequestDocumentStatus,
     TenantRequestEventType,
     TenantRequestListBucket,
@@ -400,15 +399,15 @@ class TenantRequestsService:
         owner_contact_id: str,
         unit_id: str,
     ) -> dict[str, Any]:
-        """Ensure the owner has an active link to the unit and return unit metadata."""
+        """Ensure the contact has an active primary-occupant link to the unit and return metadata."""
         org_id = self.user_context.organization_id
         assert org_id
-        is_owner = await self.contact_units_repo.owner_has_active_unit(
+        is_primary_occupant = await self.contact_units_repo.owner_has_active_unit(
             organization_id=org_id,
             owner_contact_id=owner_contact_id,
             unit_id=unit_id,
         )
-        if not is_owner:
+        if not is_primary_occupant:
             raise ValidationException(
                 message_key="tenant_requests.errors.unit_not_owned",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -924,14 +923,12 @@ class TenantRequestsService:
         ]
         create_result = await contacts_service.create_contact(
             CreateContactRequest(
-                contact_type=ContactType.TENANT,
                 portal_access=bool(row.get("portal_access")),
                 first_name=row.get("tenant_first_name"),
                 last_name=row.get("tenant_last_name"),
                 phones=phones,
                 emails=emails or [],
             ),
-            provision_auth=not bool(row.get("portal_access")),
         )
         tenant_contact_id = str(create_result["contact_id"])
         link = await self.contact_units_repo.insert_primary_occupant_link(
