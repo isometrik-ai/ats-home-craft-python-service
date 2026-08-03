@@ -864,6 +864,7 @@ async def test_approve_request_parses_json_string_phones(mock_contacts_cls: Magi
         ),
         tenant_emails='[{"email": "tenant@example.com", "is_primary": true}]',
     )
+    repo.documents = _documents(doc_status=TenantRequestDocumentStatus.VERIFIED.value)
     mock_contacts_cls.return_value.create_contact = AsyncMock(
         return_value={"contact_id": "tenant-contact-1"}
     )
@@ -901,6 +902,7 @@ async def test_approve_request_supersedes_existing(mock_contacts_cls: MagicMock)
     """Approving supersedes an existing approved tenant on the same unit."""
     repo = _FakeTenantRequestsRepo()
     repo.row = _request_row(status=TenantRequestStatus.READY_TO_APPROVE.value)
+    repo.documents = _documents(doc_status=TenantRequestDocumentStatus.VERIFIED.value)
     repo.active_approved = {
         "id": "old-request",
         "contact_unit_id": "old-link",
