@@ -46,6 +46,7 @@ _TENANT_REQUEST_SELECT_COLUMNS = f"""
   tr.tenant_phones,
   tr.tenant_emails,
   tr.move_in_date,
+  tr.move_in_fee,
   tr.status::text AS status,
   tr.portal_access,
   tr.tenant_contact_id::text AS tenant_contact_id,
@@ -457,6 +458,7 @@ class TenantRequestsRepository(BaseRepository):
             "superseded_by_request_id": "uuid",
             "admin_notes": "text",
             "move_in_date": "date",
+            "move_in_fee": "numeric",
         }
         for key, cast in allowed.items():
             if key not in fields:

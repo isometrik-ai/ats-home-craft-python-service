@@ -278,11 +278,14 @@ After each action, service recomputes header status and appends `document_verifi
 POST /v1/projects/{project_id}/tenant-requests/{id}/approve
 {
   "move_in_date": "2026-08-01",
+  "move_in_fee": 5000,
   "admin_notes": "optional"
 }
 ```
 
 `move_in_date` is **required** at approval (admin confirms or sets the tenant move-in date).
+`move_in_fee` is optional and defaults to **`0`** when omitted. It is stored on the request and
+returned on **GET** detail/list responses as a string (e.g. `"5000.00"`).
 
 Transactional steps:
 
@@ -291,7 +294,7 @@ Transactional steps:
 1. `ContactsService.create_contact` (identity; auth provisioned from `portal_access` on the request).
 1. `contact_units` insert (tenant, `is_primary = true`, `status = active`, `relationship = self`).
 1. `contact_roles` insert (`role_type = Tenant`, `status = active`, linked to unit + `contact_unit_id`).
-1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`, **`move_in_date`** (from request body).
+1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`, **`move_in_date`** and **`move_in_fee`** (from request body).
 1. Append `approved` + `tenant_added` events.
 
 Returns created tenant summary + request snapshot.

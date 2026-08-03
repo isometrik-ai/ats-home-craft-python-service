@@ -212,6 +212,7 @@ async def test_get_owner_tenant_request(monkeypatch, client):
     res = await client.get(f"/v1/contact-onboarding/tenant-requests/{REQUEST_ID}")
     body = assert_success(res, 200)
     assert body["data"]["id"] == REQUEST_ID
+    assert body["data"]["move_in_fee"] == "0"
 
 
 @pytest.mark.asyncio

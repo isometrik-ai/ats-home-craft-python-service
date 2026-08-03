@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -88,6 +89,7 @@ class ApproveTenantRequestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     move_in_date: date
+    move_in_fee: Decimal = Field(default=Decimal("0"), ge=0)
     admin_notes: str | None = Field(None, max_length=2000)
 
 
@@ -199,6 +201,7 @@ class TenantRequestListItemResponse(BaseModel):
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
     move_in_date: str | None = None
+    move_in_fee: str = "0"
     status: str
     portal_access: bool = False
     submitted_at: str | None = None
@@ -230,6 +233,7 @@ class TenantRequestResponse(BaseModel):
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
     move_in_date: str | None = None
+    move_in_fee: str = "0"
     status: str
     portal_access: bool = False
     tenant_contact_id: str | None = None

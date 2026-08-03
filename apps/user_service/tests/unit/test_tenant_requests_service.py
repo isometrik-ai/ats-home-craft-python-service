@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -73,6 +74,7 @@ def _request_row(**overrides: Any) -> dict[str, Any]:
         ],
         "tenant_emails": [],
         "move_in_date": date(2026, 8, 1),
+        "move_in_fee": Decimal("0"),
         "status": TenantRequestStatus.SUBMITTED.value,
         "portal_access": False,
         "tenant_contact_id": None,
@@ -233,6 +235,8 @@ class _FakeTenantRequestsRepo:
             "tenant_contact_id",
             "contact_unit_id",
             "admin_notes",
+            "move_in_date",
+            "move_in_fee",
         ):
             if key in kwargs:
                 self.row[key] = kwargs[key]
@@ -498,10 +502,20 @@ async def test_get_owner_request_success() -> None:
         tenant_request_id=REQUEST_ID,
     )
     assert response.unit_id == UNIT_ID
+    assert response.move_in_fee == "0"
 
 
 @pytest.mark.asyncio
-async def test_cancel_request_success() -> None:
+async def test_get_owner_request_includes_move_in_fee() -> None:
+    """Owner detail includes move_in_fee from the request row."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(move_in_fee=Decimal("2500"))
+    svc = _service(repo=repo)
+    response = await svc.get_owner_request(
+        owner_contact_id=OWNER_ID,
+        tenant_request_id=REQUEST_ID,
+    )
+    assert response.move_in_fee == "2500"
     """Owner can cancel an in-flight request."""
     svc = _service()
     response = await svc.cancel_request(
@@ -590,6 +604,20 @@ async def test_get_admin_request() -> None:
         tenant_request_id=REQUEST_ID,
     )
     assert response.documents_total_count == 3
+    assert response.move_in_fee == "0"
+
+
+@pytest.mark.asyncio
+async def test_get_admin_request_includes_move_in_fee() -> None:
+    """Admin detail includes move_in_fee from the request row."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(move_in_fee=Decimal("5000"))
+    svc = _service(repo=repo)
+    response = await svc.get_admin_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+    )
+    assert response.move_in_fee == "5000"
 
 
 @pytest.mark.asyncio
@@ -757,6 +785,33 @@ async def test_approve_request_success(mock_contacts_cls: MagicMock) -> None:
 
     assert response.status == TenantRequestStatus.APPROVED.value
     mock_contacts_cls.return_value.create_contact.assert_awaited_once()
+
+
+def test_approve_body_defaults_move_in_fee_to_zero() -> None:
+    """Approve payload defaults move_in_fee to 0 when omitted."""
+    body = _approve_body()
+    assert body.move_in_fee == Decimal("0")
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.tenant_requests_service.ContactsService")
+async def test_approve_request_persists_move_in_fee(mock_contacts_cls: MagicMock) -> None:
+    """Admin approve stores the move_in_fee on the request."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(status=TenantRequestStatus.READY_TO_APPROVE.value)
+    repo.documents = _documents(doc_status=TenantRequestDocumentStatus.VERIFIED.value)
+    mock_contacts_cls.return_value.create_contact = AsyncMock(
+        return_value={"contact_id": "tenant-contact-1"}
+    )
+    svc = _service(repo=repo)
+
+    await svc.approve_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        body=_approve_body(move_in_fee=Decimal("5000")),
+    )
+
+    assert repo.row["move_in_fee"] == Decimal("5000")
 
 
 @pytest.mark.asyncio
