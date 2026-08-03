@@ -154,6 +154,40 @@ class TenantRequestsService:
             return TenantRequestStatus.READY_TO_APPROVE.value
         return TenantRequestStatus.PENDING_REVIEW.value
 
+    async def _sync_header_status_from_documents(
+        self,
+        *,
+        row: dict[str, Any],
+        documents: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Align tenant_requests.status with document rows when still in-flight."""
+        current = str(row.get("status") or "")
+        if current not in _INFLIGHT_STATUSES:
+            return row
+        derived = self._derive_header_status(documents)
+        if derived == current:
+            return row
+        org_id = self.user_context.organization_id
+        assert org_id
+        tenant_request_id = str(row["id"])
+        await self.repo.update_request_status(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            status=derived,
+        )
+        if (
+            derived == TenantRequestStatus.READY_TO_APPROVE.value
+            and current != TenantRequestStatus.READY_TO_APPROVE.value
+        ):
+            user_id = self.user_context.user_id
+            await self.repo.insert_event(
+                organization_id=org_id,
+                tenant_request_id=tenant_request_id,
+                event_type=TenantRequestEventType.READY_TO_APPROVE.value,
+                actor_user_id=str(user_id) if user_id else None,
+            )
+        return {**row, "status": derived}
+
     @staticmethod
     def _derive_milestones(
         *,
@@ -323,6 +357,7 @@ class TenantRequestsService:
             organization_id=org_id,
             tenant_request_id=str(row["id"]),
         )
+        row = await self._sync_header_status_from_documents(row=row, documents=documents)
         events = await self.repo.list_events(
             organization_id=org_id,
             tenant_request_id=str(row["id"]),
@@ -744,16 +779,12 @@ class TenantRequestsService:
         """Recompute header status and append timeline events after doc review."""
         org_id = self.user_context.organization_id
         assert org_id
+        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
         documents = await self.repo.list_documents(
             organization_id=org_id,
             tenant_request_id=tenant_request_id,
         )
-        new_status = self._derive_header_status(documents)
-        await self.repo.update_request_status(
-            organization_id=org_id,
-            tenant_request_id=tenant_request_id,
-            status=new_status,
-        )
+        await self._sync_header_status_from_documents(row=row, documents=documents)
         await self.repo.insert_event(
             organization_id=org_id,
             tenant_request_id=tenant_request_id,
@@ -761,13 +792,6 @@ class TenantRequestsService:
             actor_user_id=actor_user_id,
             payload=payload,
         )
-        if new_status == TenantRequestStatus.READY_TO_APPROVE.value:
-            await self.repo.insert_event(
-                organization_id=org_id,
-                tenant_request_id=tenant_request_id,
-                event_type=TenantRequestEventType.READY_TO_APPROVE.value,
-                actor_user_id=actor_user_id,
-            )
 
     async def verify_document(
         self,
@@ -889,12 +913,18 @@ class TenantRequestsService:
             project_id=project_id,
             tenant_request_id=tenant_request_id,
         )
+        org_id = self.user_context.organization_id
+        assert org_id
+        documents = await self.repo.list_documents(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+        )
+        row = await self._sync_header_status_from_documents(row=row, documents=documents)
         if row.get("status") != TenantRequestStatus.READY_TO_APPROVE.value:
             raise ValidationException(
                 message_key="tenant_requests.errors.not_ready_to_approve",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        org_id = self.user_context.organization_id
         user_id = self.user_context.user_id
         assert org_id and user_id
         unit_id = str(row["unit_id"])

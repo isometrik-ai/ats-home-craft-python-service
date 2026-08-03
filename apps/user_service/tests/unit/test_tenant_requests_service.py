@@ -392,6 +392,44 @@ def test_derive_header_status_empty_documents() -> None:
     assert TenantRequestsService._derive_header_status([]) == TenantRequestStatus.SUBMITTED.value
 
 
+@pytest.mark.asyncio
+async def test_sync_header_status_heals_stale_pending_review() -> None:
+    """Detail read syncs header to ready_to_approve when all docs are verified."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(status=TenantRequestStatus.PENDING_REVIEW.value)
+    repo.documents = _documents(doc_status=TenantRequestDocumentStatus.VERIFIED.value)
+    svc = _service(repo=repo)
+
+    response = await svc.get_admin_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+    )
+
+    assert response.status == TenantRequestStatus.READY_TO_APPROVE.value
+    assert repo.row["status"] == TenantRequestStatus.READY_TO_APPROVE.value
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.tenant_requests_service.ContactsService")
+async def test_approve_request_heals_stale_header(mock_contacts_cls: MagicMock) -> None:
+    """Approve syncs a stale header before validating ready_to_approve."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(status=TenantRequestStatus.PENDING_REVIEW.value)
+    repo.documents = _documents(doc_status=TenantRequestDocumentStatus.VERIFIED.value)
+    mock_contacts_cls.return_value.create_contact = AsyncMock(
+        return_value={"contact_id": "tenant-contact-1"}
+    )
+    svc = _service(repo=repo)
+
+    response = await svc.approve_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        body=_approve_body(),
+    )
+
+    assert response.status == TenantRequestStatus.APPROVED.value
+
+
 def test_format_date_values() -> None:
     """Date formatter handles None, date, and string values."""
     assert TenantRequestsService._format_date(None) is None
