@@ -68,6 +68,7 @@ def _fake_detail(**overrides) -> TenantRequestResponse:
         "tenant_first_name": "Tenant",
         "tenant_last_name": "User",
         "status": "submitted",
+        "move_in_fee": "5000.00",
     }
     data.update(overrides)
     return TenantRequestResponse(**data)
@@ -186,6 +187,7 @@ async def test_get_project_tenant_request(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"]["id"] == REQUEST_ID
     assert body["data"]["tenant_first_name"] == "Tenant"
+    assert body["data"]["move_in_fee"] == "5000.00"
 
 
 @pytest.mark.asyncio
@@ -332,6 +334,7 @@ async def test_approve_tenant_request(monkeypatch, client):
         assert project_id == PROJECT_ID
         assert tenant_request_id == REQUEST_ID
         assert body.move_in_date.isoformat() == "2026-08-01"
+        assert body.move_in_fee == 0
         return _fake_detail(status="approved", admin_notes="Approved")
 
     monkeypatch.setattr(f"{_SERVICE}.approve_request", fake_approve_request)

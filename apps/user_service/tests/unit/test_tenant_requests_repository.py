@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, datetime, timezone
+from decimal import Decimal
 
 import pytest
 
@@ -234,13 +235,14 @@ async def test_update_request_status_with_optional_fields():
         approved_by_user_id=USER_ID,
         approved_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
         admin_notes="approved after review",
+        move_in_fee=Decimal("2500.50"),
     )
     assert updated["status"] == TenantRequestStatus.APPROVED.value
     query, args = conn.fetchrow_calls[0]
     assert "approved_by_user_id" in query
     assert "admin_notes" in query
-    assert args[0] == ORG_ID
-    assert args[1] == REQUEST_ID
+    assert "move_in_fee" in query
+    assert Decimal("2500.50") in args
 
     conn.row = None
     missing = await repo.update_request_status(

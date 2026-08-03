@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
@@ -130,6 +131,15 @@ class TenantRequestsService:
             return None
         if isinstance(value, date):
             return value.isoformat()
+        return str(value)
+
+    @staticmethod
+    def _format_decimal(value: Any) -> str | None:
+        """Format a decimal value for API responses."""
+        if value is None:
+            return None
+        if isinstance(value, Decimal):
+            return format(value, "f")
         return str(value)
 
     @staticmethod
@@ -291,6 +301,7 @@ class TenantRequestsService:
             tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
             tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
             move_in_date=self._format_date(row.get("move_in_date")),
+            move_in_fee=self._format_decimal(row.get("move_in_fee")) or "0",
             status=str(row.get("status")),
             portal_access=bool(row.get("portal_access", False)),
             submitted_at=format_iso_datetime(row.get("submitted_at")),
@@ -339,6 +350,7 @@ class TenantRequestsService:
             tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
             tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
             move_in_date=self._format_date(row.get("move_in_date")),
+            move_in_fee=self._format_decimal(row.get("move_in_fee")) or "0",
             status=str(row.get("status")),
             portal_access=bool(row.get("portal_access", False)),
             tenant_contact_id=row.get("tenant_contact_id"),
@@ -969,6 +981,7 @@ class TenantRequestsService:
             approved_by_user_id=str(user_id),
             admin_notes=body.admin_notes,
             move_in_date=body.move_in_date,
+            move_in_fee=body.move_in_fee,
         )
         await self.repo.insert_event(
             organization_id=org_id,
