@@ -36,6 +36,9 @@ def _service(*, push: _FakePushDispatcher | None = None) -> VehiclesService:
     svc.user_context.organization_id = "org-1"
     svc.repo = AsyncMock()
     svc.parking_slots_repo = AsyncMock()
+    svc.units_repo = AsyncMock()
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=2)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=0)
     svc._push_dispatcher = push or _FakePushDispatcher()
     return svc
 
@@ -484,6 +487,31 @@ async def test_create_vehicle_success():
 
 
 @pytest.mark.asyncio
+async def test_create_vehicle_rejects_when_entitlement_full():
+    """Create vehicle fails when the unit has no remaining parking entitlement."""
+    from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=1)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=1)
+
+    body = CreateVehicleRequest(
+        unit_id="u1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        registration_number="mh12ab1234",
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.create_vehicle(contact_id="c1", body=body)
+
+    svc.repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_review_vehicle_approves_and_assigns_slot():
     """Approve assigns parking slot and updates vehicle."""
     from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
@@ -494,6 +522,7 @@ async def test_review_vehicle_approves_and_assigns_slot():
         "status": VehicleStatus.PENDING.value,
         "project_id": "p1",
         "contact_id": "c1",
+        "unit_id": "u1",
     }
     svc.parking_slots_repo.get_slot.return_value = {"id": "slot-1", "status": "available"}
     svc.parking_slots_repo.assign_slot.return_value = True
@@ -522,6 +551,30 @@ async def test_review_vehicle_approves_and_assigns_slot():
     push = svc._push_dispatcher
     assert len(push.contact_calls) == 1
     assert push.contact_calls[0]["message_key"] == "notifications.push.vehicle.approved"
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_rejects_when_entitlement_full():
+    """Approve fails when the unit already has the maximum approved/pending vehicles."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+    }
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=1)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=1)
+
+    body = ReviewVehicleRequest(status=VehicleStatus.APPROVED, parking_slot_id="slot-1")
+
+    with pytest.raises(ValidationException):
+        await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+    svc.parking_slots_repo.assign_slot.assert_not_awaited()
 
 
 @pytest.mark.asyncio

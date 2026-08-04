@@ -19,6 +19,7 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.db.repositories.parking_slots_repository import (
     ParkingSlotsRepository,
 )
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
@@ -63,6 +64,7 @@ class VehiclesService:
         self.user_context = user_context
         self.repo = VehiclesRepository(db_connection)
         self.parking_slots_repo = ParkingSlotsRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
         self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
@@ -259,6 +261,31 @@ class VehiclesService:
             )
         return unit["project_id"]
 
+    async def _assert_parking_entitlement_available(
+        self,
+        *,
+        unit_id: str,
+        exclude_vehicle_id: str | None = None,
+    ) -> None:
+        """Ensure the unit has not reached its configured parking entitlement."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        entitlement = await self.units_repo.get_parking_entitlement_by_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        current = await self.repo.count_entitlement_consuming_by_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+            exclude_vehicle_id=exclude_vehicle_id,
+        )
+        if current >= entitlement:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_entitlement_exceeded",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"parking_entitlement": entitlement},
+            )
+
     async def list_vehicles(
         self,
         *,
@@ -311,6 +338,7 @@ class VehiclesService:
             contact_id=contact_id,
             unit_id=body.unit_id,
         )
+        await self._assert_parking_entitlement_available(unit_id=body.unit_id)
         try:
             row = await self.repo.create(
                 organization_id=org_id,
@@ -615,6 +643,16 @@ class VehiclesService:
 
         if body.status == VehicleStatus.APPROVED:
             assert body.parking_slot_id
+            unit_id = str(vehicle.get("unit_id") or "")
+            if not unit_id:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.unit_not_found",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            await self._assert_parking_entitlement_available(
+                unit_id=unit_id,
+                exclude_vehicle_id=vehicle_id,
+            )
             slot = await self.parking_slots_repo.get_slot(
                 organization_id=org_id,
                 project_id=project_id,

@@ -635,6 +635,7 @@
       "invalid_vehicle_type": "Vehicle type must be two_wheeler or four_wheeler.",
       "parking_slot_required": "A parking slot is required when approving a vehicle.",
       "parking_slot_unavailable": "The selected parking slot is not available.",
+      "parking_entitlement_exceeded": "This unit allows up to {parking_entitlement} registered vehicle(s). Remove or withdraw an existing request before adding another.",
       "rejection_reason_required": "Rejection reason is required when rejecting a vehicle.",
       "invalid_vehicle_review_status": "Vehicle review status must be approved or rejected.",
       "vehicle_not_pending": "Only pending vehicle requests can be reviewed.",

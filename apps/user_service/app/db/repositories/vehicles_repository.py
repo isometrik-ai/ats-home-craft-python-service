@@ -11,6 +11,7 @@ from apps.user_service.app.db.repositories.units_repository import (
     _RESOLVED_CONFIG_KIND_SQL,
     _RESOLVED_PROPERTY_TYPE_SQL,
 )
+from apps.user_service.app.schemas.enums import VehicleStatus
 
 _VEHICLE_ENUM_CASTS: dict[str, str] = {
     "vehicle_type": "::vehicle_type",
@@ -567,5 +568,36 @@ class VehiclesRepository(BaseRepository):
             """,
             organization_id,
             contact_id,
+        )
+        return int(count or 0)
+
+    async def count_entitlement_consuming_by_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        exclude_vehicle_id: str | None = None,
+    ) -> int:
+        """Count pending and approved vehicles that consume a unit's parking entitlement."""
+        args: list[Any] = [
+            organization_id,
+            unit_id,
+            [VehicleStatus.PENDING.value, VehicleStatus.APPROVED.value],
+        ]
+        exclude_sql = ""
+        if exclude_vehicle_id:
+            exclude_sql = "AND v.id <> $4::uuid"
+            args.append(exclude_vehicle_id)
+        count = await self.db_connection.fetchval(
+            f"""
+            SELECT COUNT(*)
+            FROM vehicles v
+            WHERE v.organization_id = $1::uuid
+              AND v.unit_id = $2::uuid
+              AND {_ACTIVE_VEHICLE_FILTER}
+              AND v.status = ANY($3::vehicle_status[])
+              {exclude_sql}
+            """,
+            *args,
         )
         return int(count or 0)
