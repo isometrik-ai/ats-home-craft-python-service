@@ -25,10 +25,15 @@ from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.project_serialization import serialize_row
 from libs.shared_utils.http_exceptions import (
     ConflictException,
+    InternalServerErrorException,
     NotFoundException,
     ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
+
+_TOWER_CODE_MAX_LEN = 64
+_TOWER_CODE_SUFFIX_RESERVE = 6
+_TOWER_CODE_MAX_ATTEMPTS = 1000
 
 
 class TowersService:
@@ -80,6 +85,45 @@ class TowersService:
 
     # -- towers -------------------------------------------------------------
 
+    @staticmethod
+    def _slugify_tower_name(name: str) -> str:
+        """Build a URL-friendly tower code base from the display name."""
+        clean_name = name.lower().strip()
+        normalized = "".join(char if char.isalnum() else "-" for char in clean_name)
+        compact = "-".join(part for part in normalized.split("-") if part)
+        return compact[:_TOWER_CODE_MAX_LEN]
+
+    async def _resolve_tower_code(
+        self,
+        *,
+        project_id: str,
+        name: str,
+        code: str | None,
+    ) -> str:
+        """Use the provided code or generate a unique slug from the tower name."""
+        explicit_code = (code or "").strip()
+        if explicit_code:
+            return explicit_code
+
+        base = self._slugify_tower_name(name) or "tower"
+        max_base_len = _TOWER_CODE_MAX_LEN - _TOWER_CODE_SUFFIX_RESERVE
+        candidate_base = base[:max_base_len].rstrip("-") or "tower"
+        candidate = candidate_base
+        suffix = 2
+
+        for _ in range(_TOWER_CODE_MAX_ATTEMPTS):
+            if not await self.towers_repo.tower_code_exists(project_id=project_id, code=candidate):
+                return candidate
+            suffix_text = f"-{suffix}"
+            trimmed_base = candidate_base[: _TOWER_CODE_MAX_LEN - len(suffix_text)].rstrip("-")
+            candidate = f"{trimmed_base or 'tower'}{suffix_text}"
+            suffix += 1
+
+        raise InternalServerErrorException(
+            message_key="project_setup.errors.duplicate_code",
+            custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
+        )
+
     async def create_tower(self, *, project_id: str, body: CreateTowerRequest) -> dict[str, Any]:
         """Create a tower."""
         await self.setup_service.ensure_project(project_id=project_id)
@@ -88,6 +132,11 @@ class TowersService:
             custom_prefix=body.custom_prefix,
         )
         data = body.model_dump()
+        data["code"] = await self._resolve_tower_code(
+            project_id=project_id,
+            name=body.name,
+            code=body.code,
+        )
         data["tower_type"] = body.tower_type.value
         data["numbering_pattern"] = body.numbering_pattern.value
         data["organization_id"] = self._org_id

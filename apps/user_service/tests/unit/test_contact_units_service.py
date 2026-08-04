@@ -102,6 +102,115 @@ async def test_list_contact_units_returns_all_by_default():
 
 
 @pytest.mark.asyncio
+async def test_normalize_unit_row_includes_project():
+    """Property rows include nested project details from the list query."""
+    svc = _service()
+    row = {
+        "id": "cu-1",
+        "unit_id": "unit-1",
+        "project_id": "proj-1",
+        "contact_id": "contact-1",
+        "code": "A-101",
+        "status": "pending",
+        "is_primary": True,
+        "is_default_login": False,
+        "relationship": "self",
+        "assigned_at": ASSIGNED_AT,
+        "created_at": None,
+        "project_code": "PRJ-A",
+        "project_name": "Sunrise Towers",
+        "project_developer_name": "Acme Developers",
+        "project_city": "Mumbai",
+        "project_state": "Maharashtra",
+        "project_country": "India",
+        "project_address_line_1": "1 Main Street",
+        "project_address_line_2": None,
+        "project_pin_code": "400001",
+        "project_latitude": 19.076,
+        "project_longitude": 72.877,
+        "project_property_types": ["residential"],
+    }
+
+    item = svc._normalize_unit_row(row)
+
+    assert item["project"]["id"] == "proj-1"
+    assert item["project"]["name"] == "Sunrise Towers"
+    assert item["project"]["city"] == "Mumbai"
+    assert item["project"]["property_types"] == ["residential"]
+
+
+def test_group_properties_by_project():
+    """Flat property rows are grouped by project with units nested."""
+    units = [
+        {
+            "id": "cu-1",
+            "unit_id": "unit-1",
+            "project_id": "proj-1",
+            "contact_id": "contact-1",
+            "code": "A-101",
+            "status": "pending",
+            "project": {"id": "proj-1", "name": "Project A", "code": "PA"},
+        },
+        {
+            "id": "cu-2",
+            "unit_id": "unit-2",
+            "project_id": "proj-2",
+            "contact_id": "contact-1",
+            "code": "B-201",
+            "status": "pending",
+            "project": {"id": "proj-2", "name": "Project B", "code": "PB"},
+        },
+        {
+            "id": "cu-3",
+            "unit_id": "unit-3",
+            "project_id": "proj-1",
+            "contact_id": "contact-1",
+            "code": "A-102",
+            "status": "active",
+            "project": {"id": "proj-1", "name": "Project A", "code": "PA"},
+        },
+    ]
+
+    groups = ContactUnitsService.group_properties_by_project(units)
+
+    assert len(groups) == 2
+    assert groups[0]["project"]["name"] == "Project A"
+    assert [unit["code"] for unit in groups[0]["units"]] == ["A-101", "A-102"]
+    assert "project" not in groups[0]["units"][0]
+    assert groups[1]["project"]["name"] == "Project B"
+    assert groups[1]["units"][0]["code"] == "B-201"
+
+
+@pytest.mark.asyncio
+async def test_list_my_properties_grouped():
+    """Grouped property list delegates to flat list then groups by project."""
+    svc = _service()
+    svc.list_contact_units = AsyncMock(
+        return_value=[
+            {
+                "id": "cu-1",
+                "unit_id": "unit-1",
+                "project_id": "proj-1",
+                "contact_id": "contact-1",
+                "code": "A-101",
+                "status": "pending",
+                "project": {"id": "proj-1", "name": "Project A", "code": "PA"},
+            }
+        ]
+    )
+
+    groups = await svc.list_my_properties_grouped(contact_id="contact-1")
+
+    svc.list_contact_units.assert_awaited_once_with(
+        contact_id="contact-1",
+        statuses=["pending", "active"],
+    )
+    assert len(groups) == 1
+    assert groups[0]["project"]["name"] == "Project A"
+    assert groups[0]["units"][0]["code"] == "A-101"
+
+
+@pytest.mark.asyncio
 async def test_list_contact_units_filters_by_status():
     """Admin list can filter to one contact_unit status."""
     svc = _service()

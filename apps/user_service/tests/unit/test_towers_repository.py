@@ -83,6 +83,20 @@ async def test_get_tower_and_list_towers():
 
 
 @pytest.mark.asyncio
+async def test_tower_code_exists_lookup():
+    """tower_code_exists checks project-scoped code uniqueness."""
+    conn = _FakeConn(val=True)
+    repo = TowersRepository(db_connection=conn)
+
+    exists = await repo.tower_code_exists(project_id=PROJECT_ID, code="tower-d")
+
+    assert exists is True
+    query, args = conn.fetchval_calls[0]
+    assert "FROM towers" in query
+    assert args == (PROJECT_ID, "tower-d")
+
+
+@pytest.mark.asyncio
 async def test_update_tower_empty_and_patch():
     conn = _FakeConn(row={"id": TOWER_ID, "name": "Renamed"})
     repo = TowersRepository(db_connection=conn)

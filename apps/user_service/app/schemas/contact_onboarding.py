@@ -37,6 +37,60 @@ def _validate_exactly_one_primary_phone(phones: list[Phone]) -> list[Phone]:
     return phones
 
 
+class ContactPropertyProjectSummary(BaseModel):
+    """Project display fields embedded on a contact property row."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    code: str
+    name: str
+    developer_name: str
+    city: str
+    state: str
+    country: str
+    address_line_1: str
+    address_line_2: str | None = None
+    pin_code: str
+    latitude: float | None = None
+    longitude: float | None = None
+    property_types: list[str] = Field(default_factory=list)
+
+
+class ContactPropertyUnitResponse(BaseModel):
+    """Unit row nested under a project in the properties list."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    unit_id: str
+    project_id: str
+    contact_id: str
+    code: str
+    unit_label: str | None = None
+    tower_name: str | None = None
+    floor_name: str | None = None
+    config_label: str | None = None
+    status: str
+    is_primary: bool = False
+    is_default_login: bool = False
+    relationship: str = "self"
+    contact_type: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    assign_date: str | None = None
+    created_at: str | None = None
+
+
+class ContactPropertyProjectGroupResponse(BaseModel):
+    """Properties grouped by project for onboarding step 2."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    project: ContactPropertyProjectSummary
+    units: list[ContactPropertyUnitResponse] = Field(default_factory=list)
+
+
 class ContactUnitSummaryResponse(BaseModel):
     """Contact-unit row with unit display fields."""
 
@@ -58,6 +112,9 @@ class ContactUnitSummaryResponse(BaseModel):
     contact_type: str | None = None
     first_name: str | None = None
     last_name: str | None = None
+    assign_date: str | None = None
+    created_at: str | None = None
+    project: ContactPropertyProjectSummary | None = None
 
 
 class ConfirmPropertiesRequest(BaseModel):

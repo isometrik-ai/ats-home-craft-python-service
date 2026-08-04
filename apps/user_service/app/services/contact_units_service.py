@@ -63,6 +63,33 @@ class ContactUnitsService:
         """Convert an admin assign date to UTC midnight."""
         return datetime.combine(assign_date, datetime.min.time(), tzinfo=timezone.utc)
 
+    @staticmethod
+    def _build_project_summary(row: dict[str, Any]) -> dict[str, Any] | None:
+        """Map joined project columns to a nested project object."""
+        project_id = row.get("project_id")
+        if not project_id:
+            return None
+        property_types = row.get("project_property_types") or []
+        if not isinstance(property_types, list):
+            property_types = list(property_types)
+        latitude = row.get("project_latitude")
+        longitude = row.get("project_longitude")
+        return {
+            "id": str(project_id),
+            "code": row.get("project_code") or "",
+            "name": row.get("project_name") or "",
+            "developer_name": row.get("project_developer_name") or "",
+            "city": row.get("project_city") or "",
+            "state": row.get("project_state") or "",
+            "country": row.get("project_country") or "",
+            "address_line_1": row.get("project_address_line_1") or "",
+            "address_line_2": row.get("project_address_line_2"),
+            "pin_code": row.get("project_pin_code") or "",
+            "latitude": float(latitude) if latitude is not None else None,
+            "longitude": float(longitude) if longitude is not None else None,
+            "property_types": [str(item) for item in property_types],
+        }
+
     def _normalize_unit_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact_units row to API response shape."""
         return {
@@ -84,6 +111,7 @@ class ContactUnitsService:
             "last_name": row.get("last_name"),
             "assign_date": self._format_assign_date(row.get("assigned_at")),
             "created_at": format_iso_datetime(row.get("created_at")),
+            "project": self._build_project_summary(row),
         }
 
     async def list_contact_units(
@@ -108,6 +136,31 @@ class ContactUnitsService:
             contact_id=contact_id,
             statuses=[ContactUnitStatus.PENDING.value, ContactUnitStatus.ACTIVE.value],
         )
+
+    @staticmethod
+    def group_properties_by_project(units: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Group flat property rows by project, preserving first-seen project order."""
+        groups: dict[str, dict[str, Any]] = {}
+        order: list[str] = []
+        for unit in units:
+            project_id = str(unit.get("project_id") or "")
+            if not project_id:
+                continue
+            if project_id not in groups:
+                order.append(project_id)
+                project = unit.get("project") or {"id": project_id}
+                groups[project_id] = {
+                    "project": project,
+                    "units": [],
+                }
+            unit_payload = {key: value for key, value in unit.items() if key != "project"}
+            groups[project_id]["units"].append(unit_payload)
+        return [groups[project_id] for project_id in order]
+
+    async def list_my_properties_grouped(self, *, contact_id: str) -> list[dict[str, Any]]:
+        """List pending and active units grouped by project."""
+        units = await self.list_my_properties(contact_id=contact_id)
+        return self.group_properties_by_project(units)
 
     async def _confirm_pending_units(
         self,

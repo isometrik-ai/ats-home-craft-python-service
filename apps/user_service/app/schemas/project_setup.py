@@ -250,7 +250,7 @@ class CreateTowerRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(..., min_length=1)
-    code: str = Field(..., min_length=1, max_length=64)
+    code: str | None = Field(default=None, min_length=1, max_length=64)
     tower_type: TowerType
     basement_count: int = Field(default=0, ge=0)
     upper_floor_count: int = Field(default=0, ge=0)

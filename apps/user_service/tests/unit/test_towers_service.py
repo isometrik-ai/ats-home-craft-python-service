@@ -59,6 +59,7 @@ class _FakeTowersRepo:
         insert_error: Exception | None = None,
         wing_belongs: bool = True,
         delete_result: bool = True,
+        existing_codes: set[str] | None = None,
     ) -> None:
         self.tower = tower
         self.towers = towers or []
@@ -71,6 +72,7 @@ class _FakeTowersRepo:
         self.delete_result = delete_result
         self.last_insert: dict[str, Any] | None = None
         self.last_update: dict[str, Any] | None = None
+        self.existing_codes = existing_codes or set()
 
     async def get_tower(self, **kwargs):
         """Return configured tower row."""
@@ -81,6 +83,11 @@ class _FakeTowersRepo:
         """Return configured tower rows."""
         del kwargs
         return self.towers
+
+    async def tower_code_exists(self, *, project_id: str, code: str) -> bool:
+        """Return whether the code is already used in the project."""
+        del project_id
+        return code in self.existing_codes
 
     async def insert_tower(self, data):
         """Insert tower or raise configured error."""
@@ -193,6 +200,40 @@ async def test_create_tower_success():
     assert created["id"] == TOWER_ID
     assert repo.last_insert["organization_id"] == ORG_ID
     service.setup_service.ensure_project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_tower_generates_code_from_name():
+    """Missing code is generated from the tower name."""
+    repo = _FakeTowersRepo()
+    service = _service(repo)
+    body = CreateTowerRequest(
+        name="Tower D",
+        tower_type=TowerType.RESIDENTIAL,
+        numbering_pattern=UnitNumberingPattern.FLOOR_UNIT,
+    )
+
+    created = await service.create_tower(project_id=PROJECT_ID, body=body)
+
+    assert created["code"] == "tower-d"
+    assert repo.last_insert is not None
+    assert repo.last_insert["code"] == "tower-d"
+
+
+@pytest.mark.asyncio
+async def test_create_tower_generated_code_suffix_on_conflict():
+    """Generated tower code gets a numeric suffix when the base slug exists."""
+    repo = _FakeTowersRepo(existing_codes={"tower-d"})
+    service = _service(repo)
+    body = CreateTowerRequest(
+        name="Tower D",
+        tower_type=TowerType.RESIDENTIAL,
+        numbering_pattern=UnitNumberingPattern.FLOOR_UNIT,
+    )
+
+    created = await service.create_tower(project_id=PROJECT_ID, body=body)
+
+    assert created["code"] == "tower-d-2"
 
 
 @pytest.mark.asyncio
