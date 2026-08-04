@@ -263,11 +263,32 @@ async def test_complete_onboarding(monkeypatch, client):
     assert body["data"]["default_contact_unit_id"] == CONTACT_UNIT_ID
 
 
-_FAKE_PROPERTY = {
-    "contact_unit_id": CONTACT_UNIT_ID,
-    "unit_id": "unit-1",
-    "unit_code": "A-101",
-    "status": "pending",
+_FAKE_PROPERTY_GROUP = {
+    "project": {
+        "id": "proj-1",
+        "code": "PRJ-A",
+        "name": "Sunrise Towers",
+        "developer_name": "Acme Developers",
+        "city": "Mumbai",
+        "state": "Maharashtra",
+        "country": "India",
+        "address_line_1": "1 Main Street",
+        "pin_code": "400001",
+        "property_types": ["residential"],
+    },
+    "units": [
+        {
+            "id": CONTACT_UNIT_ID,
+            "unit_id": "unit-1",
+            "project_id": "proj-1",
+            "contact_id": CONTACT_ID,
+            "code": "A-101",
+            "status": "pending",
+            "is_primary": True,
+            "is_default_login": False,
+            "relationship": "self",
+        }
+    ],
 }
 
 _FAKE_VEHICLE = {
@@ -316,17 +337,18 @@ async def test_list_properties(monkeypatch, client):
     async def fake_list(_self, *, contact_id: str):
         del _self
         assert contact_id == CONTACT_ID
-        return [_FAKE_PROPERTY]
+        return [_FAKE_PROPERTY_GROUP]
 
     monkeypatch.setattr(
         "apps.user_service.app.services.contact_units_service."
-        "ContactUnitsService.list_my_properties",
+        "ContactUnitsService.list_my_properties_grouped",
         fake_list,
     )
 
     res = await client.get("/v1/contact-onboarding/properties")
     body = assert_success(res, 200)
-    assert body["data"][0]["unit_code"] == "A-101"
+    assert body["data"][0]["project"]["name"] == "Sunrise Towers"
+    assert body["data"][0]["units"][0]["code"] == "A-101"
 
 
 @pytest.mark.asyncio
@@ -340,7 +362,7 @@ async def test_confirm_properties(monkeypatch, client):
         assert contact_id == CONTACT_ID
         assert contact_unit_ids == [CONTACT_UNIT_ID]
         assert default_contact_unit_id == CONTACT_UNIT_ID
-        return [_FAKE_PROPERTY]
+        return [{"id": CONTACT_UNIT_ID, "status": "active"}]
 
     monkeypatch.setattr(
         "apps.user_service.app.services.contact_units_service."
@@ -356,7 +378,8 @@ async def test_confirm_properties(monkeypatch, client):
         },
     )
     body = assert_success(res, 200)
-    assert body["data"]["items"][0]["contact_unit_id"] == CONTACT_UNIT_ID
+    assert body["data"]["items"][0]["id"] == CONTACT_UNIT_ID
+    assert body["data"]["items"][0]["status"] == "active"
 
 
 @pytest.mark.asyncio

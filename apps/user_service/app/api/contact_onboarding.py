@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     CompleteStepRequest,
     CompleteUnitStepRequest,
     ConfirmPropertiesRequest,
+    ContactPropertyProjectGroupResponse,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
     DeclineHouseholdInvitationRequest,
@@ -138,11 +139,15 @@ async def list_properties(
         db_connection=db_connection,
         user_context=user_context,
     )
-    items = await units_service.list_my_properties(contact_id=str(contact["id"]))
+    items = await units_service.list_my_properties_grouped(contact_id=str(contact["id"]))
+    serialized_items = [
+        ContactPropertyProjectGroupResponse.model_validate(item).model_dump(exclude_none=True)
+        for item in items
+    ]
     return list_response(
         request=request,
-        items=items,
-        total=len(items),
+        items=serialized_items,
+        total=len(serialized_items),
         message_key="contact_onboarding.success.properties_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
     )

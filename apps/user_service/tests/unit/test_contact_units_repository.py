@@ -102,6 +102,7 @@ async def test_list_by_contact_filters_statuses():
     assert len(conn.fetch_calls) == 1
     query, args = conn.fetch_calls[0]
     assert "cu.contact_id = $2::uuid" in query
+    assert "JOIN projects p ON p.id = cu.project_id" in query
     assert "cu.status = ANY" in query
     assert args[0] == ORG_ID
     assert args[1] == CONTACT_ID

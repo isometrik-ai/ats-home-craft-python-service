@@ -54,10 +54,23 @@ SELECT
   c.first_name,
   c.last_name,
   cu.assigned_at,
-  cu.created_at
+  cu.created_at,
+  p.code AS project_code,
+  p.name AS project_name,
+  p.developer_name AS project_developer_name,
+  p.city AS project_city,
+  p.state AS project_state,
+  p.country AS project_country,
+  p.address_line_1 AS project_address_line_1,
+  p.address_line_2 AS project_address_line_2,
+  p.pin_code AS project_pin_code,
+  p.latitude AS project_latitude,
+  p.longitude AS project_longitude,
+  p.property_types AS project_property_types
 FROM contact_units cu
 JOIN units u ON u.id = cu.unit_id
 JOIN contacts c ON c.id = cu.contact_id
+JOIN projects p ON p.id = cu.project_id AND p.organization_id = cu.organization_id
 LEFT JOIN towers t ON t.id = u.tower_id
 LEFT JOIN floors f ON f.id = u.floor_id
 LEFT JOIN unit_configs uc ON uc.id = u.config_id
