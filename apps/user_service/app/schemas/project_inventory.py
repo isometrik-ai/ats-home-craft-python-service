@@ -321,6 +321,7 @@ class UnitListItemResponse(BaseModel):
     status: UnitStatus
     is_sold: bool = False
     sort_order: int = Field(default=0, ge=0)
+    parking_entitlement: int = Field(default=0, ge=0)
 
 
 class UnitListSummary(BaseModel):

@@ -287,6 +287,7 @@ _FAKE_PROPERTY_GROUP = {
             "is_primary": True,
             "is_default_login": False,
             "relationship": "self",
+            "parking_entitlement": 2,
         }
     ],
 }
@@ -349,6 +350,7 @@ async def test_list_properties(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"][0]["project"]["name"] == "Sunrise Towers"
     assert body["data"][0]["units"][0]["code"] == "A-101"
+    assert body["data"][0]["units"][0]["parking_entitlement"] == 2
 
 
 @pytest.mark.asyncio

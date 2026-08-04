@@ -310,6 +310,7 @@ class UnitsRepository(BaseRepository):
                 uc.config_kind,
                 uc.display_label AS config_display_label,
                 uc.name AS config_name,
+                COALESCE(uc.parking_entitlement, 0) AS parking_entitlement,
                 pci.description AS plot_description,
                 owner_row.owner_contact_id::text AS owner_contact_id,
                 owner_row.owner_prefix,

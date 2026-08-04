@@ -80,6 +80,7 @@ class ContactPropertyUnitResponse(BaseModel):
     last_name: str | None = None
     assign_date: str | None = None
     created_at: str | None = None
+    parking_entitlement: int = Field(default=0, ge=0)
 
 
 class ContactPropertyProjectGroupResponse(BaseModel):
@@ -114,6 +115,7 @@ class ContactUnitSummaryResponse(BaseModel):
     last_name: str | None = None
     assign_date: str | None = None
     created_at: str | None = None
+    parking_entitlement: int = Field(default=0, ge=0)
     project: ContactPropertyProjectSummary | None = None
 
 

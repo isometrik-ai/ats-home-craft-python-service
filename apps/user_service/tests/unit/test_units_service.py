@@ -172,6 +172,7 @@ def test_serialize_unit_list_item_builds_registry_row():
             "resolved_property_type": "residential",
             "resolved_config_kind": "apartment",
             "config_display_label": "2BHK Standard",
+            "parking_entitlement": 2,
             "owner_contact_id": "c-1",
             "owner_prefix": "Mr.",
             "owner_first_name": "Rajesh",
@@ -200,6 +201,7 @@ def test_serialize_unit_list_item_builds_registry_row():
     assert item["owner"]["phone"] == "+919876543210"
     assert item["owner"]["email"] == "rajesh@example.com"
     assert item["is_sold"] is True
+    assert item["parking_entitlement"] == 2
 
 
 def test_format_primary_contact_phone_and_email():
@@ -279,6 +281,7 @@ def test_list_item_occupied_without_owner():
     assert item["is_sold"] is True
     assert item["owner"] is None
     assert item["assign_date"] is None
+    assert item["parking_entitlement"] == 0
 
 
 @pytest.mark.asyncio

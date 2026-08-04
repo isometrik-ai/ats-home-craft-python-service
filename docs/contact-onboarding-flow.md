@@ -331,7 +331,7 @@ Step 5  GET  /review                    → aggregate + unit_onboarding progress
 - **`GET /properties`** returns pending and active `contact_units` **grouped by project**.
   Each item has `project` (name, code, address, city/state, coordinates, `property_types`, etc.)
   and `units[]` with unit display fields (`code`, `tower_name`, `floor_name`, `config_label`,
-  `is_default_login`, etc.). `total` is the number of projects.
+  `parking_entitlement`, `is_default_login`, etc.). `total` is the number of projects.
 - **`POST /properties/confirm`** requires `complete_profile` first. Accepts one or more
   `contact_unit_ids` and optional `default_contact_unit_id` when confirming multiple units.
   Selected pending rows → `active`; unit onboarding steps are seeded for each.
