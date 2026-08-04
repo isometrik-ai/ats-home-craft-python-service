@@ -67,9 +67,18 @@ async def test_create_contact(monkeypatch, client):
     async def fake_lifecycle_events(**_kwargs):
         return []
 
+    async def fake_get_details(_self, *, contact_id: str):
+        del _self
+        assert contact_id == CONTACT_ID
+        return _FAKE_DETAILS
+
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.ContactsService.create_contact",
         fake_create_contact,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.ContactsService.get_contact_details",
+        fake_get_details,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service."
@@ -86,7 +95,9 @@ async def test_create_contact(monkeypatch, client):
         "/v1/contacts",
         json={"email": "jane@example.com", "first_name": "Jane", "last_name": "Doe"},
     )
-    assert_success(res, 201)
+    body = assert_success(res, 201)
+    assert body["data"]["id"] == CONTACT_ID
+    assert body["data"]["email"] == "jane@example.com"
 
 
 @pytest.mark.asyncio
@@ -112,9 +123,18 @@ async def test_create_contact_with_lead(monkeypatch, client):
         del _self
         return {"event_type": "leads.created", "aggregate_id": "lead-1"}
 
+    async def fake_get_details(_self, *, contact_id: str):
+        del _self
+        assert contact_id == CONTACT_ID
+        return _FAKE_DETAILS
+
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.ContactsService.create_contact",
         fake_create_contact,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.ContactsService.get_contact_details",
+        fake_get_details,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service."
@@ -149,7 +169,8 @@ async def test_create_contact_with_lead(monkeypatch, client):
         "/v1/contacts",
         json={"email": "jane@example.com", "first_name": "Jane", "last_name": "Doe"},
     )
-    assert_success(res, 201)
+    body = assert_success(res, 201)
+    assert body["data"]["id"] == CONTACT_ID
 
 
 @pytest.mark.asyncio

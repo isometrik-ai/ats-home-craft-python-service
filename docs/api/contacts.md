@@ -216,7 +216,8 @@ Send the same payload but set:
 
 ### Response
 
-201 with the standard success envelope (no `data`).
+201 with the standard success envelope. `data` is the created contact details payload (same shape
+as `GET /v1/contacts/{contact_id}`).
 
 ______________________________________________________________________
 

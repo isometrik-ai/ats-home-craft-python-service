@@ -136,8 +136,8 @@ async def create_contact(
         body: Contact create payload.
 
     Returns:
-        Standard success response envelope (201 Created). The created entity identifiers are not
-        returned directly in the response body; they are available in audit logs/events.
+        Standard success response envelope (201 Created) with the created contact details
+        (same shape as `GET /v1/contacts/{contact_id}`).
 
     Side effects:
         - Creates lifecycle events for created entities (best-effort publish via BackgroundTasks).
@@ -191,6 +191,13 @@ async def create_contact(
             )
             lead_event_key = str(created_lead_id)
 
+    contact_details: dict[str, Any] | None = None
+    if contact_id is not None and user_context is not None:
+        details = await service.get_contact_details(contact_id=str(contact_id))
+        contact_details = ContactDetailsResponse.model_validate(details).model_dump(
+            exclude_none=True
+        )
+
     ContactsService.schedule_lifecycle_event_publishes(
         background_tasks=background_tasks,
         created_events=created_events,
@@ -218,6 +225,7 @@ async def create_contact(
         message_key="contacts.success.contact_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+        data=contact_details,
     )
 
 

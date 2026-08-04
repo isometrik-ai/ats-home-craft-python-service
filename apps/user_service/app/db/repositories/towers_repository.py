@@ -78,6 +78,22 @@ class TowersRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def tower_code_exists(self, *, project_id: str, code: str) -> bool:
+        """Return True when the project already has a tower with this code."""
+        exists = await self.db_connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM towers
+                WHERE project_id = $1::uuid
+                  AND code = $2
+            )
+            """,
+            project_id,
+            code,
+        )
+        return bool(exists)
+
     async def update_tower(
         self,
         *,
