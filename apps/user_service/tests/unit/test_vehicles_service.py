@@ -79,6 +79,99 @@ async def test_withdraw_approved_rejected():
 
 
 @pytest.mark.asyncio
+async def test_resubmit_rejected_sets_pending_and_notifies():
+    """Rejected vehicles can be resubmitted to pending."""
+    from apps.user_service.app.schemas.contact_onboarding import ResubmitVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.REJECTED.value,
+        "project_id": "p1",
+        "unit_id": "u1",
+        "registration_number": "MH12AB1234",
+        "rejection_reason": "Blurry photo",
+    }
+    svc.repo.update.return_value = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "MH12AB1234",
+        "photo_paths": ["org/veh.jpg"],
+        "status": VehicleStatus.PENDING.value,
+        "rejection_reason": None,
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+
+    body = ResubmitVehicleRequest(photo_paths=["org/veh.jpg"])
+    result = await svc.resubmit_vehicle(contact_id="c1", vehicle_id="v1", body=body)
+
+    update_kwargs = svc.repo.update.await_args.kwargs
+    assert update_kwargs["update_data"]["status"] == VehicleStatus.PENDING.value
+    assert update_kwargs["update_data"]["rejection_reason"] is None
+    assert update_kwargs["update_data"]["photo_paths"] == ["org/veh.jpg"]
+    assert result["status"] == VehicleStatus.PENDING.value
+    push = svc._push_dispatcher
+    assert len(push.org_calls) == 1
+    assert push.org_calls[0]["message_key"] == "notifications.push.vehicle.submitted"
+    assert push.org_calls[0]["options"]["idempotency_key"] == "vehicle:v1:resubmitted"
+
+
+@pytest.mark.asyncio
+async def test_resubmit_pending_not_allowed():
+    """Only rejected vehicles can be resubmitted."""
+    from apps.user_service.app.schemas.contact_onboarding import ResubmitVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+        "project_id": "p1",
+        "unit_id": "u1",
+    }
+
+    with pytest.raises(ValidationException):
+        await svc.resubmit_vehicle(
+            contact_id="c1",
+            vehicle_id="v1",
+            body=ResubmitVehicleRequest(),
+        )
+
+    svc.repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resubmit_rejects_when_entitlement_full():
+    """Resubmit fails when the unit has no remaining parking entitlement."""
+    from apps.user_service.app.schemas.contact_onboarding import ResubmitVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.REJECTED.value,
+        "project_id": "p1",
+        "unit_id": "u1",
+    }
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=1)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=1)
+
+    with pytest.raises(ValidationException):
+        await svc.resubmit_vehicle(
+            contact_id="c1",
+            vehicle_id="v1",
+            body=ResubmitVehicleRequest(),
+        )
+
+    svc.repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_remove_pending_use_withdraw():
     """Pending vehicles must use withdraw, not DELETE remove."""
     svc = _service()

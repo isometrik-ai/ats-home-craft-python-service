@@ -236,6 +236,34 @@ class UpdateVehicleRequest(BaseModel):
         return photo_paths
 
 
+class ResubmitVehicleRequest(BaseModel):
+    """Patch a rejected vehicle and return it to the admin review queue."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vehicle_type: VehicleType | None = None
+    registration_number: str | None = Field(None, min_length=1, max_length=20)
+    make: str | None = Field(None, max_length=100)
+    model: str | None = Field(None, max_length=100)
+    color: str | None = Field(None, max_length=50)
+    photo_paths: list[str] | None = Field(None, max_length=10)
+    fuel_type: VehicleFuelType | None = None
+
+    @field_validator("photo_paths")
+    @classmethod
+    def validate_photo_paths(cls, photo_paths: list[str] | None) -> list[str] | None:
+        """Validate storage paths for vehicle images."""
+        if photo_paths is None:
+            return photo_paths
+        for path in photo_paths:
+            if not path or len(path) > 500:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.invalid_vehicle_photo_path",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        return photo_paths
+
+
 class VehicleUnitSummary(BaseModel):
     """Unit summary on admin vehicle request rows."""
 

@@ -167,6 +167,7 @@ most endpoints take **no** contact id in the path.
 | GET    | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Vehicle detail with unit and parking slot allotment               |
 | POST   | `/v1/contact-onboarding/vehicles`                                      | Add a vehicle                                                     |
 | PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Update a vehicle                                                  |
+| POST   | `/v1/contact-onboarding/vehicles/{vehicle_id}/resubmit`                | Resubmit a rejected request (`rejected` → `pending`)              |
 | POST   | `/v1/contact-onboarding/vehicles/{vehicle_id}/withdraw`                | Withdraw a pending request (hard-delete before approval)          |
 | DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Soft-remove an approved vehicle (`status = removed`)              |
 | POST   | `/v1/contact-onboarding/steps/vehicles/complete`                       | Complete `vehicles` for one unit (`{ contact_unit_id }`)          |
@@ -223,9 +224,13 @@ Enforced in `contact_onboarding_service.py` and related services:
     1. Admin lists available slots `GET .../facilities/{facility_id}/parking-slots?status=available`
     1. Admin approves `PATCH .../vehicle-requests/{vehicle_id}` with `{ "status": "approved", "parking_slot_id": "..." }`
        or rejects with `{ "status": "rejected", "rejection_reason": "..." }`
+    1. If rejected, resident may fix details and `POST /vehicles/{vehicle_id}/resubmit` → back to `pending`
     1. On approve: slot → `assigned`, vehicle gets `parking_slot_id`. On remove: slot released.
   - Parking slots are provisioned when a **parking** facility is created in project setup
     (`facilities.parking_slots` → `facility_parking_slots` rows). See `docs/project-setup-flow.md`.
+  - **Resubmit (rejected only):** `POST /vehicles/{id}/resubmit` sets `status = pending`, clears
+    `rejection_reason`, optionally updates `photo_paths` / make / model / color / registration, and
+    re-notifies admins. Parking entitlement is re-checked (rejected rows do not consume a slot).
   - **Withdraw (pending only):** `POST /vehicles/{id}/withdraw` permanently deletes the row.
     Allowed only while `status = pending` (before admin approval).
   - **Remove (approved only):** `DELETE /vehicles/{id}` sets `status = removed`, `deleted_at = now()`,

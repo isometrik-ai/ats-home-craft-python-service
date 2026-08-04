@@ -23,6 +23,7 @@ from apps.user_service.app.db.repositories.units_repository import UnitsReposito
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
+    ResubmitVehicleRequest,
     ReviewVehicleRequest,
     UpdateVehicleRequest,
     VehicleResponse,
@@ -424,6 +425,85 @@ class VehiclesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return self._normalize_vehicle(row)
+
+    async def resubmit_vehicle(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+        body: ResubmitVehicleRequest,
+    ) -> dict[str, Any]:
+        """Return a rejected vehicle to pending and optionally patch its details."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        existing = await self.repo.get_by_id(
+            organization_id=org_id,
+            contact_id=contact_id,
+            vehicle_id=vehicle_id,
+        )
+        if not existing:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if existing.get("status") != VehicleStatus.REJECTED.value:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.vehicle_resubmit_not_allowed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        unit_id = str(existing["unit_id"])
+        project_id = str(existing["project_id"])
+        await self._assert_parking_entitlement_available(unit_id=unit_id)
+        patch = body.model_dump(exclude_unset=True, exclude_none=True)
+        if "vehicle_type" in patch and isinstance(patch["vehicle_type"], VehicleType):
+            patch["vehicle_type"] = patch["vehicle_type"].value
+        if "fuel_type" in patch and isinstance(patch["fuel_type"], VehicleFuelType):
+            patch["fuel_type"] = patch["fuel_type"].value
+        if "registration_number" in patch and patch["registration_number"]:
+            patch["registration_number"] = patch["registration_number"].strip().upper()
+        patch["status"] = VehicleStatus.PENDING.value
+        patch["rejection_reason"] = None
+        try:
+            row = await self.repo.update(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                update_data=patch,
+            )
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="contact_onboarding.errors.vehicle_registration_duplicate",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        if not row:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        normalized = self._normalize_vehicle(row)
+        await self._push().send_to_org_members(
+            organization_id=org_id,
+            message_key="notifications.push.vehicle.submitted",
+            notification_type="NOTIFICATION_TYPE_VEHICLE",
+            feed_type="vehicle",
+            params={
+                "registration_number": normalized.get("registration_number")
+                or existing.get("registration_number"),
+                "unit_label": unit_label_from_row({"unit_id": unit_id}),
+            },
+            data={
+                "vehicle_id": normalized.get("id"),
+                "project_id": project_id,
+                "unit_id": unit_id,
+                "screen": "vehicle_request_detail",
+            },
+            entity={"kind": "vehicle", "id": str(normalized.get("id") or "")},
+            options={
+                "click_action": "OPEN_VEHICLE_REQUEST",
+                "idempotency_key": f"vehicle:{normalized.get('id')}:resubmitted",
+            },
+        )
+        return normalized
 
     async def withdraw_vehicle(self, *, contact_id: str, vehicle_id: str) -> None:
         """Hard-delete a pending vehicle request (before admin approval)."""
