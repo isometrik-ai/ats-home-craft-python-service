@@ -19,6 +19,8 @@ _VEHICLE_ENUM_CASTS: dict[str, str] = {
     "status": "::vehicle_status",
 }
 
+_VEHICLE_UUID_COLUMNS = frozenset({"parking_slot_id", "approved_by_user_id", "rejected_by_user_id"})
+
 _ACTIVE_VEHICLE_FILTER = "v.deleted_at IS NULL"
 
 _VEHICLE_OWNER_LATERAL_JOIN = f"""
@@ -126,6 +128,34 @@ _VEHICLE_PARKING_SELECT_COLUMNS = """
               pf.tower_id::text AS parking_facility_tower_id
 """
 
+_VEHICLE_REVIEWER_JOINS = """
+LEFT JOIN organization_members approved_by_om
+    ON approved_by_om.user_id = v.approved_by_user_id
+   AND approved_by_om.organization_id = v.organization_id
+   AND approved_by_om.status <> 'deleted'
+LEFT JOIN organization_members rejected_by_om
+    ON rejected_by_om.user_id = v.rejected_by_user_id
+   AND rejected_by_om.organization_id = v.organization_id
+   AND rejected_by_om.status <> 'deleted'
+"""
+
+_VEHICLE_REVIEWER_SELECT_COLUMNS = """
+              approved_by_om.salutation AS approved_by_salutation,
+              approved_by_om.first_name AS approved_by_first_name,
+              approved_by_om.last_name AS approved_by_last_name,
+              approved_by_om.email AS approved_by_email,
+              approved_by_om.phone_isd_code AS approved_by_phone_isd_code,
+              approved_by_om.phone_number AS approved_by_phone_number,
+              approved_by_om.avatar_url AS approved_by_avatar_url,
+              rejected_by_om.salutation AS rejected_by_salutation,
+              rejected_by_om.first_name AS rejected_by_first_name,
+              rejected_by_om.last_name AS rejected_by_last_name,
+              rejected_by_om.email AS rejected_by_email,
+              rejected_by_om.phone_isd_code AS rejected_by_phone_isd_code,
+              rejected_by_om.phone_number AS rejected_by_phone_number,
+              rejected_by_om.avatar_url AS rejected_by_avatar_url
+"""
+
 
 class VehiclesRepository(BaseRepository):
     """Database operations for public.vehicles."""
@@ -145,6 +175,8 @@ class VehiclesRepository(BaseRepository):
               v.fuel_type::text AS fuel_type,
               v.status::text AS status,
               v.rejection_reason,
+              v.approved_by_user_id::text AS approved_by_user_id,
+              v.rejected_by_user_id::text AS rejected_by_user_id,
               v.parking_slot_id::text AS parking_slot_id,
               v.status_updated_at,
               v.sort_order,
@@ -167,6 +199,8 @@ class VehiclesRepository(BaseRepository):
               fuel_type::text AS fuel_type,
               status::text AS status,
               rejection_reason,
+              approved_by_user_id::text AS approved_by_user_id,
+              rejected_by_user_id::text AS rejected_by_user_id,
               parking_slot_id::text AS parking_slot_id,
               status_updated_at,
               sort_order,
@@ -261,10 +295,12 @@ class VehiclesRepository(BaseRepository):
             SELECT
               {self._VEHICLE_SELECT_COLUMNS},
               {_VEHICLE_UNIT_SELECT_COLUMNS},
-              {_VEHICLE_PARKING_SELECT_COLUMNS}
+              {_VEHICLE_PARKING_SELECT_COLUMNS},
+              {_VEHICLE_REVIEWER_SELECT_COLUMNS}
             FROM vehicles v
             {_VEHICLE_UNIT_JOINS}
             {_VEHICLE_PARKING_JOINS}
+            {_VEHICLE_REVIEWER_JOINS}
             WHERE v.organization_id = $1::uuid
               AND v.contact_id = $2::uuid
               AND v.id = $3::uuid
@@ -347,6 +383,8 @@ class VehiclesRepository(BaseRepository):
             cast = _VEHICLE_ENUM_CASTS.get(col, "")
             if col == "photo_paths":
                 set_parts.append(f"{col} = ${idx}::text[]")
+            elif col in _VEHICLE_UUID_COLUMNS:
+                set_parts.append(f"{col} = ${idx}::uuid")
             else:
                 set_parts.append(f"{col} = ${idx}{cast}")
             values.append(val)
@@ -396,7 +434,7 @@ class VehiclesRepository(BaseRepository):
             cast = _VEHICLE_ENUM_CASTS.get(col, "")
             if col == "photo_paths":
                 set_parts.append(f"{col} = ${idx}::text[]")
-            elif col == "parking_slot_id":
+            elif col in _VEHICLE_UUID_COLUMNS:
                 set_parts.append(f"{col} = ${idx}::uuid")
             else:
                 set_parts.append(f"{col} = ${idx}{cast}")
@@ -508,11 +546,13 @@ class VehiclesRepository(BaseRepository):
               {self._VEHICLE_SELECT_COLUMNS},
               {_VEHICLE_UNIT_SELECT_COLUMNS},
               {_VEHICLE_OWNER_SELECT_COLUMNS},
-              {_VEHICLE_PARKING_SELECT_COLUMNS}
+              {_VEHICLE_PARKING_SELECT_COLUMNS},
+              {_VEHICLE_REVIEWER_SELECT_COLUMNS}
             FROM vehicles v
             {_VEHICLE_UNIT_JOINS}
             {_VEHICLE_PARKING_JOINS}
             {_VEHICLE_OWNER_LATERAL_JOIN}
+            {_VEHICLE_REVIEWER_JOINS}
             WHERE v.organization_id = $1::uuid
               AND v.project_id = $2::uuid
               AND ($3::vehicle_status IS NULL OR v.status = $3::vehicle_status)
@@ -539,6 +579,39 @@ class VehiclesRepository(BaseRepository):
             SELECT
               {self._VEHICLE_SELECT_COLUMNS}
             FROM vehicles v
+            WHERE v.organization_id = $1::uuid
+              AND v.project_id = $2::uuid
+              AND v.id = $3::uuid
+              AND {_ACTIVE_VEHICLE_FILTER}
+            LIMIT 1
+            """,
+            organization_id,
+            project_id,
+            vehicle_id,
+        )
+        return dict(row) if row else None
+
+    async def get_detail_by_project(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one vehicle with admin detail joins for a project."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+              {self._VEHICLE_SELECT_COLUMNS},
+              {_VEHICLE_UNIT_SELECT_COLUMNS},
+              {_VEHICLE_OWNER_SELECT_COLUMNS},
+              {_VEHICLE_PARKING_SELECT_COLUMNS},
+              {_VEHICLE_REVIEWER_SELECT_COLUMNS}
+            FROM vehicles v
+            {_VEHICLE_UNIT_JOINS}
+            {_VEHICLE_PARKING_JOINS}
+            {_VEHICLE_OWNER_LATERAL_JOIN}
+            {_VEHICLE_REVIEWER_JOINS}
             WHERE v.organization_id = $1::uuid
               AND v.project_id = $2::uuid
               AND v.id = $3::uuid

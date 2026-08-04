@@ -236,6 +236,7 @@ review via project APIs:
 1. `GET /vehicle-requests?status=pending` — queue
 1. `GET /facilities/{facility_id}/parking-slots?status=available` — pick a slot
 1. `PATCH /vehicle-requests/{vehicle_id}` — approve with `parking_slot_id`, or reject with `rejection_reason`
+   (stores `approved_by_user_id` / `rejected_by_user_id` on the vehicle row)
 
 On approval the slot becomes `assigned` and `vehicles.parking_slot_id` is set. Deleting a
 vehicle releases the slot back to `available`.

@@ -143,6 +143,8 @@ Key enums: `ContactOnboardingStep`, `ContactUnitStatus` (`pending`/`active`/`mov
 | `status_updated_at`      | timestamptz | Set whenever `status` changes                                   |
 | `deleted_at`             | timestamptz | Set on soft-remove; row retained for audit                      |
 | `rejection_reason`       | text        | Set by admin when `status = rejected`                           |
+| `approved_by_user_id`    | uuid        | Org member who approved the request                             |
+| `rejected_by_user_id`    | uuid        | Org member who rejected the request                             |
 | `parking_slot_id`        | uuid FK     | Set by admin on approve; links to `facility_parking_slots`      |
 
 Media/files (profile photo, vehicle images) store **paths only** — no raw blobs in Postgres.
@@ -224,6 +226,10 @@ Enforced in `contact_onboarding_service.py` and related services:
     1. Admin lists available slots `GET .../facilities/{facility_id}/parking-slots?status=available`
     1. Admin approves `PATCH .../vehicle-requests/{vehicle_id}` with `{ "status": "approved", "parking_slot_id": "..." }`
        or rejects with `{ "status": "rejected", "rejection_reason": "..." }`
+    1. On approve/reject the API stores `approved_by_user_id` / `rejected_by_user_id` from the
+       authenticated org member (cleared on resubmit). List/detail/review responses also include
+       nested `approved_by` / `rejected_by` summaries (`user_id`, `display_name`, `email`, `phone`,
+       `avatar_url`) from `organization_members`.
     1. If rejected, resident may fix details and `POST /vehicles/{vehicle_id}/resubmit` → back to `pending`
     1. On approve: slot → `assigned`, vehicle gets `parking_slot_id`. On remove: slot released.
   - Parking slots are provisioned when a **parking** facility is created in project setup

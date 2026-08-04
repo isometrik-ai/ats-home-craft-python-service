@@ -142,6 +142,7 @@ async def test_get_detail_by_contact():
     query, args = _sql_args(conn.fetchrow)
     assert "unit_code" in query
     assert "parking_slot_number" in query
+    assert "organization_members approved_by_om" in query
     assert "deleted_at IS NULL" in query
     assert args == (ORG_ID, CONTACT_ID, VEHICLE_ID)
 
@@ -351,6 +352,7 @@ async def test_list_by_project_with_status_filter():
     assert "v.vehicle_type = $4::vehicle_type" in query
     assert "v.fuel_type = $5::vehicle_fuel_type" in query
     assert "deleted_at IS NULL" in query
+    assert "organization_members approved_by_om" in query
     assert args == (ORG_ID, PROJECT_ID, "pending", None, None)
 
 

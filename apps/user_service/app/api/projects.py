@@ -3128,7 +3128,8 @@ async def delete_site_map_overlay(
     description=(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
         "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
-        "status), and `parking_allotment` (slot number, status, facility) when assigned. "
+        "status), `parking_allotment` (slot number, status, facility) when assigned, and "
+        "`approved_by` / `rejected_by` org-member summaries when reviewed. "
         "Optional `search` matches registration number or unit code/label. "
         "Filter by `status`, `vehicle_type`, and `fuel_type`."
     ),
@@ -3191,7 +3192,8 @@ async def list_project_vehicle_requests(
     summary="Approve or reject a vehicle request",
     description=(
         "On approval, assigns an available parking slot from a parking facility. "
-        "On rejection, stores rejection_reason."
+        "On rejection, stores rejection_reason. Response includes nested "
+        "`approved_by` / `rejected_by` org-member summaries when applicable."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )

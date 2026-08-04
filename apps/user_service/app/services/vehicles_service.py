@@ -49,6 +49,7 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_any,
 )
+from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -86,6 +87,8 @@ class VehiclesService:
             "contact_id",
             "unit_id",
             "parking_slot_id",
+            "approved_by_user_id",
+            "rejected_by_user_id",
         ):
             if out.get(key) is not None:
                 out[key] = str(out[key])
@@ -138,6 +141,23 @@ class VehiclesService:
         "parking_facility_floor_level",
         "parking_facility_wing",
         "parking_facility_tower_id",
+    )
+
+    _REVIEWER_ROW_KEYS = (
+        "approved_by_salutation",
+        "approved_by_first_name",
+        "approved_by_last_name",
+        "approved_by_email",
+        "approved_by_phone_isd_code",
+        "approved_by_phone_number",
+        "approved_by_avatar_url",
+        "rejected_by_salutation",
+        "rejected_by_first_name",
+        "rejected_by_last_name",
+        "rejected_by_email",
+        "rejected_by_phone_isd_code",
+        "rejected_by_phone_number",
+        "rejected_by_avatar_url",
     )
 
     def _build_unit_owner(self, row: dict[str, Any]) -> dict[str, Any] | None:
@@ -222,6 +242,38 @@ class VehiclesService:
             "facility": facility,
         }
 
+    def _build_vehicle_reviewer(
+        self,
+        row: dict[str, Any],
+        *,
+        kind: str,
+    ) -> dict[str, Any] | None:
+        """Build org-member summary for the admin who approved or rejected."""
+        user_id = row.get(f"{kind}_by_user_id")
+        if not user_id:
+            return None
+        prefix = f"{kind}_by"
+        display_name = (
+            build_full_name(
+                str(row.get(f"{prefix}_salutation") or "").strip(),
+                str(row.get(f"{prefix}_first_name") or "").strip(),
+                str(row.get(f"{prefix}_last_name") or "").strip(),
+            ).strip()
+            or None
+        )
+        isd = str(row.get(f"{prefix}_phone_isd_code") or "").strip()
+        number = str(row.get(f"{prefix}_phone_number") or "").strip()
+        phone = f"{isd}{number}".strip() or None
+        email = str(row.get(f"{prefix}_email") or "").strip() or None
+        avatar_url = str(row.get(f"{prefix}_avatar_url") or "").strip() or None
+        return {
+            "user_id": str(user_id),
+            "display_name": display_name,
+            "email": email,
+            "phone": phone,
+            "avatar_url": avatar_url,
+        }
+
     def _serialize_admin_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a project vehicle row to the admin list API contract."""
         payload = self._normalize_project_vehicle(row)
@@ -233,7 +285,14 @@ class VehiclesService:
         out["owner"] = self._build_unit_owner(row)
         out["unit"] = self._build_vehicle_unit(row)
         out["parking_allotment"] = self._build_parking_allotment(row)
-        for key in (*self._OWNER_ROW_KEYS, *self._UNIT_ROW_KEYS, *self._PARKING_ROW_KEYS):
+        out["approved_by"] = self._build_vehicle_reviewer(row, kind="approved")
+        out["rejected_by"] = self._build_vehicle_reviewer(row, kind="rejected")
+        for key in (
+            *self._OWNER_ROW_KEYS,
+            *self._UNIT_ROW_KEYS,
+            *self._PARKING_ROW_KEYS,
+            *self._REVIEWER_ROW_KEYS,
+        ):
             out.pop(key, None)
         return out
 
@@ -463,6 +522,8 @@ class VehiclesService:
             patch["registration_number"] = patch["registration_number"].strip().upper()
         patch["status"] = VehicleStatus.PENDING.value
         patch["rejection_reason"] = None
+        patch["approved_by_user_id"] = None
+        patch["rejected_by_user_id"] = None
         try:
             row = await self.repo.update(
                 organization_id=org_id,
@@ -705,6 +766,7 @@ class VehiclesService:
         """Approve or reject a vehicle request and assign a parking slot on approval."""
         org_id = self.user_context.organization_id
         assert org_id
+        reviewer_user_id = self.user_context.user_id
         vehicle = await self.repo.get_by_project(
             organization_id=org_id,
             project_id=project_id,
@@ -761,6 +823,8 @@ class VehiclesService:
                     "status": VehicleStatus.APPROVED.value,
                     "parking_slot_id": body.parking_slot_id,
                     "rejection_reason": None,
+                    "approved_by_user_id": reviewer_user_id,
+                    "rejected_by_user_id": None,
                 },
             )
         else:
@@ -772,6 +836,8 @@ class VehiclesService:
                     "status": VehicleStatus.REJECTED.value,
                     "rejection_reason": body.rejection_reason,
                     "parking_slot_id": None,
+                    "approved_by_user_id": None,
+                    "rejected_by_user_id": reviewer_user_id,
                 },
             )
         if not row:
@@ -779,7 +845,12 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.vehicle_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        normalized = self._normalize_vehicle(row)
+        detail = await self.repo.get_detail_by_project(
+            organization_id=org_id,
+            project_id=project_id,
+            vehicle_id=vehicle_id,
+        )
+        normalized = self._serialize_admin_vehicle(detail or row)
         message_key = (
             "notifications.push.vehicle.approved"
             if body.status == VehicleStatus.APPROVED

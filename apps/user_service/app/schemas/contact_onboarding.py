@@ -320,6 +320,18 @@ class VehicleOwnerSummary(BaseModel):
     profile_photo_url: str | None = None
 
 
+class VehicleReviewerSummary(BaseModel):
+    """Org member who approved or rejected a vehicle request."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    user_id: str
+    display_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    avatar_url: str | None = None
+
+
 class VehicleResponse(BaseModel):
     """Vehicle row."""
 
@@ -339,6 +351,8 @@ class VehicleResponse(BaseModel):
     fuel_type: str | None = None
     status: str
     rejection_reason: str | None = None
+    approved_by_user_id: str | None = None
+    rejected_by_user_id: str | None = None
     parking_slot_id: str | None = None
     status_updated_at: str
     sort_order: int = 0
@@ -347,6 +361,8 @@ class VehicleResponse(BaseModel):
     unit: VehicleUnitSummary | None = None
     owner: VehicleOwnerSummary | None = None
     parking_allotment: VehicleParkingAllotmentSummary | None = None
+    approved_by: VehicleReviewerSummary | None = None
+    rejected_by: VehicleReviewerSummary | None = None
 
 
 class ReviewVehicleRequest(BaseModel):
