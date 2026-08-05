@@ -43,6 +43,25 @@ _TOWER_INSERT_COLUMNS: tuple[str, ...] = (
 )
 
 
+def _coerce_jsonb(value: Any) -> Any:
+    """Normalize JSONB payloads for asyncpg without double-encoding strings."""
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return value
+        if isinstance(parsed, (dict, list)):
+            return parsed
+    return value
+
+
 class TowersRepository(BaseRepository):
     """Database operations for towers and their child tables."""
 
@@ -251,7 +270,6 @@ class TowersRepository(BaseRepository):
 
     async def insert_gate(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert a tower gate."""
-        operating_hours = data.get("operating_hours")
         row = await self.db_connection.fetchrow(
             """
             INSERT INTO tower_gates (
@@ -271,7 +289,7 @@ class TowersRepository(BaseRepository):
             data.get("gate_type", "both"),
             data.get("status", "active"),
             data.get("is_open_24x7", False),
-            json.dumps(operating_hours) if operating_hours is not None else None,
+            _coerce_jsonb(data.get("operating_hours")),
             data.get("sort_order", 0),
         )
         return dict(row)
@@ -327,10 +345,7 @@ class TowersRepository(BaseRepository):
         """Patch a tower gate."""
         payload = dict(update_data)
         if "operating_hours" in payload:
-            operating_hours = payload["operating_hours"]
-            payload["operating_hours"] = (
-                json.dumps(operating_hours) if operating_hours is not None else None
-            )
+            payload["operating_hours"] = _coerce_jsonb(payload["operating_hours"])
         return await self._patch_child_row(
             table="tower_gates",
             organization_id=organization_id,

@@ -39,3 +39,13 @@ def test_serialize_row() -> None:
     assert serialized["name"] == "Tower A"
     assert serialized["count"] == 3
     assert isinstance(serialized["id"], str)
+
+
+def test_serialize_value_parses_json_string_objects() -> None:
+    """JSONB values returned as strings should deserialize to objects."""
+    raw = '{"open": null, "close": null, "hours": "06:00 - 22:00"}'
+    assert serialize_value(raw) == {
+        "open": None,
+        "close": None,
+        "hours": "06:00 - 22:00",
+    }
