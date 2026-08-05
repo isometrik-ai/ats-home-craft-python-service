@@ -651,12 +651,37 @@ def test_format_household_member_pending_invitation():
     assert item["invite_url"]
 
 
+def test_format_household_member_pending_invite_with_provisioned_user():
+    """Pending invite stays invited when portal auth user was pre-provisioned."""
+    item = ContactOnboardingService._format_household_member(
+        _household_row(
+            portal_access=True,
+            unit_link_status="active",
+            user_id="auth-user-1",
+            invitation_status=HouseholdInvitationStatus.PENDING.value,
+            invitation_token="secret-token",
+        )
+    )
+
+    assert item["member_status"] == HouseholdMemberStatus.INVITED.value
+    assert item["can_resend_invitation"] is True
+    assert item["invite_url"]
+
+
 def test_can_resend_household_invitation_has_user():
-    """Resend is disabled when member already has a portal user."""
+    """Resend stays enabled for pending invites even when auth user exists."""
     assert (
         ContactOnboardingService._can_resend_household_invitation(
             portal_access=True,
             invitation_status=HouseholdInvitationStatus.PENDING.value,
+            has_user=True,
+        )
+        is True
+    )
+    assert (
+        ContactOnboardingService._can_resend_household_invitation(
+            portal_access=True,
+            invitation_status=HouseholdInvitationStatus.ACCEPTED.value,
             has_user=True,
         )
         is False

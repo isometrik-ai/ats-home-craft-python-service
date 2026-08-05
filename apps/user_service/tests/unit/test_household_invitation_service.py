@@ -92,6 +92,15 @@ def test_derive_member_status_branches() -> None:
         )
         == HouseholdMemberStatus.JOINED.value
     )
+    assert (
+        HouseholdInvitationService.derive_member_status(
+            portal_access=True,
+            unit_link_status="active",
+            invitation_status=HouseholdInvitationStatus.PENDING.value,
+            has_user=True,
+        )
+        == HouseholdMemberStatus.INVITED.value
+    )
 
 
 def test_validate_invitation_branches() -> None:
