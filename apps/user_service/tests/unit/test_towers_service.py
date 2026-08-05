@@ -18,7 +18,9 @@ from apps.user_service.app.schemas.enums import (
     UnitNumberingPattern,
 )
 from apps.user_service.app.schemas.project_setup import (
+    CreateFloorBulkItem,
     CreateFloorRequest,
+    CreateTowerGateBulkItem,
     CreateTowerGateRequest,
     CreateTowerLiftRequest,
     CreateTowerRequest,
@@ -184,6 +186,92 @@ def _service(repo: _FakeTowersRepo) -> TowersService:
 
 
 @pytest.mark.asyncio
+async def test_create_tower_with_nested_entities():
+    """Create tower can optionally create wings, gates, lifts, and floors."""
+    wing_counter = {"n": 0}
+
+    async def _insert_wing(data):
+        wing_counter["n"] += 1
+        return {"id": f"wing-{wing_counter['n']}", **data}
+
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID, "project_id": PROJECT_ID})
+    repo.insert_wing = _insert_wing
+    service = _service(repo)
+    body = CreateTowerRequest(
+        name="Tower A",
+        code="TA",
+        tower_type=TowerType.RESIDENTIAL,
+        numbering_pattern=UnitNumberingPattern.FLOOR_UNIT,
+        has_wings=True,
+        wings=[
+            CreateTowerWingRequest(
+                name="East Wing",
+                code="EAST",
+            )
+        ],
+        gates=[
+            CreateTowerGateBulkItem(
+                name="Main Gate",
+                gate_type=GateType.ENTRY,
+                wing_client_key="EAST",
+            )
+        ],
+        lifts=[CreateTowerLiftRequest(name="Lift 1")],
+        floors=[
+            CreateFloorBulkItem(level_number=0, display_name="Ground", wing_client_key="EAST"),
+        ],
+    )
+
+    created = await service.create_tower(project_id=PROJECT_ID, body=body)
+
+    assert created["id"] == TOWER_ID
+    assert len(created["wings"]) == 1
+    assert created["wings"][0]["name"] == "East Wing"
+    assert len(created["gates"]) == 1
+    assert created["gates"][0]["name"] == "Main Gate"
+    assert len(created["lifts"]) == 1
+    assert len(created["floors"]) == 1
+    assert created["floors"][0]["display_name"] == "Ground"
+
+
+@pytest.mark.asyncio
+async def test_create_tower_without_nested_omits_child_arrays():
+    """Tower-only create keeps the legacy flat response shape."""
+    repo = _FakeTowersRepo()
+    service = _service(repo)
+    body = CreateTowerRequest(
+        name="Tower A",
+        code="TA",
+        tower_type=TowerType.RESIDENTIAL,
+        numbering_pattern=UnitNumberingPattern.FLOOR_UNIT,
+    )
+
+    created = await service.create_tower(project_id=PROJECT_ID, body=body)
+
+    assert created["id"] == TOWER_ID
+    assert "wings" not in created
+    assert "gates" not in created
+
+
+@pytest.mark.asyncio
+async def test_create_tower_rejects_unknown_wing_client_key():
+    """Nested gate wing_client_key must match a wing in the same request."""
+    from apps.user_service.app.schemas.project_setup import CreateTowerGateBulkItem
+
+    repo = _FakeTowersRepo()
+    service = _service(repo)
+    body = CreateTowerRequest(
+        name="Tower A",
+        code="TA",
+        tower_type=TowerType.RESIDENTIAL,
+        gates=[CreateTowerGateBulkItem(name="Gate 1", wing_client_key="missing")],
+    )
+
+    with pytest.raises(ValidationException):
+        await service.create_tower(project_id=PROJECT_ID, body=body)
+
+
+@pytest.mark.asyncio
 async def test_create_tower_success():
     """Create tower validates project and persists row."""
     repo = _FakeTowersRepo()
@@ -261,6 +349,52 @@ async def test_ensure_tower_not_found():
 
     with pytest.raises(NotFoundException):
         await service._ensure_tower(project_id=PROJECT_ID, tower_id=TOWER_ID)
+
+
+@pytest.mark.asyncio
+async def test_get_tower_detail():
+    """Get tower detail returns nested wings, gates, lifts, and floors."""
+    repo = _FakeTowersRepo(
+        tower={
+            "id": TOWER_ID,
+            "organization_id": ORG_ID,
+            "project_id": PROJECT_ID,
+            "name": "Tower A",
+            "code": "TA",
+            "tower_type": "residential",
+            "basement_count": 0,
+            "upper_floor_count": 10,
+            "numbering_pattern": "floor_unit",
+            "starting_unit_number": 1,
+            "has_wings": True,
+            "sort_order": 0,
+            "active": True,
+        },
+        wings=[{"id": WING_ID, "name": "East Wing", "tower_id": TOWER_ID}],
+        gates=[{"id": "gate-1", "name": "Main Gate", "tower_id": TOWER_ID}],
+        lifts=[{"id": "lift-1", "name": "Lift 1", "tower_id": TOWER_ID}],
+        floors=[{"id": "floor-1", "display_name": "Ground", "tower_id": TOWER_ID}],
+    )
+    service = _service(repo)
+
+    detail = await service.get_tower_detail(project_id=PROJECT_ID, tower_id=TOWER_ID)
+
+    assert detail["id"] == TOWER_ID
+    assert detail["name"] == "Tower A"
+    assert len(detail["wings"]) == 1
+    assert len(detail["gates"]) == 1
+    assert len(detail["lifts"]) == 1
+    assert len(detail["floors"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_tower_detail_not_found():
+    """Missing tower raises NotFoundException."""
+    repo = _FakeTowersRepo(tower=None)
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.get_tower_detail(project_id=PROJECT_ID, tower_id=TOWER_ID)
 
 
 @pytest.mark.asyncio

@@ -146,11 +146,22 @@ All routes are under `/v1/projects` and require authentication + an org context.
 | Method         | Path                                                            |
 | -------------- | --------------------------------------------------------------- |
 | POST / GET     | `/v1/projects/{project_id}/towers`                              |
+| GET            | `/v1/projects/{project_id}/towers/{tower_id}`                   |
 | PATCH / DELETE | `/v1/projects/{project_id}/towers/{tower_id}`                   |
 | POST / GET     | `.../towers/{tower_id}/wings` · DELETE `.../wings/{wing_id}`    |
 | POST / GET     | `.../towers/{tower_id}/gates` · DELETE `.../gates/{gate_id}`    |
 | POST / GET     | `.../towers/{tower_id}/lifts` · DELETE `.../lifts/{lift_id}`    |
 | POST / GET     | `.../towers/{tower_id}/floors` · DELETE `.../floors/{floor_id}` |
+
+`POST /towers` accepts optional nested `wings`, `gates`, `lifts`, and `floors` so the tower
+builder page can persist everything in one call. Gates and floors link to wings created in the
+same payload via optional `wing_client_key` (matches the wing's `code` or `name`). When
+nested arrays are omitted, the response is the tower row only; when present, the response also
+includes `wings`, `gates`, `lifts`, and `floors` arrays. Individual nested endpoints remain
+available for add/update later.
+
+`GET /towers/{tower_id}` returns the tower plus nested `wings`, `gates`, `lifts`, and `floors`
+for the builder edit page.
 
 ### Unit configs
 

@@ -34,6 +34,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 _TOWER_CODE_MAX_LEN = 64
 _TOWER_CODE_SUFFIX_RESERVE = 6
 _TOWER_CODE_MAX_ATTEMPTS = 1000
+_NESTED_TOWER_CREATE_KEYS = frozenset({"wings", "gates", "lifts", "floors"})
 
 
 class TowersService:
@@ -124,14 +125,49 @@ class TowersService:
             custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         )
 
+    @staticmethod
+    def _register_wing_lookup_keys(
+        *,
+        wing_body: CreateTowerWingRequest,
+        wing_row: dict[str, Any],
+        key_map: dict[str, str],
+    ) -> None:
+        """Index a created wing by code and name for nested references."""
+        wing_id = str(wing_row["id"])
+        if wing_body.code:
+            key_map[wing_body.code.strip()] = wing_id
+        key_map[wing_body.name.strip()] = wing_id
+
+    def _resolve_nested_wing_id(
+        self,
+        *,
+        wing_client_key: str | None,
+        wing_key_map: dict[str, str],
+    ) -> str | None:
+        """Resolve a nested wing reference from the same create request."""
+        if not wing_client_key:
+            return None
+        wing_id = wing_key_map.get(wing_client_key.strip())
+        if not wing_id:
+            raise ValidationException(
+                message_key="project_setup.errors.nested_wing_client_key_not_found",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"wing_client_key": wing_client_key.strip()},
+            )
+        return wing_id
+
     async def create_tower(self, *, project_id: str, body: CreateTowerRequest) -> dict[str, Any]:
-        """Create a tower."""
+        """Create a tower and optionally nested wings, gates, lifts, and floors."""
         await self.setup_service.ensure_project(project_id=project_id)
         validate_tower_numbering(
             numbering_pattern=body.numbering_pattern.value,
             custom_prefix=body.custom_prefix,
         )
-        data = body.model_dump()
+        nested_wings = list(body.wings or [])
+        nested_gates = list(body.gates or [])
+        nested_lifts = list(body.lifts or [])
+        nested_floors = list(body.floors or [])
+        data = body.model_dump(exclude=_NESTED_TOWER_CREATE_KEYS)
         data["code"] = await self._resolve_tower_code(
             project_id=project_id,
             name=body.name,
@@ -148,7 +184,78 @@ class TowersService:
                 message_key="project_setup.errors.duplicate_code",
                 custom_code=CustomStatusCode.CONFLICT,
             ) from exc
-        return serialize_row(inserted)
+        tower_id = str(inserted["id"])
+        result = serialize_row(inserted)
+        if not any((nested_wings, nested_gates, nested_lifts, nested_floors)):
+            return result
+
+        wing_key_map: dict[str, str] = {}
+        created_wings: list[dict[str, Any]] = []
+        for wing_body in nested_wings:
+            wing = await self.create_wing(
+                project_id=project_id,
+                tower_id=tower_id,
+                body=wing_body,
+            )
+            self._register_wing_lookup_keys(
+                wing_body=wing_body,
+                wing_row=wing,
+                key_map=wing_key_map,
+            )
+            created_wings.append(wing)
+
+        created_gates: list[dict[str, Any]] = []
+        for gate_body in nested_gates:
+            gate = await self.create_gate(
+                project_id=project_id,
+                tower_id=tower_id,
+                body=CreateTowerGateRequest(
+                    wing_id=self._resolve_nested_wing_id(
+                        wing_client_key=gate_body.wing_client_key,
+                        wing_key_map=wing_key_map,
+                    ),
+                    name=gate_body.name,
+                    gate_type=gate_body.gate_type,
+                    status=gate_body.status,
+                    is_open_24x7=gate_body.is_open_24x7,
+                    operating_hours=gate_body.operating_hours,
+                    sort_order=gate_body.sort_order,
+                ),
+            )
+            created_gates.append(gate)
+
+        created_lifts: list[dict[str, Any]] = []
+        for lift_body in nested_lifts:
+            lift = await self.create_lift(
+                project_id=project_id,
+                tower_id=tower_id,
+                body=lift_body,
+            )
+            created_lifts.append(lift)
+
+        created_floors: list[dict[str, Any]] = []
+        for floor_body in nested_floors:
+            floor = await self.create_floor(
+                project_id=project_id,
+                tower_id=tower_id,
+                body=CreateFloorRequest(
+                    wing_id=self._resolve_nested_wing_id(
+                        wing_client_key=floor_body.wing_client_key,
+                        wing_key_map=wing_key_map,
+                    ),
+                    level_number=floor_body.level_number,
+                    display_name=floor_body.display_name,
+                    sort_order=floor_body.sort_order,
+                    is_parking=floor_body.is_parking,
+                ),
+            )
+            created_floors.append(floor)
+
+        result["wings"] = created_wings
+        result["gates"] = created_gates
+        result["lifts"] = created_lifts
+        result["floors"] = created_floors
+        return result
 
     async def list_towers(self, *, project_id: str) -> list[dict[str, Any]]:
         """List towers for a project."""
@@ -157,6 +264,16 @@ class TowersService:
             organization_id=self._org_id, project_id=project_id
         )
         return [serialize_row(row) for row in rows]
+
+    async def get_tower_detail(self, *, project_id: str, tower_id: str) -> dict[str, Any]:
+        """Return a tower with nested wings, gates, lifts, and floors."""
+        tower = await self._ensure_tower(project_id=project_id, tower_id=tower_id)
+        result = serialize_row(tower)
+        result["wings"] = await self.list_wings(project_id=project_id, tower_id=tower_id)
+        result["gates"] = await self.list_gates(project_id=project_id, tower_id=tower_id)
+        result["lifts"] = await self.list_lifts(project_id=project_id, tower_id=tower_id)
+        result["floors"] = await self.list_floors(project_id=project_id, tower_id=tower_id)
+        return result
 
     async def update_tower(
         self, *, project_id: str, tower_id: str, body: UpdateTowerRequest

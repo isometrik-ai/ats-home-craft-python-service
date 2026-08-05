@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.enums import (
     GateStatus,
@@ -19,6 +19,8 @@ from apps.user_service.app.schemas.enums import (
     TowerType,
     UnitNumberingPattern,
 )
+from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 # ---------------------------------------------------------------------------
 # Projects
@@ -263,6 +265,10 @@ class CreateTowerRequest(BaseModel):
     longitude: float | None = None
     sort_order: int = Field(default=0, ge=0)
     active: bool = True
+    wings: list["CreateTowerWingRequest"] | None = None
+    gates: list["CreateTowerGateBulkItem"] | None = None
+    lifts: list[CreateTowerLiftRequest] | None = None
+    floors: list["CreateFloorBulkItem"] | None = None
 
 
 class UpdateTowerRequest(BaseModel):
@@ -284,6 +290,36 @@ class UpdateTowerRequest(BaseModel):
     longitude: float | None = None
     sort_order: int | None = Field(default=None, ge=0)
     active: bool | None = None
+
+
+class TowerDetailResponse(BaseModel):
+    """Tower with nested wings, gates, lifts, and floors for the builder edit page."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    organization_id: str
+    project_id: str
+    name: str
+    code: str
+    tower_type: str
+    basement_count: int = 0
+    upper_floor_count: int = 0
+    units_per_floor_default: int | None = None
+    numbering_pattern: str
+    starting_unit_number: int = 1
+    custom_prefix: str | None = None
+    has_wings: bool = False
+    latitude: float | None = None
+    longitude: float | None = None
+    sort_order: int = 0
+    active: bool = True
+    created_at: str | None = None
+    updated_at: str | None = None
+    wings: list[dict[str, Any]] = Field(default_factory=list)
+    gates: list[dict[str, Any]] = Field(default_factory=list)
+    lifts: list[dict[str, Any]] = Field(default_factory=list)
+    floors: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CreateTowerWingRequest(BaseModel):
@@ -311,6 +347,26 @@ class CreateTowerGateRequest(BaseModel):
     sort_order: int = Field(default=0, ge=0)
 
 
+class CreateTowerGateBulkItem(CreateTowerGateRequest):
+    """Gate payload nested under tower create (use wing_client_key, not wing_id)."""
+
+    wing_client_key: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Optional wing reference (matches wing `code` or `name` from the same request).",
+    )
+
+    @model_validator(mode="after")
+    def validate_bulk_wing_ref(self) -> CreateTowerGateBulkItem:
+        """Nested tower create resolves wings by code or name."""
+        if self.wing_id is not None:
+            raise ValidationException(
+                message_key="project_setup.errors.nested_wing_id_not_allowed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
+
+
 class CreateTowerLiftRequest(BaseModel):
     """Create a tower lift."""
 
@@ -335,6 +391,26 @@ class CreateFloorRequest(BaseModel):
     display_name: str = Field(..., min_length=1)
     sort_order: int = Field(default=0, ge=0)
     is_parking: bool = False
+
+
+class CreateFloorBulkItem(CreateFloorRequest):
+    """Floor payload nested under tower create (use wing_client_key, not wing_id)."""
+
+    wing_client_key: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Optional wing reference (matches wing `code` or `name` from the same request).",
+    )
+
+    @model_validator(mode="after")
+    def validate_bulk_wing_ref(self) -> CreateFloorBulkItem:
+        """Nested tower create resolves wings by code or name."""
+        if self.wing_id is not None:
+            raise ValidationException(
+                message_key="project_setup.errors.nested_wing_id_not_allowed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class CompleteStepRequest(BaseModel):
