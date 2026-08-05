@@ -290,6 +290,10 @@ class UpdateTowerRequest(BaseModel):
     longitude: float | None = None
     sort_order: int | None = Field(default=None, ge=0)
     active: bool | None = None
+    wings: list["UpdateTowerWingItem"] | None = None
+    gates: list["UpdateTowerGateBulkItem"] | None = None
+    lifts: list["UpdateTowerLiftBulkItem"] | None = None
+    floors: list["UpdateFloorBulkItem"] | None = None
 
 
 class TowerDetailResponse(BaseModel):
@@ -410,6 +414,110 @@ class CreateFloorBulkItem(CreateFloorRequest):
                 message_key="project_setup.errors.nested_wing_id_not_allowed",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        return self
+
+
+class UpdateTowerWingItem(BaseModel):
+    """Upsert a wing when patching a tower (omit id to create)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    name: str | None = Field(default=None, min_length=1)
+    code: str | None = None
+    has_own_gate: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_create_requires_name(self) -> UpdateTowerWingItem:
+        """New wings require a name."""
+        if self.id is None and not self.name:
+            raise ValidationException(
+                message_key="project_setup.errors.nested_item_name_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
+
+
+class UpdateTowerGateBulkItem(BaseModel):
+    """Upsert a gate when patching a tower (omit id to create)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    wing_client_key: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Optional wing reference (matches wing `code`, `name`, or `id`).",
+    )
+    name: str | None = Field(default=None, min_length=1)
+    gate_type: GateType | None = None
+    status: GateStatus | None = None
+    is_open_24x7: bool | None = None
+    operating_hours: dict[str, Any] | None = None
+    sort_order: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_bulk_gate(self) -> UpdateTowerGateBulkItem:
+        """New gates require a name; nested updates resolve wings by wing_client_key."""
+        if self.id is None and not self.name:
+            raise ValidationException(
+                message_key="project_setup.errors.nested_item_name_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
+
+
+class UpdateTowerLiftBulkItem(BaseModel):
+    """Upsert a lift when patching a tower (omit id to create)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    name: str | None = Field(default=None, min_length=1)
+    lift_type: LiftType | None = None
+    capacity_persons: int | None = Field(default=None, ge=0)
+    brand: str | None = None
+    status: LiftStatus | None = None
+    serves_floors: list[int] | None = None
+    sort_order: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_create_requires_name(self) -> UpdateTowerLiftBulkItem:
+        """New lifts require a name."""
+        if self.id is None and not self.name:
+            raise ValidationException(
+                message_key="project_setup.errors.nested_item_name_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
+
+
+class UpdateFloorBulkItem(BaseModel):
+    """Upsert a floor when patching a tower (omit id to create)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str | None = None
+    wing_client_key: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Optional wing reference (matches wing `code`, `name`, or `id`).",
+    )
+    level_number: int | None = None
+    display_name: str | None = Field(default=None, min_length=1)
+    sort_order: int | None = Field(default=None, ge=0)
+    is_parking: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_bulk_floor(self) -> UpdateFloorBulkItem:
+        """New floors require level_number and display_name."""
+        if self.id is None:
+            if self.level_number is None or not self.display_name:
+                raise ValidationException(
+                    message_key="project_setup.errors.nested_floor_fields_required",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
         return self
 
 

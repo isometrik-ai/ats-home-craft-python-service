@@ -12,6 +12,17 @@ _TOWER_COLUMN_CASTS: dict[str, str] = {
     "numbering_pattern": "::unit_numbering_pattern",
 }
 
+_GATE_COLUMN_CASTS: dict[str, str] = {
+    "gate_type": "::gate_type",
+    "status": "::gate_status",
+    "wing_id": "::uuid",
+}
+
+_LIFT_COLUMN_CASTS: dict[str, str] = {
+    "lift_type": "::lift_type",
+    "status": "::lift_status",
+}
+
 _TOWER_INSERT_COLUMNS: tuple[str, ...] = (
     "organization_id",
     "project_id",
@@ -204,6 +215,38 @@ class TowersRepository(BaseRepository):
         )
         return row is not None
 
+    async def update_wing(
+        self,
+        *,
+        organization_id: str,
+        tower_id: str,
+        wing_id: str,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Patch a tower wing."""
+        return await self._patch_child_row(
+            table="tower_wings",
+            organization_id=organization_id,
+            tower_id=tower_id,
+            row_id=wing_id,
+            update_data=update_data,
+        )
+
+    async def get_wing(
+        self, *, organization_id: str, tower_id: str, wing_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch a wing scoped to org + tower."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT * FROM tower_wings
+            WHERE id = $1::uuid AND tower_id = $2::uuid AND organization_id = $3::uuid
+            """,
+            wing_id,
+            tower_id,
+            organization_id,
+        )
+        return dict(row) if row else None
+
     # -- gates --------------------------------------------------------------
 
     async def insert_gate(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -273,6 +316,45 @@ class TowersRepository(BaseRepository):
         )
         return result.upper().endswith("1")
 
+    async def update_gate(
+        self,
+        *,
+        organization_id: str,
+        tower_id: str,
+        gate_id: str,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Patch a tower gate."""
+        payload = dict(update_data)
+        if "operating_hours" in payload:
+            operating_hours = payload["operating_hours"]
+            payload["operating_hours"] = (
+                json.dumps(operating_hours) if operating_hours is not None else None
+            )
+        return await self._patch_child_row(
+            table="tower_gates",
+            organization_id=organization_id,
+            tower_id=tower_id,
+            row_id=gate_id,
+            update_data=payload,
+            column_casts=_GATE_COLUMN_CASTS,
+        )
+
+    async def get_gate(
+        self, *, organization_id: str, tower_id: str, gate_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch a gate scoped to org + tower."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT * FROM tower_gates
+            WHERE id = $1::uuid AND tower_id = $2::uuid AND organization_id = $3::uuid
+            """,
+            gate_id,
+            tower_id,
+            organization_id,
+        )
+        return dict(row) if row else None
+
     # -- lifts --------------------------------------------------------------
 
     async def insert_lift(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -327,6 +409,43 @@ class TowersRepository(BaseRepository):
         )
         return result.upper().endswith("1")
 
+    async def update_lift(
+        self,
+        *,
+        organization_id: str,
+        tower_id: str,
+        lift_id: str,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Patch a tower lift."""
+        payload = dict(update_data)
+        if "serves_floors" in payload:
+            payload["serves_floors"] = list(payload["serves_floors"] or [])
+        return await self._patch_child_row(
+            table="tower_lifts",
+            organization_id=organization_id,
+            tower_id=tower_id,
+            row_id=lift_id,
+            update_data=payload,
+            column_casts=_LIFT_COLUMN_CASTS,
+            extra_casts={"serves_floors": "::integer[]"},
+        )
+
+    async def get_lift(
+        self, *, organization_id: str, tower_id: str, lift_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch a lift scoped to org + tower."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT * FROM tower_lifts
+            WHERE id = $1::uuid AND tower_id = $2::uuid AND organization_id = $3::uuid
+            """,
+            lift_id,
+            tower_id,
+            organization_id,
+        )
+        return dict(row) if row else None
+
     # -- floors -------------------------------------------------------------
 
     async def insert_floor(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -375,3 +494,80 @@ class TowersRepository(BaseRepository):
             organization_id,
         )
         return result.upper().endswith("1")
+
+    async def update_floor(
+        self,
+        *,
+        organization_id: str,
+        tower_id: str,
+        floor_id: str,
+        update_data: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Patch a floor."""
+        return await self._patch_child_row(
+            table="floors",
+            organization_id=organization_id,
+            tower_id=tower_id,
+            row_id=floor_id,
+            update_data=update_data,
+            column_casts={"wing_id": "::uuid"},
+        )
+
+    async def get_floor(
+        self, *, organization_id: str, tower_id: str, floor_id: str
+    ) -> dict[str, Any] | None:
+        """Fetch a floor scoped to org + tower."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT * FROM floors
+            WHERE id = $1::uuid AND tower_id = $2::uuid AND organization_id = $3::uuid
+            """,
+            floor_id,
+            tower_id,
+            organization_id,
+        )
+        return dict(row) if row else None
+
+    async def _patch_child_row(
+        self,
+        *,
+        table: str,
+        organization_id: str,
+        tower_id: str,
+        row_id: str,
+        update_data: dict[str, Any],
+        column_casts: dict[str, str] | None = None,
+        extra_casts: dict[str, str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Patch a child row scoped to org + tower."""
+        casts = {**(column_casts or {}), **(extra_casts or {})}
+        if not update_data:
+            row = await self.db_connection.fetchrow(
+                f"""
+                SELECT * FROM {table}
+                WHERE id = $1::uuid AND tower_id = $2::uuid AND organization_id = $3::uuid
+                """,
+                row_id,
+                tower_id,
+                organization_id,
+            )
+            return dict(row) if row else None
+        set_parts: list[str] = []
+        values: list[Any] = []
+        idx = 1
+        for col, val in update_data.items():
+            set_parts.append(f"{col} = ${idx}{casts.get(col, '')}")
+            values.append(val)
+            idx += 1
+        set_parts.append("updated_at = now()")
+        values.extend([row_id, tower_id, organization_id])
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE {table} SET {", ".join(set_parts)}
+            WHERE id = ${idx}::uuid AND tower_id = ${idx + 1}::uuid
+              AND organization_id = ${idx + 2}::uuid
+            RETURNING *
+            """,
+            *values,
+        )
+        return dict(row) if row else None

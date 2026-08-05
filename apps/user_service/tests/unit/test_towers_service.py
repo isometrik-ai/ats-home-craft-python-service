@@ -25,7 +25,10 @@ from apps.user_service.app.schemas.project_setup import (
     CreateTowerLiftRequest,
     CreateTowerRequest,
     CreateTowerWingRequest,
+    UpdateFloorBulkItem,
+    UpdateTowerGateBulkItem,
     UpdateTowerRequest,
+    UpdateTowerWingItem,
 )
 from apps.user_service.app.services.towers_service import TowersService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -123,6 +126,23 @@ class _FakeTowersRepo:
         del kwargs
         return self.delete_result
 
+    async def update_wing(self, **kwargs):
+        """Update wing and return merged row."""
+        wing_id = kwargs["wing_id"]
+        update_data = kwargs.get("update_data") or {}
+        for wing in self.wings:
+            if str(wing["id"]) == wing_id:
+                return {**wing, **update_data}
+        return None
+
+    async def get_wing(self, **kwargs):
+        """Return a wing row when present in configured wings."""
+        wing_id = kwargs["wing_id"]
+        for wing in self.wings:
+            if str(wing["id"]) == wing_id:
+                return wing
+        return None
+
     async def wing_belongs_to_tower(self, **kwargs):
         """Return configured wing ownership result."""
         del kwargs
@@ -142,6 +162,15 @@ class _FakeTowersRepo:
         del kwargs
         return self.delete_result
 
+    async def update_gate(self, **kwargs):
+        """Update gate and return merged row."""
+        gate_id = kwargs["gate_id"]
+        update_data = kwargs.get("update_data") or {}
+        for gate in self.gates:
+            if str(gate["id"]) == gate_id:
+                return {**gate, **update_data}
+        return None
+
     async def insert_lift(self, data):
         """Insert lift row."""
         return {"id": "lift-1", **data}
@@ -155,6 +184,15 @@ class _FakeTowersRepo:
         """Delete lift and return success flag."""
         del kwargs
         return self.delete_result
+
+    async def update_lift(self, **kwargs):
+        """Update lift and return merged row."""
+        lift_id = kwargs["lift_id"]
+        update_data = kwargs.get("update_data") or {}
+        for lift in self.lifts:
+            if str(lift["id"]) == lift_id:
+                return {**lift, **update_data}
+        return None
 
     async def insert_floor(self, data):
         """Insert floor row."""
@@ -171,6 +209,15 @@ class _FakeTowersRepo:
         """Delete floor and return success flag."""
         del kwargs
         return self.delete_result
+
+    async def update_floor(self, **kwargs):
+        """Update floor and return merged row."""
+        floor_id = kwargs["floor_id"]
+        update_data = kwargs.get("update_data") or {}
+        for floor in self.floors:
+            if str(floor["id"]) == floor_id:
+                return {**floor, **update_data}
+        return None
 
 
 def _service(repo: _FakeTowersRepo) -> TowersService:
@@ -527,6 +574,44 @@ async def test_update_tower_success():
 
     assert updated["name"] == "Tower Alpha"
     assert repo.last_update is not None
+
+
+@pytest.mark.asyncio
+async def test_update_tower_with_nested_upsert():
+    """Patch tower can upsert wings, gates, lifts, and floors."""
+    repo = _FakeTowersRepo(
+        tower={
+            "id": TOWER_ID,
+            "name": "Tower A",
+            "numbering_pattern": UnitNumberingPattern.FLOOR_UNIT.value,
+            "custom_prefix": None,
+        },
+        wings=[{"id": WING_ID, "name": "East Wing", "code": "EAST"}],
+        gates=[{"id": "gate-1", "name": "Main Gate", "wing_id": None}],
+        floors=[{"id": "floor-1", "level_number": 0, "display_name": "Ground", "wing_id": None}],
+    )
+    service = _service(repo)
+    body = UpdateTowerRequest(
+        name="Tower Alpha",
+        wings=[UpdateTowerWingItem(id=WING_ID, name="East Wing Updated")],
+        gates=[
+            UpdateTowerGateBulkItem(id="gate-1", wing_client_key="EAST"),
+            UpdateTowerGateBulkItem(name="Service Gate"),
+        ],
+        floors=[UpdateFloorBulkItem(id="floor-1", wing_client_key="EAST")],
+    )
+
+    updated = await service.update_tower(
+        project_id=PROJECT_ID,
+        tower_id=TOWER_ID,
+        body=body,
+    )
+
+    assert updated["name"] == "Tower Alpha"
+    assert updated["wings"][0]["name"] == "East Wing Updated"
+    assert updated["gates"][0]["wing_id"] == WING_ID
+    assert updated["gates"][1]["name"] == "Service Gate"
+    assert updated["floors"][0]["wing_id"] == WING_ID
 
 
 @pytest.mark.asyncio

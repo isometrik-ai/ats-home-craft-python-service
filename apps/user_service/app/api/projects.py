@@ -830,6 +830,14 @@ async def get_tower_detail(
     "/{project_id}/towers/{tower_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Update a tower",
+    description=(
+        "Patch a tower. Optionally include nested `wings`, `gates`, `lifts`, and `floors` "
+        "to upsert child records in the same request. Items with an `id` are updated; items "
+        "without an `id` are created. Nested gates/floors link to wings via optional "
+        "`wing_client_key` (matching wing `code`, `name`, or `id`). When nested arrays are "
+        "omitted, the response is the tower row only; when present, the response also includes "
+        "the processed `wings`, `gates`, `lifts`, and `floors` arrays."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")

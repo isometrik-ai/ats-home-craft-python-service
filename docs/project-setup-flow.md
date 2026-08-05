@@ -153,6 +153,11 @@ All routes are under `/v1/projects` and require authentication + an org context.
 | POST / GET     | `.../towers/{tower_id}/lifts` · DELETE `.../lifts/{lift_id}`    |
 | POST / GET     | `.../towers/{tower_id}/floors` · DELETE `.../floors/{floor_id}` |
 
+`PATCH /towers/{tower_id}` accepts the same optional nested `wings`, `gates`, `lifts`, and `floors`
+arrays for upserting on the builder edit page. Items with an `id` are updated; items without an
+`id` are created. Gates and floors link to wings via optional `wing_client_key` (matches the
+wing's `code`, `name`, or `id`). Deletes still use the individual nested DELETE endpoints.
+
 `POST /towers` accepts optional nested `wings`, `gates`, `lifts`, and `floors` so the tower
 builder page can persist everything in one call. Gates and floors link to wings created in the
 same payload via optional `wing_client_key` (matches the wing's `code` or `name`). When
