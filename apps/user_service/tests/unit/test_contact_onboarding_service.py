@@ -760,11 +760,13 @@ async def test_complete_profile_updates_contact_and_step(monkeypatch):
         "apps.user_service.app.services.contact_onboarding_service.ContactsService",
         lambda **kwargs: contacts_service,
     )
-    body = CompleteProfileRequest(first_name="Jane", last_name="Doe")
+    body = CompleteProfileRequest(first_name="Jane", middle_name="Q", last_name="Doe")
 
     result = await svc.complete_profile(contact_id="contact-1", body=body)
 
     assert result["id"] == "contact-1"
+    update_body = contacts_service.update_contact.await_args.kwargs["body"]
+    assert update_body.middle_name == "Q"
     assert ContactOnboardingStep.COMPLETE_PROFILE.value in repo.complete_step_calls
 
 

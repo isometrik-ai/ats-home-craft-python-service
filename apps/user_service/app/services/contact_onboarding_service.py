@@ -312,6 +312,7 @@ class ContactOnboardingService:
         return UpdateContactRequest(
             prefix=body.prefix,
             first_name=body.first_name,
+            middle_name=body.middle_name,
             last_name=body.last_name,
             date_of_birth=body.date_of_birth,
             profile_photo_url=body.profile_photo_url,
