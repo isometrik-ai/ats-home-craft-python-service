@@ -164,6 +164,7 @@ class CompleteProfileRequest(BaseModel):
 
     prefix: str | None = Field(None, max_length=50)
     first_name: str = Field(..., max_length=100)
+    middle_name: str | None = Field(None, max_length=100)
     last_name: str | None = Field(None, max_length=100)
     date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = Field(None, max_length=500)

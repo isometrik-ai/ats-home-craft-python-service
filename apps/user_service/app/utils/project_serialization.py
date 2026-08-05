@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -20,6 +21,16 @@ def serialize_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, date):
         return value.isoformat()
+    if isinstance(value, str):
+        stripped = value.lstrip()
+        if stripped.startswith(("{", "[")):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                return value
+            if isinstance(parsed, (dict, list)):
+                return serialize_value(parsed)
+        return value
     if isinstance(value, (list, tuple)):
         return [serialize_value(item) for item in value]
     if isinstance(value, dict):

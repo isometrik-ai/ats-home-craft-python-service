@@ -98,20 +98,18 @@ class HouseholdInvitationService:
         has_user: bool = False,
     ) -> str:
         """Map stored rows to API member_status."""
-        if has_user:
-            return HouseholdMemberStatus.JOINED.value
-        if (
-            portal_access
-            and unit_link_status == "pending"
-            and invitation_status == HouseholdInvitationStatus.PENDING.value
-        ):
-            return HouseholdMemberStatus.INVITED.value
         if invitation_status == HouseholdInvitationStatus.CANCELLED.value:
             return HouseholdMemberStatus.REVOKED.value
         if not portal_access:
             return HouseholdMemberStatus.JOINED.value
+        if invitation_status == HouseholdInvitationStatus.PENDING.value:
+            return HouseholdMemberStatus.INVITED.value
+        if invitation_status == HouseholdInvitationStatus.ACCEPTED.value:
+            return HouseholdMemberStatus.JOINED.value
         if unit_link_status == "pending":
             return HouseholdMemberStatus.INVITED.value
+        if has_user:
+            return HouseholdMemberStatus.JOINED.value
         return HouseholdMemberStatus.JOINED.value
 
     def _validate_invitation(

@@ -312,6 +312,7 @@ class ContactOnboardingService:
         return UpdateContactRequest(
             prefix=body.prefix,
             first_name=body.first_name,
+            middle_name=body.middle_name,
             last_name=body.last_name,
             date_of_birth=body.date_of_birth,
             profile_photo_url=body.profile_photo_url,
@@ -359,10 +360,10 @@ class ContactOnboardingService:
         has_user: bool,
     ) -> bool:
         """True when the primary can resend SMS or re-invite after revoke/decline."""
-        if has_user:
-            return False
         if invitation_status == HouseholdInvitationStatus.PENDING.value:
             return True
+        if has_user:
+            return False
         if not portal_access and invitation_status in {
             HouseholdInvitationStatus.CANCELLED.value,
             HouseholdInvitationStatus.EXPIRED.value,
@@ -402,10 +403,8 @@ class ContactOnboardingService:
             "phones": parse_json_any(row.get("phones"), default=[]),
             "emails": parse_json_any(row.get("emails"), default=[]),
         }
-        if (
-            member_status == HouseholdMemberStatus.INVITED.value
-            and row.get("invitation_status") == "pending"
-            and row.get("invitation_token")
+        if invitation_status == HouseholdInvitationStatus.PENDING.value and row.get(
+            "invitation_token"
         ):
             item["invite_url"] = HouseholdInvitationService._generate_invite_url(
                 str(row["invitation_token"])

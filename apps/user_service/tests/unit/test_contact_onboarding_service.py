@@ -651,12 +651,37 @@ def test_format_household_member_pending_invitation():
     assert item["invite_url"]
 
 
+def test_format_household_member_pending_invite_with_provisioned_user():
+    """Pending invite stays invited when portal auth user was pre-provisioned."""
+    item = ContactOnboardingService._format_household_member(
+        _household_row(
+            portal_access=True,
+            unit_link_status="active",
+            user_id="auth-user-1",
+            invitation_status=HouseholdInvitationStatus.PENDING.value,
+            invitation_token="secret-token",
+        )
+    )
+
+    assert item["member_status"] == HouseholdMemberStatus.INVITED.value
+    assert item["can_resend_invitation"] is True
+    assert item["invite_url"]
+
+
 def test_can_resend_household_invitation_has_user():
-    """Resend is disabled when member already has a portal user."""
+    """Resend stays enabled for pending invites even when auth user exists."""
     assert (
         ContactOnboardingService._can_resend_household_invitation(
             portal_access=True,
             invitation_status=HouseholdInvitationStatus.PENDING.value,
+            has_user=True,
+        )
+        is True
+    )
+    assert (
+        ContactOnboardingService._can_resend_household_invitation(
+            portal_access=True,
+            invitation_status=HouseholdInvitationStatus.ACCEPTED.value,
             has_user=True,
         )
         is False
@@ -760,11 +785,13 @@ async def test_complete_profile_updates_contact_and_step(monkeypatch):
         "apps.user_service.app.services.contact_onboarding_service.ContactsService",
         lambda **kwargs: contacts_service,
     )
-    body = CompleteProfileRequest(first_name="Jane", last_name="Doe")
+    body = CompleteProfileRequest(first_name="Jane", middle_name="Q", last_name="Doe")
 
     result = await svc.complete_profile(contact_id="contact-1", body=body)
 
     assert result["id"] == "contact-1"
+    update_body = contacts_service.update_contact.await_args.kwargs["body"]
+    assert update_body.middle_name == "Q"
     assert ContactOnboardingStep.COMPLETE_PROFILE.value in repo.complete_step_calls
 
 
