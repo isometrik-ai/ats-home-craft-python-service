@@ -110,6 +110,7 @@ async def test_list_units_applies_registry_filters():
     assert "tower_id" in list_query
     assert "config_id" in list_query
     assert "::unit_status" in list_query
+    assert "parking_entitlement" in list_query
 
 
 @pytest.mark.asyncio

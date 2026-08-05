@@ -146,6 +146,7 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
             owner_contact_id=str(owner_contact_id) if owner_contact_id else None,
         ),
         "sort_order": int(row.get("sort_order") or 0),
+        "parking_entitlement": int(row.get("parking_entitlement") or 0),
     }
 
 

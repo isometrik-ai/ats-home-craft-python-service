@@ -40,6 +40,7 @@ SELECT
   t.name AS tower_name,
   f.display_name AS floor_name,
   uc.display_label AS config_label,
+  COALESCE(uc.parking_entitlement, 0) AS parking_entitlement,
   (
     SELECT cr.role_type::text
     FROM contact_roles cr

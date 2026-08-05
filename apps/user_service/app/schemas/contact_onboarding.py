@@ -80,6 +80,7 @@ class ContactPropertyUnitResponse(BaseModel):
     last_name: str | None = None
     assign_date: str | None = None
     created_at: str | None = None
+    parking_entitlement: int = Field(default=0, ge=0)
 
 
 class ContactPropertyProjectGroupResponse(BaseModel):
@@ -114,6 +115,7 @@ class ContactUnitSummaryResponse(BaseModel):
     last_name: str | None = None
     assign_date: str | None = None
     created_at: str | None = None
+    parking_entitlement: int = Field(default=0, ge=0)
     project: ContactPropertyProjectSummary | None = None
 
 
@@ -236,6 +238,34 @@ class UpdateVehicleRequest(BaseModel):
         return photo_paths
 
 
+class ResubmitVehicleRequest(BaseModel):
+    """Patch a rejected vehicle and return it to the admin review queue."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    vehicle_type: VehicleType | None = None
+    registration_number: str | None = Field(None, min_length=1, max_length=20)
+    make: str | None = Field(None, max_length=100)
+    model: str | None = Field(None, max_length=100)
+    color: str | None = Field(None, max_length=50)
+    photo_paths: list[str] | None = Field(None, max_length=10)
+    fuel_type: VehicleFuelType | None = None
+
+    @field_validator("photo_paths")
+    @classmethod
+    def validate_photo_paths(cls, photo_paths: list[str] | None) -> list[str] | None:
+        """Validate storage paths for vehicle images."""
+        if photo_paths is None:
+            return photo_paths
+        for path in photo_paths:
+            if not path or len(path) > 500:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.invalid_vehicle_photo_path",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        return photo_paths
+
+
 class VehicleUnitSummary(BaseModel):
     """Unit summary on admin vehicle request rows."""
 
@@ -292,6 +322,18 @@ class VehicleOwnerSummary(BaseModel):
     profile_photo_url: str | None = None
 
 
+class VehicleReviewerSummary(BaseModel):
+    """Org member who approved or rejected a vehicle request."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    user_id: str
+    display_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    avatar_url: str | None = None
+
+
 class VehicleResponse(BaseModel):
     """Vehicle row."""
 
@@ -311,6 +353,8 @@ class VehicleResponse(BaseModel):
     fuel_type: str | None = None
     status: str
     rejection_reason: str | None = None
+    approved_by_user_id: str | None = None
+    rejected_by_user_id: str | None = None
     parking_slot_id: str | None = None
     status_updated_at: str
     sort_order: int = 0
@@ -319,6 +363,8 @@ class VehicleResponse(BaseModel):
     unit: VehicleUnitSummary | None = None
     owner: VehicleOwnerSummary | None = None
     parking_allotment: VehicleParkingAllotmentSummary | None = None
+    approved_by: VehicleReviewerSummary | None = None
+    rejected_by: VehicleReviewerSummary | None = None
 
 
 class ReviewVehicleRequest(BaseModel):

@@ -19,9 +19,11 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.db.repositories.parking_slots_repository import (
     ParkingSlotsRepository,
 )
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
+    ResubmitVehicleRequest,
     ReviewVehicleRequest,
     UpdateVehicleRequest,
     VehicleResponse,
@@ -47,6 +49,7 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_any,
 )
+from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -63,6 +66,7 @@ class VehiclesService:
         self.user_context = user_context
         self.repo = VehiclesRepository(db_connection)
         self.parking_slots_repo = ParkingSlotsRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
         self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
@@ -83,6 +87,8 @@ class VehiclesService:
             "contact_id",
             "unit_id",
             "parking_slot_id",
+            "approved_by_user_id",
+            "rejected_by_user_id",
         ):
             if out.get(key) is not None:
                 out[key] = str(out[key])
@@ -135,6 +141,23 @@ class VehiclesService:
         "parking_facility_floor_level",
         "parking_facility_wing",
         "parking_facility_tower_id",
+    )
+
+    _REVIEWER_ROW_KEYS = (
+        "approved_by_salutation",
+        "approved_by_first_name",
+        "approved_by_last_name",
+        "approved_by_email",
+        "approved_by_phone_isd_code",
+        "approved_by_phone_number",
+        "approved_by_avatar_url",
+        "rejected_by_salutation",
+        "rejected_by_first_name",
+        "rejected_by_last_name",
+        "rejected_by_email",
+        "rejected_by_phone_isd_code",
+        "rejected_by_phone_number",
+        "rejected_by_avatar_url",
     )
 
     def _build_unit_owner(self, row: dict[str, Any]) -> dict[str, Any] | None:
@@ -219,6 +242,38 @@ class VehiclesService:
             "facility": facility,
         }
 
+    def _build_vehicle_reviewer(
+        self,
+        row: dict[str, Any],
+        *,
+        kind: str,
+    ) -> dict[str, Any] | None:
+        """Build org-member summary for the admin who approved or rejected."""
+        user_id = row.get(f"{kind}_by_user_id")
+        if not user_id:
+            return None
+        prefix = f"{kind}_by"
+        display_name = (
+            build_full_name(
+                str(row.get(f"{prefix}_salutation") or "").strip(),
+                str(row.get(f"{prefix}_first_name") or "").strip(),
+                str(row.get(f"{prefix}_last_name") or "").strip(),
+            ).strip()
+            or None
+        )
+        isd = str(row.get(f"{prefix}_phone_isd_code") or "").strip()
+        number = str(row.get(f"{prefix}_phone_number") or "").strip()
+        phone = f"{isd}{number}".strip() or None
+        email = str(row.get(f"{prefix}_email") or "").strip() or None
+        avatar_url = str(row.get(f"{prefix}_avatar_url") or "").strip() or None
+        return {
+            "user_id": str(user_id),
+            "display_name": display_name,
+            "email": email,
+            "phone": phone,
+            "avatar_url": avatar_url,
+        }
+
     def _serialize_admin_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a project vehicle row to the admin list API contract."""
         payload = self._normalize_project_vehicle(row)
@@ -230,7 +285,14 @@ class VehiclesService:
         out["owner"] = self._build_unit_owner(row)
         out["unit"] = self._build_vehicle_unit(row)
         out["parking_allotment"] = self._build_parking_allotment(row)
-        for key in (*self._OWNER_ROW_KEYS, *self._UNIT_ROW_KEYS, *self._PARKING_ROW_KEYS):
+        out["approved_by"] = self._build_vehicle_reviewer(row, kind="approved")
+        out["rejected_by"] = self._build_vehicle_reviewer(row, kind="rejected")
+        for key in (
+            *self._OWNER_ROW_KEYS,
+            *self._UNIT_ROW_KEYS,
+            *self._PARKING_ROW_KEYS,
+            *self._REVIEWER_ROW_KEYS,
+        ):
             out.pop(key, None)
         return out
 
@@ -258,6 +320,31 @@ class VehiclesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return unit["project_id"]
+
+    async def _assert_parking_entitlement_available(
+        self,
+        *,
+        unit_id: str,
+        exclude_vehicle_id: str | None = None,
+    ) -> None:
+        """Ensure the unit has not reached its configured parking entitlement."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        entitlement = await self.units_repo.get_parking_entitlement_by_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        current = await self.repo.count_entitlement_consuming_by_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+            exclude_vehicle_id=exclude_vehicle_id,
+        )
+        if current >= entitlement:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_entitlement_exceeded",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"parking_entitlement": entitlement},
+            )
 
     async def list_vehicles(
         self,
@@ -311,6 +398,7 @@ class VehiclesService:
             contact_id=contact_id,
             unit_id=body.unit_id,
         )
+        await self._assert_parking_entitlement_available(unit_id=body.unit_id)
         try:
             row = await self.repo.create(
                 organization_id=org_id,
@@ -396,6 +484,87 @@ class VehiclesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return self._normalize_vehicle(row)
+
+    async def resubmit_vehicle(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+        body: ResubmitVehicleRequest,
+    ) -> dict[str, Any]:
+        """Return a rejected vehicle to pending and optionally patch its details."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        existing = await self.repo.get_by_id(
+            organization_id=org_id,
+            contact_id=contact_id,
+            vehicle_id=vehicle_id,
+        )
+        if not existing:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if existing.get("status") != VehicleStatus.REJECTED.value:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.vehicle_resubmit_not_allowed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        unit_id = str(existing["unit_id"])
+        project_id = str(existing["project_id"])
+        await self._assert_parking_entitlement_available(unit_id=unit_id)
+        patch = body.model_dump(exclude_unset=True, exclude_none=True)
+        if "vehicle_type" in patch and isinstance(patch["vehicle_type"], VehicleType):
+            patch["vehicle_type"] = patch["vehicle_type"].value
+        if "fuel_type" in patch and isinstance(patch["fuel_type"], VehicleFuelType):
+            patch["fuel_type"] = patch["fuel_type"].value
+        if "registration_number" in patch and patch["registration_number"]:
+            patch["registration_number"] = patch["registration_number"].strip().upper()
+        patch["status"] = VehicleStatus.PENDING.value
+        patch["rejection_reason"] = None
+        patch["approved_by_user_id"] = None
+        patch["rejected_by_user_id"] = None
+        try:
+            row = await self.repo.update(
+                organization_id=org_id,
+                contact_id=contact_id,
+                vehicle_id=vehicle_id,
+                update_data=patch,
+            )
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="contact_onboarding.errors.vehicle_registration_duplicate",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        if not row:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        normalized = self._normalize_vehicle(row)
+        await self._push().send_to_org_members(
+            organization_id=org_id,
+            message_key="notifications.push.vehicle.submitted",
+            notification_type="NOTIFICATION_TYPE_VEHICLE",
+            feed_type="vehicle",
+            params={
+                "registration_number": normalized.get("registration_number")
+                or existing.get("registration_number"),
+                "unit_label": unit_label_from_row({"unit_id": unit_id}),
+            },
+            data={
+                "vehicle_id": normalized.get("id"),
+                "project_id": project_id,
+                "unit_id": unit_id,
+                "screen": "vehicle_request_detail",
+            },
+            entity={"kind": "vehicle", "id": str(normalized.get("id") or "")},
+            options={
+                "click_action": "OPEN_VEHICLE_REQUEST",
+                "idempotency_key": f"vehicle:{normalized.get('id')}:resubmitted",
+            },
+        )
+        return normalized
 
     async def withdraw_vehicle(self, *, contact_id: str, vehicle_id: str) -> None:
         """Hard-delete a pending vehicle request (before admin approval)."""
@@ -597,6 +766,7 @@ class VehiclesService:
         """Approve or reject a vehicle request and assign a parking slot on approval."""
         org_id = self.user_context.organization_id
         assert org_id
+        reviewer_user_id = self.user_context.user_id
         vehicle = await self.repo.get_by_project(
             organization_id=org_id,
             project_id=project_id,
@@ -615,6 +785,16 @@ class VehiclesService:
 
         if body.status == VehicleStatus.APPROVED:
             assert body.parking_slot_id
+            unit_id = str(vehicle.get("unit_id") or "")
+            if not unit_id:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.unit_not_found",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            await self._assert_parking_entitlement_available(
+                unit_id=unit_id,
+                exclude_vehicle_id=vehicle_id,
+            )
             slot = await self.parking_slots_repo.get_slot(
                 organization_id=org_id,
                 project_id=project_id,
@@ -643,6 +823,8 @@ class VehiclesService:
                     "status": VehicleStatus.APPROVED.value,
                     "parking_slot_id": body.parking_slot_id,
                     "rejection_reason": None,
+                    "approved_by_user_id": reviewer_user_id,
+                    "rejected_by_user_id": None,
                 },
             )
         else:
@@ -654,6 +836,8 @@ class VehiclesService:
                     "status": VehicleStatus.REJECTED.value,
                     "rejection_reason": body.rejection_reason,
                     "parking_slot_id": None,
+                    "approved_by_user_id": None,
+                    "rejected_by_user_id": reviewer_user_id,
                 },
             )
         if not row:
@@ -661,7 +845,12 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.vehicle_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        normalized = self._normalize_vehicle(row)
+        detail = await self.repo.get_detail_by_project(
+            organization_id=org_id,
+            project_id=project_id,
+            vehicle_id=vehicle_id,
+        )
+        normalized = self._serialize_admin_vehicle(detail or row)
         message_key = (
             "notifications.push.vehicle.approved"
             if body.status == VehicleStatus.APPROVED

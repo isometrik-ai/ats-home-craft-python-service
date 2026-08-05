@@ -34,8 +34,12 @@ def _service(*, push: _FakePushDispatcher | None = None) -> VehiclesService:
     """Build VehiclesService with mocked dependencies."""
     svc = VehiclesService(db_connection=MagicMock(), user_context=MagicMock())
     svc.user_context.organization_id = "org-1"
+    svc.user_context.user_id = "user-1"
     svc.repo = AsyncMock()
     svc.parking_slots_repo = AsyncMock()
+    svc.units_repo = AsyncMock()
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=2)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=0)
     svc._push_dispatcher = push or _FakePushDispatcher()
     return svc
 
@@ -73,6 +77,101 @@ async def test_withdraw_approved_rejected():
         await svc.withdraw_vehicle(contact_id="c1", vehicle_id="v1")
 
     svc.repo.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resubmit_rejected_sets_pending_and_notifies():
+    """Rejected vehicles can be resubmitted to pending."""
+    from apps.user_service.app.schemas.contact_onboarding import ResubmitVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.REJECTED.value,
+        "project_id": "p1",
+        "unit_id": "u1",
+        "registration_number": "MH12AB1234",
+        "rejection_reason": "Blurry photo",
+    }
+    svc.repo.update.return_value = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "MH12AB1234",
+        "photo_paths": ["org/veh.jpg"],
+        "status": VehicleStatus.PENDING.value,
+        "rejection_reason": None,
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+
+    body = ResubmitVehicleRequest(photo_paths=["org/veh.jpg"])
+    result = await svc.resubmit_vehicle(contact_id="c1", vehicle_id="v1", body=body)
+
+    update_kwargs = svc.repo.update.await_args.kwargs
+    assert update_kwargs["update_data"]["status"] == VehicleStatus.PENDING.value
+    assert update_kwargs["update_data"]["rejection_reason"] is None
+    assert update_kwargs["update_data"]["approved_by_user_id"] is None
+    assert update_kwargs["update_data"]["rejected_by_user_id"] is None
+    assert update_kwargs["update_data"]["photo_paths"] == ["org/veh.jpg"]
+    assert result["status"] == VehicleStatus.PENDING.value
+    push = svc._push_dispatcher
+    assert len(push.org_calls) == 1
+    assert push.org_calls[0]["message_key"] == "notifications.push.vehicle.submitted"
+    assert push.org_calls[0]["options"]["idempotency_key"] == "vehicle:v1:resubmitted"
+
+
+@pytest.mark.asyncio
+async def test_resubmit_pending_not_allowed():
+    """Only rejected vehicles can be resubmitted."""
+    from apps.user_service.app.schemas.contact_onboarding import ResubmitVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+        "project_id": "p1",
+        "unit_id": "u1",
+    }
+
+    with pytest.raises(ValidationException):
+        await svc.resubmit_vehicle(
+            contact_id="c1",
+            vehicle_id="v1",
+            body=ResubmitVehicleRequest(),
+        )
+
+    svc.repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resubmit_rejects_when_entitlement_full():
+    """Resubmit fails when the unit has no remaining parking entitlement."""
+    from apps.user_service.app.schemas.contact_onboarding import ResubmitVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.REJECTED.value,
+        "project_id": "p1",
+        "unit_id": "u1",
+    }
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=1)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=1)
+
+    with pytest.raises(ValidationException):
+        await svc.resubmit_vehicle(
+            contact_id="c1",
+            vehicle_id="v1",
+            body=ResubmitVehicleRequest(),
+        )
+
+    svc.repo.update.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -184,10 +283,25 @@ async def test_list_project_vehicles_includes_owner_and_unit():
             "parking_facility_floor_level": "B1",
             "parking_facility_wing": "A",
             "parking_facility_tower_id": "tower-1",
+            "approved_by_user_id": "admin-1",
+            "approved_by_salutation": "Mr.",
+            "approved_by_first_name": "Amit",
+            "approved_by_last_name": "Sharma",
+            "approved_by_email": "amit@example.com",
+            "approved_by_phone_isd_code": "+91",
+            "approved_by_phone_number": "9000000001",
+            "approved_by_avatar_url": "https://cdn.example.com/admins/amit.jpg",
         }
     ]
 
     items = await svc.list_project_vehicles(project_id="p1", status=VehicleStatus.PENDING)
+
+    assert items[0]["approved_by"]["user_id"] == "admin-1"
+    assert items[0]["approved_by"]["display_name"] == "Mr. Amit Sharma"
+    assert items[0]["approved_by"]["email"] == "amit@example.com"
+    assert items[0]["approved_by"]["phone"] == "+919000000001"
+    assert items[0]["approved_by"]["avatar_url"] == "https://cdn.example.com/admins/amit.jpg"
+    assert items[0]["rejected_by"] is None
 
     assert items[0]["owner"]["contact_id"] == "owner-1"
     assert items[0]["owner"]["display_name"] == "Mr. Rajesh Kapoor"
@@ -484,6 +598,31 @@ async def test_create_vehicle_success():
 
 
 @pytest.mark.asyncio
+async def test_create_vehicle_rejects_when_entitlement_full():
+    """Create vehicle fails when the unit has no remaining parking entitlement."""
+    from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=1)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=1)
+
+    body = CreateVehicleRequest(
+        unit_id="u1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        registration_number="mh12ab1234",
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.create_vehicle(contact_id="c1", body=body)
+
+    svc.repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_review_vehicle_approves_and_assigns_slot():
     """Approve assigns parking slot and updates vehicle."""
     from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
@@ -494,6 +633,7 @@ async def test_review_vehicle_approves_and_assigns_slot():
         "status": VehicleStatus.PENDING.value,
         "project_id": "p1",
         "contact_id": "c1",
+        "unit_id": "u1",
     }
     svc.parking_slots_repo.get_slot.return_value = {"id": "slot-1", "status": "available"}
     svc.parking_slots_repo.assign_slot.return_value = True
@@ -508,20 +648,66 @@ async def test_review_vehicle_approves_and_assigns_slot():
         "photo_paths": [],
         "status": VehicleStatus.APPROVED.value,
         "parking_slot_id": "slot-1",
+        "approved_by_user_id": "user-1",
         "status_updated_at": "2026-07-16T10:00:00Z",
         "created_at": "2026-07-16T09:00:00Z",
         "updated_at": "2026-07-16T10:00:00Z",
         "sort_order": 0,
     }
+    svc.repo.get_detail_by_project.return_value = {
+        **svc.repo.update_by_project.return_value,
+        "approved_by_salutation": "Ms.",
+        "approved_by_first_name": "Priya",
+        "approved_by_last_name": "Singh",
+        "approved_by_email": "priya@example.com",
+        "approved_by_phone_isd_code": "+91",
+        "approved_by_phone_number": "9000000002",
+        "approved_by_avatar_url": "https://cdn.example.com/priya.jpg",
+    }
 
     body = ReviewVehicleRequest(status=VehicleStatus.APPROVED, parking_slot_id="slot-1")
     result = await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
 
+    svc.repo.get_detail_by_project.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        vehicle_id="v1",
+    )
+
+    update_kwargs = svc.repo.update_by_project.await_args.kwargs
+    assert update_kwargs["update_data"]["approved_by_user_id"] == "user-1"
+    assert update_kwargs["update_data"]["rejected_by_user_id"] is None
     svc.parking_slots_repo.assign_slot.assert_awaited_once()
     assert result["status"] == VehicleStatus.APPROVED.value
+    assert result["approved_by"]["user_id"] == "user-1"
+    assert result["approved_by"]["display_name"] == "Ms. Priya Singh"
     push = svc._push_dispatcher
     assert len(push.contact_calls) == 1
     assert push.contact_calls[0]["message_key"] == "notifications.push.vehicle.approved"
+
+
+@pytest.mark.asyncio
+async def test_review_vehicle_rejects_when_entitlement_full():
+    """Approve fails when the unit already has the maximum approved/pending vehicles."""
+    from apps.user_service.app.schemas.contact_onboarding import ReviewVehicleRequest
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.PENDING.value,
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+    }
+    svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=1)
+    svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=1)
+
+    body = ReviewVehicleRequest(status=VehicleStatus.APPROVED, parking_slot_id="slot-1")
+
+    with pytest.raises(ValidationException):
+        await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
+
+    svc.parking_slots_repo.assign_slot.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -858,17 +1044,34 @@ async def test_review_vehicle_reject_success():
             "photo_paths": [],
             "status": VehicleStatus.REJECTED.value,
             "rejection_reason": "Invalid docs",
+            "rejected_by_user_id": "user-1",
             "status_updated_at": "2026-07-16T10:00:00Z",
             "created_at": "2026-07-16T09:00:00Z",
             "updated_at": "2026-07-16T10:00:00Z",
             "sort_order": 0,
         }
     )
+    svc.repo.get_detail_by_project.return_value = {
+        **svc.repo.update_by_project.return_value,
+        "rejected_by_salutation": "Mr.",
+        "rejected_by_first_name": "Ravi",
+        "rejected_by_last_name": "Mehta",
+        "rejected_by_email": "ravi@example.com",
+        "rejected_by_phone_isd_code": "+91",
+        "rejected_by_phone_number": "9000000003",
+        "rejected_by_avatar_url": None,
+    }
     body = ReviewVehicleRequest(status=VehicleStatus.REJECTED, rejection_reason="Invalid docs")
 
     result = await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
 
+    update_kwargs = svc.repo.update_by_project.await_args.kwargs
+    assert update_kwargs["update_data"]["rejected_by_user_id"] == "user-1"
+    assert update_kwargs["update_data"]["approved_by_user_id"] is None
     assert result["status"] == VehicleStatus.REJECTED.value
+    assert result["rejected_by"]["user_id"] == "user-1"
+    assert result["rejected_by"]["display_name"] == "Mr. Ravi Mehta"
+    assert result["rejected_by"]["email"] == "ravi@example.com"
     svc.parking_slots_repo.assign_slot.assert_not_called()
     push = svc._push_dispatcher
     assert len(push.contact_calls) == 1

@@ -62,6 +62,7 @@ from apps.user_service.app.schemas.project_setup import (
     ProjectMediaResponse,
     ProjectStatusResponse,
     ProjectSummaryResponse,
+    TowerDetailResponse,
     UpdateProjectRequest,
     UpdateTowerRequest,
 )
@@ -708,6 +709,12 @@ async def delete_project_media(
     "/{project_id}/towers",
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a tower",
+    description=(
+        "Create a tower. Optionally include nested `wings`, `gates`, `lifts`, and `floors` "
+        "to create the full tower setup in one request. Nested gates/floors link to wings "
+        "via optional `wing_client_key` (matching wing `code` or `name`). "
+        "Individual nested resources can still be added later via their dedicated endpoints."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
@@ -725,7 +732,7 @@ async def create_tower(
     current_user: dict = Depends(get_user_from_auth),
     body: CreateTowerRequest = Body(...),
 ):
-    """Create a tower."""
+    """Create a tower, optionally with its wings, gates, lifts, and floors."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -784,11 +791,53 @@ async def list_towers(
     )
 
 
+@handle_api_exceptions("get tower detail")
+@router.get(
+    "/{project_id}/towers/{tower_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get tower detail",
+    description=(
+        "Returns a tower with nested `wings`, `gates`, `lifts`, and `floors` for the builder edit page."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_tower_detail(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    tower_id: str = Path(..., description="Tower identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Get a tower with its nested builder entities."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+    )
+    service = TowersService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_tower_detail(project_id=project_id, tower_id=tower_id)
+    return success_response(
+        request=request,
+        message_key="project_setup.success.tower_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=TowerDetailResponse.model_validate(data).model_dump(exclude_none=True),
+    )
+
+
 @handle_api_exceptions("update tower")
 @router.patch(
     "/{project_id}/towers/{tower_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Update a tower",
+    description=(
+        "Patch a tower. Optionally include nested `wings`, `gates`, `lifts`, and `floors` "
+        "to upsert child records in the same request. Items with an `id` are updated; items "
+        "without an `id` are created. Nested gates/floors link to wings via optional "
+        "`wing_client_key` (matching wing `code`, `name`, or `id`). When nested arrays are "
+        "omitted, the response is the tower row only; when present, the response also includes "
+        "the processed `wings`, `gates`, `lifts`, and `floors` arrays."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
@@ -2264,6 +2313,7 @@ async def create_unit(
     summary="List units",
     description=(
         "Returns paginated non-parking units for the unit registry table. "
+        "Each item includes `parking_entitlement` from the unit config. "
         "Supports search by unit code/label/owner name and filters for property type, "
         "tower, config, and unit status."
     ),
@@ -3128,7 +3178,8 @@ async def delete_site_map_overlay(
     description=(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
         "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
-        "status), and `parking_allotment` (slot number, status, facility) when assigned. "
+        "status), `parking_allotment` (slot number, status, facility) when assigned, and "
+        "`approved_by` / `rejected_by` org-member summaries when reviewed. "
         "Optional `search` matches registration number or unit code/label. "
         "Filter by `status`, `vehicle_type`, and `fuel_type`."
     ),
@@ -3191,7 +3242,8 @@ async def list_project_vehicle_requests(
     summary="Approve or reject a vehicle request",
     description=(
         "On approval, assigns an available parking slot from a parking facility. "
-        "On rejection, stores rejection_reason."
+        "On rejection, stores rejection_reason. Response includes nested "
+        "`approved_by` / `rejected_by` org-member summaries when applicable."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )

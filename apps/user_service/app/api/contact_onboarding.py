@@ -21,6 +21,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
     DeclineHouseholdInvitationRequest,
+    ResubmitVehicleRequest,
     SetDefaultUnitRequest,
     UpdateHouseholdMemberRequest,
     UpdateVehicleRequest,
@@ -555,6 +556,58 @@ async def update_vehicle(
     return success_response(
         request=request,
         message_key="contact_onboarding.success.vehicle_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("resubmit contact vehicle request")
+@router.post(
+    "/vehicles/{vehicle_id}/resubmit",
+    status_code=http_status.HTTP_200_OK,
+    summary="Resubmit a rejected vehicle request",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="vehicles",
+    category="CONTACT_ONBOARDING",
+)
+async def resubmit_vehicle(
+    request: Request,
+    vehicle_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: ResubmitVehicleRequest = Body(default_factory=ResubmitVehicleRequest),
+):
+    """Return a rejected vehicle to pending and optionally update its details."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    vehicles_service = VehiclesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await vehicles_service.resubmit_vehicle(
+        contact_id=str(contact["id"]),
+        vehicle_id=vehicle_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Resubmitted vehicle request: {vehicle_id}",
+        risk_level="medium",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.vehicle_resubmitted",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

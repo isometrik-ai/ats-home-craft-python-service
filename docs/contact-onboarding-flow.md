@@ -143,6 +143,8 @@ Key enums: `ContactOnboardingStep`, `ContactUnitStatus` (`pending`/`active`/`mov
 | `status_updated_at`      | timestamptz | Set whenever `status` changes                                   |
 | `deleted_at`             | timestamptz | Set on soft-remove; row retained for audit                      |
 | `rejection_reason`       | text        | Set by admin when `status = rejected`                           |
+| `approved_by_user_id`    | uuid        | Org member who approved the request                             |
+| `rejected_by_user_id`    | uuid        | Org member who rejected the request                             |
 | `parking_slot_id`        | uuid FK     | Set by admin on approve; links to `facility_parking_slots`      |
 
 Media/files (profile photo, vehicle images) store **paths only** — no raw blobs in Postgres.
@@ -167,6 +169,7 @@ most endpoints take **no** contact id in the path.
 | GET    | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Vehicle detail with unit and parking slot allotment               |
 | POST   | `/v1/contact-onboarding/vehicles`                                      | Add a vehicle                                                     |
 | PATCH  | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Update a vehicle                                                  |
+| POST   | `/v1/contact-onboarding/vehicles/{vehicle_id}/resubmit`                | Resubmit a rejected request (`rejected` → `pending`)              |
 | POST   | `/v1/contact-onboarding/vehicles/{vehicle_id}/withdraw`                | Withdraw a pending request (hard-delete before approval)          |
 | DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Soft-remove an approved vehicle (`status = removed`)              |
 | POST   | `/v1/contact-onboarding/steps/vehicles/complete`                       | Complete `vehicles` for one unit (`{ contact_unit_id }`)          |
@@ -223,9 +226,17 @@ Enforced in `contact_onboarding_service.py` and related services:
     1. Admin lists available slots `GET .../facilities/{facility_id}/parking-slots?status=available`
     1. Admin approves `PATCH .../vehicle-requests/{vehicle_id}` with `{ "status": "approved", "parking_slot_id": "..." }`
        or rejects with `{ "status": "rejected", "rejection_reason": "..." }`
+    1. On approve/reject the API stores `approved_by_user_id` / `rejected_by_user_id` from the
+       authenticated org member (cleared on resubmit). List/detail/review responses also include
+       nested `approved_by` / `rejected_by` summaries (`user_id`, `display_name`, `email`, `phone`,
+       `avatar_url`) from `organization_members`.
+    1. If rejected, resident may fix details and `POST /vehicles/{vehicle_id}/resubmit` → back to `pending`
     1. On approve: slot → `assigned`, vehicle gets `parking_slot_id`. On remove: slot released.
   - Parking slots are provisioned when a **parking** facility is created in project setup
     (`facilities.parking_slots` → `facility_parking_slots` rows). See `docs/project-setup-flow.md`.
+  - **Resubmit (rejected only):** `POST /vehicles/{id}/resubmit` sets `status = pending`, clears
+    `rejection_reason`, optionally updates `photo_paths` / make / model / color / registration, and
+    re-notifies admins. Parking entitlement is re-checked (rejected rows do not consume a slot).
   - **Withdraw (pending only):** `POST /vehicles/{id}/withdraw` permanently deletes the row.
     Allowed only while `status = pending` (before admin approval).
   - **Remove (approved only):** `DELETE /vehicles/{id}` sets `status = removed`, `deleted_at = now()`,
@@ -320,7 +331,7 @@ Step 5  GET  /review                    → aggregate + unit_onboarding progress
 - **`GET /properties`** returns pending and active `contact_units` **grouped by project**.
   Each item has `project` (name, code, address, city/state, coordinates, `property_types`, etc.)
   and `units[]` with unit display fields (`code`, `tower_name`, `floor_name`, `config_label`,
-  `is_default_login`, etc.). `total` is the number of projects.
+  `parking_entitlement`, `is_default_login`, etc.). `total` is the number of projects.
 - **`POST /properties/confirm`** requires `complete_profile` first. Accepts one or more
   `contact_unit_ids` and optional `default_contact_unit_id` when confirming multiple units.
   Selected pending rows → `active`; unit onboarding steps are seeded for each.

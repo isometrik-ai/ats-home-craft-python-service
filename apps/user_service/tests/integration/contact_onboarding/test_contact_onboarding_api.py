@@ -287,6 +287,7 @@ _FAKE_PROPERTY_GROUP = {
             "is_primary": True,
             "is_default_login": False,
             "relationship": "self",
+            "parking_entitlement": 2,
         }
     ],
 }
@@ -349,6 +350,7 @@ async def test_list_properties(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"][0]["project"]["name"] == "Sunrise Towers"
     assert body["data"][0]["units"][0]["code"] == "A-101"
+    assert body["data"][0]["units"][0]["parking_entitlement"] == 2
 
 
 @pytest.mark.asyncio
@@ -556,6 +558,33 @@ async def test_withdraw_vehicle(monkeypatch, client):
 
     res = await client.post("/v1/contact-onboarding/vehicles/veh-1/withdraw")
     assert_success(res, 200)
+
+
+@pytest.mark.asyncio
+async def test_resubmit_vehicle(monkeypatch, client):
+    """POST /contact-onboarding/vehicles/{id}/resubmit resubmits rejected request."""
+
+    _patch_contact_context(monkeypatch)
+
+    async def fake_resubmit(_self, *, contact_id: str, vehicle_id: str, body):
+        del _self
+        assert contact_id == CONTACT_ID
+        assert vehicle_id == "veh-1"
+        assert body.photo_paths == ["org/veh.jpg"]
+        return {**_FAKE_VEHICLE, "status": "pending", "photo_paths": ["org/veh.jpg"]}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.resubmit_vehicle",
+        fake_resubmit,
+    )
+
+    res = await client.post(
+        "/v1/contact-onboarding/vehicles/veh-1/resubmit",
+        json={"photo_paths": ["org/veh.jpg"]},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["status"] == "pending"
+    assert body["data"]["photo_paths"] == ["org/veh.jpg"]
 
 
 @pytest.mark.asyncio

@@ -660,6 +660,41 @@ async def test_list_towers(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_get_tower_detail(monkeypatch, client):
+    """GET /projects/{id}/towers/{tower_id} returns nested tower detail."""
+
+    _patch_projects_access(monkeypatch)
+
+    async def fake_get_tower_detail(_self, *, project_id: str, tower_id: str):
+        del _self
+        assert project_id == PROJECT_ID
+        assert tower_id == TOWER_ID
+        return {
+            **_FAKE_TOWER,
+            "organization_id": ORG,
+            "numbering_pattern": "floor_unit",
+            "starting_unit_number": 1,
+            "sort_order": 0,
+            "has_wings": True,
+            "wings": [{"id": WING_ID, "name": "East Wing"}],
+            "gates": [{"id": GATE_ID, "name": "Main Gate"}],
+            "lifts": [{"id": LIFT_ID, "name": "Lift 1"}],
+            "floors": [{"id": FLOOR_ID, "display_name": "Ground"}],
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.towers_service.TowersService.get_tower_detail",
+        fake_get_tower_detail,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/towers/{TOWER_ID}")
+    body = assert_success(res, 200)
+    assert body["data"]["code"] == "TA"
+    assert len(body["data"]["wings"]) == 1
+    assert len(body["data"]["gates"]) == 1
+
+
+@pytest.mark.asyncio
 async def test_update_tower(monkeypatch, client):
     """PATCH /projects/{id}/towers/{tower_id} updates tower."""
 

@@ -310,6 +310,7 @@ class UnitsRepository(BaseRepository):
                 uc.config_kind,
                 uc.display_label AS config_display_label,
                 uc.name AS config_name,
+                COALESCE(uc.parking_entitlement, 0) AS parking_entitlement,
                 pci.description AS plot_description,
                 owner_row.owner_contact_id::text AS owner_contact_id,
                 owner_row.owner_prefix,
@@ -550,6 +551,26 @@ class UnitsRepository(BaseRepository):
             unit_id,
         )
         return [dict(row) for row in rows]
+
+    async def get_parking_entitlement_by_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> int:
+        """Return parking entitlement from the unit's linked configuration."""
+        entitlement = await self.db_connection.fetchval(
+            """
+            SELECT COALESCE(uc.parking_entitlement, 0)
+            FROM units u
+            LEFT JOIN unit_configs uc ON uc.id = u.config_id
+            WHERE u.id = $1::uuid
+              AND u.organization_id = $2::uuid
+            """,
+            unit_id,
+            organization_id,
+        )
+        return int(entitlement or 0)
 
     async def get_unit_owner_contact(
         self,
