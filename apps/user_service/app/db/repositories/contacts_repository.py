@@ -1145,12 +1145,16 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
     ) -> tuple[list[dict[str, Any]], int]:
         """List contacts with simple search (first/last/email) and pagination."""
         offset = (page - 1) * page_size
-        args: list[Any] = [organization_id, ClientStatus.DELETED.value]
-        where = ["organization_id = $1::uuid", "status != $2"]
-        next_param_index = 3
+        args: list[Any] = [organization_id]
+        where = ["organization_id = $1::uuid"]
+        next_param_index = 2
         if status:
             where.append(f"status = ${next_param_index}")
             args.append(status)
+            next_param_index += 1
+        else:
+            where.append(f"status <> ${next_param_index}")
+            args.append(ClientStatus.DELETED.value)
             next_param_index += 1
         if contact_type:
             where.append(
