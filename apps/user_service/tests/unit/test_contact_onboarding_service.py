@@ -890,6 +890,31 @@ async def test_complete_profile_updates_contact_and_step(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_complete_profile_can_clear_gender(monkeypatch):
+    """complete_profile clears gender when the client explicitly sends null."""
+    repo = _FakeOnboardingRepo()
+    svc = _service(onboarding_repo=repo)
+    contacts_service = MagicMock()
+    contacts_service.update_contact = AsyncMock()
+    contacts_service.get_contact_details = AsyncMock(
+        return_value={"id": "contact-1", "gender": None}
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+    body = CompleteProfileRequest.model_validate(
+        {"first_name": "Jane", "gender": None},
+    )
+
+    await svc.complete_profile(contact_id="contact-1", body=body)
+
+    update_body = contacts_service.update_contact.await_args.kwargs["body"]
+    assert "gender" in update_body.model_fields_set
+    assert update_body.gender is None
+
+
+@pytest.mark.asyncio
 async def test_get_review_aggregates_sections(monkeypatch):
     """get_review combines contact, units, vehicles, household, and status."""
     svc = _service()
