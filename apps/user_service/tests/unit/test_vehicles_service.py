@@ -175,6 +175,47 @@ async def test_resubmit_rejects_when_entitlement_full():
 
 
 @pytest.mark.asyncio
+async def test_release_for_move_out_deletes_pending_and_soft_removes_approved():
+    """Move-out cleanup hard-deletes pending and soft-removes approved vehicles."""
+    svc = _service()
+    svc.repo.list_by_contact = AsyncMock(
+        return_value=[
+            {
+                "id": "v-pending",
+                "contact_id": "c1",
+                "project_id": "p1",
+                "status": VehicleStatus.PENDING.value,
+            },
+            {
+                "id": "v-approved",
+                "contact_id": "c1",
+                "project_id": "p1",
+                "status": VehicleStatus.APPROVED.value,
+                "parking_slot_id": "slot-1",
+            },
+        ]
+    )
+
+    await svc.release_for_move_out(contact_id="c1", unit_id="u1")
+
+    svc.repo.delete.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v-pending",
+    )
+    svc.parking_slots_repo.release_slot.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        slot_id="slot-1",
+    )
+    svc.repo.soft_remove.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v-approved",
+    )
+
+
+@pytest.mark.asyncio
 async def test_remove_pending_use_withdraw():
     """Pending vehicles must use withdraw, not DELETE remove."""
     svc = _service()

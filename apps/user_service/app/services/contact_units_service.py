@@ -28,6 +28,7 @@ from apps.user_service.app.schemas.enums import (
     ContactUnitRelationship,
     ContactUnitStatus,
 )
+from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -508,6 +509,11 @@ class ContactUnitsService:
                     message_key="project_setup.errors.unit_owner_not_assigned",
                     custom_code=CustomStatusCode.NOT_FOUND,
                 )
+            vehicles_service = VehiclesService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            await vehicles_service.release_for_move_out(unit_id=unit_id)
             await self.contact_roles_repo.end_active_roles_for_unit(
                 organization_id=org_id,
                 unit_id=unit_id,
@@ -546,6 +552,12 @@ class ContactUnitsService:
                 organization_id=org_id,
                 unit_id=unit_id,
             )
+            if released:
+                vehicles_service = VehiclesService(
+                    db_connection=self.db_connection,
+                    user_context=self.user_context,
+                )
+                await vehicles_service.release_for_move_out(unit_id=unit_id)
             row = await self._create_unit_allotment(
                 project_id=project_id,
                 unit_id=unit_id,

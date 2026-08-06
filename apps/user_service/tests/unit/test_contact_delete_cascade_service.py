@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from apps.user_service.app.schemas.enums import VehicleStatus
 from apps.user_service.app.services.contact_delete_cascade_service import (
     ContactDeleteCascadeService,
 )
@@ -23,13 +22,6 @@ def _service() -> ContactDeleteCascadeService:
             organization_id="org-1",
         ),
     )
-    svc.vehicles_repo = MagicMock()
-    svc.vehicles_repo.list_by_contact = AsyncMock(return_value=[])
-    svc.vehicles_repo.list_by_unit = AsyncMock(return_value=[])
-    svc.vehicles_repo.delete = AsyncMock()
-    svc.vehicles_repo.soft_remove = AsyncMock()
-    svc.parking_slots_repo = MagicMock()
-    svc.parking_slots_repo.release_slot = AsyncMock()
     svc.passes_repo = MagicMock()
     svc.passes_repo.list_active_ids_for_host = AsyncMock(return_value=[])
     svc.passes_repo.list_active_for_unit = AsyncMock(return_value=[])
@@ -59,8 +51,14 @@ def _service() -> ContactDeleteCascadeService:
 
 
 @pytest.mark.asyncio
-async def test_primary_occupant_delete_vacates_units_and_cancels_open_requests():
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_primary_occupant_delete_vacates_units_and_cancels_open_requests(
+    mock_vehicles_cls,
+):
     """Primary occupant delete releases occupants, vacates units, and cancels in-flight requests."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
         {
@@ -100,20 +98,20 @@ async def test_primary_occupant_delete_vacates_units_and_cancels_open_requests()
         organization_id="org-1",
         contact_unit_id="cu-owner",
     )
-    svc.vehicles_repo.list_by_unit.assert_awaited_once_with(
-        organization_id="org-1",
-        unit_id="unit-1",
-    )
+    mock_vehicles.release_for_move_out.assert_awaited_once_with(unit_id="unit-1")
     svc.passes_repo.list_active_for_unit.assert_awaited_once_with(
         organization_id="org-1",
         unit_id="unit-1",
     )
-    svc.vehicles_repo.list_by_contact.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes():
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes(mock_vehicles_cls):
     """Primary occupant delete removes vehicles and passes created by any household member."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
         {
@@ -122,15 +120,6 @@ async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes():
             "project_id": "project-1",
             "status": "active",
             "relationship": "self",
-        }
-    ]
-    svc.vehicles_repo.list_by_unit.return_value = [
-        {
-            "id": "veh-family",
-            "contact_id": "family-abc",
-            "project_id": "project-1",
-            "status": VehicleStatus.APPROVED.value,
-            "parking_slot_id": "slot-1",
         }
     ]
     svc.passes_repo.list_active_for_unit.return_value = [
@@ -143,11 +132,7 @@ async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes():
         contact={},
     )
 
-    svc.vehicles_repo.soft_remove.assert_awaited_once_with(
-        organization_id="org-1",
-        contact_id="family-abc",
-        vehicle_id="veh-family",
-    )
+    mock_vehicles.release_for_move_out.assert_awaited_once_with(unit_id="unit-1")
     svc.passes_repo.cancel.assert_awaited_once_with(
         organization_id="org-1",
         host_contact_id="family-abc",
@@ -157,8 +142,14 @@ async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes():
 
 
 @pytest.mark.asyncio
-async def test_primary_occupant_delete_soft_deletes_household_without_remaining_links():
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_primary_occupant_delete_soft_deletes_household_without_remaining_links(
+    mock_vehicles_cls,
+):
     """Primary occupant delete soft-deletes household contacts with no other unit links."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
     svc = _service()
     svc.contact_units_repo.list_household_by_primary.return_value = [{"contact_id": "family-abc"}]
     svc.contact_units_repo.list_open_links_for_contact = AsyncMock(
@@ -202,8 +193,14 @@ async def test_primary_occupant_delete_soft_deletes_household_without_remaining_
 
 
 @pytest.mark.asyncio
-async def test_primary_occupant_delete_keeps_household_with_remaining_unit_links():
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_primary_occupant_delete_keeps_household_with_remaining_unit_links(
+    mock_vehicles_cls,
+):
     """Primary occupant delete skips household contacts that still belong to another unit."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
     svc = _service()
     svc.contact_units_repo.list_household_by_primary.return_value = [{"contact_id": "family-abc"}]
     svc.contact_units_repo.list_open_links_for_contact = AsyncMock(
@@ -242,8 +239,14 @@ async def test_primary_occupant_delete_keeps_household_with_remaining_unit_links
 
 
 @pytest.mark.asyncio
-async def test_household_delete_releases_link_without_vehicle_or_pass_cleanup():
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_household_delete_releases_link_without_vehicle_or_pass_cleanup(
+    mock_vehicles_cls,
+):
     """Household delete moves out the member but keeps unit vehicles and passes."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
         {
@@ -273,16 +276,19 @@ async def test_household_delete_releases_link_without_vehicle_or_pass_cleanup():
         organization_id="org-1",
         contact_unit_id="cu-family",
     )
-    svc.vehicles_repo.list_by_contact.assert_not_awaited()
-    svc.vehicles_repo.list_by_unit.assert_not_awaited()
+    mock_vehicles.release_for_move_out.assert_not_awaited()
     svc.passes_repo.list_active_ids_for_host.assert_not_awaited()
     svc.passes_repo.list_active_for_unit.assert_not_awaited()
     svc.units_repo.mark_unit_vacant.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_tenant_delete_releases_links_and_vehicles():
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_tenant_delete_releases_links_and_vehicles(mock_vehicles_cls):
     """Approved tenant delete moves out contact_units and removes approved vehicles."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
         {
@@ -305,15 +311,6 @@ async def test_tenant_delete_releases_links_and_vehicles():
             "contact_id": "tenant-1",
         }
     ]
-    svc.vehicles_repo.list_by_contact.return_value = [
-        {
-            "id": "veh-1",
-            "contact_id": "tenant-1",
-            "project_id": "project-1",
-            "status": VehicleStatus.APPROVED.value,
-            "parking_slot_id": "slot-1",
-        }
-    ]
 
     await svc.cascade_before_soft_delete(
         contact_id="tenant-1",
@@ -321,14 +318,17 @@ async def test_tenant_delete_releases_links_and_vehicles():
     )
 
     svc.contact_units_repo.release_open_links_for_contact.assert_awaited_once()
-    svc.parking_slots_repo.release_slot.assert_awaited_once()
-    svc.vehicles_repo.soft_remove.assert_awaited_once()
+    mock_vehicles.release_for_move_out.assert_awaited_once_with(contact_id="tenant-1")
     svc.units_repo.mark_unit_vacant.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_tenant_delete_cancels_active_passes():
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_tenant_delete_cancels_active_passes(mock_vehicles_cls):
     """Active visitor passes hosted by an approved tenant are cancelled."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
         {

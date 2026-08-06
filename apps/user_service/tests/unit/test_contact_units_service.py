@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -372,8 +373,17 @@ async def test_admin_assign_unit_creates_pending_allotment():
 
 
 @pytest.mark.asyncio
-async def test_unassign_unit_owner_marks_vacant():
-    """Unassign releases owner links and marks the unit vacant."""
+async def test_unassign_unit_owner_marks_vacant(monkeypatch):
+    """Unassign releases owner links, clears vehicles, and marks the unit vacant."""
+    release_calls: list[dict[str, Any]] = []
+
+    async def fake_release_for_move_out(_self, **kwargs):
+        release_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_units_service.VehiclesService.release_for_move_out",
+        fake_release_for_move_out,
+    )
     svc = _service()
     _mock_transaction(svc)
     svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
@@ -384,6 +394,7 @@ async def test_unassign_unit_owner_marks_vacant():
 
     result = await svc.unassign_unit_owner(project_id="proj-1", unit_id="unit-1")
 
+    assert release_calls == [{"unit_id": "unit-1"}]
     svc.repo.release_unit_owner_links.assert_awaited_once()
     svc.units_repo.mark_unit_vacant.assert_awaited_once_with(
         organization_id="org-1",
@@ -407,8 +418,17 @@ async def test_unassign_unit_owner_not_found():
 
 
 @pytest.mark.asyncio
-async def test_reassign_unit_owner_replaces_owner():
+async def test_reassign_unit_owner_replaces_owner(monkeypatch):
     """Reassign releases the current owner and creates a new allotment."""
+    release_calls: list[dict[str, Any]] = []
+
+    async def fake_release_for_move_out(_self, **kwargs):
+        release_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_units_service.VehiclesService.release_for_move_out",
+        fake_release_for_move_out,
+    )
     svc = _service()
     _mock_transaction(svc)
     svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
@@ -443,6 +463,7 @@ async def test_reassign_unit_owner_replaces_owner():
     )
 
     svc.repo.release_unit_owner_links.assert_awaited_once()
+    assert release_calls == [{"unit_id": "unit-1"}]
     svc.repo.insert_allotment.assert_awaited_once_with(
         organization_id="org-1",
         project_id="proj-1",
