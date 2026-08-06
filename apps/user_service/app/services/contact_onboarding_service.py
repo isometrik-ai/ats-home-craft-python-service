@@ -310,19 +310,7 @@ class ContactOnboardingService:
     @staticmethod
     def _to_update_contact_request(body: CompleteProfileRequest) -> UpdateContactRequest:
         """Map onboarding profile payload to the shared contact update request."""
-        return UpdateContactRequest(
-            prefix=body.prefix,
-            first_name=body.first_name,
-            middle_name=body.middle_name,
-            last_name=body.last_name,
-            date_of_birth=body.date_of_birth,
-            profile_photo_url=body.profile_photo_url,
-            gender=body.gender,
-            blood_group=body.blood_group,
-            communication_preferences=body.communication_preferences,
-            phones=body.phones,
-            emails=body.emails,
-        )
+        return UpdateContactRequest(**body.model_dump(exclude_unset=True))
 
     async def complete_profile(
         self,

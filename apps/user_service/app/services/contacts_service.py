@@ -1625,6 +1625,7 @@ class ContactsService:
         """Build the scalar update data for the contact."""
         # pylint: disable=too-complex
         update_data: dict[str, Any] = {}
+        fields_set = getattr(body, "model_fields_set", set())
         scalar_fields = (
             ("status", "status"),
             ("prefix", "prefix"),
@@ -1638,11 +1639,13 @@ class ContactsService:
             ("description", "description"),
         )
         for body_attr, column_name in scalar_fields:
+            if body_attr not in fields_set:
+                continue
             value = getattr(body, body_attr, None)
             if value is not None:
                 update_data[column_name] = value.value if hasattr(value, "value") else value
 
-        if "portal_access" in body.model_fields_set:
+        if "portal_access" in fields_set:
             update_data["portal_access"] = body.portal_access
 
         if body.additional_data is not None:
@@ -1651,11 +1654,13 @@ class ContactsService:
         if body.sales_intelligence is not None:
             update_data["sales_intelligence"] = body.sales_intelligence
 
-        if body.gender is not None:
-            update_data["gender"] = body.gender.value
+        if "gender" in fields_set:
+            update_data["gender"] = body.gender.value if body.gender is not None else None
 
-        if body.blood_group is not None:
-            update_data["blood_group"] = body.blood_group.value
+        if "blood_group" in fields_set:
+            update_data["blood_group"] = (
+                body.blood_group.value if body.blood_group is not None else None
+            )
 
         if body.communication_preferences is not None:
             update_data["communication_preferences"] = body.communication_preferences.model_dump()

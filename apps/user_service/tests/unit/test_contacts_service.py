@@ -1686,6 +1686,23 @@ async def test_update_contact_scalar_profile_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_contact_can_clear_gender(monkeypatch):
+    """Explicit null gender clears the stored value."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail()
+    repo = _FakeContactsRepo(contact_for_update=current, updated_row={"gender": None})
+    svc = _service(contacts_repo=repo)
+
+    await svc.update_contact(
+        contact_id=CONTACT_ID,
+        body=UpdateContactRequest.model_validate({"gender": None}),
+    )
+
+    update_data = repo.last_update_kwargs["update_data"]
+    assert update_data["gender"] is None
+
+
+@pytest.mark.asyncio
 async def test_update_contact_sync_auth_phone(monkeypatch):
     """Update contact syncs auth phone when primary phone changes."""
     _patch_custom_fields(monkeypatch)
