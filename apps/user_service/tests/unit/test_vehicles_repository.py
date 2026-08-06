@@ -433,6 +433,23 @@ async def test_count_active():
 
 
 @pytest.mark.asyncio
+async def test_count_entitlement_consuming_excludes_moved_out_contacts():
+    """Entitlement count ignores vehicles tied to moved_out contact_units links."""
+    conn = _mock_conn(val=1)
+    repo = VehiclesRepository(db_connection=conn)
+
+    count = await repo.count_entitlement_consuming_by_unit(
+        organization_id=ORG_ID,
+        unit_id=UNIT_ID,
+    )
+
+    assert count == 1
+    query, _ = _sql_args(conn.fetchval)
+    assert "FROM contact_units cu" in query
+    assert "cu.status IN" in query
+
+
+@pytest.mark.asyncio
 async def test_update_skips_protected_columns():
     """update ignores immutable id/organization_id/contact_id/created_at keys."""
     conn = _mock_conn(row=_vehicle_row(color="Green"))

@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     AcceptHouseholdInvitationRequest,
     ClaimPropertiesRequest,
     ClaimPropertiesResponse,
+    CompleteOnboardingRequest,
     CompleteProfileRequest,
     CompleteStepRequest,
     CompleteUnitStepRequest,
@@ -1392,6 +1393,11 @@ async def get_review(
     "/complete",
     status_code=http_status.HTTP_200_OK,
     summary="Finalize onboarding",
+    description=(
+        "Finalize onboarding and activate confirmed properties. Optionally pass "
+        "`contact_unit_ids` to finish a subset now; other active properties are moved "
+        "back to pending and can be claimed later via POST /properties/claim."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("10/minute")
@@ -1406,6 +1412,7 @@ async def complete_onboarding(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
+    body: CompleteOnboardingRequest | None = Body(default=None),
 ):
     """Finalize contact onboarding and activate assigned units."""
     user_context, contact = await extract_onboarding_contact_context(
@@ -1416,7 +1423,10 @@ async def complete_onboarding(
         user_context=user_context,
         sb_client=None,
     )
-    data = await service.complete_onboarding(contact_id=str(contact["id"]))
+    data = await service.complete_onboarding(
+        contact_id=str(contact["id"]),
+        body=body,
+    )
     set_audit_context(
         request,
         user_context,

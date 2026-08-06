@@ -148,6 +148,21 @@ class ClaimPropertiesRequest(BaseModel):
     contact_unit_ids: list[str] = Field(..., min_length=1)
 
 
+class CompleteOnboardingRequest(BaseModel):
+    """Finalize onboarding for all or a subset of active properties."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_unit_ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional active contact_unit ids to finalize now. Omitted ids are moved back "
+            "to pending and can be claimed later via POST /properties/claim."
+        ),
+    )
+
+
 class ClaimPropertiesResponse(BaseModel):
     """Result of claiming one or more post-onboarding properties."""
 

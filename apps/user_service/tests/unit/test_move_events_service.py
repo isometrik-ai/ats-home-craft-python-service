@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -320,8 +320,17 @@ def test_format_date_and_decimal_helpers():
 
 
 @pytest.mark.asyncio
-async def test_create_move_out_success_syncs_move_out():
-    """Move-out inserts event and syncs move-out on contact_units."""
+async def test_create_move_out_success_syncs_move_out(monkeypatch):
+    """Move-out inserts event, syncs move-out on contact_units, and releases vehicles."""
+    release_calls: list[dict[str, Any]] = []
+
+    async def fake_release_for_move_out(_self, **kwargs):
+        release_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.VehiclesService.release_for_move_out",
+        fake_release_for_move_out,
+    )
     move_repo = _FakeMoveEventsRepo()
     move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
     contact_units_repo = _FakeContactUnitsRepo()
@@ -338,6 +347,7 @@ async def test_create_move_out_success_syncs_move_out():
 
     assert result.move_type == MoveEventType.MOVE_OUT.value
     assert len(contact_units_repo.sync_move_out_calls) == 1
+    assert release_calls == [{"contact_id": "contact-1", "unit_id": "unit-1"}]
 
 
 @pytest.mark.asyncio
@@ -452,8 +462,12 @@ async def test_update_not_found_paths():
 
 
 @pytest.mark.asyncio
-async def test_update_event_date_resyncs_move_out():
+async def test_update_event_date_resyncs_move_out(monkeypatch):
     """Patching event_date on move-out re-syncs move-out occupancy."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.VehiclesService.release_for_move_out",
+        AsyncMock(),
+    )
     move_repo = _FakeMoveEventsRepo()
     move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
     contact_units_repo = _FakeContactUnitsRepo()

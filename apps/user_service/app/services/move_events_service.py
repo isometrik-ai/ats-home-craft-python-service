@@ -25,6 +25,7 @@ from apps.user_service.app.services.push_notification_dispatch import (
     unit_label_from_row,
 )
 from apps.user_service.app.services.units_service import format_contact_display_name
+from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -105,6 +106,8 @@ class MoveEventsService:
         *,
         organization_id: str,
         contact_unit_id: str,
+        contact_id: str,
+        unit_id: str,
         move_type: str,
         event_date: date,
     ) -> None:
@@ -120,6 +123,14 @@ class MoveEventsService:
             organization_id=organization_id,
             contact_unit_id=contact_unit_id,
             event_date=event_date,
+        )
+        vehicles_service = VehiclesService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await vehicles_service.release_for_move_out(
+            contact_id=contact_id,
+            unit_id=unit_id,
         )
 
     async def _resolve_contact_unit(
@@ -221,6 +232,8 @@ class MoveEventsService:
         await self._sync_occupancy_for_move(
             organization_id=organization_id,
             contact_unit_id=contact_unit_id,
+            contact_id=body.contact_id,
+            unit_id=body.unit_id,
             move_type=move_type,
             event_date=body.event_date,
         )
@@ -342,6 +355,8 @@ class MoveEventsService:
             await self._sync_occupancy_for_move(
                 organization_id=organization_id,
                 contact_unit_id=existing["contact_unit_id"],
+                contact_id=str(existing["contact_id"]),
+                unit_id=str(existing["unit_id"]),
                 move_type=existing["move_type"],
                 event_date=update_data["event_date"],
             )
@@ -381,6 +396,8 @@ class MoveEventsService:
             await self._sync_occupancy_for_move(
                 organization_id=organization_id,
                 contact_unit_id=contact_unit_id,
+                contact_id=str(existing["contact_id"]),
+                unit_id=str(existing["unit_id"]),
                 move_type=latest["move_type"],
                 event_date=latest["event_date"],
             )

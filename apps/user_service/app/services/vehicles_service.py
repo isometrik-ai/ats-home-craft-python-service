@@ -346,6 +346,60 @@ class VehiclesService:
                 params={"parking_entitlement": entitlement},
             )
 
+    async def release_for_move_out(
+        self,
+        *,
+        contact_id: str | None = None,
+        unit_id: str | None = None,
+    ) -> None:
+        """Withdraw pending and soft-remove approved vehicles when occupancy ends."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        if contact_id and unit_id:
+            vehicles = await self.repo.list_by_contact(
+                organization_id=org_id,
+                contact_id=contact_id,
+                unit_id=unit_id,
+            )
+        elif unit_id:
+            vehicles = await self.repo.list_by_unit(
+                organization_id=org_id,
+                unit_id=unit_id,
+            )
+        elif contact_id:
+            vehicles = await self.repo.list_by_contact(
+                organization_id=org_id,
+                contact_id=contact_id,
+            )
+        else:
+            return
+
+        for vehicle in vehicles:
+            vehicle_contact_id = str(vehicle["contact_id"])
+            vehicle_id = str(vehicle["id"])
+            status = str(vehicle.get("status") or "")
+            if status == VehicleStatus.PENDING.value:
+                await self.repo.delete(
+                    organization_id=org_id,
+                    contact_id=vehicle_contact_id,
+                    vehicle_id=vehicle_id,
+                )
+                continue
+            if status != VehicleStatus.APPROVED.value:
+                continue
+            slot_id = vehicle.get("parking_slot_id")
+            if slot_id:
+                await self.parking_slots_repo.release_slot(
+                    organization_id=org_id,
+                    project_id=str(vehicle["project_id"]),
+                    slot_id=str(slot_id),
+                )
+            await self.repo.soft_remove(
+                organization_id=org_id,
+                contact_id=vehicle_contact_id,
+                vehicle_id=vehicle_id,
+            )
+
     async def list_vehicles(
         self,
         *,

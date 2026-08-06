@@ -209,3 +209,43 @@ class ContactUnitOnboardingRepository(BaseRepository):
             list(UNIT_ONBOARDING_STEP_KEYS),
         )
         return bool(row)
+
+    async def all_unit_steps_terminal_for_units(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        contact_unit_ids: list[str],
+    ) -> bool:
+        """True when the given active units have vehicles + household completed or skipped."""
+        if not contact_unit_ids:
+            return False
+        row = await self.db_connection.fetchval(
+            """
+            WITH selected_units AS (
+                SELECT cu.id
+                FROM contact_units cu
+                WHERE cu.organization_id = $1::uuid
+                  AND cu.contact_id = $2::uuid
+                  AND cu.status = 'active'::contact_unit_status
+                  AND cu.id = ANY($4::uuid[])
+            ),
+            expected AS (
+                SELECT su.id AS contact_unit_id, step_key
+                FROM selected_units su
+                CROSS JOIN unnest($3::contact_onboarding_step[]) AS step_key
+            )
+            SELECT COUNT(*) = COUNT(*) FILTER (
+                WHERE cuos.status IN ('completed', 'skipped')
+            )
+            FROM expected e
+            LEFT JOIN contact_unit_onboarding_steps cuos
+              ON cuos.contact_unit_id = e.contact_unit_id
+             AND cuos.step_key = e.step_key
+            """,
+            organization_id,
+            contact_id,
+            list(UNIT_ONBOARDING_STEP_KEYS),
+            contact_unit_ids,
+        )
+        return bool(row)

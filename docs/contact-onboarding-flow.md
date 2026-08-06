@@ -68,10 +68,11 @@ The "current step" is derived on the fly via `_derive_navigation` in `contact_on
 profile → properties → **each unit's vehicles then household** → choose unit (if needed) → review.
 `GET /status` returns `setup_current_step` and `current_contact_unit_id` when on a unit step.
 
-> **Multiple properties:** see [§6 Multi-property onboarding](#6-multi-property-onboarding) for
-> how steps 1, 3–5 behave when a contact has more than one pre‑allotted unit.
+> **Multiple properties:** see [§6 Multi-property onboarding](#6-multi-property-onboarding) and
+> [All onboarding scenarios (8 cases)](#all-onboarding-scenarios-8-cases) for every path
+> (single unit, partial confirm, partial finalize, claim, household-only).
 >
-> **Admin assigns a unit later:** see [§7 Post-onboarding property assignment](#7-post-onboarding-property-assignment).
+> **Admin assigns a unit later:** see [§7 Post-onboarding property assignment](#7-post-onboarding-property-assignment) ([Case 7](#case-7--post-onboarding-admin-adds-another-unit)).
 
 ______________________________________________________________________
 
@@ -274,10 +275,11 @@ Enforced in `contact_onboarding_service.py` and related services:
 - **Finalize (`complete_onboarding`) prerequisites:**
   - not already completed (`already_completed`),
   - at least one active unit (`no_active_units`),
-  - if more than one unit, a default login unit must be set (`no_default_unit`),
+  - if finalizing all active units and more than one exists, a default login unit must be set (`no_default_unit`),
   - every contact-level step except `review` must be `completed`/`skipped` (`step_prerequisite`),
-  - every confirmed unit must have `vehicles` and `household` `completed`/`skipped` (`unit_steps_incomplete`),
-  - then unit links are activated and the `review` step is completed.
+  - every selected active unit must have `vehicles` and `household` `completed`/`skipped` (`unit_steps_incomplete`),
+  - optional `contact_unit_ids` finalizes a subset; other active units return to `pending` for `POST /properties/claim`,
+  - then selected unit links are activated and the `review` step is completed.
 
 ______________________________________________________________________
 
@@ -296,7 +298,252 @@ three apartments still has a single profile and one set of contact-level steps �
 | Vehicles / household         | One unit loop (vehicles → household) | Repeat vehicles → household **for each confirmed unit**   |
 | `choose_unit`                | Auto-completed on confirm            | Required unless `default_contact_unit_id` sent on confirm |
 | Review                       | One unit in payload                  | All active units + all vehicles + all household           |
-| Finalize                     | `is_default_login` not enforced      | `is_default_login` required on exactly one active unit    |
+| Finalize                     | `POST /complete` (no body)           | `POST /complete` (optional `{ contact_unit_ids }`)        |
+
+### Overview — wizard order
+
+Onboarding is **one wizard per contact**. Contact-level steps run once; `vehicles` and
+`household` repeat for each **active** (confirmed) unit.
+
+```mermaid
+flowchart TD
+    A[1. complete_profile] --> B[2. select_properties / confirm]
+    B --> C{How many active units?}
+    C -->|1 unit| D[3. vehicles + household for that unit]
+    C -->|2+ units| E[3. vehicles + household for EACH active unit]
+    E --> F[4. choose_unit if default not set]
+    D --> G[5. review]
+    F --> G
+    G --> H[POST /complete]
+```
+
+Drive the UI from **`GET /status`** (`setup_current_step`, `current_contact_unit_id`,
+`unit_onboarding[]`).
+
+### Unit link states
+
+| `contact_units.status` | Meaning                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `pending`              | Admin assigned; resident has not confirmed yet. Does **not** block finalize. |
+| `active`               | Resident confirmed (`POST /properties/confirm`). Unit steps apply.           |
+| After finalize         | Selected units receive `activated_at`. Deferred units return to `pending`.   |
+
+### All onboarding scenarios (8 cases)
+
+Quick index:
+
+| Case | Scenario                             | Section                                                                   |
+| ---- | ------------------------------------ | ------------------------------------------------------------------------- |
+| 1    | Single unit                          | [Case 1](#case-1--single-unit-simplest)                                   |
+| 2    | Confirm one unit only (recommended)  | [Case 2](#case-2--multiple-units-confirm-only-one-up-front-recommended)   |
+| 3    | Confirm all, finish all              | [Case 3](#case-3--confirm-all-units-finish-all-at-once)                   |
+| 4    | Confirm all, partial finalize one    | [Case 4](#case-4--confirm-all-three-finish-only-one-now-partial-finalize) |
+| 5    | Confirm all, skip others, finish all | [Case 5](#case-5--confirm-all-three-skip-others-then-full-complete)       |
+| 6    | Partial finalize two of three        | [Case 6](#case-6--partial-finalize-with-two-of-three-units)               |
+| 7    | Post-onboarding new allotment        | [Case 7](#case-7--post-onboarding-admin-adds-another-unit)                |
+| 8    | Household-only member                | [Case 8](#case-8--household-only-member-family-not-owner)                 |
+
+#### Case 1 — Single unit (simplest)
+
+**Setup:** Admin assigns one unit → `pending`.
+
+| Step | API                                                           | Result                                                                   |
+| ---- | ------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 1    | `PATCH /profile`                                              | Profile step complete                                                    |
+| 2    | `POST /properties/confirm` `{ "contact_unit_ids": ["cu-1"] }` | Unit → `active`; `choose_unit` auto-completed; default login set         |
+| 3    | Vehicles + household for unit 1                               | Complete or skip each (`POST /steps/.../complete` or `POST /steps/skip`) |
+| 4    | `POST /complete` (no body)                                    | Unit activated; wizard done                                              |
+
+No default-unit screen required. Empty body on `/complete` is correct when only one unit is active.
+
+#### Case 2 — Multiple units, confirm only one up front (recommended)
+
+**Setup:** Admin assigns units A, B, C → all `pending`.
+
+| Step               | Action                                                        |
+| ------------------ | ------------------------------------------------------------- |
+| Profile            | `PATCH /profile`                                              |
+| Confirm **only A** | `POST /properties/confirm` `{ "contact_unit_ids": ["cu-A"] }` |
+| B, C               | Remain **`pending`** — no vehicles/household required         |
+| Unit steps         | Only for A                                                    |
+| Finish             | `POST /complete` (no body)                                    |
+
+B and C never block finalize because they are not `active`.
+
+**Later (after onboarding is complete):**
+
+```text
+GET  /properties              → B, C appear as pending
+POST /properties/claim        → { "contact_unit_ids": ["cu-B"] }
+→ optional vehicles/household for B
+POST /default-unit            → if contact now has 2+ active units
+```
+
+Uses the **claim** flow (`is_completed: true`), not the full wizard.
+
+#### Case 3 — Confirm all units, finish all at once
+
+**Setup:** Resident confirms A, B, C in one call:
+
+```json
+POST /properties/confirm
+{
+  "contact_unit_ids": ["cu-A", "cu-B", "cu-C"],
+  "default_contact_unit_id": "cu-A"
+}
+```
+
+| Step      | Requirement                                                      |
+| --------- | ---------------------------------------------------------------- |
+| Unit loop | Vehicles + household for **A, B, and C** (complete or skip each) |
+| Default   | Must be set (on confirm or via `POST /default-unit`)             |
+| Finish    | `POST /complete` with **no body**                                |
+
+All three active units must have terminal unit steps, or the API returns `unit_steps_incomplete`.
+
+#### Case 4 — Confirm all three, finish only one now (partial finalize)
+
+**Setup:** All three confirmed → all `active`. Resident only completes setup for A.
+
+| Step       | Action                                            |
+| ---------- | ------------------------------------------------- |
+| Unit steps | Complete/skip vehicles + household **only for A** |
+| Finish     | `POST /complete` with body                        |
+
+```json
+POST /complete
+{
+  "contact_unit_ids": ["cu-A"]
+}
+```
+
+**What happens:**
+
+| Unit          | After `/complete`                                            |
+| ------------- | ------------------------------------------------------------ |
+| A             | `activated_at` set; stays `active`                           |
+| B, C          | Moved back to **`pending`**                                  |
+| Default login | **A** auto-set when it is the only unit in the finalize list |
+| Wizard        | Done (`review` completed, `is_completed: true`)              |
+
+Response includes `completed_contact_unit_ids` and `deferred_contact_unit_ids`.
+
+**Later for B and C:** `POST /properties/claim` (not `/confirm`).
+
+#### Case 5 — Confirm all three, skip others, then full complete
+
+If all three are already `active` and you want to finalize all without partial body:
+
+```json
+POST /steps/skip { "step_key": "vehicles", "contact_unit_id": "cu-B" }
+POST /steps/skip { "step_key": "household", "contact_unit_id": "cu-B" }
+POST /steps/skip { "step_key": "vehicles", "contact_unit_id": "cu-C" }
+POST /steps/skip { "step_key": "household", "contact_unit_id": "cu-C" }
+POST /complete
+```
+
+All three stay `active` and receive `activated_at`. No units deferred.
+
+#### Case 6 — Partial finalize with two of three units
+
+```json
+POST /complete
+{
+  "contact_unit_ids": ["cu-A", "cu-B"]
+}
+```
+
+| Rule       | Detail                                                    |
+| ---------- | --------------------------------------------------------- |
+| Validation | A and B must have vehicles/household completed or skipped |
+| Default    | Must be **A or B** (included in `contact_unit_ids`)       |
+| C          | Deferred to `pending`                                     |
+
+If the current default login unit is C, either include C in the list or call
+`POST /default-unit` for A or B before finalize.
+
+#### Case 7 — Post-onboarding: admin adds another unit
+
+Contact has already finished onboarding (`GET /status` → `is_completed: true`).
+
+| Who      | Action                                                     |
+| -------- | ---------------------------------------------------------- |
+| Admin    | `POST /v1/contacts/{contact_id}/units` → new row `pending` |
+| Resident | Sees “New property to accept” (not the full wizard)        |
+| Resident | `POST /properties/claim` `{ "contact_unit_ids": ["..."] }` |
+| Resident | Optional vehicles/household scoped to the new unit         |
+| Resident | `POST /default-unit` when `requires_default_unit: true`    |
+
+The full wizard does **not** reopen. See [§7 Post-onboarding property assignment](#7-post-onboarding-property-assignment).
+
+#### Case 8 — Household-only member (family, not owner)
+
+A contact linked only as a **family member** (`relationship != self`) on someone else's unit.
+
+- `GET /status` → only `complete_profile`; `unit_onboarding` is empty
+- `PATCH /profile` → `is_completed: true`
+- No properties, vehicles, household, or `POST /complete`
+
+Full primary-occupant onboarding applies when the contact has at least one `relationship = self`
+link (or no links yet during initial signup).
+
+### `POST /complete` decision matrix
+
+| Request body                              | Active units  | Unit steps validated | Default login rule                              | Other active units         |
+| ----------------------------------------- | ------------- | -------------------- | ----------------------------------------------- | -------------------------- |
+| Omitted / `{}`                            | All           | **All** active units | Required when 2+ active                         | All receive `activated_at` |
+| `{ "contact_unit_ids": ["cu-1"] }`        | e.g. 3 active | **Only cu-1**        | Auto-set to cu-1 when finalizing one of several | Rest → `pending`           |
+| `{ "contact_unit_ids": ["cu-A","cu-B"] }` | e.g. 3 active | **Only A and B**     | Default must be A or B                          | C → `pending`              |
+
+Optional body schema: `CompleteOnboardingRequest` in `schemas/contact_onboarding.py`.
+
+### Which API when?
+
+| Situation                                  | Endpoint                              |
+| ------------------------------------------ | ------------------------------------- |
+| Accept properties during the wizard        | `POST /properties/confirm`            |
+| Accept properties after wizard is done     | `POST /properties/claim`              |
+| Finish all active units now                | `POST /complete` (no body)            |
+| Finish one (or some) units now, rest later | `POST /complete` + `contact_unit_ids` |
+| Skip vehicles or household for a unit      | `POST /steps/skip`                    |
+
+### Common errors at finalize
+
+| Error key                                   | Cause                                              | Fix                                                               |
+| ------------------------------------------- | -------------------------------------------------- | ----------------------------------------------------------------- |
+| `unit_steps_incomplete`                     | Selected unit(s) missing vehicles/household        | Complete or skip per unit                                         |
+| `no_default_unit`                           | 2+ active units, finishing **all**, no default set | `POST /default-unit` or pass `default_contact_unit_id` on confirm |
+| `partial_complete_default_not_in_selection` | Finalizing 2+ units but default is not in the list | Include the default unit in `contact_unit_ids`                    |
+| `partial_complete_units_not_active`         | Id in body is not an active unit                   | Use ids from `GET /properties`                                    |
+| `onboarding_not_completed_use_confirm`      | Used `/claim` before first `/complete`             | Use `/confirm` during the wizard                                  |
+
+### Mobile app — recommended flow
+
+```mermaid
+flowchart TD
+    subgraph step2 [Property selection]
+        P[GET /properties]
+        P --> Q{How many to set up now?}
+        Q -->|Just one| R[POST /properties/confirm with 1 id]
+        Q -->|All now| S[POST /properties/confirm with all ids + default]
+    end
+
+    subgraph finish [Finalize]
+        T{All active units ready?}
+        T -->|Yes| U[POST /complete — no body]
+        T -->|Only some| V[POST /complete with contact_unit_ids]
+    end
+
+    R --> finish
+    S --> finish
+    V --> W[Deferred units → POST /properties/claim later]
+```
+
+**Simplest paths for product:**
+
+1. **One unit now:** confirm one id → complete unit steps → `POST /complete` (no body).
+1. **Confirmed too many already:** `POST /complete` with one `contact_unit_id` → others return to
+   pending → claim later.
 
 ### Step-by-step flow (multiple units)
 
@@ -323,7 +570,9 @@ Step 3  For each confirmed unit (use GET /status → current_contact_unit_id):
 Step 4  POST /default-unit              → when 2+ active units and not set on confirm
         ↓
 Step 5  GET  /review                    → aggregate + unit_onboarding progress
-        POST /complete                  → sets activated_at on all active units
+        POST /complete                  → all active units (no body)
+                                     or → subset only ({ "contact_unit_ids": [...] })
+                                        (see [All onboarding scenarios](#all-onboarding-scenarios-8-cases))
 ```
 
 ### Step 2 — confirming properties
@@ -339,21 +588,16 @@ Step 5  GET  /review                    → aggregate + unit_onboarding progress
 - Unselected pending units **remain pending** and are excluded from vehicle/household
   validation (`unit_not_assigned`) until confirmed.
 
-**Partial property selection:** `contact_unit_ids` is the set the user accepts **in this call**,
-not all assigned units. To finish onboarding for one unit only, confirm just that unit's
-`contact_unit_id` and leave others pending. Pending units do **not** block `POST /complete`.
+**Partial property selection:** See [Case 2](#case-2--multiple-units-confirm-only-one-up-front-recommended)
+(confirm one unit at step 2) or [Case 4](#case-4--confirm-all-three-finish-only-one-now-partial-finalize)
+(partial finalize at step 5). Pending units never block `POST /complete`.
 
-**Multiple units confirmed in one call:** `POST /complete` requires vehicles + household
-`completed` or `skipped` for **every active (confirmed) unit** (`unit_steps_incomplete` otherwise).
-To finish onboarding before finishing Unit 2 setup, either skip Unit 2's steps:
-
-```json
-POST /steps/skip { "step_key": "vehicles", "contact_unit_id": "<unit2_contact_unit_id>" }
-POST /steps/skip { "step_key": "household", "contact_unit_id": "<unit2_contact_unit_id>" }
-```
-
-or confirm units one at a time across separate `/properties/confirm` calls before calling
-`POST /complete`. After onboarding, claim remaining pending units via `POST /properties/claim`.
+**Multiple units confirmed in one call:** To finalize all, every active unit needs terminal
+unit steps ([Case 3](#case-3--confirm-all-units-finish-all-at-once)). To finish before completing
+every unit's setup, use partial finalize ([Case 4](#case-4--confirm-all-three-finish-only-one-now-partial-finalize)),
+skip steps ([Case 5](#case-5--confirm-all-three-skip-others-then-full-complete)), or confirm
+one unit at a time ([Case 2](#case-2--multiple-units-confirm-only-one-up-front-recommended)).
+After onboarding, claim remaining pending units via `POST /properties/claim`.
 
 ### Unit-scoped vehicles and household
 
@@ -400,10 +644,26 @@ finalize. For multiple units, `POST /complete` fails with `no_default_unit` if n
 
 1. Wizard not already completed.
 1. At least one active unit.
-1. If `active_count > 1`, a default login unit must be set.
+1. If finalizing **all** active units and there is more than one, a default login unit must be set.
 1. Every contact-level step except `review` must be `completed` or `skipped`.
-1. Every active unit must have `vehicles` and `household` `completed` or `skipped`.
-1. On success: `activated_at` is set on all active units; `review` step is completed.
+1. Every **selected** active unit must have `vehicles` and `household` `completed` or `skipped`
+   (`unit_steps_incomplete` when omitted, all active units are selected).
+1. On success: `activated_at` is set on selected units; unselected active units move back to
+   `pending` for later `POST /properties/claim`; `review` step is completed.
+
+Optional body:
+
+```json
+POST /complete
+{
+  "contact_unit_ids": ["<contact-unit-uuid>"]
+}
+```
+
+When `contact_unit_ids` is omitted, behavior matches the original all-units finalize. When
+provided, only those units are validated and activated; other active units are deferred to
+`pending`. Finalizing a single unit while others remain active auto-sets it as the default
+login property.
 
 ### Mobile UI recommendations
 
@@ -429,11 +689,13 @@ finalize. For multiple units, `POST /complete` fails with `no_default_unit` if n
 | Add family        | `POST /household`               | Requires `unit_id`                               |
 | Set login default | `POST /default-unit`            | When 2+ active units                             |
 | Preview all       | `GET /review`                   | Includes `unit_onboarding`                       |
-| Finish            | `POST /complete`                | Activates all confirmed units                    |
+| Finish            | `POST /complete`                | Optional `{ contact_unit_ids }`; defers others   |
 
 ______________________________________________________________________
 
 ## 7. Post-onboarding property assignment
+
+This is [Case 7 — Post-onboarding: admin adds another unit](#case-7--post-onboarding-admin-adds-another-unit).
 
 When a contact **already finished onboarding** (`GET /status` → `is_completed: true`) and an
 admin assigns another unit later, the **full wizard does not reopen**. The new allotment is a
@@ -549,7 +811,8 @@ ______________________________________________________________________
 
 ## 9. Tests
 
-- `tests/unit/test_contact_onboarding_service.py` — step derivation, skip rules, finalize gating.
+- `tests/unit/test_contact_onboarding_service.py` — step derivation, skip rules, finalize gating,
+  partial finalize (`test_complete_onboarding_partial_finalize`).
 - `tests/unit/test_contact_units_service.py` — property confirm/claim after onboarding.
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`

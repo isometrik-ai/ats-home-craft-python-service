@@ -54,6 +54,7 @@ from apps.user_service.app.services.units_service import (
     format_primary_contact_phone,
     serialize_unit_list_item,
 )
+from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -940,6 +941,16 @@ class TenantRequestsService:
                 contact_unit_id=str(existing["contact_unit_id"]),
                 event_date=now.date(),
             )
+            tenant_contact_id = existing.get("tenant_contact_id")
+            if tenant_contact_id:
+                vehicles_service = VehiclesService(
+                    db_connection=self.db_connection,
+                    user_context=self.user_context,
+                )
+                await vehicles_service.release_for_move_out(
+                    contact_id=str(tenant_contact_id),
+                    unit_id=unit_id,
+                )
             await self.contact_roles_repo.end_active_roles_for_unit(
                 organization_id=org_id,
                 unit_id=unit_id,

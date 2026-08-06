@@ -14,9 +14,6 @@ from apps.user_service.app.db.repositories.contacts_repository import ContactsRe
 from apps.user_service.app.db.repositories.household_invitations_repository import (
     HouseholdInvitationsRepository,
 )
-from apps.user_service.app.db.repositories.parking_slots_repository import (
-    ParkingSlotsRepository,
-)
 from apps.user_service.app.db.repositories.pass_events_repository import (
     PassEventsRepository,
 )
@@ -25,7 +22,6 @@ from apps.user_service.app.db.repositories.tenant_requests_repository import (
     TenantRequestsRepository,
 )
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
-from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.enums import (
     ClientStatus,
     ContactUnitRelationship,
@@ -33,8 +29,8 @@ from apps.user_service.app.schemas.enums import (
     PassEventType,
     TenantRequestEventType,
     TenantRequestStatus,
-    VehicleStatus,
 )
+from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
@@ -55,8 +51,6 @@ class ContactDeleteCascadeService:
         self.contacts_repo = ContactsRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
-        self.vehicles_repo = VehiclesRepository(db_connection)
-        self.parking_slots_repo = ParkingSlotsRepository(db_connection)
         self.passes_repo = PassesRepository(db_connection)
         self.pass_events_repo = PassEventsRepository(db_connection)
         self.tenant_requests_repo = TenantRequestsRepository(db_connection)
@@ -168,11 +162,11 @@ class ContactDeleteCascadeService:
 
     async def _release_vehicles(self, *, organization_id: str, contact_id: str) -> None:
         """Withdraw pending vehicles and soft-remove approved ones with slot release."""
-        vehicles = await self.vehicles_repo.list_by_contact(
-            organization_id=organization_id,
-            contact_id=contact_id,
+        vehicles_service = VehiclesService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
         )
-        await self._release_vehicle_rows(organization_id=organization_id, vehicles=vehicles)
+        await vehicles_service.release_for_move_out(contact_id=contact_id)
 
     async def _release_vehicles_for_unit(
         self,
@@ -181,44 +175,12 @@ class ContactDeleteCascadeService:
         unit_id: str,
     ) -> None:
         """Withdraw all vehicles registered against a unit (any household member)."""
-        vehicles = await self.vehicles_repo.list_by_unit(
-            organization_id=organization_id,
-            unit_id=unit_id,
+        del organization_id
+        vehicles_service = VehiclesService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
         )
-        await self._release_vehicle_rows(organization_id=organization_id, vehicles=vehicles)
-
-    async def _release_vehicle_rows(
-        self,
-        *,
-        organization_id: str,
-        vehicles: list[dict[str, Any]],
-    ) -> None:
-        """Shared vehicle cleanup for contact-scoped or unit-scoped deletes."""
-        for vehicle in vehicles:
-            contact_id = str(vehicle["contact_id"])
-            vehicle_id = str(vehicle["id"])
-            status = str(vehicle.get("status") or "")
-            if status == VehicleStatus.PENDING.value:
-                await self.vehicles_repo.delete(
-                    organization_id=organization_id,
-                    contact_id=contact_id,
-                    vehicle_id=vehicle_id,
-                )
-                continue
-            if status != VehicleStatus.APPROVED.value:
-                continue
-            slot_id = vehicle.get("parking_slot_id")
-            if slot_id:
-                await self.parking_slots_repo.release_slot(
-                    organization_id=organization_id,
-                    project_id=str(vehicle["project_id"]),
-                    slot_id=str(slot_id),
-                )
-            await self.vehicles_repo.soft_remove(
-                organization_id=organization_id,
-                contact_id=contact_id,
-                vehicle_id=vehicle_id,
-            )
+        await vehicles_service.release_for_move_out(unit_id=unit_id)
 
     async def _cancel_passes(self, *, organization_id: str, contact_id: str) -> None:
         """Cancel active visitor passes hosted by the contact."""

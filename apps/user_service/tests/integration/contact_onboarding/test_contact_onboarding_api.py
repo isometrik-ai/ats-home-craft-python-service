@@ -246,9 +246,10 @@ async def test_complete_onboarding(monkeypatch, client):
 
     _patch_contact_context(monkeypatch)
 
-    async def fake_complete_onboarding(_self, *, contact_id: str):
+    async def fake_complete_onboarding(_self, *, contact_id: str, body=None):
         del _self
         assert contact_id == CONTACT_ID
+        assert body is None
         return _FAKE_COMPLETE
 
     monkeypatch.setattr(

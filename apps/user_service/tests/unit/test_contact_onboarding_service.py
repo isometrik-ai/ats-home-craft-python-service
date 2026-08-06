@@ -12,6 +12,7 @@ from apps.user_service.app.db.repositories.contact_onboarding_repository import 
 )
 from apps.user_service.app.schemas.common import Phone
 from apps.user_service.app.schemas.contact_onboarding import (
+    CompleteOnboardingRequest,
     CompleteProfileRequest,
     CreateHouseholdMemberRequest,
     UpdateHouseholdMemberRequest,
@@ -146,6 +147,10 @@ class _FakeUnitOnboardingRepo:
         """Return configured terminal flag."""
         return self.all_terminal
 
+    async def all_unit_steps_terminal_for_units(self, **_kwargs):
+        """Return configured terminal flag for selected units."""
+        return self.all_terminal
+
     async def skip_step(self, **kwargs):
         """Record skip_step call."""
         self.skip_step_calls.append((kwargs["contact_unit_id"], kwargs["step_key"]))
@@ -164,7 +169,9 @@ class _FakeContactUnitsRepo:
         self,
         *,
         active_count: int = 1,
+        active_unit_ids: list[str] | None = None,
         has_default: bool = True,
+        default_contact_unit_id: str | None = None,
         confirm_result: list[dict[str, Any]] | None = None,
         owned_unit: dict[str, Any] | None = None,
         household_rows: list[dict[str, Any]] | None = None,
@@ -174,10 +181,18 @@ class _FakeContactUnitsRepo:
         contact_unit_links: list[dict[str, Any]] | None = None,
     ):
         self.active_count = active_count
+        self.active_unit_ids = active_unit_ids or [
+            f"cu-{index + 1}" for index in range(active_count)
+        ]
         self.has_default = has_default
+        self.default_contact_unit_id = default_contact_unit_id or (
+            self.active_unit_ids[0] if self.has_default and self.active_unit_ids else None
+        )
         self.confirm_result = confirm_result or [{"id": "cu-1", "status": "active"}]
         self.owned_unit = owned_unit or {"id": "cu-1"}
         self.activate_called = False
+        self.activated_unit_ids: list[str] = []
+        self.deferred_unit_ids: list[str] = []
         self.household_rows = household_rows or []
         self.household_member = household_member
         self.household_link = household_link
@@ -188,6 +203,14 @@ class _FakeContactUnitsRepo:
         """Return configured active unit count."""
         return self.active_count
 
+    async def list_active_contact_unit_ids(self, **_kwargs):
+        """Return configured active contact_unit ids."""
+        return list(self.active_unit_ids)
+
+    async def get_default_login_contact_unit_id(self, **_kwargs):
+        """Return configured default login contact_unit id."""
+        return self.default_contact_unit_id if self.has_default else None
+
     async def has_default_login(self, **_kwargs):
         """Return configured default-login flag."""
         return self.has_default
@@ -195,6 +218,22 @@ class _FakeContactUnitsRepo:
     async def activate_for_contact(self, **_kwargs):
         """Record activate_for_contact call."""
         self.activate_called = True
+
+    async def activate_units_by_ids(self, **kwargs):
+        """Record activate_units_by_ids call."""
+        self.activate_called = True
+        self.activated_unit_ids = list(kwargs.get("contact_unit_ids") or [])
+
+    async def defer_active_units_to_pending(self, **kwargs):
+        """Record deferred units."""
+        self.deferred_unit_ids = list(kwargs.get("contact_unit_ids") or [])
+        return self.deferred_unit_ids
+
+    async def set_default_login(self, **kwargs):
+        """Record default login assignment."""
+        self.default_contact_unit_id = kwargs.get("contact_unit_id")
+        self.has_default = True
+        return {"id": self.default_contact_unit_id, "is_default_login": True}
 
     async def get_owned_by_contact(self, **_kwargs):
         """Return configured owned unit row."""
@@ -498,7 +537,9 @@ async def test_complete_onboarding_requires_active_units():
 async def test_complete_onboarding_requires_default_unit():
     """Multi-unit contacts must set a default unit before completion."""
     repo = _FakeOnboardingRepo(_terminal_contact_steps())
-    units_repo = _FakeContactUnitsRepo(active_count=2, has_default=False)
+    units_repo = _FakeContactUnitsRepo(
+        active_count=2, has_default=False, default_contact_unit_id=None
+    )
     unit_repo = _FakeUnitOnboardingRepo(all_terminal=True)
     svc = _service(
         onboarding_repo=repo,
@@ -541,8 +582,61 @@ async def test_complete_onboarding_happy_path():
     result = await svc.complete_onboarding(contact_id="contact-1")
 
     assert units_repo.activate_called is True
+    assert units_repo.activated_unit_ids == ["cu-1"]
     assert ContactOnboardingStep.REVIEW.value in repo.complete_step_calls
     assert result["is_completed"] is False
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding_partial_finalize():
+    """Partial finalize activates selected units and defers the rest to pending."""
+    repo = _FakeOnboardingRepo(_terminal_contact_steps())
+    units_repo = _FakeContactUnitsRepo(
+        active_count=3,
+        active_unit_ids=["cu-1", "cu-2", "cu-3"],
+        has_default=False,
+        default_contact_unit_id=None,
+    )
+    unit_repo = _FakeUnitOnboardingRepo(all_terminal=True)
+    svc = _service(
+        onboarding_repo=repo,
+        contact_units_repo=units_repo,
+        unit_onboarding_repo=unit_repo,
+    )
+
+    result = await svc.complete_onboarding(
+        contact_id="contact-1",
+        body=CompleteOnboardingRequest(contact_unit_ids=["cu-1"]),
+    )
+
+    assert units_repo.activated_unit_ids == ["cu-1"]
+    assert units_repo.deferred_unit_ids == ["cu-2", "cu-3"]
+    assert units_repo.default_contact_unit_id == "cu-1"
+    assert result["completed_contact_unit_ids"] == ["cu-1"]
+    assert result["deferred_contact_unit_ids"] == ["cu-2", "cu-3"]
+    assert ContactOnboardingStep.REVIEW.value in repo.complete_step_calls
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding_partial_requires_terminal_steps_for_selection():
+    """Partial finalize only validates vehicles/household on selected units."""
+    repo = _FakeOnboardingRepo(_terminal_contact_steps())
+    units_repo = _FakeContactUnitsRepo(
+        active_count=2,
+        active_unit_ids=["cu-1", "cu-2"],
+    )
+    unit_repo = _FakeUnitOnboardingRepo(all_terminal=False)
+    svc = _service(
+        onboarding_repo=repo,
+        contact_units_repo=units_repo,
+        unit_onboarding_repo=unit_repo,
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.complete_onboarding(
+            contact_id="contact-1",
+            body=CompleteOnboardingRequest(contact_unit_ids=["cu-1"]),
+        )
 
 
 @pytest.mark.asyncio

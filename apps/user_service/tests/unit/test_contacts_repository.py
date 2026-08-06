@@ -112,10 +112,33 @@ async def test_list_contacts_status_filter():
     )
 
     count_query, count_args = conn.fetchval_calls[0]
-    assert "status = $3" in count_query
+    assert "status = $2" in count_query
     assert ClientStatus.ACTIVE.value in count_args
+    assert ClientStatus.DELETED.value not in count_args
     list_query, _ = conn.fetch_calls[0]
     assert "company_names_by_contact" in list_query
+
+
+@pytest.mark.asyncio
+async def test_list_contacts_deleted_status_filter():
+    """List can return deleted contacts when status=deleted is requested."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = ContactsRepository(db_connection=conn)
+
+    await repo.list_contacts(
+        organization_id=ORG_ID,
+        search=None,
+        status=ClientStatus.DELETED.value,
+        contact_type=None,
+        page=1,
+        page_size=20,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "status <> 'deleted'" not in count_query
+    assert "status != 'deleted'" not in count_query
+    assert "status = $2" in count_query
+    assert count_args == (ORG_ID, ClientStatus.DELETED.value)
 
 
 @pytest.mark.asyncio

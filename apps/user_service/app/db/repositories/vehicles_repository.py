@@ -669,6 +669,17 @@ class VehiclesRepository(BaseRepository):
               AND v.unit_id = $2::uuid
               AND {_ACTIVE_VEHICLE_FILTER}
               AND v.status = ANY($3::vehicle_status[])
+              AND EXISTS (
+                  SELECT 1
+                  FROM contact_units cu
+                  WHERE cu.organization_id = v.organization_id
+                    AND cu.contact_id = v.contact_id
+                    AND cu.unit_id = v.unit_id
+                    AND cu.status IN (
+                        'pending'::contact_unit_status,
+                        'active'::contact_unit_status
+                    )
+              )
               {exclude_sql}
             """,
             *args,
