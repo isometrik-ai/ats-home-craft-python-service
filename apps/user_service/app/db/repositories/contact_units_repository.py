@@ -602,6 +602,82 @@ class ContactUnitsRepository(BaseRepository):
         )
         return row is not None
 
+    async def list_active_contact_unit_ids(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> list[str]:
+        """Return active contact_unit ids for a contact."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT id::text AS id
+            FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND contact_id = $2::uuid
+              AND status = $3::contact_unit_status
+            ORDER BY sort_order, created_at
+            """,
+            organization_id,
+            contact_id,
+            ContactUnitStatus.ACTIVE.value,
+        )
+        return [str(row["id"]) for row in rows]
+
+    async def get_default_login_contact_unit_id(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> str | None:
+        """Return the active default-login contact_unit id, if any."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT id::text AS id
+            FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND contact_id = $2::uuid
+              AND status = $3::contact_unit_status
+              AND is_default_login = true
+            LIMIT 1
+            """,
+            organization_id,
+            contact_id,
+            ContactUnitStatus.ACTIVE.value,
+        )
+        return str(row["id"]) if row else None
+
+    async def defer_active_units_to_pending(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        contact_unit_ids: list[str],
+    ) -> list[str]:
+        """Move active contact_units back to pending (partial onboarding finalize)."""
+        if not contact_unit_ids:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE contact_units
+            SET status = $4::contact_unit_status,
+                is_default_login = false,
+                activated_at = NULL,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND contact_id = $2::uuid
+              AND id = ANY($3::uuid[])
+              AND status = $5::contact_unit_status
+            RETURNING id::text AS id
+            """,
+            organization_id,
+            contact_id,
+            contact_unit_ids,
+            ContactUnitStatus.PENDING.value,
+            ContactUnitStatus.ACTIVE.value,
+        )
+        return [str(row["id"]) for row in rows]
+
     async def confirm_selection(
         self,
         *,
