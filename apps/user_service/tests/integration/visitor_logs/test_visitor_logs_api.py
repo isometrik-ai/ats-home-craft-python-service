@@ -2,7 +2,10 @@
 
 import pytest
 
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import (
+    patch_check_permissions,
+    patch_ensure_staff_project_access_optional,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 
 PASS_ID = "pass-1"
@@ -47,7 +50,9 @@ _FAKE_DETAIL = {
 async def test_list_visitor_logs(monkeypatch, client):
     """GET visitor-logs returns paginated visitor log rows."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.visitor_logs")
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.visitor_logs"
+    )
 
     async def fake_list_logs(
         _self,
@@ -87,7 +92,9 @@ async def test_list_visitor_logs(monkeypatch, client):
 async def test_get_visitor_log_overview(monkeypatch, client):
     """GET visitor-logs/overview returns overview card metrics."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.visitor_logs")
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.visitor_logs"
+    )
 
     async def fake_get_overview(
         _self,

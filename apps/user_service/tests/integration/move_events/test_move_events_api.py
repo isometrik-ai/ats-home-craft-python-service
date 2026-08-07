@@ -3,7 +3,11 @@
 import pytest
 
 from apps.user_service.app.schemas.move_events import MoveEventResponse
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import (
+    patch_ensure_staff_project_access,
+    patch_ensure_staff_project_access_optional,
+    patch_staff_move_event_access,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 
 MOVE_EVENT_ID = "me-1"
@@ -51,11 +55,21 @@ def _fake_move_event(**overrides) -> MoveEventResponse:
     return MoveEventResponse(**base)
 
 
+_API = "apps.user_service.app.api.move_events"
+
+
+def _patch_move_events_access(monkeypatch) -> None:
+    """Bypass RBAC for move event routes."""
+    patch_ensure_staff_project_access(monkeypatch, _API)
+    patch_ensure_staff_project_access_optional(monkeypatch, _API)
+    patch_staff_move_event_access(monkeypatch, _API)
+
+
 @pytest.mark.asyncio
 async def test_list_move_events(monkeypatch, client):
     """GET move-events returns paginated move-in and move-out records."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.move_events")
+    _patch_move_events_access(monkeypatch)
 
     async def fake_list_move_events(
         _self,
@@ -92,7 +106,18 @@ async def test_list_move_events(monkeypatch, client):
 async def test_create_move_event(monkeypatch, client):
     """POST move-events records a move-in or move-out event."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.move_events")
+    _patch_move_events_access(monkeypatch)
+
+    async def fake_get_unit_project(self, *, organization_id: str, unit_id: str):
+        del self, organization_id
+        assert unit_id == "unit-1"
+        return {"project_id": PROJECT_ID}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.db.repositories.contact_units_repository."
+        "ContactUnitsRepository.get_unit_project",
+        fake_get_unit_project,
+    )
 
     async def fake_create_move_event(_self, body):
         del _self
@@ -116,7 +141,7 @@ async def test_create_move_event(monkeypatch, client):
 async def test_get_move_event(monkeypatch, client):
     """GET move-events/{id} returns one move event with joined fields."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.move_events")
+    _patch_move_events_access(monkeypatch)
 
     async def fake_get_move_event(_self, move_event_id: str):
         del _self
@@ -138,7 +163,7 @@ async def test_get_move_event(monkeypatch, client):
 async def test_update_move_event(monkeypatch, client):
     """PATCH move-events/{id} updates move event details."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.move_events")
+    _patch_move_events_access(monkeypatch)
 
     async def fake_update_move_event(_self, move_event_id: str, body):
         del _self

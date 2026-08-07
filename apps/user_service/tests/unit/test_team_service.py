@@ -67,6 +67,7 @@ class _FakeTeamRepo:
         self.last_create: Any = None
         self.last_update: Any = None
         self.last_delete: Any = None
+        self.last_list_kwargs: dict[str, Any] | None = None
 
     async def create_team(self, db_in):
         """Record create payload and return team id."""
@@ -75,12 +76,13 @@ class _FakeTeamRepo:
 
     async def get_teams_list(self, **kwargs):
         """Return paginated teams."""
+        self.last_list_kwargs = kwargs
         del kwargs
         return self.teams, self.total
 
-    async def get_team_detail(self, **kwargs):
+    async def get_team_detail(self, team_id, organization_id, **_kwargs):
         """Return team row and members."""
-        del kwargs
+        del team_id, organization_id
         return self.team_data, self.members
 
     async def get_team_member_ids(self, team_id, organization_id):
@@ -96,9 +98,11 @@ class _FakeTeamRepo:
         """Record delete payload."""
         self.last_delete = delete_input
 
-    async def check_team_name_unique(self, new_name, organization_id, team_id=None):
+    async def check_team_name_unique(
+        self, new_name, organization_id, team_id=None, project_id=None
+    ):
         """Return configured uniqueness result."""
-        del new_name, organization_id, team_id
+        del new_name, organization_id, team_id, project_id
         return self.name_unique
 
     async def validate_organization_members(self, member_ids, organization_id):
@@ -111,7 +115,12 @@ def _service(repo: _FakeTeamRepo) -> TeamService:
     """Build TeamService with fake repository."""
     service = TeamService(user_context=_ctx(), db_connection=MagicMock())
     service.team_repository = repo
+    service.setup_service = MagicMock()
+    service.setup_service.ensure_project = AsyncMock()
     return service
+
+
+PROJECT_ID = "990e8400-e29b-41d4-a716-446655440005"
 
 
 @pytest.mark.asyncio
@@ -164,6 +173,9 @@ async def test_update_team_syncs_roles():
     service._validate_member_ids = AsyncMock()  # pylint: disable=protected-access
     service.team_repository = MagicMock()
     service.team_repository.get_team_member_ids = AsyncMock(return_value=[USER_A, USER_B])
+    service.team_repository.get_team_detail = AsyncMock(
+        return_value=({"id": TEAM_ID, "project_id": None}, [])
+    )
     service.team_repository.update_team = AsyncMock()
 
     body = UpdateTeamRequest(
@@ -281,7 +293,10 @@ async def test_get_team_detail_success():
 @pytest.mark.asyncio
 async def test_update_team_computes_member_changes():
     """Update team computes member adds/removes and validates ids."""
-    repo = _FakeTeamRepo(member_ids=[MEMBER_ID])
+    repo = _FakeTeamRepo(
+        member_ids=[MEMBER_ID],
+        team_data={"id": TEAM_ID, "name": "Team", "project_id": None},
+    )
     service = _service(repo)
 
     await service.update_team(
@@ -319,3 +334,32 @@ async def test_delete_team():
 
     assert repo.last_delete.team_id == TEAM_ID
     assert repo.last_delete.organization_id == ORG_ID
+
+
+@pytest.mark.asyncio
+async def test_create_team_with_project_id():
+    """Create team validates project and stores project_id."""
+    repo = _FakeTeamRepo()
+    service = _service(repo)
+    request = CreateTeamRequest(
+        name="Security",
+        project_id=PROJECT_ID,
+    )
+
+    team_id = await service.create_team(request)
+
+    assert team_id == TEAM_ID
+    assert repo.last_create.project_id == PROJECT_ID
+    service.setup_service.ensure_project.assert_awaited_once_with(project_id=PROJECT_ID)
+
+
+@pytest.mark.asyncio
+async def test_list_teams_filters_by_project_id():
+    """List teams forwards project_id filter after validation."""
+    repo = _FakeTeamRepo(teams=[], total=0)
+    service = _service(repo)
+
+    await service.list_teams(page=1, page_size=20, project_id=PROJECT_ID)
+
+    service.setup_service.ensure_project.assert_awaited_once_with(project_id=PROJECT_ID)
+    assert repo.last_list_kwargs["project_id"] == PROJECT_ID

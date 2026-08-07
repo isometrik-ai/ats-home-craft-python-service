@@ -486,6 +486,10 @@ async def _build_contact_document(
     full_name = _build_contact_full_name(details)
     phone_numbers, phones_display = _extract_phone_numbers_and_display(details)
     company_ids, company_names = _extract_contact_company_linkage(details)
+    project_ids = await contacts_repo.list_contact_project_ids(
+        contact_id=contact_id,
+        organization_id=organization_id,
+    )
     custom_field_keys, custom_field_values = await _extract_contact_custom_field_facets(
         conn=conn,
         organization_id=organization_id,
@@ -532,6 +536,7 @@ async def _build_contact_document(
         "address_postal_codes": address_postal_codes or None,
         "company_ids": company_ids or None,
         "company_names": company_names or None,
+        "project_ids": project_ids or None,
         "custom_field_keys": custom_field_keys or None,
         "custom_field_values": custom_field_values or None,
         "enrichment_done": bool(details.get("enrichment_done")),

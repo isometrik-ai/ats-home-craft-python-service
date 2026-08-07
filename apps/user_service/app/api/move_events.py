@@ -17,7 +17,8 @@ from apps.user_service.app.schemas.move_events import (
 from apps.user_service.app.services.move_events_service import MoveEventsService
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    ensure_staff_project_access,
+    ensure_staff_project_access_optional,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -42,6 +43,49 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 }
 
 
+async def _staff_move_event_access(
+    *,
+    request: Request,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    move_event_id: str,
+    permission_codes: str | list[str],
+):
+    """Resolve project_id from a move event then enforce staff project access."""
+    from apps.user_service.app.db.repositories.move_events_repository import (
+        MoveEventsRepository,
+    )
+    from apps.user_service.app.utils.common_utils import extract_user_context
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = user_context.organization_id
+    if not org_id:
+        from apps.user_service.app.utils.common_utils import ValidationException
+        from libs.shared_utils.status_codes import CustomStatusCode
+
+        raise ValidationException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+    row = await MoveEventsRepository(db_connection).get_by_id(
+        organization_id=org_id,
+        move_event_id=move_event_id,
+    )
+    if not row or not row.get("project_id"):
+        raise NotFoundException(
+            message_key="move_events.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    return await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=str(row["project_id"]),
+        permission_codes=permission_codes,
+        request=request,
+    )
+
+
 @handle_api_exceptions("list move events")
 @router.get(
     "",
@@ -57,9 +101,10 @@ async def list_move_events(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return paginated move-in / move-out records for the organization."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=query.project_id,
         permission_codes=CONTACTS_MANAGEMENT_VIEW,
         request=request,
     )
@@ -108,9 +153,34 @@ async def create_move_event(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Record a move event and sync contact_units occupancy."""
-    user_context = await check_permissions(
+    from apps.user_service.app.db.repositories.contact_units_repository import (
+        ContactUnitsRepository,
+    )
+    from apps.user_service.app.utils.common_utils import extract_user_context
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = user_context.organization_id
+    if not org_id:
+        from apps.user_service.app.utils.common_utils import ValidationException
+
+        raise ValidationException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+    unit = await ContactUnitsRepository(db_connection).get_unit_project(
+        organization_id=org_id,
+        unit_id=body.unit_id,
+    )
+    if not unit or not unit.get("project_id"):
+        raise NotFoundException(
+            message_key="move_events.errors.unit_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=str(unit["project_id"]),
         permission_codes=CONTACTS_MANAGEMENT_CREATE,
         request=request,
     )
@@ -152,11 +222,12 @@ async def get_move_event(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return one move event with joined unit and contact display fields."""
-    user_context = await check_permissions(
+    user_context = await _staff_move_event_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        move_event_id=move_event_id,
         permission_codes=CONTACTS_MANAGEMENT_VIEW,
-        request=request,
     )
     service = MoveEventsService(
         db_connection=db_connection,
@@ -194,11 +265,12 @@ async def update_move_event(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Correct move event date, fee, notes, or documents."""
-    user_context = await check_permissions(
+    user_context = await _staff_move_event_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        move_event_id=move_event_id,
         permission_codes=CONTACTS_MANAGEMENT_EDIT,
-        request=request,
     )
     service = MoveEventsService(
         db_connection=db_connection,
@@ -244,11 +316,12 @@ async def delete_move_event(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Soft-void a move event and re-derive occupancy from prior moves."""
-    user_context = await check_permissions(
+    user_context = await _staff_move_event_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        move_event_id=move_event_id,
         permission_codes=CONTACTS_MANAGEMENT_DELETE,
-        request=request,
     )
     service = MoveEventsService(
         db_connection=db_connection,

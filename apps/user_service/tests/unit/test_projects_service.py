@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from asyncpg import UniqueViolationError
@@ -307,15 +307,42 @@ async def test_get_project_details_not_found():
 async def test_list_projects_returns_summaries():
     """List projects serializes summary rows."""
     service = _service(projects_repo=_FakeProjectsRepo(projects=[_project_row()]))
-    result = await service.list_projects(
-        search=None,
-        status=None,
-        property_type=None,
-        page=1,
-        page_size=20,
-    )
+    with patch(
+        "libs.shared_middleware.jwt_auth.check_user_access_async",
+        new=AsyncMock(return_value=True),
+    ):
+        result = await service.list_projects(
+            search=None,
+            status=None,
+            property_type=None,
+            page=1,
+            page_size=20,
+        )
     assert result["total"] == 1
     assert result["items"][0]["code"] == "sunrise-towers"
+
+
+@pytest.mark.asyncio
+async def test_list_projects_assigned_only_uses_member_query():
+    """Users with only assigned view list via project_members."""
+    repo = _FakeProjectsRepo(projects=[_project_row(role="community_admin")])
+    service = _service(projects_repo=repo)
+
+    async def _access(**kwargs):
+        return kwargs["permission_code"] == ["projects_management.view_assigned"]
+
+    with patch(
+        "libs.shared_middleware.jwt_auth.check_user_access_async",
+        new=AsyncMock(side_effect=_access),
+    ):
+        result = await service.list_projects(
+            search=None,
+            status=None,
+            property_type=None,
+            page=1,
+            page_size=20,
+        )
+    assert result["total"] == 1
 
 
 @pytest.mark.asyncio

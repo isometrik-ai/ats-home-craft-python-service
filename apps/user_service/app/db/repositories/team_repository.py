@@ -52,10 +52,10 @@ class TeamRepository:
         # Insert team record
         team_query = """
             INSERT INTO teams (
-                organization_id, name, description, created_by,
+                organization_id, name, description, project_id, created_by,
                 created_at, updated_at, deleted_at
             )
-            VALUES ($1, $2, $3, $4, NOW(), NOW(), NULL)
+            VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), NULL)
             RETURNING id
         """
 
@@ -64,6 +64,7 @@ class TeamRepository:
             team_input.organization_id,
             team_input.name,
             team_input.description,
+            team_input.project_id,
             team_input.created_by,
         )
 
@@ -195,12 +196,14 @@ class TeamRepository:
         self,
         organization_id: str,
         search: str | None = None,
+        project_id: str | None = None,
     ) -> tuple[str, list[object]]:
         """Build WHERE clause and parameters for team queries.
 
         Args:
             organization_id: Organization UUID to filter by
             search: Optional search term for team name
+            project_id: Optional project UUID to filter project-scoped teams
 
         Returns:
             Tuple containing (where_clause, params) for use in SQL query
@@ -211,6 +214,10 @@ class TeamRepository:
         if search and search.strip():
             params.append(f"%{search.strip()}%")
             conditions.append(f"t.name ILIKE ${len(params)}")
+
+        if project_id is not None:
+            params.append(project_id)
+            conditions.append(f"t.project_id = ${len(params)}::uuid")
 
         where_clause = "WHERE " + " AND ".join(conditions)
         return where_clause, params
@@ -232,6 +239,7 @@ class TeamRepository:
         self,
         organization_id: str,
         search: str | None = None,
+        project_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, object]], int]:
@@ -240,6 +248,7 @@ class TeamRepository:
         Args:
             organization_id: Organization UUID
             search: Optional search term to filter teams by name
+            project_id: Optional project UUID filter for project-scoped teams
             page: Page number (1-indexed)
             page_size: Number of teams per page
 
@@ -247,7 +256,9 @@ class TeamRepository:
             Tuple[list[dict], int]: (list of teams, total count of filtered teams)
         """
         offset = (page - 1) * page_size
-        where_clause, params = self._build_team_filters(organization_id, search)
+        where_clause, params = self._build_team_filters(
+            organization_id, search, project_id=project_id
+        )
 
         # Count query
         count_query = f"""
@@ -263,6 +274,7 @@ class TeamRepository:
                 t.id,
                 t.name,
                 t.description,
+                t.project_id,
                 t.created_at,
                 t.updated_at,
                 COALESCE(tm.member_count, 0)::int AS member_count
@@ -290,6 +302,7 @@ class TeamRepository:
             "id": row["id"],
             "name": row["name"],
             "description": row["description"],
+            "project_id": row.get("project_id"),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -326,7 +339,7 @@ class TeamRepository:
         """
 
         team_query = """
-            SELECT id, name, description, created_at, updated_at
+            SELECT id, name, description, project_id, created_at, updated_at
             FROM teams
             WHERE id = $1
             AND organization_id = $2
@@ -392,24 +405,36 @@ class TeamRepository:
 
     # VALIDATION OPERATIONS
     async def check_team_name_unique(
-        self, name: str, organization_id: str, team_id: str | None = None
+        self,
+        name: str,
+        organization_id: str,
+        team_id: str | None = None,
+        project_id: str | None = None,
     ) -> bool:
-        """Check if team name is unique within organization (case-insensitive).
+        """Check if team name is unique within organization and project scope.
+
+        Org CRM teams (project_id NULL) are unique among other org CRM teams.
+        Project-scoped teams are unique within the same project.
 
         Args:
             name: Team name to check
             organization_id: Organization UUID
             team_id: Optional team ID to exclude from check (during update)
+            project_id: Optional project UUID scope for uniqueness
 
         Returns:
             bool: True if name is unique, False otherwise
         """
-        exclude_clause = ""
-        params = [name, organization_id]
+        params: list[object] = [name, organization_id]
+        project_clause = "AND project_id IS NULL"
+        if project_id:
+            params.append(project_id)
+            project_clause = f"AND project_id = ${len(params)}::uuid"
 
+        exclude_clause = ""
         if team_id:
-            exclude_clause = "AND id != $3"
             params.append(team_id)
+            exclude_clause = f"AND id != ${len(params)}::uuid"
 
         query = f"""
             SELECT EXISTS(
@@ -417,9 +442,10 @@ class TeamRepository:
                 WHERE LOWER(name) = LOWER($1)
                 AND organization_id = $2
                 AND deleted_at IS NULL
+                {project_clause}
                 {exclude_clause}
             ) AS exists
-        """.format(exclude_clause=exclude_clause)
+        """
 
         exists = await self.db_connection.fetchval(query, *params)
         return not exists

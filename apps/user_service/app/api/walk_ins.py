@@ -13,7 +13,7 @@ from apps.user_service.app.schemas.walk_in import CreateWalkInRequest, WalkInLis
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    ensure_staff_project_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -60,9 +60,10 @@ async def create_walk_in(
     body: CreateWalkInRequest = Body(...),
 ):
     """Create a walk-in visit with one or more target flats."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=VISITOR_MANAGEMENT_VERIFY,
         request=request,
     )
@@ -102,9 +103,10 @@ async def list_walk_ins(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List walk-in visits for the security app."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=VISITOR_MANAGEMENT_VERIFY,
         request=request,
     )
@@ -138,9 +140,10 @@ async def get_walk_in(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return walk-in detail with visit units and timeline."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=VISITOR_MANAGEMENT_VERIFY,
         request=request,
     )
@@ -180,9 +183,10 @@ async def enter_walk_in(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Mark the visitor physically inside (requires at least one approved flat)."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=VISITOR_MANAGEMENT_VERIFY,
         request=request,
     )
@@ -230,9 +234,10 @@ async def exit_walk_in(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Mark the visitor exited for the whole visit."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=VISITOR_MANAGEMENT_VERIFY,
         request=request,
     )

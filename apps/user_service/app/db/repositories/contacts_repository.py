@@ -1140,6 +1140,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         status: str | None,
         contact_type: str | None = None,
         dropdown_filters: dict[str, list[str]] | None = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -1169,6 +1170,19 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 )"""
             )
             args.append(contact_type)
+            next_param_index += 1
+        if project_id:
+            where.append(
+                f"""EXISTS (
+                  SELECT 1
+                  FROM contact_units cu
+                  WHERE cu.contact_id = ct.id
+                    AND cu.organization_id = ct.organization_id
+                    AND cu.project_id = ${next_param_index}::uuid
+                    AND cu.status IN ('active', 'pending')
+                )"""
+            )
+            args.append(project_id)
             next_param_index += 1
         if search:
             name_email_match = (
@@ -1351,6 +1365,27 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             ClientStatus.DELETED.value,
         )
         return [dict(row) for row in rows]
+
+    async def list_contact_project_ids(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+    ) -> list[str]:
+        """Return distinct project IDs from active/pending contact_units for a contact."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT cu.project_id::text AS project_id
+            FROM contact_units cu
+            WHERE cu.contact_id = $1::uuid
+              AND cu.organization_id = $2::uuid
+              AND cu.status IN ('active', 'pending')
+              AND cu.project_id IS NOT NULL
+            """,
+            contact_id,
+            organization_id,
+        )
+        return [str(row["project_id"]) for row in rows if row.get("project_id")]
 
     async def get_active_contact_by_user_id(
         self,

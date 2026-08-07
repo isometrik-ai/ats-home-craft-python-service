@@ -113,6 +113,7 @@
       "user_not_member_of_organization": "You are not a member of this organization.",
       "session_already_has_organization": "Your session is already linked to an organization. Please logout and login again to switch organizations.",
       "session_not_found": "Session not found. Please login again.",
+      "project_access_denied": "You do not have access to this project.",
       "session_renewal_failed": "Password updated, but we couldn't sign you in automatically. Please log in again with your new password."
     },
     "success": {
@@ -346,6 +347,19 @@
       "project_retrieved": "Project retrieved successfully.",
       "project_updated": "Project updated successfully.",
       "project_deleted": "Project deleted successfully."
+    }
+  },
+  "project_members": {
+    "errors": {
+      "not_found": "Project member not found.",
+      "already_assigned": "This user is already assigned to the project.",
+      "last_community_admin": "Cannot remove or demote the last community admin on this project."
+    },
+    "success": {
+      "list_retrieved": "Project members retrieved successfully.",
+      "assigned": "Project member assigned successfully.",
+      "updated": "Project member updated successfully.",
+      "removed": "Project member removed successfully."
     }
   },
   "project_setup": {

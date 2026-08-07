@@ -206,7 +206,38 @@ async def test_check_team_name_unique():
     assert await repo.check_team_name_unique("Legal", "org1") is True
     query, args = conn.fetchval_calls[0]
     assert "LOWER(name) = LOWER($1)" in query
+    assert "project_id IS NULL" in query
     assert args[:2] == ("Legal", "org1")
+
+
+@pytest.mark.asyncio
+async def test_get_teams_list_project_filter():
+    """get_teams_list filters by project_id when provided."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = TeamRepository(db_connection=conn)
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+
+    await repo.get_teams_list("org1", project_id=project_id, page=1, page_size=20)
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "t.project_id = $2::uuid" in count_query
+    assert project_id in count_args
+
+
+@pytest.mark.asyncio
+async def test_create_team_persists_project_id():
+    """create_team INSERT includes project_id column."""
+    conn = _FakeConn()
+    conn.row = {"id": "t1"}
+    repo = TeamRepository(db_connection=conn)
+    team_in = _team_input(with_members=False)
+    team_in = team_in.model_copy(update={"project_id": "550e8400-e29b-41d4-a716-446655440099"})
+
+    await repo.create_team(team_in)
+
+    insert_query, insert_args = conn.fetchrow_calls[0]
+    assert "project_id" in insert_query
+    assert team_in.project_id in insert_args
 
 
 @pytest.mark.asyncio
@@ -356,7 +387,7 @@ async def test_check_team_name_unique_exclude_self():
 
     assert unique is False
     query, args = _sql_args(conn.fetchval)
-    assert "id != $3" in query
+    assert "id != $3::uuid" in query
     assert args[2] == "t1"
 
 

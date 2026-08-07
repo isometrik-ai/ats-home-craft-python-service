@@ -24,6 +24,7 @@ from apps.user_service.app.services.project_setup_service import ProjectSetupSer
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     ConflictException,
+    ForbiddenException,
     InternalServerErrorException,
     NotFoundException,
     ValidationException,
@@ -381,15 +382,53 @@ class ProjectsService:
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
-        """List projects with pagination."""
-        rows, total = await self.projects_repo.list_projects(
-            organization_id=self.user_context.organization_id,
-            search=search,
-            status=status,
-            property_type=property_type,
-            page=page,
-            page_size=page_size,
+        """List projects with pagination (org-wide or assigned-only)."""
+        from libs.shared_middleware.jwt_auth import check_user_access_async
+        from libs.shared_utils.common_query import (
+            PROJECTS_MANAGEMENT_VIEW,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
         )
+
+        org_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        assert org_id and user_id
+
+        has_org_wide = await check_user_access_async(
+            permission_code=[PROJECTS_MANAGEMENT_VIEW],
+            user_id=user_id,
+            organization_id=org_id,
+            db_connection=self.db_connection,
+        )
+        if has_org_wide:
+            rows, total = await self.projects_repo.list_projects(
+                organization_id=org_id,
+                search=search,
+                status=status,
+                property_type=property_type,
+                page=page,
+                page_size=page_size,
+            )
+        else:
+            has_assigned = await check_user_access_async(
+                permission_code=[PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+                user_id=user_id,
+                organization_id=org_id,
+                db_connection=self.db_connection,
+            )
+            if not has_assigned:
+                raise ForbiddenException(
+                    message_key="errors.insufficient_permissions",
+                    custom_code=CustomStatusCode.FORBIDDEN,
+                )
+            rows, total = await self.projects_repo.list_projects_for_member(
+                organization_id=org_id,
+                user_id=user_id,
+                search=search,
+                status=status,
+                property_type=property_type,
+                page=page,
+                page_size=page_size,
+            )
         return {
             "items": [self._summary_from_row(row) for row in rows],
             "total": total,

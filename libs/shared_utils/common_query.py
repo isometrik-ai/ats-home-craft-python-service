@@ -31,8 +31,10 @@ COMPANIES_MANAGEMENT_DELETE = "companies_management.delete"
 
 PROJECTS_MANAGEMENT_CREATE = "projects_management.create"
 PROJECTS_MANAGEMENT_VIEW = "projects_management.view"
+PROJECTS_MANAGEMENT_VIEW_ASSIGNED = "projects_management.view_assigned"
 PROJECTS_MANAGEMENT_EDIT = "projects_management.edit"
 PROJECTS_MANAGEMENT_DELETE = "projects_management.delete"
+PROJECT_MEMBERS_MANAGE = "project_members.manage"
 
 CUSTOM_FIELDS_MANAGEMENT_CREATE = "custom_fields_management.create"
 CUSTOM_FIELDS_MANAGEMENT_VIEW = "custom_fields_management.view"
@@ -265,6 +267,18 @@ DEFAULT_PERMISSIONS = [
         "projects_management.delete",
         "Delete Projects",
         "Remove projects from the system",
+        "projects",
+    ),
+    (
+        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        "View Assigned Projects",
+        "View and access only projects assigned via project_members",
+        "projects",
+    ),
+    (
+        PROJECT_MEMBERS_MANAGE,
+        "Manage Project Members",
+        "Assign and remove staff on projects",
         "projects",
     ),
     # custom fields management

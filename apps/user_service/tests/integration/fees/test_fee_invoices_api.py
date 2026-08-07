@@ -2,7 +2,10 @@
 
 import pytest
 
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.tests.integration.helpers import (
+    patch_check_permissions,
+    patch_ensure_staff_project_access,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 
 PROJECT_ID = "proj-1"
@@ -48,33 +51,11 @@ _FAKE_SCHEDULER_RESULT = {
 }
 
 
-def _ctx() -> UserContext:
-    """Return a reusable admin user context."""
-    return UserContext(
-        user_id="u1",
-        email="u1@example.com",
-        organization_id="org-1",
-        user_type="admin",
-    )
-
-
-def _patch_check_permissions(monkeypatch, module_path: str) -> None:
-    """Patch check_permissions to return a fake admin context."""
-
-    async def fake_check_permissions(
-        current_user, db_connection, permission_codes, organization_id=None
-    ):
-        del current_user, db_connection, permission_codes, organization_id
-        return _ctx()
-
-    monkeypatch.setattr(f"{module_path}.check_permissions", fake_check_permissions)
-
-
 @pytest.mark.asyncio
 async def test_list_fee_invoices(monkeypatch, client):
     """GET fee invoices returns paginated project invoice list."""
 
-    _patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_invoices")
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.fee_invoices")
 
     async def fake_list_project_invoices(
         _self, *, project_id: str, status=None, page=1, page_size=50
@@ -105,7 +86,7 @@ async def test_list_fee_invoices(monkeypatch, client):
 async def test_get_fee_invoice(monkeypatch, client):
     """GET fee invoice by id returns invoice detail."""
 
-    _patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_invoices")
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.fee_invoices")
 
     async def fake_get_invoice(_self, *, invoice_id: str, project_id=None):
         del _self
@@ -128,7 +109,7 @@ async def test_get_fee_invoice(monkeypatch, client):
 async def test_generate_fee_invoices(monkeypatch, client):
     """POST generate creates invoices for billable units."""
 
-    _patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_invoices")
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.fee_invoices")
 
     async def fake_generate_invoices_for_project(_self, *, project_id: str):
         del _self
@@ -151,7 +132,7 @@ async def test_generate_fee_invoices(monkeypatch, client):
 async def test_run_fee_billing_scheduler(monkeypatch, client):
     """POST fee-billing/run executes the billing scheduler."""
 
-    _patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_invoices")
+    patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_invoices")
 
     async def fake_run_billing_cycle(_self):
         del _self

@@ -877,6 +877,49 @@ async def test_list_contacts_forwards_filters(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_contacts_forwards_project_id(monkeypatch):
+    """List contacts forwards optional project_id filter."""
+    _patch_custom_fields(monkeypatch)
+    repo = _FakeContactsRepo(contacts=[_contact_list_row()], total=1)
+    svc = _service(contacts_repo=repo)
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+
+    await svc.list_contacts(
+        search=None,
+        status=ClientStatus.ACTIVE.value,
+        contact_type=None,
+        dropdown_filters=None,
+        project_id=project_id,
+        page=1,
+        page_size=10,
+    )
+
+    assert repo.last_list_kwargs["project_id"] == project_id
+
+
+@pytest.mark.asyncio
+async def test_search_contacts_project_filter():
+    """Search contacts adds project_ids Typesense filter when project_id is set."""
+    svc = _service()
+    fake_typesense = MagicMock()
+    fake_typesense.embed_query_text = AsyncMock(return_value=None)
+    fake_typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
+    svc._typesense = fake_typesense
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+
+    await svc.search_contacts(
+        query="Jane",
+        page=1,
+        page_size=10,
+        status=ClientStatus.ACTIVE.value,
+        project_id=project_id,
+    )
+
+    params = fake_typesense.search.await_args.args[0]
+    assert f"project_ids:={project_id}" in params["filter_by"]
+
+
+@pytest.mark.asyncio
 async def test_search_contacts_email_params():
     """Search contacts uses email params when query has @."""
     svc = _service()

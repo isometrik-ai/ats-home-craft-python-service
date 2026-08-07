@@ -41,6 +41,7 @@ CONTACTS_COLLECTION_SCHEMA: dict[str, Any] = {
         # All associated companies (multi) - aligns with list API shape (company_names[])
         {"name": "company_ids", "type": "string[]", "index": False, "optional": True},
         {"name": "company_names", "type": "string[]", "optional": True},
+        {"name": "project_ids", "type": "string[]", "facet": True, "optional": True},
         # Custom fields
         {"name": "custom_field_values", "type": "string[]", "optional": True},
         {"name": "custom_field_keys", "type": "string[]", "optional": True},
@@ -76,7 +77,7 @@ CONTACT_SEARCH_PARAMS: dict[str, Any] = {
     "min_len_2typo": 7,
     "prefix": True,
     "sort_by": "_text_match:desc,updated_at:desc",
-    "facet_by": "status,tags,address_countries,address_states,address_cities",
+    "facet_by": "status,tags,address_countries,address_states,address_cities,project_ids",
     "max_facet_values": 25,
 }
 

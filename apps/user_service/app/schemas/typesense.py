@@ -253,6 +253,7 @@ class TypesenseContactDocument(BaseModel):
 
     company_ids: list[str] | None = None
     company_names: list[str] | None = None
+    project_ids: list[str] | None = None
 
     custom_field_keys: list[str] | None = None
     custom_field_values: list[str] | None = None

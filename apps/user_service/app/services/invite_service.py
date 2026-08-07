@@ -19,6 +19,7 @@ from apps.user_service.app.db.repositories import (
     TeamRepository,
     UserRepository,
 )
+from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.schemas.auth import SignupRequest
 from apps.user_service.app.schemas.enums import (
     INVITE_ACCEPT_SUCCESS_MESSAGE_KEYS,
@@ -26,6 +27,7 @@ from apps.user_service.app.schemas.enums import (
     InviteStatus,
     OrganizationMemberRole,
     OrganizationMemberStatus,
+    ProjectMemberRole,
 )
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
@@ -123,6 +125,7 @@ class InviteService:
         )
         self.user_repository = UserRepository(db_connection=db_connection)
         self.team_repository = TeamRepository(db_connection=db_connection)
+        self.projects_repository = ProjectsRepository(db_connection=db_connection)
         self.session_management_service = SessionManagementService(db_connection=db_connection)
         self.supabase_admin_client = sb_admin_client
         self.supabase_anon_client = sb_anon_client
@@ -227,6 +230,10 @@ class InviteService:
         }
         if body.team_id:
             metadata["team_id"] = str(body.team_id)
+        if body.project_id:
+            metadata["project_id"] = str(body.project_id)
+        if body.project_role:
+            metadata["project_role"] = body.project_role.value
         if body.tags is not None:
             metadata["tags"] = [tag.strip() for tag in body.tags if tag and tag.strip()]
         return metadata
@@ -238,6 +245,7 @@ class InviteService:
         organization_id: str,
         user_id: str,
         added_by: str,
+        invite_project_id: str | None = None,
     ) -> None:
         """Add an accepted invitee to a team when team_id was set on the invitation."""
         if not team_id:
@@ -251,6 +259,47 @@ class InviteService:
             team_id=team_id,
             member_data=[MemberData(member_id=user_id, additional_data=None)],
             added_by=added_by,
+        )
+
+        team_project_id = team_data.get("project_id")
+        if team_project_id and not invite_project_id:
+            await self._add_invitee_to_project(
+                project_id=str(team_project_id),
+                project_role=None,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+
+    async def _validate_project_in_org(self, project_id: str, organization_id: str) -> None:
+        """Ensure project_id belongs to the organization before storing on invite."""
+        validate_uuid_format(project_id, "project ID")
+        project = await self.projects_repository.get_project(
+            organization_id=organization_id,
+            project_id=project_id,
+        )
+        if not project:
+            raise NotFoundException(
+                message_key="project_setup.errors.project_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def _add_invitee_to_project(
+        self,
+        *,
+        project_id: str | None,
+        project_role: str | None,
+        organization_id: str,
+        user_id: str,
+    ) -> None:
+        """Assign accepted invitee to a project when project_id was set on the invitation."""
+        if not project_id:
+            return
+        role = project_role or ProjectMemberRole.COMMUNITY_ADMIN.value
+        await self.projects_repository.upsert_member(
+            organization_id=organization_id,
+            project_id=project_id,
+            user_id=user_id,
+            role=role,
         )
 
     def _validate_invitation_for_acceptance(
@@ -597,6 +646,13 @@ class InviteService:
             organization_id=str(invitation_data["organization_id"]),
             user_id=str(user.id),
             added_by=str(invitation_data["invited_by"]),
+            invite_project_id=inv_meta.get("project_id"),
+        )
+        await self._add_invitee_to_project(
+            project_id=inv_meta.get("project_id"),
+            project_role=inv_meta.get("project_role"),
+            organization_id=str(invitation_data["organization_id"]),
+            user_id=str(user.id),
         )
 
         # Update invitation status
@@ -716,6 +772,8 @@ class InviteService:
 
         if body.team_id:
             await self._validate_team_in_org(str(body.team_id), organization_id)
+        if body.project_id:
+            await self._validate_project_in_org(str(body.project_id), organization_id)
 
         # Generate invite token
         invite_token, token_hash = self._generate_invite_token()
@@ -1096,6 +1154,8 @@ class InviteService:
             phone_full = f"{phone_isd_code}{phone_number_db}"
 
         team_id = metadata.get("team_id")
+        project_id = metadata.get("project_id")
+        project_role = metadata.get("project_role")
         tags = metadata.get("tags")
 
         return {
@@ -1112,5 +1172,7 @@ class InviteService:
             "last_name": metadata.get("last_name", None),
             "phone": phone_full,
             "team_id": team_id,
+            "project_id": project_id,
+            "project_role": project_role,
             "tags": tags if tags else None,
         }
