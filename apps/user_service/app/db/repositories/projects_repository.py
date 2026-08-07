@@ -500,3 +500,165 @@ class ProjectsRepository(BaseRepository):
             project_id,
         )
         return [dict(row) for row in rows]
+
+    async def get_active_member(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return active project_members row for a user on a project."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT *
+            FROM project_members
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND user_id = $3::uuid
+              AND status = 'active'
+            """,
+            organization_id,
+            project_id,
+            user_id,
+        )
+        return dict(row) if row else None
+
+    async def get_member(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return project_members row regardless of status."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT *
+            FROM project_members
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND user_id = $3::uuid
+            """,
+            organization_id,
+            project_id,
+            user_id,
+        )
+        return dict(row) if row else None
+
+    async def update_member(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        user_id: str,
+        role: str | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Patch role and/or status on a project member."""
+        sets: list[str] = ["updated_at = now()"]
+        args: list[Any] = [organization_id, project_id, user_id]
+        next_param = 4
+        if role is not None:
+            sets.append(f"role = ${next_param}")
+            args.append(role)
+            next_param += 1
+        if status is not None:
+            sets.append(f"status = ${next_param}")
+            args.append(status)
+            next_param += 1
+        if len(sets) == 1:
+            return await self.get_member(
+                organization_id=organization_id,
+                project_id=project_id,
+                user_id=user_id,
+            )
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE project_members
+            SET {", ".join(sets)}
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND user_id = $3::uuid
+            RETURNING *
+            """,
+            *args,
+        )
+        return dict(row) if row else None
+
+    async def remove_member(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Soft-remove a project member by setting status to suspended."""
+        return await self.update_member(
+            organization_id=organization_id,
+            project_id=project_id,
+            user_id=user_id,
+            status="suspended",
+        )
+
+    async def list_members_with_profiles(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+    ) -> list[dict[str, Any]]:
+        """List project members joined with organization member profile fields."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              pm.id::text AS id,
+              pm.organization_id::text AS organization_id,
+              pm.project_id::text AS project_id,
+              pm.user_id::text AS user_id,
+              pm.role,
+              pm.status,
+              pm.joined_at,
+              pm.created_at,
+              pm.updated_at,
+              om.email,
+              om.first_name,
+              om.last_name,
+              om.role_id::text AS org_role_id,
+              om.member_role
+            FROM project_members pm
+            INNER JOIN organization_members om
+              ON om.user_id = pm.user_id
+             AND om.organization_id = pm.organization_id
+             AND om.status = 'active'
+            WHERE pm.organization_id = $1::uuid
+              AND pm.project_id = $2::uuid
+              AND pm.status != 'suspended'
+            ORDER BY pm.joined_at NULLS LAST, pm.created_at
+            """,
+            organization_id,
+            project_id,
+        )
+        return [dict(row) for row in rows]
+
+    async def count_active_members_by_role(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        role: str,
+    ) -> int:
+        """Count active project members with a given role."""
+        count = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(1)
+            FROM project_members
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND role = $3
+              AND status = 'active'
+            """,
+            organization_id,
+            project_id,
+            role,
+        )
+        return int(count or 0)

@@ -9,7 +9,9 @@ from apps.user_service.app.schemas.tenant_requests import (
     TenantRequestResponse,
     TenantRequestSummaryResponse,
 )
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import (
+    patch_ensure_staff_project_access,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -26,7 +28,7 @@ ORG = "org-123"
 
 def _patch_admin_access(monkeypatch) -> None:
     """Bypass RBAC for admin tenant request routes."""
-    patch_check_permissions(monkeypatch, _API, org_id=ORG)
+    patch_ensure_staff_project_access(monkeypatch, _API, org_id=ORG)
 
 
 def _fake_summary(**overrides) -> TenantRequestSummaryResponse:

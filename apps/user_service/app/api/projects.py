@@ -48,6 +48,11 @@ from apps.user_service.app.schemas.project_inventory import (
     UpdateUnitRequest,
     UpsertFloorInventoryRequest,
 )
+from apps.user_service.app.schemas.project_members import (
+    AssignProjectMemberRequest,
+    ProjectMemberResponse,
+    UpdateProjectMemberRequest,
+)
 from apps.user_service.app.schemas.project_setup import (
     CompleteStepRequest,
     CreateFloorRequest,
@@ -73,6 +78,7 @@ from apps.user_service.app.services.contact_units_service import ContactUnitsSer
 from apps.user_service.app.services.facilities_service import FacilitiesService
 from apps.user_service.app.services.inventory_service import InventoryService
 from apps.user_service.app.services.passes_service import PassesService
+from apps.user_service.app.services.project_members_service import ProjectMembersService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.services.projects_service import ProjectsService
 from apps.user_service.app.services.site_map_service import SiteMapService
@@ -83,16 +89,20 @@ from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    check_any_permissions,
     check_permissions,
+    ensure_staff_project_access,
     extract_user_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
+    PROJECT_MEMBERS_MANAGE,
     PROJECTS_MANAGEMENT_CREATE,
     PROJECTS_MANAGEMENT_DELETE,
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
@@ -131,6 +141,24 @@ def _set_audit(
         risk_level=risk_level,
         old_data=old_data,
         new_data=new_data,
+    )
+
+
+async def _staff_project_access(
+    *,
+    request: Request,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str,
+    permission_codes: list[str] | str,
+) -> UserContext:
+    """Thin wrapper for project-scoped staff route permission checks."""
+    return await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=permission_codes,
+        request=request,
     )
 
 
@@ -207,10 +235,14 @@ async def list_projects(
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
 ):
     """List projects with pagination."""
-    user_context = await check_permissions(
+    user_context = await check_any_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=[
+            PROJECTS_MANAGEMENT_VIEW,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        ],
+        request=request,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
     result = await service.list_projects(
@@ -325,9 +357,11 @@ async def get_project_status(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Get the setup wizard status for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = ProjectSetupService(db_connection=db_connection, user_context=user_context)
@@ -358,9 +392,11 @@ async def get_project_details(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Get a single project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
@@ -399,9 +435,11 @@ async def update_project(
     body: UpdateProjectRequest = Body(...),
 ):
     """Update a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
@@ -447,9 +485,11 @@ async def delete_project(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
@@ -497,9 +537,11 @@ async def complete_setup_step(
     body: CompleteStepRequest = Body(default=CompleteStepRequest()),
 ):
     """Complete a wizard step."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectSetupService(db_connection=db_connection, user_context=user_context)
@@ -544,9 +586,11 @@ async def complete_project_setup(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Finalize the setup wizard."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectSetupService(db_connection=db_connection, user_context=user_context)
@@ -592,9 +636,11 @@ async def add_project_media(
     body: ProjectMediaRequest = Body(...),
 ):
     """Attach media to a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
@@ -632,9 +678,11 @@ async def list_project_media(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List media for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
@@ -676,9 +724,11 @@ async def delete_project_media(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a project media row."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
@@ -733,9 +783,11 @@ async def create_tower(
     body: CreateTowerRequest = Body(...),
 ):
     """Create a tower, optionally with its wings, gates, lifts, and floors."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -772,9 +824,11 @@ async def list_towers(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List towers for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -810,9 +864,11 @@ async def get_tower_detail(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Get a tower with its nested builder entities."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -857,9 +913,11 @@ async def update_tower(
     body: UpdateTowerRequest = Body(...),
 ):
     """Update a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -904,9 +962,11 @@ async def delete_tower(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -951,9 +1011,11 @@ async def create_tower_wing(
     body: CreateTowerWingRequest = Body(...),
 ):
     """Create a wing under a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -991,9 +1053,11 @@ async def list_tower_wings(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List wings for a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1034,9 +1098,11 @@ async def delete_tower_wing(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a wing."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1081,9 +1147,11 @@ async def create_tower_gate(
     body: CreateTowerGateRequest = Body(...),
 ):
     """Create a gate under a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1121,9 +1189,11 @@ async def list_tower_gates(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List gates for a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1164,9 +1234,11 @@ async def delete_tower_gate(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a gate."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1211,9 +1283,11 @@ async def create_tower_lift(
     body: CreateTowerLiftRequest = Body(...),
 ):
     """Create a lift under a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1251,9 +1325,11 @@ async def list_tower_lifts(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List lifts for a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1294,9 +1370,11 @@ async def delete_tower_lift(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a lift."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1341,9 +1419,11 @@ async def create_floor(
     body: CreateFloorRequest = Body(...),
 ):
     """Create a floor under a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1381,9 +1461,11 @@ async def list_floors(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List floors for a tower."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1424,9 +1506,11 @@ async def delete_floor(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a floor."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
@@ -1475,9 +1559,11 @@ async def create_unit_config(
     body: CreateUnitConfigRequest = Body(...),
 ):
     """Create a unit configuration."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1515,9 +1601,11 @@ async def list_unit_configs(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List unit configurations."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1558,9 +1646,11 @@ async def update_unit_config(
     body: UpdateUnitConfigRequest = Body(...),
 ):
     """Update a unit configuration."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1605,9 +1695,11 @@ async def delete_unit_config(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a unit configuration."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1652,9 +1744,11 @@ async def create_plot_item(
     body: CreatePlotConfigItemRequest = Body(...),
 ):
     """Create a plot item under a plot config."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1692,9 +1786,11 @@ async def list_plot_items(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List plot items for a plot config."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1735,9 +1831,11 @@ async def delete_plot_item(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a plot item."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1784,9 +1882,11 @@ async def add_config_media(
     body: ConfigMediaRequest = Body(...),
 ):
     """Attach media to a config."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1824,9 +1924,11 @@ async def list_config_media(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List media for a config."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1867,9 +1969,11 @@ async def delete_config_media(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete config media."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
@@ -1920,9 +2024,11 @@ async def upsert_floor_inventory(
     body: UpsertFloorInventoryRequest = Body(...),
 ):
     """Upsert the floor inventory matrix for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = InventoryService(db_connection=db_connection, user_context=user_context)
@@ -1975,9 +2081,11 @@ async def get_inventory_summary(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Get the inventory menu summary for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = InventoryService(db_connection=db_connection, user_context=user_context)
@@ -2012,9 +2120,11 @@ async def list_floor_inventory(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List the floor inventory matrix for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = InventoryService(db_connection=db_connection, user_context=user_context)
@@ -2059,9 +2169,11 @@ async def create_facility(
     body: CreateFacilityRequest = Body(...),
 ):
     """Create a facility."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
@@ -2098,9 +2210,11 @@ async def list_facilities(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List facilities for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
@@ -2137,9 +2251,11 @@ async def list_facility_parking_slots(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List parking slots provisioned for a parking facility."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
@@ -2184,9 +2300,11 @@ async def update_facility(
     body: UpdateFacilityRequest = Body(...),
 ):
     """Update a facility."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
@@ -2231,9 +2349,11 @@ async def delete_facility(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a facility."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
@@ -2282,9 +2402,11 @@ async def create_unit(
     body: CreateUnitRequest = Body(...),
 ):
     """Create a unit."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2328,9 +2450,11 @@ async def list_units(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List units for a project with filters and pagination."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2392,9 +2516,11 @@ async def get_units_registry_summary(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return aggregate unit counts for the registry header."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2435,9 +2561,11 @@ async def get_unit_detail(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Get full detail for one unit in a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2526,9 +2654,11 @@ async def unassign_unit_owner(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Remove the current owner allotment from a unit."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ContactUnitsService(db_connection=db_connection, user_context=user_context)
@@ -2579,9 +2709,11 @@ async def reassign_unit_owner(
     body: ReassignUnitOwnerRequest = Body(...),
 ):
     """Replace the owner on a unit with a new contact."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ContactUnitsService(db_connection=db_connection, user_context=user_context)
@@ -2630,9 +2762,11 @@ async def list_unit_documents(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List documents for the current owner allotment on a unit."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = ContactUnitDocumentsService(
@@ -2680,9 +2814,11 @@ async def add_unit_document(
     body: CreateUnitDocumentRequest = Body(...),
 ):
     """Add a document to the current owner allotment on a unit."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ContactUnitDocumentsService(
@@ -2736,9 +2872,11 @@ async def delete_unit_document(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete one document from the current owner allotment on a unit."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = ContactUnitDocumentsService(
@@ -2788,9 +2926,11 @@ async def update_unit(
     body: UpdateUnitRequest = Body(...),
 ):
     """Update a unit."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2835,9 +2975,11 @@ async def delete_unit(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a unit."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2881,9 +3023,11 @@ async def create_parking_zone(
     body: CreateParkingZoneRequest = Body(...),
 ):
     """Create a parking zone."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2920,9 +3064,11 @@ async def list_parking_zones(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List parking zones for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -2962,9 +3108,11 @@ async def delete_parking_zone(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a parking zone."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
@@ -3013,9 +3161,11 @@ async def update_project_location(
     body: UpdateProjectLocationRequest = Body(...),
 ):
     """Patch the project's map latitude/longitude."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
@@ -3061,9 +3211,11 @@ async def create_site_map_overlays(
     body: CreateSiteMapOverlaysRequest = Body(...),
 ):
     """Create site map overlay markers in bulk."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
@@ -3100,9 +3252,11 @@ async def list_site_map_overlays(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List site map overlays for a project."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
@@ -3142,9 +3296,11 @@ async def delete_site_map_overlay(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Delete a site map overlay."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_DELETE,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
@@ -3162,6 +3318,215 @@ async def delete_site_map_overlay(
         message_key="project_setup.success.overlay_deleted",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Project members (staff assignment)
+# ---------------------------------------------------------------------------
+
+
+@handle_api_exceptions("list project members")
+@router.get(
+    "/{project_id}/members",
+    status_code=http_status.HTTP_200_OK,
+    summary="List staff assigned to a project",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_project_members(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return project_members rows joined with organization member profiles."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[
+            PROJECTS_MANAGEMENT_VIEW,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        ],
+    )
+    service = ProjectMembersService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    items = await service.list_members(project_id=project_id)
+    payload = [ProjectMemberResponse.model_validate(i).model_dump() for i in items]
+    return list_response(
+        request=request,
+        items=payload,
+        total=len(payload),
+        page=1,
+        page_size=max(len(payload), 1),
+        message_key="project_members.success.list_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if payload else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("assign project member")
+@router.post(
+    "/{project_id}/members",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Assign an organization member to a project",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="project_members",
+    category="PROJECT_MEMBERS",
+)
+async def assign_project_member(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    body: AssignProjectMemberRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Assign an active organization member to a project."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECT_MEMBERS_MANAGE,
+    )
+    service = ProjectMembersService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    member = await service.assign_member(project_id=project_id, body=body)
+    data = member.model_dump()
+    _set_audit(
+        request,
+        user_context,
+        table="project_members",
+        requested_id=data.get("id", project_id),
+        description=f"Assigned project member {body.user_id} to project {project_id}",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_members.success.assigned",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=data,
+    )
+
+
+@handle_api_exceptions("update project member")
+@router.patch(
+    "/{project_id}/members/{user_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Update a project member role or status",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="project_members",
+    category="PROJECT_MEMBERS",
+)
+async def update_project_member(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    user_id: str = Path(..., description="Auth user id of the project member."),
+    body: UpdateProjectMemberRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Update project member role or status."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECT_MEMBERS_MANAGE,
+    )
+    service = ProjectMembersService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    member = await service.update_member(
+        project_id=project_id,
+        user_id=user_id,
+        body=body,
+    )
+    data = member.model_dump()
+    _set_audit(
+        request,
+        user_context,
+        table="project_members",
+        requested_id=data.get("id", user_id),
+        description=f"Updated project member {user_id} on project {project_id}",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_members.success.updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("remove project member")
+@router.delete(
+    "/{project_id}/members/{user_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Remove a project member assignment",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="project_members",
+    category="PROJECT_MEMBERS",
+)
+async def remove_project_member(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    user_id: str = Path(..., description="Auth user id of the project member."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Suspend a user's assignment to a project."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECT_MEMBERS_MANAGE,
+    )
+    service = ProjectMembersService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    member = await service.remove_member(project_id=project_id, user_id=user_id)
+    data = member.model_dump()
+    _set_audit(
+        request,
+        user_context,
+        table="project_members",
+        requested_id=data.get("id", user_id),
+        description=f"Removed project member {user_id} from project {project_id}",
+        old_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_members.success.removed",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
     )
 
 
@@ -3210,9 +3575,11 @@ async def list_project_vehicle_requests(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List vehicle requests for admin review."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
@@ -3264,9 +3631,11 @@ async def review_project_vehicle_request(
     body: ReviewVehicleRequest = Body(...),
 ):
     """Approve or reject a resident vehicle registration request."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
@@ -3321,9 +3690,11 @@ async def delete_project_vehicle(
     body: DeleteProjectVehicleRequest = Body(...),
 ):
     """Remove or delete a vehicle registered in a project (admin)."""
-    user_context = await check_permissions(
+    user_context = await _staff_project_access(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)

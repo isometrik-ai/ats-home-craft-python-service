@@ -2,7 +2,9 @@
 
 import pytest
 
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.tests.integration.helpers import (
+    patch_ensure_staff_project_access,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 
 PROJECT_ID = "proj-1"
@@ -70,33 +72,11 @@ _UPSERT_PAYLOAD = {
 }
 
 
-def _ctx() -> UserContext:
-    """Return a reusable admin user context."""
-    return UserContext(
-        user_id="u1",
-        email="u1@example.com",
-        organization_id="org-1",
-        user_type="admin",
-    )
-
-
-def _patch_check_permissions(monkeypatch, module_path: str) -> None:
-    """Patch check_permissions to return a fake admin context."""
-
-    async def fake_check_permissions(
-        current_user, db_connection, permission_codes, organization_id=None
-    ):
-        del current_user, db_connection, permission_codes, organization_id
-        return _ctx()
-
-    monkeypatch.setattr(f"{module_path}.check_permissions", fake_check_permissions)
-
-
 @pytest.mark.asyncio
 async def test_get_fee_configuration(monkeypatch, client):
     """GET fee configuration returns project settings and rates."""
 
-    _patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_configuration")
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.fee_configuration")
 
     async def fake_get_configuration(_self, *, project_id: str):
         del _self
@@ -120,7 +100,7 @@ async def test_get_fee_configuration(monkeypatch, client):
 async def test_upsert_fee_configuration(monkeypatch, client):
     """PUT fee configuration upserts settings and rates."""
 
-    _patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_configuration")
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.fee_configuration")
 
     async def fake_upsert_configuration(_self, *, project_id: str, body):
         del _self
@@ -148,7 +128,7 @@ async def test_upsert_fee_configuration(monkeypatch, client):
 async def test_preview_fee_configuration(monkeypatch, client):
     """GET fee configuration preview returns computed fee."""
 
-    _patch_check_permissions(monkeypatch, "apps.user_service.app.api.fee_configuration")
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.fee_configuration")
 
     async def fake_preview(
         _self,

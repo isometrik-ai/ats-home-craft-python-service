@@ -97,6 +97,29 @@ async def test_get_contact_ids_by_emails_bulk():
 
 
 @pytest.mark.asyncio
+async def test_list_contacts_project_filter():
+    """List adds contact_units EXISTS filter when project_id is set."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = ContactsRepository(db_connection=conn)
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+
+    await repo.list_contacts(
+        organization_id=ORG_ID,
+        search=None,
+        status=None,
+        contact_type=None,
+        project_id=project_id,
+        page=1,
+        page_size=20,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "contact_units cu" in count_query
+    assert "cu.project_id = $3::uuid" in count_query
+    assert project_id in count_args
+
+
+@pytest.mark.asyncio
 async def test_list_contacts_status_filter():
     """List adds status predicate when provided."""
     conn = _FakeConn(rows=[], val=0)

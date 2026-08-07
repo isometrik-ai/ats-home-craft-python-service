@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import pytest
 
+from apps.user_service.app.schemas.project_members import ProjectMemberResponse
 from apps.user_service.tests.integration.helpers import (
     admin_context,
+    patch_check_any_permissions,
     patch_check_permissions,
+    patch_staff_project_access_wrapper,
 )
 from apps.user_service.tests.utils.assertions import assert_success
 
@@ -256,6 +259,8 @@ _CREATE_PROJECT_BODY = {
 def _patch_projects_access(monkeypatch) -> None:
     """Bypass RBAC for projects routes."""
     patch_check_permissions(monkeypatch, _API, org_id=ORG)
+    patch_check_any_permissions(monkeypatch, _API, org_id=ORG)
+    patch_staff_project_access_wrapper(monkeypatch, _API, org_id=ORG)
 
 
 def _patch_extract_user_context(monkeypatch) -> None:
@@ -1894,3 +1899,65 @@ async def test_delete_project_vehicle(monkeypatch, client):
     )
     body = assert_success(res, 200)
     assert body["data"]["status"] == "removed"
+
+
+# ---------------------------------------------------------------------------
+# Project members
+# ---------------------------------------------------------------------------
+
+_FAKE_PROJECT_MEMBER = {
+    "id": "770e8400-e29b-41d4-a716-446655440006",
+    "user_id": ADMIN_USER_ID,
+    "project_id": PROJECT_ID,
+    "organization_id": ORG,
+    "role": "community_admin",
+    "status": "active",
+    "first_name": "Admin",
+    "last_name": "User",
+    "email": "admin@example.com",
+}
+
+
+@pytest.mark.asyncio
+async def test_list_project_members(monkeypatch, client):
+    """GET /projects/{project_id}/members returns assigned staff."""
+    _patch_projects_access(monkeypatch)
+
+    async def fake_list_members(_self, *, project_id: str):
+        del _self
+        assert project_id == PROJECT_ID
+        return [_FAKE_PROJECT_MEMBER]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_members_service.ProjectMembersService.list_members",
+        fake_list_members,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/members")
+    body = assert_success(res, 200)
+    assert body["data"][0]["user_id"] == ADMIN_USER_ID
+    assert body["data"][0]["role"] == "community_admin"
+
+
+@pytest.mark.asyncio
+async def test_assign_project_member(monkeypatch, client):
+    """POST /projects/{project_id}/members assigns an org member."""
+    _patch_projects_access(monkeypatch)
+
+    async def fake_assign_member(_self, *, project_id: str, body):
+        del _self
+        assert project_id == PROJECT_ID
+        assert body.user_id == ADMIN_USER_ID
+        return ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_members_service.ProjectMembersService.assign_member",
+        fake_assign_member,
+    )
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/members",
+        json={"user_id": ADMIN_USER_ID, "role": "community_admin"},
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["user_id"] == ADMIN_USER_ID

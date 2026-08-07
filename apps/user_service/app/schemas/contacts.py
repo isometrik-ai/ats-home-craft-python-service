@@ -325,6 +325,10 @@ class ListContactsRequest(BaseModel):
     )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
+    project_id: str | None = Field(
+        default=None,
+        description="Optional project filter — contacts linked via active/pending contact_units.",
+    )
     dropdown_filters: list[DropdownCustomFieldFilter] = Field(default_factory=list)
 
 

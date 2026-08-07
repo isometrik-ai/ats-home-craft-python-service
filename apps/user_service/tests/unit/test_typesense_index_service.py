@@ -105,6 +105,10 @@ async def test_build_contact_document(monkeypatch):
     async def fake_custom_facets(**_kwargs):
         return ([], [])
 
+    async def fake_list_project_ids(self, *, contact_id: str, organization_id: str):
+        del self, contact_id, organization_id
+        return ["proj-1", "proj-2"]
+
     monkeypatch.setattr(
         tis.ContactsRepository,
         "__init__",
@@ -114,6 +118,11 @@ async def test_build_contact_document(monkeypatch):
         tis.ContactsRepository,
         "get_contact_details",
         fake_get_contact_details,
+    )
+    monkeypatch.setattr(
+        tis.ContactsRepository,
+        "list_contact_project_ids",
+        fake_list_project_ids,
     )
     monkeypatch.setattr(
         tis,
@@ -129,6 +138,7 @@ async def test_build_contact_document(monkeypatch):
     assert doc is not None
     assert doc["id"] == "c-1"
     assert doc["email"] == "jane@example.com"
+    assert doc["project_ids"] == ["proj-1", "proj-2"]
 
 
 @pytest.mark.asyncio

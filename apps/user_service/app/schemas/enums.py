@@ -1148,6 +1148,24 @@ class PropertyProjectStatus(str, Enum):
     SUSPENDED = "suspended"
 
 
+class ProjectMemberRole(str, Enum):
+    """Staff role on a project (Postgres project_member_role enum)."""
+
+    COMMUNITY_ADMIN = "community_admin"
+    SECURITY = "security"
+    ACCOUNTANT = "accountant"
+    FACILITY_MANAGER = "facility_manager"
+    VIEWER = "viewer"
+
+
+class ProjectMemberStatus(str, Enum):
+    """Project member assignment status."""
+
+    ACTIVE = "active"
+    INVITED = "invited"
+    SUSPENDED = "suspended"
+
+
 class PropertyType(str, Enum):
     """Property type for a project (Postgres property_type enum)."""
 

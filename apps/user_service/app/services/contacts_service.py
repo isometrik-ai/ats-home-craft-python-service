@@ -2281,6 +2281,7 @@ class ContactsService:
         status: str | None,
         contact_type: str | None = None,
         dropdown_filters: Any = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
@@ -2303,6 +2304,7 @@ class ContactsService:
             status=status,
             contact_type=contact_type,
             dropdown_filters=parsed_filters,
+            project_id=project_id,
             page=page,
             page_size=page_size,
         )
@@ -2397,6 +2399,7 @@ class ContactsService:
         page: int,
         page_size: int,
         status: str | None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Search contacts via Typesense (contacts collection).
 
@@ -2406,6 +2409,8 @@ class ContactsService:
         filters = [f"organization_id:={org_id}"]
         if status:
             filters.append(f"status:={status}")
+        if project_id:
+            filters.append(f"project_ids:={project_id}")
         filter_by = " && ".join(filters)
 
         query = query.strip()

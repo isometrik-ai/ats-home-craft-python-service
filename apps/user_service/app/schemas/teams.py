@@ -50,6 +50,10 @@ class CreateTeamRequest(BaseModel):
         description="Team name (must be unique within organization)",
     )
     description: str | None = Field(None, max_length=1000, description=EXAMPLE_TEAM_DESC_SHORT)
+    project_id: str | None = Field(
+        None,
+        description="Optional project UUID — when set, creates a project-scoped ops team.",
+    )
     members: list[TeamMemberInput] | None = Field(
         None,
         description="Team members with optional per-member role (defaults to MEMBER)",
@@ -183,6 +187,10 @@ class TeamItem(BaseModel):
     id: str = Field(..., description="Unique identifier for the team")
     name: str = Field(..., description="Team name")
     description: str | None = Field(None, description=EXAMPLE_TEAM_DESC_SHORT)
+    project_id: str | None = Field(
+        None,
+        description="Project UUID when this is a project-scoped ops team; null for org CRM teams.",
+    )
     member_count: int = Field(..., description="Number of members in the team")
     created_at: str = Field(..., description="ISO timestamp when team was created")
     updated_at: str = Field(..., description="ISO timestamp when team was last updated")
@@ -207,6 +215,10 @@ class TeamDetailItem(BaseModel):
     id: str = Field(..., description="Unique identifier for the team")
     name: str = Field(..., description="Team name")
     description: str | None = Field(None, description=EXAMPLE_TEAM_DESC_SHORT)
+    project_id: str | None = Field(
+        None,
+        description="Project UUID when this is a project-scoped ops team; null for org CRM teams.",
+    )
     members: list[TeamMemberItem] = Field(default_factory=list, description="List of team members")
     created_at: str = Field(..., description="ISO timestamp when team was created")
     updated_at: str = Field(..., description="ISO timestamp when team was last updated")
@@ -303,6 +315,9 @@ class TeamDbIn(BaseModel):
     organization_id: str = Field(..., description="Organization UUID")
     name: str = Field(..., min_length=1, max_length=255, description="Team name")
     description: str | None = Field(None, max_length=1000, description="Team description")
+    project_id: str | None = Field(
+        None, description="Optional project UUID for project-scoped teams"
+    )
     created_by: str = Field(..., description="User ID creating the team")
     member_data: list[MemberData] | None = Field(
         None, description="Initial team member data with additional_data"

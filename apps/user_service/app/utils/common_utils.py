@@ -27,6 +27,10 @@ from pydantic import BaseModel
 
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
+from libs.shared_utils.common_query import (
+    PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+)
 from libs.shared_utils.http_exceptions import (
     ForbiddenException,
     InternalServerErrorException,
@@ -341,6 +345,205 @@ async def check_permissions(
         organization_id=user_context.organization_id,
     )
     return user_context
+
+
+async def check_any_permissions(
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    permission_codes: list[str] | str,
+    organization_id: str | None = None,
+    request: Request | None = None,
+) -> UserContext:
+    """Extract user context and require at least one of the given permissions."""
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+
+    if organization_id:
+        if (
+            user_context.organization_id is not None
+            and user_context.organization_id != organization_id
+        ):
+            raise ForbiddenException(
+                message_key="auth.errors.session_cannot_access_organization",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+    await require_any_permission(
+        permission_codes=permission_codes,
+        user_context=user_context,
+        db_connection=db_connection,
+        organization_id=user_context.organization_id,
+    )
+    return user_context
+
+
+def _normalize_permission_codes(permission_codes: list[str] | str) -> list[str]:
+    """Return permission codes as a list."""
+    if isinstance(permission_codes, str):
+        return [permission_codes]
+    return list(permission_codes)
+
+
+def _expand_project_view_permission_codes(permission_codes: list[str]) -> list[str]:
+    """Allow assigned-project view as an alternative to org-wide project view."""
+    expanded = list(permission_codes)
+    if (
+        PROJECTS_MANAGEMENT_VIEW in permission_codes
+        and PROJECTS_MANAGEMENT_VIEW_ASSIGNED not in permission_codes
+    ):
+        expanded.append(PROJECTS_MANAGEMENT_VIEW_ASSIGNED)
+    return expanded
+
+
+async def user_has_any_permission(
+    *,
+    permission_codes: list[str],
+    user_context: UserContext,
+    db_connection: asyncpg.Connection,
+    organization_id: str | None,
+) -> bool:
+    """Return True when the user has at least one of the given permission codes."""
+    for code in permission_codes:
+        if await check_user_access_async(
+            permission_code=[code],
+            user_id=user_context.user_id,
+            organization_id=organization_id,
+            db_connection=db_connection,
+        ):
+            return True
+    return False
+
+
+async def require_any_permission(
+    permission_codes: list[str] | str,
+    user_context: UserContext,
+    db_connection: asyncpg.Connection,
+    organization_id: str | None = None,
+) -> None:
+    """Require at least one permission from the provided codes."""
+    codes = _normalize_permission_codes(permission_codes)
+    if not codes:
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+    if await user_has_any_permission(
+        permission_codes=codes,
+        user_context=user_context,
+        db_connection=db_connection,
+        organization_id=organization_id,
+    ):
+        return
+    raise ForbiddenException(
+        message_key="errors.insufficient_permissions",
+        custom_code=CustomStatusCode.FORBIDDEN,
+    )
+
+
+async def ensure_staff_project_access_for_context(
+    *,
+    user_context: UserContext,
+    db_connection: asyncpg.Connection,
+    project_id: str,
+    permission_codes: list[str] | str,
+) -> UserContext:
+    """Enforce project access for an already-resolved staff user context."""
+    from apps.user_service.app.db.repositories.projects_repository import (
+        ProjectsRepository,
+    )
+    from apps.user_service.app.services.project_setup_service import ProjectSetupService
+
+    org_id = user_context.organization_id
+    if not org_id or not user_context.user_id:
+        raise ValidationException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+
+    action_codes = _expand_project_view_permission_codes(
+        _normalize_permission_codes(permission_codes)
+    )
+    await require_any_permission(
+        permission_codes=action_codes,
+        user_context=user_context,
+        db_connection=db_connection,
+        organization_id=org_id,
+    )
+
+    setup_service = ProjectSetupService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    await setup_service.ensure_project(project_id=project_id)
+
+    has_org_wide = await check_user_access_async(
+        permission_code=[PROJECTS_MANAGEMENT_VIEW],
+        user_id=user_context.user_id,
+        organization_id=org_id,
+        db_connection=db_connection,
+    )
+    if has_org_wide:
+        return user_context
+
+    has_assigned_view = await check_user_access_async(
+        permission_code=[PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+        user_id=user_context.user_id,
+        organization_id=org_id,
+        db_connection=db_connection,
+    )
+    if has_assigned_view:
+        member = await ProjectsRepository(db_connection).get_active_member(
+            organization_id=org_id,
+            project_id=project_id,
+            user_id=user_context.user_id,
+        )
+        if member:
+            return user_context
+
+    raise ForbiddenException(
+        message_key="auth.errors.project_access_denied",
+        custom_code=CustomStatusCode.FORBIDDEN,
+    )
+
+
+async def ensure_staff_project_access(
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str,
+    permission_codes: list[str] | str,
+    request: Request | None = None,
+) -> UserContext:
+    """Check org RBAC, project existence, and project assignment rules for staff."""
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    return await ensure_staff_project_access_for_context(
+        user_context=user_context,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=permission_codes,
+    )
+
+
+async def ensure_staff_project_access_optional(
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str | None,
+    permission_codes: list[str] | str,
+    request: Request | None = None,
+) -> UserContext:
+    """Apply project assignment rules when project_id is provided; org-only otherwise."""
+    if project_id:
+        return await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=permission_codes,
+            request=request,
+        )
+    return await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=permission_codes,
+        request=request,
+    )
 
 
 async def extract_onboarding_contact_context(

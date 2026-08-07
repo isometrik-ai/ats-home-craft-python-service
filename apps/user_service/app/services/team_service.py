@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.teams import (
     TeamsListResponse,
     UpdateTeamRequest,
 )
+from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -50,6 +51,10 @@ class TeamService:
         self.user_context = user_context
         # Initialize database operations class once
         self.team_repository = TeamRepository(db_connection=db_connection)
+        self.setup_service = ProjectSetupService(
+            db_connection=db_connection,
+            user_context=user_context,
+        )
 
     @staticmethod
     def _member_data_from_input(members: list[TeamMemberInput]) -> list[MemberData]:
@@ -89,8 +94,14 @@ class TeamService:
             HTTPException: For validation or creation failures
         """
         # Validate team name uniqueness
+        project_id = str(request.project_id) if request.project_id else None
+        if project_id:
+            validate_uuid_format(project_id, "project ID")
+            await self.setup_service.ensure_project(project_id=project_id)
+
         await self._validate_team_name(
             request.name,
+            project_id=project_id,
         )
 
         # Validate and deduplicate member IDs
@@ -105,6 +116,7 @@ class TeamService:
             organization_id=self.user_context.organization_id,
             name=request.name,
             description=request.description,
+            project_id=project_id,
             created_by=self.user_context.user_id,
             member_data=member_data,
         )
@@ -115,6 +127,7 @@ class TeamService:
         page: int,
         page_size: int,
         search: str | None = None,
+        project_id: str | None = None,
     ) -> TeamsListResponse:
         """Retrieve paginated list of teams.
 
@@ -122,6 +135,7 @@ class TeamService:
             page: Page number for pagination (1-indexed)
             page_size: Number of teams per page
             search: Optional search term for team name filtering
+            project_id: Optional project UUID to list project-scoped teams
 
         Returns:
             TeamsListResponse: Paginated team list
@@ -129,10 +143,14 @@ class TeamService:
         Raises:
             HTTPException: 400 if user doesn't belong to an organization
         """
+        if project_id:
+            validate_uuid_format(project_id, "project ID")
+            await self.setup_service.ensure_project(project_id=project_id)
 
         teams_data, total_count = await self.team_repository.get_teams_list(
             organization_id=self.user_context.organization_id,
             search=search,
+            project_id=project_id,
             page=page,
             page_size=page_size,
         )
@@ -142,6 +160,7 @@ class TeamService:
                 id=str(team["id"]),
                 name=team["name"],
                 description=team.get("description"),
+                project_id=str(team["project_id"]) if team.get("project_id") else None,
                 member_count=team.get("member_count", 0),
                 created_at=format_iso_datetime(team.get("created_at")) or "",
                 updated_at=format_iso_datetime(team.get("updated_at")) or "",
@@ -198,6 +217,7 @@ class TeamService:
             id=str(team_data["id"]),
             name=team_data["name"],
             description=team_data.get("description"),
+            project_id=str(team_data["project_id"]) if team_data.get("project_id") else None,
             members=member_items,
             created_at=format_iso_datetime(team_data.get("created_at")),
             updated_at=format_iso_datetime(team_data.get("updated_at")),
@@ -243,8 +263,23 @@ class TeamService:
             )
 
         # Validate team name if provided
+        team_data, _ = await self.team_repository.get_team_detail(
+            team_id,
+            self.user_context.organization_id,
+        )
+        if not team_data:
+            raise NotFoundException(
+                message_key="teams.errors.team_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        project_id = str(team_data["project_id"]) if team_data.get("project_id") else None
+
         if request.name:
-            await self._validate_team_name(request.name, team_id=team_id)
+            await self._validate_team_name(
+                request.name,
+                team_id=team_id,
+                project_id=project_id,
+            )
 
         # Update team
         update_input = TeamDbUpdate(
@@ -282,17 +317,22 @@ class TeamService:
         self,
         new_name: str,
         team_id: str | None = None,
+        project_id: str | None = None,
     ):
-        """Validate team name uniqueness.
+        """Validate team name uniqueness within org/project scope.
 
         Args:
             new_name: Team name to validate
             team_id: Team Id
+            project_id: Optional project scope for project-scoped teams
         Raises:
             HTTPException: 409 if team name already exists
         """
         is_unique = await self.team_repository.check_team_name_unique(
-            new_name, self.user_context.organization_id, team_id
+            new_name,
+            self.user_context.organization_id,
+            team_id,
+            project_id=project_id,
         )
         if not is_unique:
             raise DuplicateValueException(

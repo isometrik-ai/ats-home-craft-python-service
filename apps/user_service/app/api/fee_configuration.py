@@ -21,7 +21,7 @@ from apps.user_service.app.services.fee_configuration_service import (
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     UserContext,
-    check_permissions,
+    ensure_staff_project_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -81,10 +81,12 @@ async def get_fee_configuration(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return fee settings and per-category rates for a project."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=FINANCE_MANAGEMENT_VIEW,
+        request=request,
     )
     service = FeeConfigurationService(db_connection=db_connection, user_context=user_context)
     data = await service.get_configuration(project_id=project_id)
@@ -119,10 +121,12 @@ async def upsert_fee_configuration(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Create or update fee configuration for a project."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=FINANCE_MANAGEMENT_EDIT,
+        request=request,
     )
     service = FeeConfigurationService(db_connection=db_connection, user_context=user_context)
     data = await service.upsert_configuration(project_id=project_id, body=body)
@@ -161,10 +165,12 @@ async def preview_fee_configuration(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Compute a maintenance fee preview for a unit or sample area."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=FINANCE_MANAGEMENT_VIEW,
+        request=request,
     )
     service = FeeConfigurationService(db_connection=db_connection, user_context=user_context)
     data = await service.preview(

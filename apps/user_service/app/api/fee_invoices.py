@@ -14,6 +14,7 @@ from apps.user_service.app.services.fee_scheduler_service import FeeSchedulerSer
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
+    ensure_staff_project_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -54,10 +55,12 @@ async def list_fee_invoices(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List invoices for a project (Fee Management)."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=FINANCE_MANAGEMENT_VIEW,
+        request=request,
     )
     service = FeeInvoiceService(db_connection=db_connection, user_context=user_context)
     payload = await service.list_project_invoices(
@@ -93,10 +96,12 @@ async def get_fee_invoice(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Fetch a single maintenance fee invoice."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=FINANCE_MANAGEMENT_VIEW,
+        request=request,
     )
     service = FeeInvoiceService(db_connection=db_connection, user_context=user_context)
     data = await service.get_invoice(invoice_id=invoice_id, project_id=project_id)
@@ -130,10 +135,12 @@ async def generate_fee_invoices(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Generate invoices for billable units in a project."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=FINANCE_MANAGEMENT_ADMIN,
+        request=request,
     )
     service = FeeInvoiceService(db_connection=db_connection, user_context=user_context)
     data = await service.generate_invoices_for_project(project_id=project_id)
@@ -179,6 +186,7 @@ async def run_fee_billing_scheduler(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=FINANCE_MANAGEMENT_ADMIN,
+        request=request,
     )
     service = FeeSchedulerService(db_connection=db_connection, user_context=user_context)
     data = await service.run_billing_cycle()

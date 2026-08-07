@@ -49,8 +49,8 @@ async def test_list_teams(monkeypatch, client):
             user_id="u1", email="u1@example.com", organization_id="org-1", user_type="admin"
         )
 
-    async def fake_list(self, page, page_size, search=None):
-        del self, page, page_size, search
+    async def fake_list(self, page, page_size, search=None, project_id=None):
+        del self, page, page_size, search, project_id
         return type(
             "Resp",
             (),
@@ -88,8 +88,8 @@ async def test_list_teams_no_data(monkeypatch, client):
             user_id="u1", email="u1@example.com", organization_id="org-1", user_type="admin"
         )
 
-    async def fake_list(self, page, page_size, search=None):
-        del self, page, page_size, search
+    async def fake_list(self, page, page_size, search=None, project_id=None):
+        del self, page, page_size, search, project_id
         return type(
             "Resp", (), {"data": [], "total": 0, "total_count": 0, "page": 1, "page_size": 20}
         )

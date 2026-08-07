@@ -164,6 +164,10 @@ async def list_teams_endpoint(
     page: int = Query(1, ge=1, description="Page number for pagination"),
     page_size: int = Query(50, ge=1, le=100, description="Number of teams per page"),
     search: str | None = Query(None, description="Search term for team name"),
+    project_id: str | None = Query(
+        None,
+        description="Optional project UUID — filter to project-scoped ops teams.",
+    ),
 ):
     """Retrieve paginated list of teams for the user's organization.
 
@@ -194,7 +198,7 @@ async def list_teams_endpoint(
     # Create service with user context and delegate to service
     team_service = TeamService(db_connection=db_connection, user_context=user_context)
     result: TeamsListResponse = await team_service.list_teams(
-        page=page, page_size=page_size, search=search
+        page=page, page_size=page_size, search=search, project_id=project_id
     )
 
     if not result.data:

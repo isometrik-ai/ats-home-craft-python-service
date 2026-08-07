@@ -6,7 +6,9 @@ from datetime import datetime, timezone
 
 import pytest
 
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import (
+    patch_ensure_staff_project_access,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -35,7 +37,7 @@ _CREATE_BODY = {
 
 def _patch_security_access(monkeypatch) -> None:
     """Bypass RBAC for security walk-in routes."""
-    patch_check_permissions(monkeypatch, _API, org_id=ORG)
+    patch_ensure_staff_project_access(monkeypatch, _API, org_id=ORG)
 
 
 def _fake_detail(**overrides) -> dict:

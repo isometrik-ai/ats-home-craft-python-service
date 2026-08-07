@@ -19,7 +19,7 @@ from apps.user_service.app.schemas.tenant_requests import (
 from apps.user_service.app.services.tenant_requests_service import TenantRequestsService
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    ensure_staff_project_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -57,9 +57,10 @@ async def get_project_tenant_request_summary(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return summary card counts for the admin tenant requests dashboard."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
         request=request,
     )
@@ -96,9 +97,10 @@ async def list_project_tenant_requests(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return paginated tenant requests for admin review within a project."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
         request=request,
     )
@@ -134,9 +136,10 @@ async def get_project_tenant_request(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return one tenant request with documents and timeline."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
         request=request,
     )
@@ -180,9 +183,10 @@ async def verify_tenant_document(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Mark one document as verified."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
         request=request,
     )
@@ -237,9 +241,10 @@ async def reject_tenant_document(
     body: RejectTenantDocumentRequest = Body(...),
 ):
     """Reject one document with a reason."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
         request=request,
     )
@@ -295,9 +300,10 @@ async def approve_tenant_request(
     body: ApproveTenantRequestRequest = Body(...),
 ):
     """Approve a ready tenant request and create the tenant contact + unit link."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_EDIT,
         request=request,
     )

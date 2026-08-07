@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from apps.user_service.app.schemas.enums import InviteStatus
+from apps.user_service.app.schemas.enums import InviteStatus, ProjectMemberRole
 
 
 class InviteDetailsResponse(BaseModel):
@@ -92,6 +92,14 @@ class InviteCreateRequest(BaseModel):
     team_id: uuid.UUID | None = Field(
         None,
         description="Optional team to add the invitee to when the invitation is accepted",
+    )
+    project_id: uuid.UUID | None = Field(
+        None,
+        description="Optional project to assign the invitee to when the invitation is accepted",
+    )
+    project_role: ProjectMemberRole | None = Field(
+        default=None,
+        description="Project member role when project_id is set (defaults to community_admin)",
     )
     tags: list[str] | None = Field(
         None,

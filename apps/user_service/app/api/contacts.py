@@ -275,6 +275,7 @@ async def list_contacts(
         dropdown_filters=dropdown_filters,
         page=body.page,
         page_size=body.page_size,
+        project_id=str(body.project_id) if body.project_id else None,
     )
     items = [
         ContactSummaryResponse.model_validate(summary_row).model_dump(exclude_none=True)
@@ -414,6 +415,10 @@ async def search_contacts(
         le=100,
         description="Number of hits per page (max 100).",
     ),
+    project_id: str | None = Query(
+        None,
+        description="Optional project filter — contacts linked via active/pending contact_units.",
+    ),
 ):
     """Search contacts using Typesense.
 
@@ -443,6 +448,7 @@ async def search_contacts(
         page=page,
         page_size=page_size,
         status=status.value if status else None,
+        project_id=project_id,
     )
     items = result["items"]
     total = result["total"]
