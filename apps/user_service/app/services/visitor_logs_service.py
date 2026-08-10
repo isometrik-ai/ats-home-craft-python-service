@@ -22,9 +22,12 @@ from apps.user_service.app.db.repositories.visitor_logs_repository import (
 from apps.user_service.app.schemas.enums import (
     ContactType,
     PassEventType,
+    PassStatus,
     PassType,
+    VisitorLogVisitStatus,
     VisitorType,
     WalkInEventType,
+    WalkInStatus,
 )
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.walk_in_service import WalkInService
@@ -322,6 +325,62 @@ class VisitorLogsService:
             "visitor_phone_number": number_value or None,
         }
 
+    @classmethod
+    def _latest_pass_gate_event(
+        cls,
+        events: list[dict[str, Any]],
+        *,
+        event_type: str,
+    ) -> dict[str, Any] | None:
+        """Return the latest pass event of a given gate type."""
+        matches = [event for event in events if event.get("event_type") == event_type]
+        if not matches:
+            return None
+        return max(
+            matches,
+            key=lambda event: cls._parse_dt(event.get("occurred_at"))
+            or datetime.min.replace(tzinfo=timezone.utc),
+        )
+
+    @classmethod
+    def _pass_visit_status(cls, *, detail: dict[str, Any]) -> str:
+        """Derive unified visit_status for a pass detail payload."""
+        events = list(detail.get("events") or [])
+        check_in = cls._latest_pass_gate_event(events, event_type=PassEventType.CHECKED_IN.value)
+        check_out = cls._latest_pass_gate_event(events, event_type=PassEventType.CHECKED_OUT.value)
+        in_time = cls._parse_dt(check_in.get("occurred_at")) if check_in else None
+        out_time = cls._parse_dt(check_out.get("occurred_at")) if check_out else None
+
+        if in_time and out_time:
+            return VisitorLogVisitStatus.EXITED.value
+        if in_time and not out_time:
+            return VisitorLogVisitStatus.INSIDE.value
+
+        status = str(detail.get("status") or "")
+        if status == PassStatus.CANCELLED.value:
+            return VisitorLogVisitStatus.DENIED.value
+        if status == PassStatus.EXPIRED.value:
+            return VisitorLogVisitStatus.EXPIRED.value
+
+        now = datetime.now(timezone.utc)
+        valid_until = cls._parse_dt(detail.get("valid_until"))
+        if valid_until and valid_until < now and not in_time:
+            return VisitorLogVisitStatus.EXPIRED.value
+
+        return VisitorLogVisitStatus.APPROVED.value
+
+    @staticmethod
+    def _walk_in_visit_status(*, status: str | None) -> str:
+        """Map walk-in header status to unified visit_status."""
+        mapping = {
+            WalkInStatus.AWAITING.value: VisitorLogVisitStatus.AWAITING_APPROVAL.value,
+            WalkInStatus.APPROVED.value: VisitorLogVisitStatus.APPROVED.value,
+            WalkInStatus.ENTERED.value: VisitorLogVisitStatus.INSIDE.value,
+            WalkInStatus.EXITED.value: VisitorLogVisitStatus.EXITED.value,
+            WalkInStatus.CANCELLED.value: VisitorLogVisitStatus.DENIED.value,
+        }
+        return mapping.get(str(status or ""), VisitorLogVisitStatus.APPROVED.value)
+
     def _enrich_detail_fields(
         self,
         *,
@@ -333,6 +392,7 @@ class VisitorLogsService:
         pass_image_url: str | None = None,
         visitor_photo_urls: list[str] | None = None,
         vehicle_photo_urls: list[str] | None = None,
+        visit_status: str | None = None,
     ) -> dict[str, Any]:
         """Attach visitor-log summary fields to a detail payload."""
         payload: dict[str, Any] = {
@@ -340,6 +400,7 @@ class VisitorLogsService:
             "created_by": created_by,
             "guard_user_id": guard_user_id,
             "guard_name": guard_name,
+            "visit_status": visit_status,
             "image_urls": image_urls or [],
             **self._visitor_phone_fields(detail),
         }
@@ -600,6 +661,7 @@ class VisitorLogsService:
                 guard_name=guard_name,
                 pass_image_url=image_fields["pass_image_url"],
                 image_urls=image_fields["image_urls"],
+                visit_status=self._pass_visit_status(detail=detail),
             )
 
         walk_in_row = await self._walk_in_service.repo.get_entry(
@@ -629,6 +691,7 @@ class VisitorLogsService:
                 visitor_photo_urls=image_fields["visitor_photo_urls"],
                 vehicle_photo_urls=image_fields["vehicle_photo_urls"],
                 image_urls=image_fields["image_urls"],
+                visit_status=self._walk_in_visit_status(status=str(detail.get("status") or "")),
             )
 
         raise NotFoundException(

@@ -1,5 +1,6 @@
 """Unit tests for ProjectMembersService."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,7 +11,7 @@ from apps.user_service.app.schemas.project_members import (
     UpdateProjectMemberRequest,
 )
 from apps.user_service.app.services.project_members_service import ProjectMembersService
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import ConflictException, ValidationException
 
 ORG_ID = "11111111-1111-1111-1111-111111111111"
@@ -150,3 +151,29 @@ async def test_update_member_role():
         body=UpdateProjectMemberRequest(role=ProjectMemberRole.SECURITY),
     )
     assert result.role == ProjectMemberRole.SECURITY
+
+
+@pytest.mark.asyncio
+async def test_list_members_formats_joined_at_datetime():
+    joined = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
+    repo = MagicMock()
+    repo.list_members_with_profiles = AsyncMock(
+        return_value=[
+            {
+                "id": MEMBER_ID,
+                "organization_id": ORG_ID,
+                "project_id": PROJECT_ID,
+                "user_id": USER_ID,
+                "role": ProjectMemberRole.COMMUNITY_ADMIN.value,
+                "status": ProjectMemberStatus.ACTIVE.value,
+                "joined_at": joined,
+                "email": "admin@example.com",
+            }
+        ]
+    )
+    svc = _service(projects_repo=repo)
+
+    result = await svc.list_members(project_id=PROJECT_ID)
+
+    assert len(result) == 1
+    assert result[0].joined_at == format_iso_datetime(joined)

@@ -372,6 +372,7 @@ class VisitorLogPassDetailData(PassResponse):
                 "created_by": "Radhi Sharma",
                 "guard_user_id": "d4772ff8-eb05-47f7-84ee-b235ff512157",
                 "guard_name": "Mr. Ajay Thakur Guard",
+                "visit_status": VisitorLogVisitStatus.EXITED.value,
                 "resident": _EXAMPLE_UNIT_RESIDENT,
                 "pass_image_url": "https://media.houseofapps.ai/org/passes/pass-4821.png",
                 "image_urls": ["https://media.houseofapps.ai/org/passes/pass-4821.png"],
@@ -398,6 +399,13 @@ class VisitorLogPassDetailData(PassResponse):
     created_by: str | None = Field(None, description="Resident who created the pass.")
     guard_user_id: str | None = Field(None, description="Staff user who checked the visitor in.")
     guard_name: str | None = Field(None, description="Display name of the guard at check-in.")
+    visit_status: str = Field(
+        ...,
+        description=(
+            "Unified visit status aligned with the list API: awaiting_approval, approved, "
+            "inside, exited, expired, or denied."
+        ),
+    )
     visitor_phone_isd_code: str | None = Field(
         None,
         description="Visitor phone country/ISD code (same as guest_phone_isd_code for passes).",
@@ -449,6 +457,7 @@ class VisitorLogWalkInDetailData(WalkInDetailResponse):
                 "created_by": "Mr. Ajay Thakur Guard",
                 "guard_user_id": "d4772ff8-eb05-47f7-84ee-b235ff512157",
                 "guard_name": "Mr. Ajay Thakur Guard",
+                "visit_status": VisitorLogVisitStatus.EXITED.value,
                 "resident": _EXAMPLE_UNIT_RESIDENT,
                 "visitor_photo_urls": ["https://media.houseofapps.ai/org/walk-ins/photo-1.jpg"],
                 "vehicle_photo_urls": [],
@@ -496,6 +505,13 @@ class VisitorLogWalkInDetailData(WalkInDetailResponse):
         None, description="Staff user who marked the visitor entered."
     )
     guard_name: str | None = Field(None, description="Display name of the guard at entry.")
+    visit_status: str = Field(
+        ...,
+        description=(
+            "Unified visit status aligned with the list API: awaiting_approval, approved, "
+            "inside, exited, expired, or denied."
+        ),
+    )
     resident: VisitorLogResidentResponse | None = Field(
         None,
         description="Flat resident who approved the primary visited flat.",
@@ -538,6 +554,7 @@ class VisitorLogDetailApiResponse(BaseModel):
                     "created_by": "Radhi Sharma",
                     "guard_user_id": "d4772ff8-eb05-47f7-84ee-b235ff512157",
                     "guard_name": "Mr. Ajay Thakur Guard",
+                    "visit_status": VisitorLogVisitStatus.EXITED.value,
                     "resident": _EXAMPLE_UNIT_RESIDENT,
                     "pass_image_url": "https://media.houseofapps.ai/org/passes/pass-4821.png",
                     "image_urls": ["https://media.houseofapps.ai/org/passes/pass-4821.png"],

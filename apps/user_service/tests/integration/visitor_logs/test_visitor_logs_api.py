@@ -55,6 +55,7 @@ _FAKE_DETAIL = {
     "guest_name": "Ravi Kumar",
     "status": "active",
     "code": "4821",
+    "visit_status": "exited",
     "events": [{"id": "evt-1", "event_type": "check_in"}],
 }
 

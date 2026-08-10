@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.enums import (
     VisitorLogVisitStatus,
     VisitorType,
     WalkInEventType,
+    WalkInStatus,
 )
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -388,6 +389,7 @@ async def test_get_log_detail_returns_pass_timeline():
     assert detail["visitor_phone_number"] == "9876543210"
     assert detail["resident"]["contact_id"] == "owner-1"
     assert detail["resident"]["role"] == "Owner"
+    assert detail["visit_status"] == VisitorLogVisitStatus.INSIDE.value
 
 
 @pytest.mark.asyncio
@@ -470,6 +472,45 @@ async def test_get_log_detail_returns_walk_in_when_pass_missing():
     assert detail["visitor_photo_urls"][0].endswith("org/walk-ins/photo-1.jpg")
     assert len(detail["vehicle_photo_urls"]) == 1
     assert detail["image_urls"] == detail["visitor_photo_urls"] + detail["vehicle_photo_urls"]
+    assert detail["visit_status"] == VisitorLogVisitStatus.EXITED.value
+
+
+def test_pass_visit_status_exited_with_check_in_and_out():
+    """Pass visit_status is exited when both check-in and check-out exist."""
+    events = [
+        {
+            "event_type": PassEventType.CHECKED_IN.value,
+            "occurred_at": datetime(2026, 6, 9, 9, 0, tzinfo=timezone.utc),
+        },
+        {
+            "event_type": PassEventType.CHECKED_OUT.value,
+            "occurred_at": datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc),
+        },
+    ]
+    status = VisitorLogsService._pass_visit_status(
+        detail={"events": events, "status": "active", "valid_until": None}
+    )
+    assert status == VisitorLogVisitStatus.EXITED.value
+
+
+def test_pass_visit_status_expired_without_check_in():
+    """Pass visit_status is expired when validity ended without gate entry."""
+    status = VisitorLogsService._pass_visit_status(
+        detail={
+            "events": [],
+            "status": "active",
+            "valid_until": datetime(2026, 6, 1, tzinfo=timezone.utc),
+        }
+    )
+    assert status == VisitorLogVisitStatus.EXPIRED.value
+
+
+def test_walk_in_visit_status_maps_awaiting():
+    """Walk-in awaiting maps to awaiting_approval visit_status."""
+    assert (
+        VisitorLogsService._walk_in_visit_status(status=WalkInStatus.AWAITING.value)
+        == VisitorLogVisitStatus.AWAITING_APPROVAL.value
+    )
 
 
 @pytest.mark.asyncio
@@ -512,6 +553,7 @@ async def test_get_log_detail_shows_creator_without_unit_role():
     detail = await svc.get_log_detail(pass_id="pass-rasika")
     assert detail["resident"]["person_name"] == "Rasika Bharati"
     assert detail["resident"]["role"] is None
+    assert detail["visit_status"] == VisitorLogVisitStatus.EXPIRED.value
 
 
 def test_build_resident_without_unit_role():
