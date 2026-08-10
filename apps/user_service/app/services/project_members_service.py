@@ -20,6 +20,7 @@ from apps.user_service.app.services.project_setup_service import ProjectSetupSer
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     ensure_staff_project_access_for_context,
+    format_iso_datetime,
 )
 from libs.shared_utils.common_query import (
     PROJECT_MEMBERS_MANAGE,
@@ -87,7 +88,10 @@ class ProjectMembersService:
 
     @staticmethod
     def _to_response(row: dict[str, Any]) -> ProjectMemberResponse:
-        return ProjectMemberResponse.model_validate(row)
+        payload = dict(row)
+        if payload.get("joined_at") is not None:
+            payload["joined_at"] = format_iso_datetime(payload["joined_at"])
+        return ProjectMemberResponse.model_validate(payload)
 
     async def list_members(self, *, project_id: str) -> list[ProjectMemberResponse]:
         """List staff assigned to a project."""

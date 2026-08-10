@@ -50,7 +50,6 @@ from apps.user_service.app.schemas.project_inventory import (
 )
 from apps.user_service.app.schemas.project_members import (
     AssignProjectMemberRequest,
-    ProjectMemberResponse,
     UpdateProjectMemberRequest,
 )
 from apps.user_service.app.schemas.project_setup import (
@@ -3356,7 +3355,7 @@ async def list_project_members(
         user_context=user_context,
     )
     items = await service.list_members(project_id=project_id)
-    payload = [ProjectMemberResponse.model_validate(i).model_dump() for i in items]
+    payload = [item.model_dump() for item in items]
     return list_response(
         request=request,
         items=payload,

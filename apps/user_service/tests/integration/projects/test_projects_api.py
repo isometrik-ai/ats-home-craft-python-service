@@ -1926,7 +1926,7 @@ async def test_list_project_members(monkeypatch, client):
     async def fake_list_members(_self, *, project_id: str):
         del _self
         assert project_id == PROJECT_ID
-        return [_FAKE_PROJECT_MEMBER]
+        return [ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)]
 
     monkeypatch.setattr(
         "apps.user_service.app.services.project_members_service.ProjectMembersService.list_members",
