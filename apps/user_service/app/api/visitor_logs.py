@@ -9,6 +9,9 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.schemas.visitor_logs import (
+    VisitorLogDetailApiResponse,
+    VisitorLogListApiResponse,
+    VisitorLogOverviewApiResponse,
     VisitorLogOverviewQuery,
     VisitorLogQuery,
 )
@@ -34,13 +37,43 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     500: {"description": "Internal server error."},
 }
 
+LIST_SUCCESS_RESPONSES: dict[int | str, dict] = {
+    **COMMON_ERROR_RESPONSES,
+    http_status.HTTP_200_OK: {
+        "model": VisitorLogListApiResponse,
+        "description": (
+            "Paginated visitor log rows from passes and walk-ins across the full visit lifecycle."
+        ),
+    },
+}
+
+OVERVIEW_SUCCESS_RESPONSES: dict[int | str, dict] = {
+    **COMMON_ERROR_RESPONSES,
+    http_status.HTTP_200_OK: {
+        "model": VisitorLogOverviewApiResponse,
+        "description": "Overview card metrics for the selected date range.",
+    },
+}
+
+DETAIL_SUCCESS_RESPONSES: dict[int | str, dict] = {
+    **COMMON_ERROR_RESPONSES,
+    http_status.HTTP_200_OK: {
+        "model": VisitorLogDetailApiResponse,
+        "description": (
+            "Pass detail with timeline when the id is a pass; "
+            "walk-in detail when the id is a walk-in entry."
+        ),
+    },
+}
+
 
 @handle_api_exceptions("list visitor logs")
 @router.get(
     "",
     status_code=http_status.HTTP_200_OK,
     summary="List visitor logs",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=LIST_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_visitor_logs(
@@ -65,10 +98,13 @@ async def list_visitor_logs(
         start_at=query.start_at,
         end_at=query.end_at,
         search=query.search,
+        bucket=query.bucket.value if query.bucket else None,
+        visitor_type=query.visitor_type.value if query.visitor_type else None,
         pass_type=query.pass_type.value if query.pass_type else None,
         entry_method=query.entry_method.value if query.entry_method else None,
         access_status=query.access_status.value if query.access_status else None,
         tower_id=query.tower_id,
+        guard_user_id=query.guard_user_id,
         project_id=query.project_id,
         unit_id=query.unit_id,
         page=query.page,
@@ -90,7 +126,8 @@ async def list_visitor_logs(
     "/overview",
     status_code=http_status.HTTP_200_OK,
     summary="Get visitor log overview",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=OVERVIEW_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def get_visitor_log_overview(
@@ -130,12 +167,13 @@ async def get_visitor_log_overview(
     "/{pass_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Get visitor log detail",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=DETAIL_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def get_visitor_log_detail(
     request: Request,
-    pass_id: str = Path(..., description="Pass UUID"),
+    pass_id: str = Path(..., description="Pass or walk-in entry UUID"),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):

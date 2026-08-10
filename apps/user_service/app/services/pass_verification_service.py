@@ -129,10 +129,6 @@ class PassVerificationService:
             return f"{isd_code} {phone_number}".strip()
         return phone_number
 
-    def _actor_label(self) -> str:
-        """Resolve operator display label from the authenticated user context."""
-        return self.user_context.email
-
     @classmethod
     def _compute_admissibility(
         cls,
@@ -308,7 +304,6 @@ class PassVerificationService:
                     "gate_id": body.gate_id,
                     "actor_type": PassActorType.STAFF.value,
                     "actor_user_id": self.user_context.user_id,
-                    "actor_label": self._actor_label(),
                     "notes": body.notes,
                     "entry_method": body.entry_method.value,
                     "access_status": refusal_status,
@@ -332,7 +327,6 @@ class PassVerificationService:
                 "gate_id": body.gate_id,
                 "actor_type": PassActorType.STAFF.value,
                 "actor_user_id": self.user_context.user_id,
-                "actor_label": self._actor_label(),
                 "notes": body.notes,
                 "entry_method": body.entry_method.value,
                 "access_status": body.access_status.value,
@@ -385,7 +379,6 @@ class PassVerificationService:
                 "gate_id": body.gate_id,
                 "actor_type": PassActorType.STAFF.value,
                 "actor_user_id": self.user_context.user_id,
-                "actor_label": self._actor_label(),
                 "notes": body.notes,
             }
         )
