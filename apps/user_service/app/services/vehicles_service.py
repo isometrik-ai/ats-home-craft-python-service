@@ -274,6 +274,17 @@ class VehiclesService:
             "avatar_url": avatar_url,
         }
 
+    def _serialize_contact_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Map a contact vehicle list row to API shape with parking allotment only."""
+        out = self._normalize_vehicle(row)
+        out["parking_allotment"] = self._build_parking_allotment(row)
+        for key in self._PARKING_ROW_KEYS:
+            out.pop(key, None)
+        payload = VehicleResponse.model_validate(out).model_dump(mode="json")
+        for key in ("unit", "owner", "approved_by", "rejected_by"):
+            payload.pop(key, None)
+        return payload
+
     def _serialize_admin_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a project vehicle row to the admin list API contract."""
         payload = self._normalize_project_vehicle(row)
@@ -411,12 +422,12 @@ class VehiclesService:
         assert org_id
         if unit_id:
             await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
-        rows = await self.repo.list_by_contact(
+        rows = await self.repo.list_details_by_contact(
             organization_id=org_id,
             contact_id=contact_id,
             unit_id=unit_id,
         )
-        return [self._normalize_vehicle(row) for row in rows]
+        return [self._serialize_contact_vehicle(row) for row in rows]
 
     async def get_vehicle_detail(
         self,

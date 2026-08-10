@@ -233,6 +233,33 @@ class VehiclesRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def list_details_by_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        unit_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List active vehicles for a contact with parking slot joins."""
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              {self._VEHICLE_SELECT_COLUMNS},
+              {_VEHICLE_PARKING_SELECT_COLUMNS}
+            FROM vehicles v
+            {_VEHICLE_PARKING_JOINS}
+            WHERE v.organization_id = $1::uuid
+              AND v.contact_id = $2::uuid
+              AND ($3::uuid IS NULL OR v.unit_id = $3::uuid)
+              AND {_ACTIVE_VEHICLE_FILTER}
+            ORDER BY v.sort_order, v.created_at
+            """,
+            organization_id,
+            contact_id,
+            unit_id,
+        )
+        return [dict(row) for row in rows]
+
     async def list_by_unit(
         self,
         *,

@@ -56,6 +56,27 @@ def _vehicle_row(**overrides):
 
 
 @pytest.mark.asyncio
+async def test_list_details_by_contact_with_unit_filter():
+    """list_details_by_contact joins parking slot data."""
+    conn = _mock_conn(rows=[_vehicle_row()])
+    repo = VehiclesRepository(db_connection=conn)
+
+    rows = await repo.list_details_by_contact(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        unit_id=UNIT_ID,
+    )
+
+    assert len(rows) == 1
+    query, args = _sql_args(conn.fetch)
+    assert "FROM vehicles v" in query
+    assert "parking_slot_number" in query
+    assert "unit_code" not in query
+    assert "deleted_at IS NULL" in query
+    assert args == (ORG_ID, CONTACT_ID, UNIT_ID)
+
+
+@pytest.mark.asyncio
 async def test_list_by_contact_with_unit_filter():
     """list_by_contact scopes by organization, contact, and optional unit."""
     conn = _mock_conn(rows=[_vehicle_row()])

@@ -299,6 +299,7 @@ _FAKE_VEHICLE = {
     "registration_number": "MH12AB1234",
     "vehicle_type": "four_wheeler",
     "status": "pending",
+    "parking_allotment": None,
 }
 
 _FAKE_VEHICLE_DETAIL = {
@@ -461,6 +462,8 @@ async def test_list_vehicles(monkeypatch, client):
     res = await client.get("/v1/contact-onboarding/vehicles")
     body = assert_success(res, 200)
     assert body["data"][0]["registration_number"] == "MH12AB1234"
+    assert "unit" not in body["data"][0]
+    assert body["data"][0]["parking_allotment"] is None
 
 
 @pytest.mark.asyncio
