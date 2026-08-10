@@ -630,6 +630,195 @@ class UnitsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    @staticmethod
+    def _resident_pair_key(contact_id: str, unit_id: str) -> str:
+        """Build a stable lookup key for contact/unit resident pairs."""
+        return f"{contact_id}:{unit_id}"
+
+    async def get_contact_residents_batch(
+        self,
+        *,
+        organization_id: str,
+        contact_unit_pairs: list[tuple[str, str]],
+    ) -> dict[str, dict[str, Any] | None]:
+        """Resolve resident profile (name + Owner/Tenant/Family role) for contact/unit pairs."""
+        unique_pairs = list(dict.fromkeys(contact_unit_pairs))
+        if not unique_pairs:
+            return {}
+
+        contact_ids = [pair[0] for pair in unique_pairs]
+        unit_ids = [pair[1] for pair in unique_pairs]
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+                c.id::text AS contact_id,
+                cu.unit_id::text AS unit_id,
+                TRIM(
+                    COALESCE(c.prefix, '') || ' ' ||
+                    COALESCE(c.first_name, '') || ' ' ||
+                    COALESCE(c.last_name, '')
+                ) AS person_name,
+                (
+                  SELECT cr.role_type::text
+                  FROM contact_roles cr
+                  WHERE cr.organization_id = cu.organization_id
+                    AND cr.contact_id = cu.contact_id
+                    AND cr.unit_id = cu.unit_id
+                    AND cr.status = 'active'::public.contact_role_status
+                    AND cr.ended_at IS NULL
+                    AND cr.role_type IN (
+                        'Owner'::contact_role_type,
+                        'Tenant'::contact_role_type,
+                        'Family'::contact_role_type
+                    )
+                  ORDER BY cr.started_at DESC
+                  LIMIT 1
+                ) AS role
+            FROM unnest($2::uuid[], $3::uuid[]) AS pair(contact_id, unit_id)
+            JOIN contacts c
+              ON c.id = pair.contact_id
+             AND c.organization_id = $1::uuid
+            JOIN contact_units cu
+              ON cu.contact_id = c.id
+             AND cu.unit_id = pair.unit_id
+             AND cu.organization_id = $1::uuid
+            WHERE c.status = 'active'
+              AND cu.status = 'active'::contact_unit_status
+            """,
+            organization_id,
+            contact_ids,
+            unit_ids,
+        )
+        result = {
+            self._resident_pair_key(contact_id, unit_id): None
+            for contact_id, unit_id in unique_pairs
+        }
+        for row in rows:
+            role = str(row.get("role") or "")
+            role_value = role if role in {"Owner", "Tenant", "Family"} else None
+            person_name = str(row.get("person_name") or "").strip()
+            if not person_name:
+                continue
+            key = self._resident_pair_key(str(row["contact_id"]), str(row["unit_id"]))
+            result[key] = {
+                "contact_id": str(row["contact_id"]),
+                "person_name": person_name,
+                "role": role_value,
+            }
+        return result
+
+    async def get_contact_person_names_batch(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> dict[str, str]:
+        """Return display names for contacts by id."""
+        unique_contact_ids = [contact_id for contact_id in dict.fromkeys(contact_ids) if contact_id]
+        if not unique_contact_ids:
+            return {}
+
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+                c.id::text AS contact_id,
+                TRIM(
+                    COALESCE(c.prefix, '') || ' ' ||
+                    COALESCE(c.first_name, '') || ' ' ||
+                    COALESCE(c.last_name, '')
+                ) AS person_name
+            FROM contacts c
+            WHERE c.organization_id = $1::uuid
+              AND c.id = ANY($2::uuid[])
+              AND c.status = 'active'
+            """,
+            organization_id,
+            unique_contact_ids,
+        )
+        return {
+            str(row["contact_id"]): str(row["person_name"] or "").strip()
+            for row in rows
+            if str(row.get("person_name") or "").strip()
+        }
+
+    async def get_unit_role_occupants(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> dict[str, dict[str, Any] | None]:
+        """Return active Owner and Tenant contacts for a unit."""
+        occupants = await self.get_unit_role_occupants_batch(
+            organization_id=organization_id,
+            unit_ids=[unit_id],
+        )
+        return occupants.get(
+            unit_id,
+            {"owner": None, "tenant": None},
+        )
+
+    async def get_unit_role_occupants_batch(
+        self,
+        *,
+        organization_id: str,
+        unit_ids: list[str],
+    ) -> dict[str, dict[str, dict[str, Any] | None]]:
+        """Return active Owner and Tenant contacts for many units."""
+        unique_unit_ids = [unit_id for unit_id in dict.fromkeys(unit_ids) if unit_id]
+        if not unique_unit_ids:
+            return {}
+
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT ON (cu.unit_id, cr.role_type)
+                cu.unit_id::text AS unit_id,
+                cr.role_type::text AS role,
+                c.id::text AS contact_id,
+                TRIM(
+                    COALESCE(c.prefix, '') || ' ' ||
+                    COALESCE(c.first_name, '') || ' ' ||
+                    COALESCE(c.last_name, '')
+                ) AS person_name
+            FROM contact_units cu
+            JOIN contacts c
+                ON c.id = cu.contact_id
+               AND c.organization_id = cu.organization_id
+            JOIN contact_roles cr
+                ON cr.organization_id = cu.organization_id
+               AND cr.contact_id = cu.contact_id
+               AND cr.unit_id = cu.unit_id
+               AND cr.status = 'active'::public.contact_role_status
+               AND cr.ended_at IS NULL
+               AND cr.role_type IN (
+                   'Owner'::contact_role_type,
+                   'Tenant'::contact_role_type
+               )
+            WHERE cu.organization_id = $1::uuid
+              AND cu.unit_id = ANY($2::uuid[])
+              AND cu.status = 'active'::contact_unit_status
+              AND c.status = 'active'
+            ORDER BY cu.unit_id, cr.role_type, cr.started_at DESC
+            """,
+            organization_id,
+            unique_unit_ids,
+        )
+        result: dict[str, dict[str, dict[str, Any] | None]] = {
+            unit_id: {"owner": None, "tenant": None} for unit_id in unique_unit_ids
+        }
+        for row in rows:
+            unit_id = str(row["unit_id"])
+            role = str(row["role"])
+            payload = {
+                "contact_id": str(row["contact_id"]),
+                "person_name": str(row["person_name"] or "").strip() or None,
+                "role": role,
+            }
+            if role == "Owner":
+                result[unit_id]["owner"] = payload
+            elif role == "Tenant":
+                result[unit_id]["tenant"] = payload
+        return result
+
     async def count_unit_vehicles(
         self,
         *,

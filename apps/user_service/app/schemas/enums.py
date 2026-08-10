@@ -1365,6 +1365,7 @@ class PassType(str, Enum):
     CAB = "cab"
     SERVICE = "service"
     OTHER = "other"
+    WALK_IN = "walk_in"  # visitor logs filter only; not stored on passes.pass_type
 
 
 class PassValidityType(str, Enum):
@@ -1435,6 +1436,34 @@ class PassAccessStatus(str, Enum):
     GRANTED = "granted"
     EXPIRED = "expired"
     DENIED = "denied"
+
+
+class VisitorLogVisitStatus(str, Enum):
+    """Unified visit row status for the admin visitor logs table."""
+
+    AWAITING_APPROVAL = "awaiting_approval"
+    APPROVED = "approved"
+    INSIDE = "inside"
+    EXITED = "exited"
+    EXPIRED = "expired"
+    DENIED = "denied"
+
+
+class VisitorLogBucket(str, Enum):
+    """Tab filter buckets for GET /visitor-logs."""
+
+    ALL = "all"
+    AWAITING_APPROVAL = "awaiting_approval"
+    INSIDE_NOW = "inside_now"
+    COMPLETED = "completed"
+    DENIED_EXPIRED = "denied_expired"
+
+
+class VisitorType(str, Enum):
+    """High-level visitor category for admin filters (UI visitor type column)."""
+
+    GUEST = "guest"
+    VISITOR = "visitor"
 
 
 # ============================================================================

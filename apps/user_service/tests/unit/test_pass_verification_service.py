@@ -260,6 +260,8 @@ async def test_check_in_success():
     assert result["entry_count"] == 1
     assert events_repo.insert_calls[-1]["event_type"] == PassEventType.CHECKED_IN.value
     assert events_repo.insert_calls[-1]["entry_method"] == PassEntryMethod.QR.value
+    assert events_repo.insert_calls[-1]["actor_user_id"] == "staff-1"
+    assert "actor_label" not in events_repo.insert_calls[-1]
     assert passes_repo.increment_calls
 
 

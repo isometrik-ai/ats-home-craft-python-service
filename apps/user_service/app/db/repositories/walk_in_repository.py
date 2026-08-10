@@ -276,6 +276,7 @@ class WalkInRepository(BaseRepository):
               vu.walk_in_entry_id::text AS walk_in_entry_id,
               vu.tower_id::text AS tower_id,
               vu.unit_id::text AS unit_id,
+              vu.approved_by_contact_id::text AS approved_by_contact_id,
               vu.status::text AS status,
               vu.rejection_reason,
               vu.approved_at,
