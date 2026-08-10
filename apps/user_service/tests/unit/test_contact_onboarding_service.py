@@ -763,22 +763,34 @@ def test_format_household_member_pending_invite_with_provisioned_user():
 
 
 def test_can_resend_household_invitation_has_user():
-    """Resend stays enabled for pending invites even when auth user exists."""
+    """Resend stays enabled for pending or re-issuable invites even when auth user exists."""
     assert (
         ContactOnboardingService._can_resend_household_invitation(
-            portal_access=True,
             invitation_status=HouseholdInvitationStatus.PENDING.value,
-            has_user=True,
         )
         is True
     )
     assert (
         ContactOnboardingService._can_resend_household_invitation(
-            portal_access=True,
+            invitation_status=HouseholdInvitationStatus.CANCELLED.value,
+        )
+        is True
+    )
+    assert (
+        ContactOnboardingService._can_resend_household_invitation(
             invitation_status=HouseholdInvitationStatus.ACCEPTED.value,
-            has_user=True,
         )
         is False
+    )
+
+
+def test_can_resend_household_invitation_cancelled_with_portal_access():
+    """Cancelled invites can be re-issued regardless of portal_access flag."""
+    assert (
+        ContactOnboardingService._can_resend_household_invitation(
+            invitation_status=HouseholdInvitationStatus.CANCELLED.value,
+        )
+        is True
     )
 
 
@@ -786,9 +798,7 @@ def test_can_resend_household_invitation_expired():
     """Expired revoked invites can be resent."""
     assert (
         ContactOnboardingService._can_resend_household_invitation(
-            portal_access=False,
             invitation_status=HouseholdInvitationStatus.EXPIRED.value,
-            has_user=False,
         )
         is True
     )
@@ -1066,6 +1076,71 @@ async def test_add_household_member_unit_not_assigned():
             primary_contact_id="contact-1",
             body=_household_create_body(),
         )
+
+
+def test_format_household_member_revoked_with_existing_user():
+    """Revoked invites stay re-issuable even when the member already has portal auth."""
+    item = ContactOnboardingService._format_household_member(
+        _household_row(
+            portal_access=True,
+            user_id="auth-user-1",
+            invitation_status=HouseholdInvitationStatus.CANCELLED.value,
+        )
+    )
+
+    assert item["member_status"] == HouseholdMemberStatus.REVOKED.value
+    assert item["can_resend_invitation"] is True
+
+
+@pytest.mark.asyncio
+async def test_resend_household_invitation_after_revoke_with_existing_user(monkeypatch):
+    """resend re-issues a cancelled invite even when portal_access and user_id are set."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(
+            portal_access=True,
+            user_id="auth-user-1",
+            unit_link_status="active",
+            invitation_status=HouseholdInvitationStatus.CANCELLED.value,
+        ),
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.household_invitation_service.invitations_repo = MagicMock()
+    svc.household_invitation_service.invitations_repo.get_pending_by_contact_unit = AsyncMock(
+        return_value=None,
+    )
+    svc.household_invitation_service.create_and_send = AsyncMock(
+        return_value={"invitation_id": "inv-2", "invite_url": "https://example.com/invite"}
+    )
+    svc.contacts_repo.get_contact_details = AsyncMock(
+        return_value={
+            "first_name": "Ashe",
+            "last_name": "S",
+            "phones": [
+                {
+                    "phone_number": "9112233711",
+                    "phone_isd_code": "+91",
+                    "is_primary": True,
+                }
+            ],
+        }
+    )
+    svc.contacts_repo.update_contact = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: MagicMock(
+            get_contact_details=AsyncMock(return_value={"first_name": "Owner"}),
+        ),
+    )
+
+    result = await svc.resend_household_invitation(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+    )
+
+    assert result["invitation_id"] == "inv-2"
+    svc.household_invitation_service.create_and_send.assert_awaited_once()
+    svc.contacts_repo.update_contact.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -55,7 +55,6 @@ from apps.user_service.app.utils.common_utils import (
 from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
 )
-from apps.user_service.app.utils.household_invitation_sms import mask_phone
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -341,23 +340,23 @@ class ContactOnboardingService:
         )
         return profile
 
-    @staticmethod
-    def _can_resend_household_invitation(
-        *,
-        portal_access: bool,
-        invitation_status: str | None,
-        has_user: bool,
-    ) -> bool:
-        """True when the primary can resend SMS or re-invite after revoke/decline."""
-        if invitation_status == HouseholdInvitationStatus.PENDING.value:
-            return True
-        if has_user:
-            return False
-        if not portal_access and invitation_status in {
+    _REISSUABLE_HOUSEHOLD_INVITATION_STATUSES = frozenset(
+        {
             HouseholdInvitationStatus.CANCELLED.value,
             HouseholdInvitationStatus.EXPIRED.value,
             HouseholdInvitationStatus.DECLINED.value,
-        }:
+        }
+    )
+
+    @staticmethod
+    def _can_resend_household_invitation(
+        *,
+        invitation_status: str | None,
+    ) -> bool:
+        """True when the primary can resend SMS or re-issue after revoke/decline."""
+        if invitation_status == HouseholdInvitationStatus.PENDING.value:
+            return True
+        if invitation_status in ContactOnboardingService._REISSUABLE_HOUSEHOLD_INVITATION_STATUSES:
             return True
         return False
 
@@ -385,9 +384,7 @@ class ContactOnboardingService:
             "member_status": member_status,
             "invitation_status": invitation_status,
             "can_resend_invitation": ContactOnboardingService._can_resend_household_invitation(
-                portal_access=portal_access,
                 invitation_status=invitation_status,
-                has_user=has_user,
             ),
             "phones": parse_json_any(row.get("phones"), default=[]),
             "emails": parse_json_any(row.get("emails"), default=[]),
@@ -755,46 +752,64 @@ class ContactOnboardingService:
             primary_contact_id=primary_contact_id,
             contact_unit_id=contact_unit_id,
         )
-        if member_row.get("user_id"):
+        invitation_status = member_row.get("invitation_status")
+        if invitation_status == HouseholdInvitationStatus.ACCEPTED.value:
             raise ValidationException(
                 message_key="contact_onboarding.errors.household_portal_access_already_enabled",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        if bool(member_row.get("portal_access")):
+        if invitation_status not in self._REISSUABLE_HOUSEHOLD_INVITATION_STATUSES:
             raise NotFoundException(
                 message_key="contact_onboarding.errors.invitation_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        await self._apply_household_portal_access_change(
-            primary_contact_id=primary_contact_id,
-            contact_unit_id=contact_unit_id,
-            family_contact_id=str(link["contact_id"]),
-            member_row=member_row,
-            portal_access=True,
-        )
+        family_contact_id = str(link["contact_id"])
+        if not bool(member_row.get("portal_access")):
+            await self.contacts_repo.update_contact(
+                contact_id=family_contact_id,
+                organization_id=org_id,
+                update_data={"portal_access": True},
+            )
 
-        pending_invitation = await invitations_repo.get_pending_by_contact_unit(
+        if (
+            not member_row.get("user_id")
+            and str(member_row.get("unit_link_status") or ContactUnitStatus.ACTIVE.value)
+            == ContactUnitStatus.ACTIVE.value
+        ):
+            await self.contact_units_repo.update_household_link_status(
+                organization_id=org_id,
+                contact_unit_id=contact_unit_id,
+                status=ContactUnitStatus.PENDING.value,
+            )
+
+        family_contact = await self.contacts_repo.get_contact_details(
+            contact_id=family_contact_id,
             organization_id=org_id,
-            contact_unit_id=contact_unit_id,
         )
-        if not pending_invitation:
+        if not family_contact:
             raise NotFoundException(
-                message_key="contact_onboarding.errors.invitation_not_found",
+                message_key="contacts.errors.contact_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return {
-            "invitation_id": str(pending_invitation["id"]),
-            "contact_unit_id": contact_unit_id,
-            "member_status": HouseholdMemberStatus.INVITED.value,
-            "phone_masked": mask_phone(
-                phone_isd_code=str(pending_invitation["phone_isd_code"]),
-                phone_number=str(pending_invitation["phone_number"]),
-            ),
-            "invite_url": HouseholdInvitationService._generate_invite_url(
-                str(pending_invitation["token"])
-            ),
-        }
+        primary_phone = self._primary_phone_from_contact(family_contact)
+        if not primary_phone:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_portal_access_requires_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        return await self.household_invitation_service.create_and_send(
+            primary_contact_id=primary_contact_id,
+            family_contact_id=family_contact_id,
+            contact_unit_id=contact_unit_id,
+            phone_isd_code=str(primary_phone["phone_isd_code"]),
+            phone_number=str(primary_phone["phone_number"]),
+            invitee_first_name=family_contact.get("first_name"),
+            invitee_last_name=family_contact.get("last_name"),
+            inviter_first_name=primary_contact.get("first_name"),
+            inviter_last_name=primary_contact.get("last_name"),
+        )
 
     async def revoke_household_invitation(
         self,
