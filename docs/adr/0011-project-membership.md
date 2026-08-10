@@ -116,6 +116,7 @@ control source of truth** for staff.
 | Resident identity                       | `contacts.organization_id`       |
 | Resident project membership             | `contact_units.project_id`       |
 | Visitor passes, fees, move events       | `organization_id` + `project_id` |
+| Notices (community board)               | `organization_id` + `project_id` |
 
 ### 6. Terminology (avoid overload)
 
