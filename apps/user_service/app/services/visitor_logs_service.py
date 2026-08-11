@@ -21,6 +21,7 @@ from apps.user_service.app.db.repositories.visitor_logs_repository import (
 )
 from apps.user_service.app.schemas.enums import (
     ContactType,
+    PassEntryMethod,
     PassEventType,
     PassStatus,
     PassType,
@@ -113,6 +114,26 @@ class VisitorLogsService:
         email = str(profile.get("email") or "").strip()
         return email or None
 
+    async def _resolve_guard_from_gate_event(
+        self,
+        *,
+        event: dict[str, Any],
+        organization_id: str,
+    ) -> tuple[str | None, str | None]:
+        """Resolve guard id/name from a gate check-in or enter event."""
+        guard_user_id = event.get("actor_user_id")
+        guard_name = None
+        if guard_user_id:
+            guard_name = await self._staff_display_name(
+                user_id=str(guard_user_id),
+                organization_id=organization_id,
+            )
+        if not guard_name:
+            guard_name = str(event.get("actor_label") or "").strip() or None
+        if not guard_user_id and not guard_name:
+            return None, None
+        return (str(guard_user_id) if guard_user_id else None, guard_name)
+
     async def _guard_from_pass_events(
         self,
         *,
@@ -131,16 +152,10 @@ class VisitorLogsService:
             key=lambda row: self._parse_dt(row.get("occurred_at"))
             or datetime.min.replace(tzinfo=timezone.utc),
         )
-        guard_user_id = latest.get("actor_user_id")
-        if not guard_user_id:
-            return None, None
-        guard_name = await self._staff_display_name(
-            user_id=str(guard_user_id),
+        return await self._resolve_guard_from_gate_event(
+            event=latest,
             organization_id=organization_id,
         )
-        if not guard_name:
-            guard_name = str(latest.get("actor_label") or "").strip() or None
-        return str(guard_user_id), guard_name
 
     async def _guard_from_walk_in_events(
         self,
@@ -155,17 +170,15 @@ class VisitorLogsService:
         if not entered_events:
             return None, None
 
-        latest = entered_events[-1]
-        guard_user_id = latest.get("actor_user_id")
-        if not guard_user_id:
-            return None, None
-        guard_name = await self._staff_display_name(
-            user_id=str(guard_user_id),
+        latest = max(
+            entered_events,
+            key=lambda row: self._parse_dt(row.get("occurred_at"))
+            or datetime.min.replace(tzinfo=timezone.utc),
+        )
+        return await self._resolve_guard_from_gate_event(
+            event=latest,
             organization_id=organization_id,
         )
-        if not guard_name:
-            guard_name = str(latest.get("actor_label") or "").strip() or None
-        return str(guard_user_id), guard_name
 
     @staticmethod
     def _build_resident(
@@ -381,6 +394,39 @@ class VisitorLogsService:
         }
         return mapping.get(str(status or ""), VisitorLogVisitStatus.APPROVED.value)
 
+    def _detail_summary_fields(self, *, detail: dict[str, Any]) -> dict[str, Any]:
+        """Derive list-aligned summary fields for a pass or walk-in detail payload."""
+        source = str(detail.get("source") or "pass")
+        if source == "walk_in":
+            return {
+                "visitor_type": VisitorType.VISITOR.value,
+                "entry_method": PassEntryMethod.MANUAL.value,
+                "vehicle_number": detail.get("vehicle_number"),
+                "time_spent_minutes": self._time_spent_minutes(
+                    detail.get("entered_at"),
+                    detail.get("exited_at"),
+                ),
+            }
+
+        events = list(detail.get("events") or [])
+        check_in = self._latest_pass_gate_event(
+            events,
+            event_type=PassEventType.CHECKED_IN.value,
+        )
+        check_out = self._latest_pass_gate_event(
+            events,
+            event_type=PassEventType.CHECKED_OUT.value,
+        )
+        return {
+            "visitor_type": self._visitor_type_from_row(detail),
+            "entry_method": check_in.get("entry_method") if check_in else None,
+            "vehicle_number": detail.get("vehicle_number"),
+            "time_spent_minutes": self._time_spent_minutes(
+                check_in.get("occurred_at") if check_in else None,
+                check_out.get("occurred_at") if check_out else None,
+            ),
+        }
+
     def _enrich_detail_fields(
         self,
         *,
@@ -397,6 +443,7 @@ class VisitorLogsService:
         """Attach visitor-log summary fields to a detail payload."""
         payload: dict[str, Any] = {
             **detail,
+            **self._detail_summary_fields(detail=detail),
             "created_by": created_by,
             "guard_user_id": guard_user_id,
             "guard_name": guard_name,
@@ -469,13 +516,24 @@ class VisitorLogsService:
 
     @staticmethod
     def _parse_dt(value: Any) -> datetime | None:
-        """Parse a DB datetime value."""
+        """Parse a DB datetime or ISO-8601 string."""
         if value is None:
             return None
         if isinstance(value, datetime):
             if value.tzinfo is None:
                 return value.replace(tzinfo=timezone.utc)
             return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed
         return None
 
     @classmethod
@@ -669,9 +727,13 @@ class VisitorLogsService:
             walk_in_entry_id=pass_id,
         )
         if walk_in_row:
+            raw_events = await self._walk_in_service.repo.list_events(
+                organization_id=org_id,
+                walk_in_entry_id=pass_id,
+            )
             detail = await self._walk_in_service._serialize_detail(walk_in_row)
             guard_user_id, guard_name = await self._guard_from_walk_in_events(
-                events=detail.get("events") or [],
+                events=[dict(event) for event in raw_events],
                 organization_id=org_id,
             )
             created_by = await self._staff_display_name(

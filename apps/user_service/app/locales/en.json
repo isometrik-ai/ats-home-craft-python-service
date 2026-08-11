@@ -916,7 +916,53 @@
           "title": "Vehicle request rejected",
           "body": "Your vehicle {registration_number} was rejected"
         }
+      },
+      "notices": {
+        "published": {
+          "title": "New community notice",
+          "body": "{title}"
+        }
       }
+    }
+  },
+  "notices": {
+    "errors": {
+      "title_too_long": "Notice title cannot exceed 70 characters.",
+      "description_too_long": "Notice description cannot exceed 600 characters.",
+      "recipients_required": "Select at least one recipient group to publish or schedule.",
+      "towers_required": "Select at least one tower when scope is by tower.",
+      "schedule_too_far": "Scheduled publish date cannot be more than 2 months ahead.",
+      "schedule_required": "Publish date is required when scheduling a notice.",
+      "not_editable": "Published or deleted notices cannot be edited.",
+      "not_pinnable": "Only live notices can be pinned to the banner.",
+      "already_pinned": "This notice is already pinned to a banner slot.",
+      "pin_slots_full": "All six banner slots are occupied.",
+      "slot_occupied": "The selected banner slot is already occupied.",
+      "too_many_attachments": "A notice cannot have more than 4 attachments.",
+      "invalid_attachment": "Attachment must be a JPEG or PNG image up to 5 MB.",
+      "duplicate_live_forbidden": "Live notices cannot be duplicated. Use Create Notice instead.",
+      "not_restorable": "Only deleted notices can be restored.",
+      "project_access_denied": "You do not have access to manage notices for this project.",
+      "not_found": "The notice could not be found."
+    },
+    "success": {
+      "summary_retrieved": "Notice summary retrieved successfully.",
+      "list_retrieved": "Notices retrieved successfully.",
+      "reach_estimate_retrieved": "Reach estimate retrieved successfully.",
+      "retrieved": "Notice retrieved successfully.",
+      "created": "Notice created successfully.",
+      "updated": "Notice updated successfully.",
+      "deleted": "Notice deleted successfully.",
+      "restored": "Notice restored as a new draft successfully.",
+      "duplicated": "Notice duplicated successfully.",
+      "pinned": "Notice pinned to banner successfully.",
+      "unpinned": "Notice unpinned successfully.",
+      "publish_due_completed": "Due scheduled notices published successfully.",
+      "expire_pins_completed": "Expired banner pins cleared successfully.",
+      "banner_retrieved": "Notice banner retrieved successfully.",
+      "feed_retrieved": "Notice feed retrieved successfully.",
+      "liked": "Notice liked successfully.",
+      "unliked": "Notice like removed successfully."
     }
   }
 }

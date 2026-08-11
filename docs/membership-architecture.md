@@ -401,19 +401,20 @@ ______________________________________________________________________
 
 ## Data scoping reference
 
-| Entity / feature        | `organization_id` | `project_id`    | Membership check           |
-| ----------------------- | ----------------- | --------------- | -------------------------- |
-| Org settings            | Required          | —               | Org admin permission       |
-| Roles / permissions     | Required          | —               | Org member                 |
-| CRM contacts (registry) | Required          | Filter optional | Org permission             |
-| CRM companies, leads    | Required          | —               | Org permission             |
-| Projects list (all)     | Required          | —               | `projects_management.view` |
-| Projects list (mine)    | Required          | —               | `project_members`          |
-| Towers, units, gates    | Required          | Required        | Project access             |
-| Visitor passes          | Required          | Required        | Project access             |
-| Maintenance fees        | Required          | Required        | Project access             |
-| Resident portal         | Required          | Per unit        | `contact_units`            |
-| Push notifications      | Required          | Optional target | Persona-specific           |
+| Entity / feature        | `organization_id` | `project_id`    | Membership check             |
+| ----------------------- | ----------------- | --------------- | ---------------------------- |
+| Org settings            | Required          | —               | Org admin permission         |
+| Roles / permissions     | Required          | —               | Org member                   |
+| CRM contacts (registry) | Required          | Filter optional | Org permission               |
+| CRM companies, leads    | Required          | —               | Org permission               |
+| Projects list (all)     | Required          | —               | `projects_management.view`   |
+| Projects list (mine)    | Required          | —               | `project_members`            |
+| Towers, units, gates    | Required          | Required        | Project access               |
+| Visitor passes          | Required          | Required        | Project access               |
+| **Notices**             | Required          | Required        | Project access (staff admin) |
+| Maintenance fees        | Required          | Required        | Project access               |
+| Resident portal         | Required          | Per unit        | `contact_units`              |
+| Push notifications      | Required          | Optional target | Persona-specific             |
 
 ______________________________________________________________________
 
@@ -506,4 +507,7 @@ ______________________________________________________________________
 | Resident onboarding               | [adr/0001-resident-onboarding.md](./adr/0001-resident-onboarding.md)                              |
 | Project setup flow                | [project-setup-flow.md](./project-setup-flow.md)                                                  |
 | Contact roles schema              | [contact-roles-schema.md](../../ats-home-craft-supabase/docs/contact-roles-schema.md)             |
+| Notice board flow                 | [notice-board-flow.md](./notice-board-flow.md)                                                    |
+| Notice board ADR                  | [adr/0012-notice-board.md](./adr/0012-notice-board.md)                                            |
+| Notice board schema               | [notice-board-schema.md](../../ats-home-craft-supabase/docs/notice-board-schema.md)               |
 | Resident onboarding schema        | [resident-onboarding-schema.md](../../ats-home-craft-supabase/docs/resident-onboarding-schema.md) |
