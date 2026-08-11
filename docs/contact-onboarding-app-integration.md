@@ -12,10 +12,10 @@ ______________________________________________________________________
 ## 1. Principles
 
 1. **Do not block the app** on onboarding. Show home and features even when `is_completed: false`.
-2. **Drive UI from `prompts[]` only** on `GET /status`. Do not use removed fields (`steps`, `setup_current_step`, `unit_onboarding`).
-3. **Prompts are dismissible** — user can complete profile or accept units later from Settings.
-4. **Order is flexible** — accept unit before profile, or profile first; both work.
-5. **Refresh `/status`** after profile update, accept unit, or set default unit.
+1. **Drive UI from `prompts[]` only** on `GET /status`. Do not use removed fields (`steps`, `setup_current_step`, `unit_onboarding`).
+1. **Prompts are dismissible** — user can complete profile or accept units later from Settings.
+1. **Order is flexible** — accept unit before profile, or profile first; both work.
+1. **Refresh `/status`** after profile update, accept unit, or set default unit.
 
 ______________________________________________________________________
 
@@ -74,22 +74,22 @@ Authorization: Bearer <token>
 }
 ```
 
-| Field | Type | App usage |
-| ----- | ---- | --------- |
-| `profile_complete` | bool | Profile done; hide profile nudge |
-| `pending_unit_count` | int | Copy: “N properties waiting” |
-| `active_unit_count` | int | Unit switcher; feature eligibility |
-| `requires_default_unit` | bool | Show default-unit picker when `true` |
-| `prompts` | array | **Primary UI driver** — see §4 |
-| `is_completed` | bool | `true` → hide all onboarding banners |
+| Field                   | Type  | App usage                            |
+| ----------------------- | ----- | ------------------------------------ |
+| `profile_complete`      | bool  | Profile done; hide profile nudge     |
+| `pending_unit_count`    | int   | Copy: “N properties waiting”         |
+| `active_unit_count`     | int   | Unit switcher; feature eligibility   |
+| `requires_default_unit` | bool  | Show default-unit picker when `true` |
+| `prompts`               | array | **Primary UI driver** — see §4       |
+| `is_completed`          | bool  | `true` → hide all onboarding banners |
 
 ### Prompt types
 
-| `type` | Extra fields | Meaning |
-| ------ | ------------ | ------- |
-| `complete_profile` | — | Suggest profile form |
-| `accept_unit` | `contact_unit_id`, `unit_id` | Pending allotment to accept |
-| `choose_default_unit` | — | 2+ active units, no default login |
+| `type`                | Extra fields                 | Meaning                           |
+| --------------------- | ---------------------------- | --------------------------------- |
+| `complete_profile`    | —                            | Suggest profile form              |
+| `accept_unit`         | `contact_unit_id`, `unit_id` | Pending allotment to accept       |
+| `choose_default_unit` | —                            | 2+ active units, no default login |
 
 ### Example — contact exists, no unit assigned yet
 
@@ -196,7 +196,7 @@ Content-Type: application/json
 
 **After success:** `GET /status` → `complete_profile` prompt removed; `profile_complete: true`.
 
----
+______________________________________________________________________
 
 ### 4.2 Accept unit
 
@@ -289,10 +289,10 @@ Content-Type: application/json
 }
 ```
 
-| `requires_default_unit` | App action |
-| ----------------------- | ---------- |
-| `false` | Refresh `/status`; done |
-| `true` | Open default-unit picker → §4.3 |
+| `requires_default_unit` | App action                      |
+| ----------------------- | ------------------------------- |
+| `false`                 | Refresh `/status`; done         |
+| `true`                  | Open default-unit picker → §4.3 |
 
 **Claim (same activation, use anytime):**
 
@@ -311,7 +311,7 @@ Content-Type: application/json
 Same response shape as confirm. Claim does not accept `default_contact_unit_id` — use
 `POST /default-unit` if `requires_default_unit: true`.
 
----
+______________________________________________________________________
 
 ### 4.3 Choose default unit
 
@@ -335,7 +335,7 @@ ______________________________________________________________________
 
 ## 5. Optional features (no onboarding gate)
 
-Available when `active_unit_count >= 1`. No wizard or `/complete` required.
+Available when `active_unit_count >= 1`. Accept units via confirm/claim only.
 
 ### Vehicles
 
@@ -377,17 +377,7 @@ POST /v1/contact-onboarding/household
 
 ______________________________________________________________________
 
-## 6. Legacy endpoints (usually skip in v1 app)
-
-| Endpoint | When to use |
-| -------- | ----------- |
-| `GET /review` | Optional summary screen only |
-| `POST /complete` | Partial defer of active units (§ Scenario 6) |
-| `POST /steps/skip` | Not needed — features are not gated |
-
-______________________________________________________________________
-
-## 7. App flow diagram
+## 6. App flow diagram
 
 ```mermaid
 flowchart TD
@@ -408,30 +398,30 @@ flowchart TD
 
 ______________________________________________________________________
 
-## 8. All scenarios with example API sequences
+## 7. All scenarios with example API sequences
 
 Placeholder IDs used below:
 
-| Symbol | Meaning |
-| ------ | ------- |
-| `contact-uuid` | Authenticated contact |
+| Symbol                 | Meaning                                    |
+| ---------------------- | ------------------------------------------ |
+| `contact-uuid`         | Authenticated contact                      |
 | `cu-A`, `cu-B`, `cu-C` | `contact_unit_id` (row id in confirm body) |
-| `unit-A`, `unit-B` | Physical `unit_id` |
+| `unit-A`, `unit-B`     | Physical `unit_id`                         |
 
----
+______________________________________________________________________
 
 ### Scenario 1 — Single unit (simplest)
 
 **Setup:** Admin assigns one unit → contact sees accept prompt.
 
-| Step | Request | Expected `data` after |
-| ---- | ------- | --------------------- |
-| 1. Login | `GET /status` | `prompts: [complete_profile, accept_unit]`, `pending_unit_count: 1` |
-| 2. (Optional) Profile | `PATCH /profile` `{ "first_name": "Jane", ... }` | — |
-| 3. Accept unit | `POST /properties/confirm` `{ "contact_unit_ids": ["cu-A"] }` | `items[0].status: active`, `requires_default_unit: false` |
-| 4. Refresh | `GET /status` | `active_unit_count: 1`, `pending_unit_count: 0`, accept prompt gone |
-| 5. Profile if skipped | `PATCH /profile` | — |
-| 6. Done | `GET /status` | `prompts: []`, `is_completed: true` |
+| Step                  | Request                                                       | Expected `data` after                                               |
+| --------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 1. Login              | `GET /status`                                                 | `prompts: [complete_profile, accept_unit]`, `pending_unit_count: 1` |
+| 2. (Optional) Profile | `PATCH /profile` `{ "first_name": "Jane", ... }`              | —                                                                   |
+| 3. Accept unit        | `POST /properties/confirm` `{ "contact_unit_ids": ["cu-A"] }` | `items[0].status: active`, `requires_default_unit: false`           |
+| 4. Refresh            | `GET /status`                                                 | `active_unit_count: 1`, `pending_unit_count: 0`, accept prompt gone |
+| 5. Profile if skipped | `PATCH /profile`                                              | —                                                                   |
+| 6. Done               | `GET /status`                                                 | `prompts: []`, `is_completed: true`                                 |
 
 **Minimal path (accept first, profile later):**
 
@@ -446,24 +436,24 @@ PATCH /v1/contact-onboarding/profile
 GET  /v1/contact-onboarding/status
 ```
 
----
+______________________________________________________________________
 
 ### Scenario 2 — Multiple units, accept one now (recommended)
 
 **Setup:** Admin assigns units A, B, C → all `pending`.
 
-| Step | Request | Notes |
-| ---- | ------- | ----- |
-| 1 | `GET /status` | Up to 3× `accept_unit` prompts (one per pending self unit) |
-| 2 | `GET /properties` | Show all pending units grouped by project |
-| 3 | `POST /properties/confirm` | `{"contact_unit_ids":["cu-A"]}` — only A |
-| 4 | `GET /status` | `active_unit_count: 1`, B/C still pending |
-| 5 | Use app with unit A | Vehicles/household for A optional |
-| 6 | Later accept B | `POST /properties/claim` `{"contact_unit_ids":["cu-B"]}` |
-| 7 | `GET /status` | If 2 active, may show `choose_default_unit` |
-| 8 | Set default | `POST /default-unit` `{"contact_unit_id":"cu-A"}` |
+| Step | Request                    | Notes                                                      |
+| ---- | -------------------------- | ---------------------------------------------------------- |
+| 1    | `GET /status`              | Up to 3× `accept_unit` prompts (one per pending self unit) |
+| 2    | `GET /properties`          | Show all pending units grouped by project                  |
+| 3    | `POST /properties/confirm` | `{"contact_unit_ids":["cu-A"]}` — only A                   |
+| 4    | `GET /status`              | `active_unit_count: 1`, B/C still pending                  |
+| 5    | Use app with unit A        | Vehicles/household for A optional                          |
+| 6    | Later accept B             | `POST /properties/claim` `{"contact_unit_ids":["cu-B"]}`   |
+| 7    | `GET /status`              | If 2 active, may show `choose_default_unit`                |
+| 8    | Set default                | `POST /default-unit` `{"contact_unit_id":"cu-A"}`          |
 
----
+______________________________________________________________________
 
 ### Scenario 3 — Accept all units at once
 
@@ -498,42 +488,9 @@ GET /v1/contact-onboarding/status
 
 Expect: `active_unit_count: 3`, no `accept_unit` prompts, no `choose_default_unit` if default was sent on confirm.
 
----
+______________________________________________________________________
 
-### Scenario 4 — Accept all, then defer some via `/complete` (legacy)
-
-Use only if product requires “finish setup for one unit now, park others for later.”
-**Prefer Scenario 2** (accept one at a time) for new apps.
-
-**Precondition:** A, B, C already `active` (all accepted).
-
-```http
-POST /v1/contact-onboarding/complete
-Content-Type: application/json
-
-{
-  "contact_unit_ids": ["cu-A"]
-}
-```
-
-**Effect:**
-
-| Unit | After |
-| ---- | ----- |
-| A | Stays `active`, `activated_at` set |
-| B, C | Moved back to **`pending`** |
-
-**Later for B:**
-
-```http
-POST /v1/contact-onboarding/properties/claim
-{"contact_unit_ids":["cu-B"]}
-GET  /v1/contact-onboarding/status
-```
-
----
-
-### Scenario 5 — Two active units, need default picker
+### Scenario 4 — Two active units, need default picker
 
 User accepted A and B without default on confirm.
 
@@ -562,9 +519,9 @@ GET  /v1/contact-onboarding/status
 
 Expect: `requires_default_unit: false`, `choose_default_unit` prompt gone.
 
----
+______________________________________________________________________
 
-### Scenario 6 — Profile only, no units (contact created, not assigned)
+### Scenario 5 — Profile only, no units (contact created, not assigned)
 
 ```http
 GET /v1/contact-onboarding/status
@@ -591,9 +548,9 @@ GET  /v1/contact-onboarding/status
 
 Expect: `is_completed: true`, `prompts: []`.
 
----
+______________________________________________________________________
 
-### Scenario 7 — Post-onboarding: admin adds another unit
+### Scenario 6 — Post-onboarding: admin adds another unit
 
 **Precondition:** `is_completed: true`, one active unit.
 
@@ -630,9 +587,9 @@ If `requires_default_unit: true` → `POST /default-unit`.
 
 No full wizard reopens — single accept banner.
 
----
+______________________________________________________________________
 
-### Scenario 8 — Household-only member (family, not owner)
+### Scenario 7 — Household-only member (family, not owner)
 
 Contact linked only as family on someone else's unit (`relationship: spouse|parent|child|...`).
 
@@ -663,9 +620,9 @@ GET  /v1/contact-onboarding/status
 
 Expect: `is_completed: true`.
 
----
+______________________________________________________________________
 
-### Scenario 9 — Family member later assigned own unit
+### Scenario 8 — Family member later assigned own unit
 
 Contact was family on unit A; admin assigns unit B as owner (`relationship: self`, `pending`).
 
@@ -697,9 +654,9 @@ GET  /v1/contact-onboarding/status
 
 Family link on unit A remains; owner link on B is now `active`. Both coexist.
 
----
+______________________________________________________________________
 
-## 9. Status transition cheat sheet
+## 8. Status transition cheat sheet
 
 ```
 [Created, no units]
@@ -729,21 +686,19 @@ Family link on unit A remains; owner link on B is now `active`. Both coexist.
 
 ______________________________________________________________________
 
-## 10. Error handling
+## 9. Error handling
 
-| Situation | Typical code | App action |
-| --------- | ------------ | ---------- |
-| Unit not in pending list | 422 | Refresh `GET /properties` |
-| Primary conflict (unit taken) | 422 | Show server `message` |
-| Invalid `contact_unit_id` | 422 | Refresh lists |
-| `POST /complete` when no prompts | 409 | Hide complete CTA |
-| No active units on `/complete` | 422 | Use confirm/claim first |
+| Situation                     | Typical code | App action                |
+| ----------------------------- | ------------ | ------------------------- |
+| Unit not in pending list      | 422          | Refresh `GET /properties` |
+| Primary conflict (unit taken) | 422          | Show server `message`     |
+| Invalid `contact_unit_id`     | 422          | Refresh lists             |
 
 Always refresh `GET /status` and `GET /properties` after a failed confirm.
 
 ______________________________________________________________________
 
-## 11. TypeScript types (optional)
+## 10. TypeScript types (optional)
 
 ```typescript
 type OnboardingPrompt =
@@ -768,7 +723,7 @@ interface ConfirmPropertiesResponse {
 
 ______________________________________________________________________
 
-## 12. Integration checklist
+## 11. Integration checklist
 
 - [ ] `GET /status` on login and after onboarding actions
 - [ ] UI driven by `prompts[]` only
@@ -777,11 +732,10 @@ ______________________________________________________________________
 - [ ] Handle `requires_default_unit` after confirm/claim
 - [ ] `POST /properties/claim` for later accepts (same as confirm)
 - [ ] Do not implement linear wizard or read removed status fields
-- [ ] Skip `POST /complete` unless product needs partial defer (Scenario 4)
 
 ______________________________________________________________________
 
-## 13. Related docs
+## 12. Related docs
 
 - Backend flow & rules: [contact-onboarding-flow.md](./contact-onboarding-flow.md)
 - Role model: [adr/0010-contact-roles.md](./adr/0010-contact-roles.md)

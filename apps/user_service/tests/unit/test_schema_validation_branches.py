@@ -15,7 +15,6 @@ from apps.user_service.app.schemas.auth import (
 from apps.user_service.app.schemas.common import NoteItem
 from apps.user_service.app.schemas.contact_onboarding import (
     CompleteProfileRequest,
-    CompleteStepRequest,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
     ReviewVehicleRequest,
@@ -30,7 +29,6 @@ from apps.user_service.app.schemas.email_templates import (
     UpdateEmailTemplateRequest,
 )
 from apps.user_service.app.schemas.enums import (
-    ContactOnboardingStep,
     ContactUnitRelationship,
     EmailTemplateType,
     FieldType,
@@ -223,10 +221,6 @@ class TestContactOnboardingSchemaValidators:
     def test_update_household_member_empty_patch(self) -> None:
         with pytest.raises(ValidationException):
             UpdateHouseholdMemberRequest()
-
-    def test_complete_step_requires_contact_unit_for_unit_steps(self) -> None:
-        with pytest.raises(ValidationException):
-            CompleteStepRequest(step_key=ContactOnboardingStep.VEHICLES)
 
 
 class TestMoveEventsSchemaValidators:

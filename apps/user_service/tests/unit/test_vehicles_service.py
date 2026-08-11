@@ -844,19 +844,6 @@ async def test_list_project_vehicles_passes_vehicle_type_and_fuel_type():
 
 
 @pytest.mark.asyncio
-async def test_complete_vehicles_step():
-    """Complete vehicles step marks onboarding step done."""
-    svc = _service()
-    svc.contact_units_repo = AsyncMock()
-    svc.unit_onboarding_repo = AsyncMock()
-    svc.contact_units_repo.get_owned_by_contact.return_value = {"id": "cu-1"}
-
-    await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")
-
-    svc.unit_onboarding_repo.complete_step.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_build_parking_allotment_returns_none_without_slot():
     """Rows without an assigned parking slot skip nested parking summary."""
     svc = _service()
@@ -1293,15 +1280,3 @@ async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
         vehicle_id="v1",
     )
     assert result["status"] == VehicleStatus.REMOVED.value
-
-
-@pytest.mark.asyncio
-async def test_complete_vehicles_step_not_found():
-    """Complete step fails when contact unit is missing."""
-    svc = _service()
-    svc.contact_units_repo = AsyncMock()
-    svc.unit_onboarding_repo = AsyncMock()
-    svc.contact_units_repo.get_owned_by_contact = AsyncMock(return_value=None)
-
-    with pytest.raises(NotFoundException):
-        await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")

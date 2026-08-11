@@ -10,13 +10,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import (
     CommunicationPreferences,
-    ContactDetailsResponse,
     FlexibleOptionalDate,
 )
 from apps.user_service.app.schemas.enums import (
     ContactBloodGroup,
     ContactGender,
-    ContactOnboardingStep,
     ContactUnitRelationship,
     VehicleFuelType,
     VehicleStatus,
@@ -146,21 +144,6 @@ class ClaimPropertiesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     contact_unit_ids: list[str] = Field(..., min_length=1)
-
-
-class CompleteOnboardingRequest(BaseModel):
-    """Finalize onboarding for all or a subset of active properties."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    contact_unit_ids: list[str] | None = Field(
-        default=None,
-        min_length=1,
-        description=(
-            "Optional active contact_unit ids to finalize now. Omitted ids are moved back "
-            "to pending and can be claimed later via POST /properties/claim."
-        ),
-    )
 
 
 class ClaimPropertiesResponse(BaseModel):
@@ -514,40 +497,6 @@ class SetDefaultUnitRequest(BaseModel):
     contact_unit_id: str
 
 
-class CompleteUnitStepRequest(BaseModel):
-    """Complete a unit-scoped onboarding step (vehicles or household)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    contact_unit_id: str
-
-
-class CompleteStepRequest(BaseModel):
-    """Mark an optional step complete (unit-scoped for vehicles/household)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    step_key: ContactOnboardingStep
-    contact_unit_id: str | None = Field(
-        None,
-        description="Required when step_key is vehicles or household.",
-    )
-
-    @model_validator(mode="after")
-    def validate_unit_step(self) -> CompleteStepRequest:
-        """Unit-scoped steps require contact_unit_id."""
-        unit_steps = {
-            ContactOnboardingStep.VEHICLES.value,
-            ContactOnboardingStep.HOUSEHOLD.value,
-        }
-        if self.step_key.value in unit_steps and not self.contact_unit_id:
-            raise ValidationException(
-                message_key="contact_onboarding.errors.unit_step_requires_contact_unit",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return self
-
-
 class AdminAssignUnitRequest(BaseModel):
     """Admin pre-allotment of a unit to a contact."""
 
@@ -582,31 +531,6 @@ class ContactUnitAssignmentResponse(BaseModel):
     last_name: str | None = None
     assign_date: str | None = None
     created_at: str | None = None
-
-
-class OnboardingStepResponse(BaseModel):
-    """Single wizard step."""
-
-    step_key: str
-    status: str
-    completed_at: str | None = None
-
-
-class UnitOnboardingStepResponse(BaseModel):
-    """Single unit-scoped wizard step."""
-
-    step_key: str
-    status: str
-    completed_at: str | None = None
-
-
-class UnitOnboardingProgressResponse(BaseModel):
-    """Per-unit vehicles/household progress."""
-
-    contact_unit_id: str
-    unit_id: str
-    unit_code: str | None = None
-    steps: list[UnitOnboardingStepResponse] = Field(default_factory=list)
 
 
 class OnboardingPromptResponse(BaseModel):
@@ -729,12 +653,3 @@ class HouseholdInvitationAcceptResponse(BaseModel):
     expires_in: int | None = None
     expires_at: datetime | None = None
     user: HouseholdInvitationUserInfo
-
-
-class OnboardingReviewResponse(BaseModel):
-    """Review screen aggregate."""
-
-    contact: ContactDetailsResponse
-    units: list[ContactUnitSummaryResponse]
-    vehicles: list[VehicleResponse]
-    household: list[HouseholdMemberResponse]

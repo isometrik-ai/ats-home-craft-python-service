@@ -250,13 +250,17 @@ async def test_my_properties_pending_active_only():
 async def test_claim_properties_works_without_completed_onboarding():
     """Claim accepts pending units without legacy wizard completion."""
     svc = _service()
-    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": CONTACT_UNIT_ID_2, "status": "active"}])
+    svc.repo.confirm_selection = AsyncMock(
+        return_value=[{"id": CONTACT_UNIT_ID_2, "status": "active"}]
+    )
     svc.repo.count_active_units = AsyncMock(return_value=1)
     svc.repo.has_default_login = AsyncMock(return_value=True)
     svc.repo.set_default_login = AsyncMock()
     svc.repo.activate_units_by_ids = AsyncMock()
 
-    result = await svc.claim_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID_2])
+    result = await svc.claim_properties(
+        contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID_2]
+    )
 
     assert result["items"] == [{"id": CONTACT_UNIT_ID_2, "status": "active"}]
     svc.repo.activate_units_by_ids.assert_awaited_once()
@@ -266,13 +270,17 @@ async def test_claim_properties_works_without_completed_onboarding():
 async def test_claim_properties_activates_and_flags_default():
     """Claim activates units and signals when default login is needed."""
     svc = _service()
-    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": CONTACT_UNIT_ID_2, "status": "active"}])
+    svc.repo.confirm_selection = AsyncMock(
+        return_value=[{"id": CONTACT_UNIT_ID_2, "status": "active"}]
+    )
     svc.repo.count_active_units = AsyncMock(return_value=2)
     svc.repo.has_default_login = AsyncMock(return_value=False)
     svc.repo.set_default_login = AsyncMock()
     svc.repo.activate_units_by_ids = AsyncMock()
 
-    result = await svc.claim_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID_2])
+    result = await svc.claim_properties(
+        contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID_2]
+    )
 
     svc.repo.activate_units_by_ids.assert_awaited_once_with(
         organization_id="org-1",
@@ -511,14 +519,18 @@ async def test_confirm_rejects_invalid_contact_unit_id():
 async def test_confirm_activates_immediately():
     """Confirm activates units immediately and returns default-login hint."""
     svc = _service()
-    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": CONTACT_UNIT_ID, "status": "active"}])
+    svc.repo.confirm_selection = AsyncMock(
+        return_value=[{"id": CONTACT_UNIT_ID, "status": "active"}]
+    )
     svc.repo.set_default_login = AsyncMock()
     svc.repo.activate_units_by_ids = AsyncMock()
     svc.repo.count_active_units = AsyncMock(return_value=1)
     svc.repo.has_default_login = AsyncMock(return_value=True)
     svc.onboarding_repo.complete_step = AsyncMock()
 
-    result = await svc.confirm_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID])
+    result = await svc.confirm_properties(
+        contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID]
+    )
 
     svc.repo.set_default_login.assert_awaited_once_with(
         organization_id="org-1",

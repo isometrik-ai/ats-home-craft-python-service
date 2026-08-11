@@ -13,10 +13,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     AcceptHouseholdInvitationRequest,
     ClaimPropertiesRequest,
     ClaimPropertiesResponse,
-    CompleteOnboardingRequest,
     CompleteProfileRequest,
-    CompleteStepRequest,
-    CompleteUnitStepRequest,
     ConfirmPropertiesRequest,
     ContactPropertyProjectGroupResponse,
     CreateHouseholdMemberRequest,
@@ -713,104 +710,6 @@ async def remove_vehicle(
     )
 
 
-@handle_api_exceptions("complete vehicles step")
-@router.post(
-    "/steps/vehicles/complete",
-    status_code=http_status.HTTP_200_OK,
-    summary="Mark vehicles step complete",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("30/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["audit_required"],
-    table_name="contact_unit_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def complete_vehicles_step(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteUnitStepRequest = Body(...),
-):
-    """Mark the vehicles onboarding step complete for one unit."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_unit_onboarding_steps",
-        requested_id=body.contact_unit_id,
-        description=f"Completed vehicles step for contact: {contact['id']}",
-        risk_level="medium",
-    )
-    vehicles_service = VehiclesService(
-        db_connection=db_connection,
-        user_context=user_context,
-    )
-    await vehicles_service.complete_vehicles_step(
-        contact_id=str(contact["id"]),
-        contact_unit_id=body.contact_unit_id,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.step_completed",
-        custom_code=CustomStatusCode.SUCCESS,
-    )
-
-
-@handle_api_exceptions("skip onboarding step")
-@router.post(
-    "/steps/skip",
-    status_code=http_status.HTTP_200_OK,
-    summary="Skip an optional onboarding step",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("30/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["gdpr", "pii", "audit_required"],
-    table_name="contact_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def skip_onboarding_step(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteStepRequest = Body(...),
-):
-    """Skip an optional onboarding step."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_onboarding_steps",
-        requested_id=str(contact["id"]),
-        description=f"Skipped onboarding step for contact: {contact['id']}",
-        risk_level="medium",
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=None,
-    )
-    await service.skip_step(
-        contact_id=str(contact["id"]),
-        step_key=body.step_key.value,
-        contact_unit_id=body.contact_unit_id,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.step_skipped",
-        custom_code=CustomStatusCode.SUCCESS,
-    )
-
-
 @handle_api_exceptions("list household members")
 @router.get(
     "/household",
@@ -1258,55 +1157,6 @@ async def remove_household_member(
     )
 
 
-@handle_api_exceptions("complete household step")
-@router.post(
-    "/steps/household/complete",
-    status_code=http_status.HTTP_200_OK,
-    summary="Mark household step complete",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("30/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["audit_required"],
-    table_name="contact_unit_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def complete_household_step(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteUnitStepRequest = Body(...),
-):
-    """Mark the household onboarding step complete for one unit."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_unit_onboarding_steps",
-        requested_id=body.contact_unit_id,
-        description=f"Completed household step for contact: {contact['id']}",
-        risk_level="medium",
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=None,
-    )
-    await service.complete_household_step(
-        contact_id=str(contact["id"]),
-        contact_unit_id=body.contact_unit_id,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.step_completed",
-        custom_code=CustomStatusCode.SUCCESS,
-    )
-
-
 @handle_api_exceptions("set default login unit")
 @router.post(
     "/default-unit",
@@ -1352,94 +1202,6 @@ async def set_default_unit(
     return success_response(
         request=request,
         message_key="contact_onboarding.success.default_unit_set",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("get onboarding review")
-@router.get(
-    "/review",
-    status_code=http_status.HTTP_200_OK,
-    summary="Review onboarding summary",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("100/minute")
-async def get_review(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-    sb_client: AsyncClient = Depends(supabase_service),
-):
-    """Return aggregated onboarding review data."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=sb_client,
-    )
-    data = await service.get_review(contact_id=str(contact["id"]))
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.review_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("complete contact onboarding")
-@router.post(
-    "/complete",
-    status_code=http_status.HTTP_200_OK,
-    summary="Finalize onboarding",
-    description=(
-        "Finalize onboarding and activate confirmed properties. Optionally pass "
-        "`contact_unit_ids` to finish a subset now; other active properties are moved "
-        "back to pending and can be claimed later via POST /properties/claim."
-    ),
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("10/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["gdpr", "pii", "audit_required"],
-    table_name="contact_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def complete_onboarding(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteOnboardingRequest | None = Body(default=None),
-):
-    """Finalize contact onboarding and activate assigned units."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=None,
-    )
-    data = await service.complete_onboarding(
-        contact_id=str(contact["id"]),
-        body=body,
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_onboarding_steps",
-        requested_id=str(contact["id"]),
-        description=f"Completed onboarding for contact: {contact['id']}",
-        risk_level="high",
-        new_data=data,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.onboarding_completed",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

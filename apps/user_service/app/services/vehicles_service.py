@@ -7,12 +7,6 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
-from apps.user_service.app.db.repositories.contact_onboarding_repository import (
-    ContactOnboardingRepository,
-)
-from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
-    ContactUnitOnboardingRepository,
-)
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
@@ -29,7 +23,6 @@ from apps.user_service.app.schemas.contact_onboarding import (
     VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import (
-    ContactOnboardingStep,
     VehicleFuelType,
     VehicleStatus,
     VehicleType,
@@ -68,8 +61,6 @@ class VehiclesService:
         self.parking_slots_repo = ParkingSlotsRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
-        self.onboarding_repo = ContactOnboardingRepository(db_connection)
-        self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
@@ -941,29 +932,3 @@ class VehiclesService:
             },
         )
         return normalized
-
-    async def complete_vehicles_step(
-        self,
-        *,
-        contact_id: str,
-        contact_unit_id: str,
-    ) -> None:
-        """Mark the vehicles onboarding step complete for one unit."""
-        org_id = self.user_context.organization_id
-        assert org_id
-        row = await self.contact_units_repo.get_owned_by_contact(
-            organization_id=org_id,
-            contact_id=contact_id,
-            contact_unit_id=contact_unit_id,
-        )
-        if not row:
-            raise NotFoundException(
-                message_key="contact_onboarding.errors.contact_unit_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        await self.unit_onboarding_repo.complete_step(
-            organization_id=org_id,
-            contact_id=contact_id,
-            contact_unit_id=contact_unit_id,
-            step_key=ContactOnboardingStep.VEHICLES.value,
-        )
