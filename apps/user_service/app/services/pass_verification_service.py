@@ -21,6 +21,10 @@ from apps.user_service.app.schemas.enums import (
     PassValidityType,
 )
 from apps.user_service.app.schemas.gate_passes import CheckInRequest, CheckOutRequest
+from apps.user_service.app.services.daily_help_notification_service import (
+    DailyHelpNotificationService,
+)
+from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
@@ -182,10 +186,14 @@ class PassVerificationService:
         )
 
     def _normalize_verify_response(
-        self, row: dict[str, Any], decision: _Admissibility
+        self,
+        row: dict[str, Any],
+        decision: _Admissibility,
+        *,
+        daily_help_profile: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Map a pass row to the verify snapshot shown before check-in."""
-        return {
+        payload = {
             "pass_id": str(row["id"]),
             "code": row.get("code"),
             "guest_name": row.get("guest_name"),
@@ -210,6 +218,9 @@ class PassVerificationService:
             "can_check_in": decision.can_check_in,
             "too_early": decision.too_early,
         }
+        if daily_help_profile:
+            payload["daily_help_profile"] = daily_help_profile
+        return payload
 
     def _normalize_event(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a pass_events row to gate API shape."""
@@ -276,7 +287,23 @@ class PassVerificationService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         decision = self._compute_admissibility(row)
-        return self._normalize_verify_response(row, decision)
+        daily_help_profile: dict[str, Any] | None = None
+        daily_help_id = row.get("daily_help_id")
+        project_id = row.get("project_id")
+        if daily_help_id and project_id:
+            daily_help_service = DailyHelpService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            daily_help_profile = await daily_help_service.get_verify_profile_summary(
+                project_id=str(project_id),
+                profile_id=str(daily_help_id),
+            )
+        return self._normalize_verify_response(
+            row,
+            decision,
+            daily_help_profile=daily_help_profile,
+        )
 
     async def check_in(
         self,
@@ -337,11 +364,25 @@ class PassVerificationService:
             pass_id=pass_id,
         )
         refreshed = await self._get_pass_or_404(pass_id=pass_id)
-        await self._notify_household_pass_event(
-            pass_row=refreshed,
-            message_key="notifications.push.pass.checked_in",
-            idempotency_suffix="checked_in",
-        )
+        if refreshed.get("daily_help_id"):
+            await DailyHelpNotificationService(
+                db_connection=self.db_connection,
+            ).notify_linked_unit_holders(
+                organization_id=org_id,
+                profile_id=str(refreshed["daily_help_id"]),
+                pass_id=pass_id,
+                event_id=str(event["id"]),
+                message_key="notifications.push.daily_help.checked_in",
+                idempotency_suffix="checked_in",
+                helper_name=str(refreshed.get("guest_name") or ""),
+                project_id=str(refreshed.get("project_id") or "") or None,
+            )
+        else:
+            await self._notify_household_pass_event(
+                pass_row=refreshed,
+                message_key="notifications.push.pass.checked_in",
+                idempotency_suffix="checked_in",
+            )
         return {
             "event": self._normalize_event(event),
             "entry_count": int(
@@ -390,11 +431,25 @@ class PassVerificationService:
             )
 
         refreshed = await self._get_pass_or_404(pass_id=pass_id)
-        await self._notify_household_pass_event(
-            pass_row=refreshed,
-            message_key="notifications.push.pass.checked_out",
-            idempotency_suffix="checked_out",
-        )
+        if refreshed.get("daily_help_id"):
+            await DailyHelpNotificationService(
+                db_connection=self.db_connection,
+            ).notify_linked_unit_holders(
+                organization_id=org_id,
+                profile_id=str(refreshed["daily_help_id"]),
+                pass_id=pass_id,
+                event_id=str(event["id"]),
+                message_key="notifications.push.daily_help.checked_out",
+                idempotency_suffix="checked_out",
+                helper_name=str(refreshed.get("guest_name") or ""),
+                project_id=str(refreshed.get("project_id") or "") or None,
+            )
+        else:
+            await self._notify_household_pass_event(
+                pass_row=refreshed,
+                message_key="notifications.push.pass.checked_out",
+                idempotency_suffix="checked_out",
+            )
         return {
             "event": self._normalize_event(event),
             "pass_status": str(refreshed.get("status") or ""),

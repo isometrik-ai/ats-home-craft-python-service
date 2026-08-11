@@ -1,0 +1,409 @@
+"""Resident daily help directory API."""
+
+from __future__ import annotations
+
+import asyncpg
+from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import status as http_status
+
+from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.schemas.daily_help import (
+    CreateDailyHelpRatingRequest,
+    DailyHelpAttendanceApiResponse,
+    DailyHelpDetailApiResponse,
+    DailyHelpHouseholdLinkApiResponse,
+    DailyHelpRatingSummaryApiResponse,
+    ResidentDailyHelpCategoryStatsApiResponse,
+    ResidentDailyHelpListApiResponse,
+    ResidentDailyHelpListQuery,
+    ResidentDailyHelpSearchQuery,
+)
+from apps.user_service.app.services.daily_help_service import DailyHelpService
+from apps.user_service.app.utils.common_utils import (
+    extract_onboarding_contact_context,
+    handle_api_exceptions,
+)
+from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.response_factory import list_response, success_response
+from libs.shared_utils.status_codes import CustomStatusCode
+
+router = APIRouter(prefix="/daily-help", tags=["Daily Help (Resident)"])
+
+COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
+    401: {"description": "Unauthorized (missing/invalid JWT)."},
+    403: {"description": "Forbidden."},
+    404: {"description": "Not found."},
+    409: {"description": "Conflict."},
+    422: {"description": "Validation error."},
+    429: {"description": "Too many requests (rate limited)."},
+    500: {"description": "Internal server error."},
+}
+
+
+def _ok_response(
+    model: type,
+    description: str,
+    *,
+    status_code: int = http_status.HTTP_200_OK,
+) -> dict[int | str, dict]:
+    """Build OpenAPI responses for a successful JSON envelope."""
+    return {
+        **COMMON_ERROR_RESPONSES,
+        status_code: {"model": model, "description": description},
+    }
+
+
+def _created_response(model: type, description: str) -> dict[int | str, dict]:
+    """Build OpenAPI responses for HTTP 201 success."""
+    return _ok_response(model, description, status_code=http_status.HTTP_201_CREATED)
+
+
+CATEGORIES_SUCCESS_RESPONSES = _ok_response(
+    ResidentDailyHelpCategoryStatsApiResponse,
+    "Active categories with inside/open-to-work/newly-added stats.",
+)
+LIST_SUCCESS_RESPONSES = _ok_response(
+    ResidentDailyHelpListApiResponse,
+    "Paginated active daily help profiles for the resident directory.",
+)
+SEARCH_SUCCESS_RESPONSES = _ok_response(
+    ResidentDailyHelpListApiResponse,
+    "Search results for active daily help profiles.",
+)
+DETAIL_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpDetailApiResponse,
+    "Daily help profile detail; phone masked unless household-linked to the unit.",
+)
+HOUSEHOLD_LINK_CREATED_RESPONSES = _created_response(
+    DailyHelpHouseholdLinkApiResponse,
+    "Daily help profile linked to the resident unit.",
+)
+HOUSEHOLD_LINK_REMOVED_RESPONSES = _ok_response(
+    DailyHelpHouseholdLinkApiResponse,
+    "Household link removed from the resident unit.",
+)
+RATING_CREATED_RESPONSES = _created_response(
+    DailyHelpRatingSummaryApiResponse,
+    "Rating recorded; returns updated aggregate summary.",
+)
+RATING_SUMMARY_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpRatingSummaryApiResponse,
+    "Aggregated star average and trait counts for the profile.",
+)
+ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpAttendanceApiResponse,
+    "Check-in count and events from the linked gate pass.",
+)
+
+
+@handle_api_exceptions("list resident daily help categories")
+@router.get(
+    "/categories",
+    status_code=http_status.HTTP_200_OK,
+    summary="Daily help categories with stats for resident home",
+    response_model=None,
+    responses=CATEGORIES_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def list_resident_daily_help_categories(
+    request: Request,
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return active categories with inside/open-to-work/newly-added stats."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items = await service.list_resident_categories(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.categories_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=[item.model_dump() for item in items],
+    )
+
+
+@handle_api_exceptions("list resident daily help profiles")
+@router.get(
+    "",
+    status_code=http_status.HTTP_200_OK,
+    summary="Browse active daily help profiles",
+    response_model=None,
+    responses=LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def list_resident_daily_help_profiles(
+    request: Request,
+    query: ResidentDailyHelpListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return paginated active daily help profiles for resident directory."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items, total = await service.list_resident_profiles(
+        contact_id=str(contact["id"]),
+        query=query,
+    )
+    return list_response(
+        request=request,
+        items=[item.model_dump() for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="daily_help.success.list_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("search resident daily help profiles")
+@router.get(
+    "/search",
+    status_code=http_status.HTTP_200_OK,
+    summary="Search daily help by name, mobile, or passcode",
+    response_model=None,
+    responses=SEARCH_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def search_resident_daily_help_profiles(
+    request: Request,
+    query: ResidentDailyHelpSearchQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Search active daily help profiles for resident directory."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items, total = await service.search_resident_profiles(
+        contact_id=str(contact["id"]),
+        query=query,
+    )
+    return list_response(
+        request=request,
+        items=[item.model_dump() for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="daily_help.success.search_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("get resident daily help profile")
+@router.get(
+    "/{profile_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Daily help profile detail for resident",
+    response_model=None,
+    responses=DETAIL_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def get_resident_daily_help_profile(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return one active daily help profile; phone masked unless household-linked."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_resident_detail(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("add daily help household link")
+@router.post(
+    "/{profile_id}/household-links",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Link daily help profile to resident unit",
+    response_model=None,
+    responses=HOUSEHOLD_LINK_CREATED_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def add_daily_help_household_link(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Add a daily help profile to the caller's household for the selected unit."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.add_household_link(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.household_linked",
+        custom_code=CustomStatusCode.CREATED,
+        data=data.model_dump(),
+        status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("remove daily help household link")
+@router.delete(
+    "/{profile_id}/household-links/{link_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Remove daily help profile from household",
+    response_model=None,
+    responses=HOUSEHOLD_LINK_REMOVED_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def remove_daily_help_household_link(
+    request: Request,
+    profile_id: str = Path(...),
+    link_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Remove a household link to a daily help profile."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.remove_household_link(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        link_id=link_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.household_removed",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("create daily help rating")
+@router.post(
+    "/{profile_id}/ratings",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Rate a daily help profile",
+    response_model=None,
+    responses=RATING_CREATED_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def create_daily_help_rating(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    body: CreateDailyHelpRatingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Submit a resident rating for a daily help profile."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.create_rating(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        body=body,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.rating_created",
+        custom_code=CustomStatusCode.CREATED,
+        data=data.model_dump(),
+        status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("get daily help rating summary")
+@router.get(
+    "/{profile_id}/ratings/summary",
+    status_code=http_status.HTTP_200_OK,
+    summary="Aggregated rating summary for a daily help profile",
+    response_model=None,
+    responses=RATING_SUMMARY_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def get_daily_help_rating_summary(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return star average and trait counts for a profile."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_rating_summary(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.rating_summary_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("get resident daily help attendance")
+@router.get(
+    "/{profile_id}/attendance",
+    status_code=http_status.HTTP_200_OK,
+    summary="Check-in attendance for a daily help profile",
+    response_model=None,
+    responses=ATTENDANCE_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def get_resident_daily_help_attendance(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return check-in count from the linked gate pass."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_attendance(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.attendance_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
