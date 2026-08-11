@@ -135,6 +135,69 @@ class ContactOnboardingService:
             for link in links
         )
 
+    async def _is_profile_complete(self, *, contact_id: str) -> bool:
+        """True when the contact has completed or skipped the profile step."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        steps = await self.onboarding_repo.list_profile_step(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        profile_status = self._step_status(
+            steps,
+            ContactOnboardingStep.COMPLETE_PROFILE.value,
+        )
+        return profile_status in TERMINAL_STEP_STATUSES
+
+    async def _list_pending_self_units(self, *, contact_id: str) -> list[dict[str, Any]]:
+        """Pending allotments where the contact is the primary occupant (relationship=self)."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        links = await self.contact_units_repo.list_by_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+            statuses=[ContactUnitStatus.PENDING.value],
+        )
+        return [
+            link
+            for link in links
+            if str(link.get("relationship") or "") == ContactUnitRelationship.SELF.value
+        ]
+
+    def _build_onboarding_prompts(
+        self,
+        *,
+        profile_complete: bool,
+        pending_self_units: list[dict[str, Any]],
+        requires_default_unit: bool,
+    ) -> list[dict[str, Any]]:
+        """Build optional home-screen prompts (nothing here blocks app usage)."""
+        prompts: list[dict[str, Any]] = []
+        if not profile_complete:
+            prompts.append({"type": "complete_profile"})
+        for link in pending_self_units:
+            prompts.append(
+                {
+                    "type": "accept_unit",
+                    "contact_unit_id": str(link["id"]),
+                    "unit_id": str(link.get("unit_id") or ""),
+                }
+            )
+        if requires_default_unit:
+            prompts.append({"type": "choose_default_unit"})
+        return prompts
+
+    async def _auto_complete_legacy_wizard_steps(self, *, contact_id: str) -> None:
+        """Mark legacy wizard steps completed so older integrations stay green."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        for step_key in CONTACT_LEVEL_STEP_KEYS:
+            await self.onboarding_repo.complete_step(
+                organization_id=org_id,
+                contact_id=contact_id,
+                step_key=step_key,
+            )
+
     def _normalize_step(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact_onboarding_steps row to API response shape."""
         return {
@@ -224,42 +287,14 @@ class ContactOnboardingService:
         contact_id: str,
         contact_type: str | None = None,  # — kept for API compatibility
     ) -> dict[str, Any]:
-        """Return wizard progress and derived current step."""
+        """Return optional onboarding prompts for the contact."""
         org_id = self.user_context.organization_id
         assert org_id
 
         await self._ensure_onboarding(contact_id)
 
-        if await self._is_household_only_contact(contact_id):
-            steps = await self.onboarding_repo.list_profile_step(
-                organization_id=org_id,
-                contact_id=contact_id,
-            )
-            normalized = [self._normalize_step(row) for row in steps]
-            profile_status = self._step_status(
-                steps,
-                ContactOnboardingStep.COMPLETE_PROFILE.value,
-            )
-            is_completed = profile_status in TERMINAL_STEP_STATUSES
-            current_step = None if is_completed else ContactOnboardingStep.COMPLETE_PROFILE.value
-            return {
-                "setup_current_step": current_step,
-                "current_contact_unit_id": None,
-                "is_completed": is_completed,
-                "steps": normalized,
-                "unit_onboarding": [],
-            }
-
-        steps = await self.onboarding_repo.list_steps(
-            organization_id=org_id,
-            contact_id=contact_id,
-        )
-        normalized = [self._normalize_step(row) for row in steps]
-        unit_step_rows = await self.unit_onboarding_repo.list_steps_for_contact(
-            organization_id=org_id,
-            contact_id=contact_id,
-        )
-        unit_onboarding = self._build_unit_onboarding_progress(unit_step_rows)
+        profile_complete = await self._is_profile_complete(contact_id=contact_id)
+        pending_self_units = await self._list_pending_self_units(contact_id=contact_id)
         active_count = await self.contact_units_repo.count_active_units(
             organization_id=org_id,
             contact_id=contact_id,
@@ -268,31 +303,22 @@ class ContactOnboardingService:
             organization_id=org_id,
             contact_id=contact_id,
         )
-        contact_completed = await self.onboarding_repo.is_wizard_completed(
-            organization_id=org_id,
-            contact_id=contact_id,
+        requires_default_unit = active_count > 1 and not has_default
+        household_only = await self._is_household_only_contact(contact_id)
+
+        prompts = self._build_onboarding_prompts(
+            profile_complete=profile_complete,
+            pending_self_units=pending_self_units,
+            requires_default_unit=requires_default_unit and not household_only,
         )
-        units_completed = await self.unit_onboarding_repo.all_unit_steps_terminal(
-            organization_id=org_id,
-            contact_id=contact_id,
-        )
-        is_completed = contact_completed and units_completed and active_count > 0
-        current_step, current_contact_unit_id = (
-            (None, None)
-            if is_completed
-            else self._derive_navigation(
-                contact_steps=steps,
-                unit_step_rows=unit_step_rows,
-                active_count=active_count,
-                has_default=has_default,
-            )
-        )
+
         return {
-            "setup_current_step": current_step,
-            "current_contact_unit_id": current_contact_unit_id,
-            "is_completed": is_completed,
-            "steps": normalized,
-            "unit_onboarding": unit_onboarding,
+            "profile_complete": profile_complete,
+            "pending_unit_count": len(pending_self_units),
+            "active_unit_count": active_count,
+            "requires_default_unit": requires_default_unit and not household_only,
+            "prompts": prompts,
+            "is_completed": not prompts,
         }
 
     async def get_profile(self, *, contact_id: str) -> dict[str, Any]:
@@ -1016,14 +1042,11 @@ class ContactOnboardingService:
         units = await self.contact_units_service.list_my_properties(contact_id=contact_id)
         vehicles = await self.vehicles_service.list_vehicles(contact_id=contact_id)
         household = await self.list_household(contact_id=contact_id)
-        status = await self.get_status(contact_id=contact_id)
         return {
             "contact": contact,
             "units": units,
             "vehicles": vehicles,
             "household": household,
-            "steps": status["steps"],
-            "unit_onboarding": status["unit_onboarding"],
         }
 
     async def complete_onboarding(
@@ -1032,16 +1055,10 @@ class ContactOnboardingService:
         contact_id: str,
         body: CompleteOnboardingRequest | None = None,
     ) -> dict[str, Any]:
-        """Validate prerequisites, activate selected units, and complete the review step."""
+        """Legacy finalize endpoint — marks wizard done; app usage is not gated on this."""
         org_id = self.user_context.organization_id
         assert org_id
         payload = body or CompleteOnboardingRequest()
-        status = await self.get_status(contact_id=contact_id)
-        if status["is_completed"]:
-            raise ConflictException(
-                message_key="contact_onboarding.errors.already_completed",
-                custom_code=CustomStatusCode.CONFLICT,
-            )
 
         active_unit_ids = await self.contact_units_repo.list_active_contact_unit_ids(
             organization_id=org_id,
@@ -1051,6 +1068,13 @@ class ContactOnboardingService:
             raise ValidationException(
                 message_key="contact_onboarding.errors.no_active_units",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        status = await self.get_status(contact_id=contact_id)
+        if status["is_completed"]:
+            raise ConflictException(
+                message_key="contact_onboarding.errors.already_completed",
+                custom_code=CustomStatusCode.CONFLICT,
             )
 
         if payload.contact_unit_ids is None:
@@ -1074,55 +1098,15 @@ class ContactOnboardingService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-        if len(completing_unit_ids) > 1:
-            default_unit_id = await self.contact_units_repo.get_default_login_contact_unit_id(
-                organization_id=org_id,
-                contact_id=contact_id,
-            )
-            if not default_unit_id or default_unit_id not in completing_unit_ids:
-                raise ValidationException(
-                    message_key="contact_onboarding.errors.partial_complete_default_not_in_selection",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
-                )
-        elif len(active_unit_ids) > 1:
+        default_unit_id = await self.contact_units_repo.get_default_login_contact_unit_id(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        if not default_unit_id or default_unit_id not in completing_unit_ids:
             await self.contact_units_repo.set_default_login(
                 organization_id=org_id,
                 contact_id=contact_id,
                 contact_unit_id=completing_unit_ids[0],
-            )
-            await self.onboarding_repo.complete_step(
-                organization_id=org_id,
-                contact_id=contact_id,
-                step_key=ContactOnboardingStep.CHOOSE_UNIT.value,
-            )
-
-        for step_key in CONTACT_LEVEL_STEP_KEYS:
-            if step_key == ContactOnboardingStep.REVIEW.value:
-                continue
-            step = next((s for s in status["steps"] if s["step_key"] == step_key), None)
-            if not step or step["status"] not in TERMINAL_STEP_STATUSES:
-                raise ValidationException(
-                    message_key="contact_onboarding.errors.step_prerequisite",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
-                    params={"step_key": step_key},
-                )
-
-        steps_terminal = (
-            await self.unit_onboarding_repo.all_unit_steps_terminal_for_units(
-                organization_id=org_id,
-                contact_id=contact_id,
-                contact_unit_ids=completing_unit_ids,
-            )
-            if payload.contact_unit_ids is not None
-            else await self.unit_onboarding_repo.all_unit_steps_terminal(
-                organization_id=org_id,
-                contact_id=contact_id,
-            )
-        )
-        if not steps_terminal:
-            raise ValidationException(
-                message_key="contact_onboarding.errors.unit_steps_incomplete",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
         if defer_unit_ids:
@@ -1137,11 +1121,8 @@ class ContactOnboardingService:
             contact_id=contact_id,
             contact_unit_ids=completing_unit_ids,
         )
-        await self.onboarding_repo.complete_step(
-            organization_id=org_id,
-            contact_id=contact_id,
-            step_key=ContactOnboardingStep.REVIEW.value,
-        )
+        await self._auto_complete_legacy_wizard_steps(contact_id=contact_id)
+
         result = await self.get_status(contact_id=contact_id)
         result["completed_contact_unit_ids"] = completing_unit_ids
         if defer_unit_ids:

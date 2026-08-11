@@ -21,6 +21,7 @@ from apps.user_service.app.schemas.enums import (
     ContactOnboardingStep,
     ContactType,
     ContactUnitRelationship,
+    ContactUnitStatus,
     HouseholdInvitationStatus,
     HouseholdMemberStatus,
     SetupStepStatus,
@@ -291,9 +292,13 @@ class _FakeContactUnitsRepo:
         """Return configured link count for orphan detection."""
         return getattr(self, "link_count", 0)
 
-    async def list_by_contact(self, **_kwargs):
+    async def list_by_contact(self, **kwargs):
         """Return configured unit links for onboarding mode detection."""
-        return getattr(self, "contact_unit_links", [])
+        statuses = kwargs.get("statuses")
+        links = list(getattr(self, "contact_unit_links", []))
+        if not statuses:
+            return links
+        return [link for link in links if str(link.get("status") or "") in statuses]
 
 
 def _service(
@@ -352,22 +357,18 @@ async def test_get_status_household_contact_profile_only():
         ]
     )
     units_repo = _FakeContactUnitsRepo(
-        contact_unit_links=[{"relationship": ContactUnitRelationship.SPOUSE.value}],
+        contact_unit_links=[
+            {
+                "relationship": ContactUnitRelationship.SPOUSE.value,
+                "status": ContactUnitStatus.ACTIVE.value,
+            }
+        ],
     )
     svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
 
     result = await svc.get_status(contact_id="contact-1")
 
-    assert result["setup_current_step"] == ContactOnboardingStep.COMPLETE_PROFILE.value
-    assert result["steps"] == [
-        {
-            "step_key": ContactOnboardingStep.COMPLETE_PROFILE.value,
-            "status": SetupStepStatus.NOT_STARTED.value,
-            "completed_at": None,
-        }
-    ]
-    assert result["unit_onboarding"] == []
-    assert result["current_contact_unit_id"] is None
+    assert result["prompts"] == [{"type": "complete_profile"}]
     assert result["is_completed"] is False
 
 
@@ -384,14 +385,19 @@ async def test_get_status_household_contact_completed():
         ]
     )
     units_repo = _FakeContactUnitsRepo(
-        contact_unit_links=[{"relationship": ContactUnitRelationship.CHILD.value}],
+        contact_unit_links=[
+            {
+                "relationship": ContactUnitRelationship.CHILD.value,
+                "status": ContactUnitStatus.ACTIVE.value,
+            }
+        ],
     )
     svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
 
     result = await svc.get_status(contact_id="contact-1")
 
-    assert result["setup_current_step"] is None
     assert result["is_completed"] is True
+    assert result["prompts"] == []
 
 
 @pytest.mark.asyncio
@@ -402,69 +408,66 @@ async def test_get_status_returns_profile_first():
 
     result = await svc.get_status(contact_id="contact-1")
 
-    assert result["setup_current_step"] == ContactOnboardingStep.COMPLETE_PROFILE.value
-    assert result["current_contact_unit_id"] is None
+    assert result["prompts"] == [{"type": "complete_profile"}]
     assert result["is_completed"] is False
     assert repo.ensure_calls == 1
 
 
 @pytest.mark.asyncio
-async def test_get_status_returns_unit_step_after_properties():
-    """After profile and properties, navigation points at unit vehicles step."""
+async def test_get_status_shows_accept_unit_prompt():
+    """Pending self units surface an accept_unit prompt instead of wizard unit steps."""
     repo = _FakeOnboardingRepo(
         _contact_steps(
             overrides={
                 ContactOnboardingStep.COMPLETE_PROFILE.value: SetupStepStatus.COMPLETED.value,
-                ContactOnboardingStep.SELECT_PROPERTIES.value: SetupStepStatus.COMPLETED.value,
             }
         )
     )
-    unit_repo = _FakeUnitOnboardingRepo(
-        unit_step_rows=[
+    units_repo = _FakeContactUnitsRepo(
+        active_count=0,
+        has_default=True,
+        contact_unit_links=[
             {
-                "contact_unit_id": "cu-1",
-                "unit_id": "unit-1",
-                "unit_code": "A-101",
-                "step_key": ContactOnboardingStep.VEHICLES.value,
-                "status": SetupStepStatus.NOT_STARTED.value,
-                "completed_at": None,
-            },
-            {
-                "contact_unit_id": "cu-1",
-                "unit_id": "unit-1",
-                "unit_code": "A-101",
-                "step_key": ContactOnboardingStep.HOUSEHOLD.value,
-                "status": SetupStepStatus.NOT_STARTED.value,
-                "completed_at": None,
-            },
+                "id": "cu-2",
+                "unit_id": "unit-2",
+                "relationship": ContactUnitRelationship.SELF.value,
+                "status": ContactUnitStatus.PENDING.value,
+            }
         ],
-        all_terminal=False,
     )
-    svc = _service(onboarding_repo=repo, unit_onboarding_repo=unit_repo)
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
 
     result = await svc.get_status(contact_id="contact-1")
 
-    assert result["setup_current_step"] == ContactOnboardingStep.VEHICLES.value
-    assert result["current_contact_unit_id"] == "cu-1"
-    assert len(result["unit_onboarding"]) == 1
+    assert result["profile_complete"] is True
+    assert result["pending_unit_count"] == 1
+    assert result["prompts"][0]["type"] == "accept_unit"
+    assert result["is_completed"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_status_completed_when_no_prompts():
+    """No prompts means the contact can use the app without onboarding banners."""
+    repo = _FakeOnboardingRepo(
+        _contact_steps(
+            overrides={
+                ContactOnboardingStep.COMPLETE_PROFILE.value: SetupStepStatus.COMPLETED.value,
+            }
+        )
+    )
+    units_repo = _FakeContactUnitsRepo(active_count=1, has_default=True, contact_unit_links=[])
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    result = await svc.get_status(contact_id="contact-1")
+
+    assert result["is_completed"] is True
+    assert result["prompts"] == []
 
 
 @pytest.mark.asyncio
 async def test_get_status_completed_wizard():
-    """Completed wizard returns no current step."""
-    repo = _FakeOnboardingRepo(completed=True)
-    unit_repo = _FakeUnitOnboardingRepo(all_terminal=True)
-    units_repo = _FakeContactUnitsRepo(active_count=1)
-    svc = _service(
-        onboarding_repo=repo,
-        unit_onboarding_repo=unit_repo,
-        contact_units_repo=units_repo,
-    )
-
-    result = await svc.get_status(contact_id="contact-1")
-
-    assert result["setup_current_step"] is None
-    assert result["is_completed"] is True
+    """Alias for completed when no prompts remain."""
+    await test_get_status_completed_when_no_prompts()
 
 
 @pytest.mark.asyncio
@@ -507,11 +510,19 @@ async def test_skip_step_allows_vehicles_for_unit():
     assert unit_repo.skip_step_calls == [("cu-1", ContactOnboardingStep.VEHICLES.value)]
 
 
+
 @pytest.mark.asyncio
 async def test_complete_onboarding_rejects_already_completed():
     """Already completed onboarding raises ConflictException."""
-    repo = _FakeOnboardingRepo(completed=True)
-    svc = _service(onboarding_repo=repo)
+    repo = _FakeOnboardingRepo(
+        _contact_steps(
+            overrides={
+                ContactOnboardingStep.COMPLETE_PROFILE.value: SetupStepStatus.COMPLETED.value,
+            }
+        )
+    )
+    units_repo = _FakeContactUnitsRepo(active_count=1, has_default=True, contact_unit_links=[])
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
 
     with pytest.raises(ConflictException):
         await svc.complete_onboarding(contact_id="contact-1")
@@ -534,57 +545,31 @@ async def test_complete_onboarding_requires_active_units():
 
 
 @pytest.mark.asyncio
-async def test_complete_onboarding_requires_default_unit():
-    """Multi-unit contacts must set a default unit before completion."""
+async def test_complete_onboarding_auto_sets_default_unit():
+    """Legacy finalize auto-picks a default unit when missing."""
     repo = _FakeOnboardingRepo(_terminal_contact_steps())
     units_repo = _FakeContactUnitsRepo(
         active_count=2, has_default=False, default_contact_unit_id=None
     )
-    unit_repo = _FakeUnitOnboardingRepo(all_terminal=True)
-    svc = _service(
-        onboarding_repo=repo,
-        contact_units_repo=units_repo,
-        unit_onboarding_repo=unit_repo,
-    )
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
 
-    with pytest.raises(ValidationException):
-        await svc.complete_onboarding(contact_id="contact-1")
+    result = await svc.complete_onboarding(contact_id="contact-1")
+
+    assert units_repo.default_contact_unit_id == "cu-1"
+    assert result["is_completed"] is True
 
 
 @pytest.mark.asyncio
-async def test_complete_onboarding_requires_unit_steps():
-    """Completion requires all unit steps terminal."""
+async def test_complete_onboarding_succeeds_without_unit_steps():
+    """Legacy finalize no longer requires vehicles/household wizard steps."""
     repo = _FakeOnboardingRepo(_terminal_contact_steps())
-    units_repo = _FakeContactUnitsRepo(active_count=1)
-    unit_repo = _FakeUnitOnboardingRepo(all_terminal=False)
-    svc = _service(
-        onboarding_repo=repo,
-        contact_units_repo=units_repo,
-        unit_onboarding_repo=unit_repo,
-    )
-
-    with pytest.raises(ValidationException):
-        await svc.complete_onboarding(contact_id="contact-1")
-
-
-@pytest.mark.asyncio
-async def test_complete_onboarding_happy_path():
-    """Successful completion activates units and completes review step."""
-    repo = _FakeOnboardingRepo(_terminal_contact_steps())
-    units_repo = _FakeContactUnitsRepo(active_count=1)
-    unit_repo = _FakeUnitOnboardingRepo(all_terminal=True)
-    svc = _service(
-        onboarding_repo=repo,
-        contact_units_repo=units_repo,
-        unit_onboarding_repo=unit_repo,
-    )
+    units_repo = _FakeContactUnitsRepo(active_count=2, has_default=False, default_contact_unit_id=None)
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
 
     result = await svc.complete_onboarding(contact_id="contact-1")
 
     assert units_repo.activate_called is True
-    assert units_repo.activated_unit_ids == ["cu-1"]
-    assert ContactOnboardingStep.REVIEW.value in repo.complete_step_calls
-    assert result["is_completed"] is False
+    assert result["is_completed"] is True
 
 
 @pytest.mark.asyncio
@@ -614,29 +599,28 @@ async def test_complete_onboarding_partial_finalize():
     assert units_repo.default_contact_unit_id == "cu-1"
     assert result["completed_contact_unit_ids"] == ["cu-1"]
     assert result["deferred_contact_unit_ids"] == ["cu-2", "cu-3"]
-    assert ContactOnboardingStep.REVIEW.value in repo.complete_step_calls
+    assert result["is_completed"] is True
 
 
 @pytest.mark.asyncio
-async def test_complete_onboarding_partial_requires_terminal_steps_for_selection():
-    """Partial finalize only validates vehicles/household on selected units."""
+async def test_complete_onboarding_partial_succeeds_without_unit_steps():
+    """Partial finalize no longer requires vehicles/household wizard steps."""
     repo = _FakeOnboardingRepo(_terminal_contact_steps())
     units_repo = _FakeContactUnitsRepo(
         active_count=2,
         active_unit_ids=["cu-1", "cu-2"],
+        has_default=False,
+        default_contact_unit_id=None,
     )
-    unit_repo = _FakeUnitOnboardingRepo(all_terminal=False)
-    svc = _service(
-        onboarding_repo=repo,
-        contact_units_repo=units_repo,
-        unit_onboarding_repo=unit_repo,
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    result = await svc.complete_onboarding(
+        contact_id="contact-1",
+        body=CompleteOnboardingRequest(contact_unit_ids=["cu-1"]),
     )
 
-    with pytest.raises(ValidationException):
-        await svc.complete_onboarding(
-            contact_id="contact-1",
-            body=CompleteOnboardingRequest(contact_unit_ids=["cu-1"]),
-        )
+    assert result["completed_contact_unit_ids"] == ["cu-1"]
+    assert result["is_completed"] is True
 
 
 @pytest.mark.asyncio
@@ -661,29 +645,29 @@ async def test_confirm_properties_validates_selection_count():
 
 
 @pytest.mark.asyncio
-async def test_confirm_properties_requires_profile_step():
-    """Confirm rejects when profile step is not complete."""
+async def test_confirm_properties_works_without_profile_step():
+    """Accepting units is not blocked by an incomplete profile step."""
     svc = ContactUnitsService(
         db_connection=MagicMock(),
         user_context=_user_context(),
     )
     svc.repo = MagicMock()
+    svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
+    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": "cu-1", "status": "active"}])
+    svc.repo.set_default_login = AsyncMock()
+    svc.repo.activate_units_by_ids = AsyncMock()
+    svc.repo.count_active_units = AsyncMock(return_value=1)
+    svc.repo.has_default_login = AsyncMock(return_value=True)
     svc.onboarding_repo = MagicMock()
-    svc.onboarding_repo.list_steps = AsyncMock(
-        return_value=[
-            {
-                "step_key": ContactOnboardingStep.COMPLETE_PROFILE.value,
-                "status": SetupStepStatus.NOT_STARTED.value,
-            }
-        ]
-    )
-    svc.unit_onboarding_repo = MagicMock()
+    svc.onboarding_repo.complete_step = AsyncMock()
 
-    with pytest.raises(ValidationException):
-        await svc.confirm_properties(
-            contact_id="contact-1",
-            contact_unit_ids=["cu-1"],
-        )
+    result = await svc.confirm_properties(
+        contact_id="contact-1",
+        contact_unit_ids=["cu-1"],
+    )
+
+    assert result["items"] == [{"id": "cu-1", "status": "active"}]
+    svc.repo.activate_units_by_ids.assert_awaited_once()
 
 
 def _household_row(**overrides: Any) -> dict[str, Any]:
@@ -937,15 +921,6 @@ async def test_get_review_aggregates_sections(monkeypatch):
     svc.contact_units_service.list_my_properties = AsyncMock(return_value=[{"id": "cu-1"}])
     svc.vehicles_service.list_vehicles = AsyncMock(return_value=[])
     svc.list_household = AsyncMock(return_value=[])
-    svc.get_status = AsyncMock(
-        return_value={
-            "steps": [],
-            "unit_onboarding": [],
-            "setup_current_step": None,
-            "current_contact_unit_id": None,
-            "is_completed": False,
-        }
-    )
 
     result = await svc.get_review(contact_id="contact-1")
 

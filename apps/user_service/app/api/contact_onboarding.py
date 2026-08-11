@@ -84,7 +84,7 @@ def _service(
 @router.get(
     "/status",
     status_code=http_status.HTTP_200_OK,
-    summary="Get onboarding wizard status",
+    summary="Get onboarding status",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
@@ -93,7 +93,7 @@ async def get_onboarding_status(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return onboarding wizard status for the authenticated contact."""
+    """Return onboarding prompts for the authenticated contact."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -198,11 +198,12 @@ async def confirm_properties(
         risk_level="high",
         new_data=data,
     )
+    payload = ClaimPropertiesResponse.model_validate(data).model_dump(exclude_none=True)
     return success_response(
         request=request,
         message_key="contact_onboarding.success.properties_confirmed",
         custom_code=CustomStatusCode.SUCCESS,
-        data={"items": data},
+        data=payload,
     )
 
 

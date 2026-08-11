@@ -157,6 +157,8 @@ async def test_complete_step():
     )
 
     assert row["status"] == SetupStepStatus.COMPLETED.value
+    assert len(conn.execute_calls) == 1
+    assert "INSERT INTO contact_unit_onboarding_steps" in conn.execute_calls[0][0]
     assert conn.fetchrow_calls[0][1][4] == SetupStepStatus.COMPLETED.value
 
 
@@ -174,6 +176,7 @@ async def test_complete_step_not_found():
     )
 
     assert row is None
+    assert len(conn.execute_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -195,6 +198,8 @@ async def test_skip_step():
     )
 
     assert row["status"] == SetupStepStatus.SKIPPED.value
+    assert len(conn.execute_calls) == 1
+    assert "INSERT INTO contact_unit_onboarding_steps" in conn.execute_calls[0][0]
 
 
 @pytest.mark.asyncio

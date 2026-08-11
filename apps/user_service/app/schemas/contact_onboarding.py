@@ -609,14 +609,25 @@ class UnitOnboardingProgressResponse(BaseModel):
     steps: list[UnitOnboardingStepResponse] = Field(default_factory=list)
 
 
-class OnboardingStatusResponse(BaseModel):
-    """Wizard progress."""
+class OnboardingPromptResponse(BaseModel):
+    """Optional home-screen action for the contact (nothing here blocks app usage)."""
 
-    setup_current_step: str | None
-    current_contact_unit_id: str | None = None
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    contact_unit_id: str | None = None
+    unit_id: str | None = None
+
+
+class OnboardingStatusResponse(BaseModel):
+    """Onboarding prompts for the authenticated contact."""
+
+    profile_complete: bool = False
+    pending_unit_count: int = 0
+    active_unit_count: int = 0
+    requires_default_unit: bool = False
+    prompts: list[OnboardingPromptResponse] = Field(default_factory=list)
     is_completed: bool
-    steps: list[OnboardingStepResponse]
-    unit_onboarding: list[UnitOnboardingProgressResponse] = Field(default_factory=list)
 
 
 class HouseholdMemberResponse(BaseModel):
@@ -727,4 +738,3 @@ class OnboardingReviewResponse(BaseModel):
     units: list[ContactUnitSummaryResponse]
     vehicles: list[VehicleResponse]
     household: list[HouseholdMemberResponse]
-    steps: list[OnboardingStepResponse]

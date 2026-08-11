@@ -9,9 +9,12 @@ CONTACT_ID = "contact-1"
 CONTACT_UNIT_ID = "cu-1"
 
 _FAKE_STATUS = {
-    "onboarding_completed": False,
-    "setup_current_step": "complete_profile",
-    "steps": [{"step_key": "complete_profile", "status": "pending"}],
+    "profile_complete": False,
+    "pending_unit_count": 0,
+    "active_unit_count": 0,
+    "requires_default_unit": False,
+    "prompts": [{"type": "complete_profile"}],
+    "is_completed": False,
 }
 
 _FAKE_PROFILE = {
@@ -75,8 +78,8 @@ async def test_get_onboarding_status(monkeypatch, client):
 
     res = await client.get("/v1/contact-onboarding/status")
     body = assert_success(res, 200)
-    assert body["data"]["setup_current_step"] == "complete_profile"
-    assert body["data"]["onboarding_completed"] is False
+    assert body["data"]["prompts"][0]["type"] == "complete_profile"
+    assert body["data"]["is_completed"] is False
 
 
 @pytest.mark.asyncio
@@ -366,7 +369,10 @@ async def test_confirm_properties(monkeypatch, client):
         assert contact_id == CONTACT_ID
         assert contact_unit_ids == [CONTACT_UNIT_ID]
         assert default_contact_unit_id == CONTACT_UNIT_ID
-        return [{"id": CONTACT_UNIT_ID, "status": "active"}]
+        return {
+            "items": [{"id": CONTACT_UNIT_ID, "status": "active"}],
+            "requires_default_unit": False,
+        }
 
     monkeypatch.setattr(
         "apps.user_service.app.services.contact_units_service."

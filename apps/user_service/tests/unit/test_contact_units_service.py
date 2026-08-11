@@ -18,6 +18,8 @@ from apps.user_service.app.services.contact_units_service import ContactUnitsSer
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 
+CONTACT_UNIT_ID = "550e8400-e29b-41d4-a716-446655440002"
+CONTACT_UNIT_ID_2 = "660e8400-e29b-41d4-a716-446655440003"
 ASSIGN_DATE = date(2026, 7, 15)
 ASSIGNED_AT = datetime(2026, 7, 15, tzinfo=timezone.utc)
 
@@ -57,9 +59,7 @@ def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService
     svc.units_repo.mark_unit_occupied = AsyncMock()
     svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
     svc.onboarding_repo = onboarding_repo or AsyncMock()
-    svc.unit_onboarding_repo = AsyncMock()
     svc.onboarding_repo.list_steps = AsyncMock(return_value=_completed_profile_steps())
-    svc.unit_onboarding_repo.ensure_steps_for_units = AsyncMock()
     svc.repo.set_default_login = AsyncMock(return_value={"id": "cu-1"})
     svc.contact_roles_repo = AsyncMock()
     svc.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
@@ -247,39 +247,39 @@ async def test_my_properties_pending_active_only():
 
 
 @pytest.mark.asyncio
-async def test_claim_properties_requires_completed_onboarding():
-    """Claim is rejected when onboarding is not yet complete."""
+async def test_claim_properties_works_without_completed_onboarding():
+    """Claim accepts pending units without legacy wizard completion."""
     svc = _service()
-    svc.onboarding_repo.is_wizard_completed = AsyncMock(return_value=False)
+    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": CONTACT_UNIT_ID_2, "status": "active"}])
+    svc.repo.count_active_units = AsyncMock(return_value=1)
+    svc.repo.has_default_login = AsyncMock(return_value=True)
+    svc.repo.set_default_login = AsyncMock()
+    svc.repo.activate_units_by_ids = AsyncMock()
 
-    with pytest.raises(ValidationException):
-        await svc.claim_properties(contact_id="contact-1", contact_unit_ids=["cu-2"])
+    result = await svc.claim_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID_2])
 
-    svc.repo.confirm_selection.assert_not_awaited()
+    assert result["items"] == [{"id": CONTACT_UNIT_ID_2, "status": "active"}]
+    svc.repo.activate_units_by_ids.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_claim_properties_activates_and_flags_default():
     """Claim activates units and signals when default login is needed."""
     svc = _service()
-    svc.onboarding_repo.is_wizard_completed = AsyncMock(return_value=True)
-    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": "cu-2", "status": "active"}])
+    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": CONTACT_UNIT_ID_2, "status": "active"}])
     svc.repo.count_active_units = AsyncMock(return_value=2)
     svc.repo.has_default_login = AsyncMock(return_value=False)
+    svc.repo.set_default_login = AsyncMock()
+    svc.repo.activate_units_by_ids = AsyncMock()
 
-    result = await svc.claim_properties(contact_id="contact-1", contact_unit_ids=["cu-2"])
+    result = await svc.claim_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID_2])
 
-    svc.unit_onboarding_repo.ensure_steps_for_units.assert_awaited_once_with(
-        organization_id="org-1",
-        contact_id="contact-1",
-        contact_unit_ids=["cu-2"],
-    )
     svc.repo.activate_units_by_ids.assert_awaited_once_with(
         organization_id="org-1",
         contact_id="contact-1",
-        contact_unit_ids=["cu-2"],
+        contact_unit_ids=[CONTACT_UNIT_ID_2],
     )
-    assert result["items"] == [{"id": "cu-2", "status": "active"}]
+    assert result["items"] == [{"id": CONTACT_UNIT_ID_2, "status": "active"}]
     assert result["requires_default_unit"] is True
 
 
@@ -488,41 +488,43 @@ async def test_confirm_properties_rejects_primary_conflict():
     svc.repo.confirm_selection = AsyncMock()
 
     with pytest.raises(ValidationException):
-        await svc.confirm_properties(contact_id="contact-1", contact_unit_ids=["cu-1"])
+        await svc.confirm_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID])
 
     svc.repo.confirm_selection.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_confirm_activates_if_onboarding_done():
-    """Confirm also sets activated_at if wizard is already complete."""
+async def test_confirm_rejects_invalid_contact_unit_id():
+    """Malformed UUIDs return 422 instead of a database error."""
     svc = _service()
-    svc.onboarding_repo.is_wizard_completed = AsyncMock(return_value=True)
-    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": "cu-1", "status": "active"}])
+
+    with pytest.raises(ValidationException):
+        await svc.confirm_properties(
+            contact_id="contact-1",
+            contact_unit_ids=["18dbd383-4e0c-4e9c-8ace-74d9ffb1bd4"],
+        )
+
+    svc.repo.find_active_primary_conflicts.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_confirm_activates_immediately():
+    """Confirm activates units immediately and returns default-login hint."""
+    svc = _service()
+    svc.repo.confirm_selection = AsyncMock(return_value=[{"id": CONTACT_UNIT_ID, "status": "active"}])
+    svc.repo.set_default_login = AsyncMock()
+    svc.repo.activate_units_by_ids = AsyncMock()
+    svc.repo.count_active_units = AsyncMock(return_value=1)
+    svc.repo.has_default_login = AsyncMock(return_value=True)
     svc.onboarding_repo.complete_step = AsyncMock()
 
-    items = await svc.confirm_properties(contact_id="contact-1", contact_unit_ids=["cu-1"])
+    result = await svc.confirm_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID])
 
-    svc.unit_onboarding_repo.ensure_steps_for_units.assert_awaited_once_with(
-        organization_id="org-1",
-        contact_id="contact-1",
-        contact_unit_ids=["cu-1"],
-    )
     svc.repo.set_default_login.assert_awaited_once_with(
         organization_id="org-1",
         contact_id="contact-1",
-        contact_unit_id="cu-1",
+        contact_unit_id=CONTACT_UNIT_ID,
     )
     svc.repo.activate_units_by_ids.assert_awaited_once()
-    assert svc.onboarding_repo.complete_step.await_count == 2
-    svc.onboarding_repo.complete_step.assert_any_await(
-        organization_id="org-1",
-        contact_id="contact-1",
-        step_key=ContactOnboardingStep.CHOOSE_UNIT.value,
-    )
-    svc.onboarding_repo.complete_step.assert_any_await(
-        organization_id="org-1",
-        contact_id="contact-1",
-        step_key=ContactOnboardingStep.SELECT_PROPERTIES.value,
-    )
-    assert items == [{"id": "cu-1", "status": "active"}]
+    assert result["items"] == [{"id": CONTACT_UNIT_ID, "status": "active"}]
+    assert result["requires_default_unit"] is False
