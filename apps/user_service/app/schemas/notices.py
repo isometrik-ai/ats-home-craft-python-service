@@ -223,31 +223,6 @@ class NoticeDetailResponse(BaseModel):
     created_by_user_id: str | None = None
 
 
-class BannerSlotNoticeResponse(BaseModel):
-    """Pinned notice summary in a banner slot."""
-
-    id: str
-    display_code: str
-    title: str
-    category: NoticeCategory
-
-
-class BannerSlotResponse(BaseModel):
-    """One banner slot (occupied or empty)."""
-
-    slot_index: int
-    category_label: str | None = None
-    notice: BannerSlotNoticeResponse | None = None
-
-
-class BannerSlotsResponse(BaseModel):
-    """All six banner slots for a project."""
-
-    max_slots: int
-    occupied_count: int
-    slots: list[BannerSlotResponse]
-
-
 class ReachEstimateResponse(BaseModel):
     """Audience size estimate."""
 

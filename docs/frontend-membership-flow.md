@@ -492,7 +492,6 @@ type ResidentContext = {
 ["project", orgId, projectId, "members"]
 ["visitor-logs", orgId, projectId, filters]
 ["notices", orgId, projectId, filters]
-["notices", orgId, projectId, "banner-slots"]
 ["contacts", orgId, { projectId }] // null = org-wide
 ```
 

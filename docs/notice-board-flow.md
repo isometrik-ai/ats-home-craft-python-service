@@ -68,29 +68,29 @@ see pinned banners on the home feed.
 
 **Admin dashboard (Community → Notices)**
 
-| Screen / action                                | Capability                                                                    |
-| ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| Page load + tab counts                         | `GET /projects/{project_id}/notices/summary`                                  |
-| Status tabs (All / Live / Scheduled / Deleted) | `GET /projects/{project_id}/notices?status=`                                  |
-| Banner slots row (Live tab only)               | `GET /projects/{project_id}/notices/banner-slots`                             |
-| Click pinned banner slot                       | `GET /projects/{project_id}/notices/{id}` (detail drawer)                     |
-| Group filter chips (Live tab)                  | `GET /projects/{project_id}/notices?status=live&group=Owner`                  |
-| Search by title                                | `GET /projects/{project_id}/notices?search=`                                  |
-| Notice card grid                               | List response                                                                 |
-| Notice detail drawer                           | `GET /projects/{project_id}/notices/{id}`                                     |
-| Create notice drawer                           | `POST /projects/{project_id}/notices`                                         |
-| Save as draft                                  | `POST` with `{ "publish_mode": "draft" }`                                     |
-| Publish now (+ optional pin)                   | `POST` with `{ "publish_mode": "now", "pin_to_banner": true }`                |
-| Schedule notice                                | `POST` with `{ "publish_mode": "schedule", "publish_at": "..." }`             |
-| Reach estimate                                 | `GET /projects/{project_id}/notices/reach-estimate?groups=&scope=&tower_ids=` |
-| Edit notice (draft / scheduled)                | `PATCH /projects/{project_id}/notices/{id}`                                   |
-| Pin live notice                                | `POST /projects/{project_id}/notices/{id}/pin`                                |
-| Unpin                                          | `POST /projects/{project_id}/notices/{id}/unpin`                              |
-| Duplicate (draft / scheduled)                  | `POST /projects/{project_id}/notices/{id}/duplicate`                          |
-| Copy published notice                          | Create Notice prefilled → `POST /projects/{project_id}/notices`               |
-| Delete                                         | `POST /projects/{project_id}/notices/{id}/delete`                             |
-| Restore (Deleted tab)                          | `POST /projects/{project_id}/notices/{id}/restore`                            |
-| Upload images                                  | Presigned URL → paths in create/PATCH body                                    |
+| Screen / action                                | Capability                                                                                               |
+| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Page load + tab counts                         | `GET /projects/{project_id}/notices/summary`                                                             |
+| Status tabs (All / Live / Scheduled / Deleted) | `GET /projects/{project_id}/notices?status=`                                                             |
+| Banner slots row (Live tab only)               | `GET /projects/{project_id}/notices?status=live` (use `pinned`, `slot_index`, `category_label` on items) |
+| Click pinned banner slot                       | `GET /projects/{project_id}/notices/{id}` (detail drawer)                                                |
+| Group filter chips (Live tab)                  | `GET /projects/{project_id}/notices?status=live&group=Owner`                                             |
+| Search by title                                | `GET /projects/{project_id}/notices?search=`                                                             |
+| Notice card grid                               | List response                                                                                            |
+| Notice detail drawer                           | `GET /projects/{project_id}/notices/{id}`                                                                |
+| Create notice drawer                           | `POST /projects/{project_id}/notices`                                                                    |
+| Save as draft                                  | `POST` with `{ "publish_mode": "draft" }`                                                                |
+| Publish now (+ optional pin)                   | `POST` with `{ "publish_mode": "now", "pin_to_banner": true }`                                           |
+| Schedule notice                                | `POST` with `{ "publish_mode": "schedule", "publish_at": "..." }`                                        |
+| Reach estimate                                 | `GET /projects/{project_id}/notices/reach-estimate?groups=&scope=&tower_ids=`                            |
+| Edit notice (draft / scheduled)                | `PATCH /projects/{project_id}/notices/{id}`                                                              |
+| Pin live notice                                | `POST /projects/{project_id}/notices/{id}/pin`                                                           |
+| Unpin                                          | `POST /projects/{project_id}/notices/{id}/unpin`                                                         |
+| Duplicate (draft / scheduled)                  | `POST /projects/{project_id}/notices/{id}/duplicate`                                                     |
+| Copy published notice                          | Create Notice prefilled → `POST /projects/{project_id}/notices`                                          |
+| Delete                                         | `POST /projects/{project_id}/notices/{id}/delete`                                                        |
+| Restore (Deleted tab)                          | `POST /projects/{project_id}/notices/{id}/restore`                                                       |
+| Upload images                                  | Presigned URL → paths in create/PATCH body                                                               |
 
 **Resident mobile (Phase 2)**
 
@@ -171,7 +171,7 @@ Full column reference: [notice-board-schema.md](../../ats-home-craft-supabase/do
 
 ```text
                     ┌──────────┐
-                    │  draft   │◄──────────────── restore (from deleted)
+                    │  draft   │◄──── duplicate / restore (new draft copy)
                     └────┬─────┘
            save draft    │
                          │    publish now (+ optional pin if live)
@@ -254,7 +254,7 @@ ______________________________________________________________________
 ```
 
 3. Default tab **All** → `GET /notices?status=all&page=1&page_size=20`.
-1. If tab **Live** → also `GET /notices/banner-slots`.
+1. If tab **Live** → `GET /notices?status=live`; build banner row from list items with `pinned = true`.
 
 **List query parameters:**
 
@@ -485,7 +485,8 @@ POST /v1/projects/{project_id}/notices/{notice_id}/restore
 ```
 
 1. Assert `status = deleted`.
-1. Set `status = draft`, clear `deleted_at` (keep `deleted_reason` for audit or clear — product: **keep**).
+1. **Same as duplicate:** copy title, description, category, recipients, towers, attachments into a **new** draft row with a new `display_code` and `duplicate_of_id` pointing at the deleted source.
+1. Original deleted row **stays deleted** (audit retained in Deleted tab).
 1. Does **not** automatically re-pin.
 
 ### 4.8 Publish draft / promote scheduled (optional explicit endpoints)
@@ -573,48 +574,9 @@ BANNER SLOTS — UP TO 6 PINNED NOTICES
 Slots are **generic** — not reserved per category or recipient group. Two Maintenance notices
 cannot both be pinned unless they occupy different slot indices (max one pin per notice).
 
-### 5.2 Banner slots API
+### 5.2 Banner slots (admin UI)
 
-```http
-GET /v1/projects/{project_id}/notices/banner-slots
-```
-
-**Response:**
-
-```json
-{
-  "max_slots": 6,
-  "occupied_count": 2,
-  "slots": [
-    {
-      "slot_index": 1,
-      "category_label": "Maintenance",
-      "notice": {
-        "id": "uuid",
-        "display_code": "NTC-1042",
-        "title": "Elevator maintenance in Tower A",
-        "category": "maintenance"
-      }
-    },
-    {
-      "slot_index": 2,
-      "category_label": "Event",
-      "notice": {
-        "id": "uuid",
-        "display_code": "NTC-1040",
-        "title": "Independence Day flag hoisting at 8 AM",
-        "category": "event"
-      }
-    },
-    { "slot_index": 3, "category_label": null, "notice": null },
-    { "slot_index": 4, "category_label": null, "notice": null },
-    { "slot_index": 5, "category_label": null, "notice": null },
-    { "slot_index": 6, "category_label": null, "notice": null }
-  ]
-}
-```
-
-Always return all 6 slot indices (occupied or empty) for stable grid layout.
+Build the Live-tab banner grid from **`GET /notices?status=live`** list items where `pinned = true`, keyed by `slot_index` (1–6). Render empty placeholders for unoccupied slots. Resident mobile banner still uses **`GET /v1/notices/banner?project_id=`**.
 
 ### 5.3 Pin (live only)
 
@@ -837,7 +799,6 @@ Route: `/projects/:projectId/community/notices` ([frontend-membership-flow.md](.
 ```typescript
 ["notices", orgId, projectId, "summary"]
 ["notices", orgId, projectId, filters]
-["notices", orgId, projectId, "banner-slots"]
 ["notices", orgId, projectId, noticeId]
 ```
 

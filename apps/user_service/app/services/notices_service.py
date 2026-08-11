@@ -11,7 +11,6 @@ from apps.user_service.app.db.repositories.notices_repository import NoticesRepo
 from apps.user_service.app.schemas.enums import (
     NOTICE_CATEGORY_LABELS,
     NOTICE_MAX_ATTACHMENTS,
-    NOTICE_MAX_PIN_SLOTS,
     NOTICE_SCHEDULE_MAX_DAYS,
     NoticeCategory,
     NoticePinDuration,
@@ -20,9 +19,6 @@ from apps.user_service.app.schemas.enums import (
     NoticeStatus,
 )
 from apps.user_service.app.schemas.notices import (
-    BannerSlotNoticeResponse,
-    BannerSlotResponse,
-    BannerSlotsResponse,
     CreateNoticeRequest,
     DeleteNoticeRequest,
     NoticeAttachmentInput,
@@ -357,19 +353,27 @@ class NoticesService:
         project_id: str,
         notice_id: str,
     ) -> NoticeDetailResponse:
-        """Restore deleted notice to draft."""
-        row = await self.repo.restore_notice(
+        """Restore a deleted notice by creating a new draft copy (duplicate semantics)."""
+        source = await self.repo.fetch_notice_by_id(
             organization_id=self.organization_id,
             project_id=project_id,
             notice_id=notice_id,
-            updated_by_user_id=self.user_id,
         )
-        if row is None:
+        if source is None:
             raise NotFoundException(
                 message_key="notices.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return await self._to_detail(row)
+        if str(source["status"]) != NoticeStatus.DELETED.value:
+            raise ConflictException(
+                message_key="notices.errors.not_restorable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        return await self._duplicate_from_source(
+            project_id=project_id,
+            source_notice_id=notice_id,
+            source=source,
+        )
 
     async def duplicate_notice(
         self,
@@ -389,18 +393,31 @@ class NoticesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         self._assert_duplicatable(str(source["status"]))
+        return await self._duplicate_from_source(
+            project_id=project_id,
+            source_notice_id=notice_id,
+            source=source,
+        )
 
+    async def _duplicate_from_source(
+        self,
+        *,
+        project_id: str,
+        source_notice_id: str,
+        source: dict[str, Any],
+    ) -> NoticeDetailResponse:
+        """Copy notice content into a new draft row."""
         recipient_groups = await self.repo.list_recipient_groups(
             organization_id=self.organization_id,
-            notice_id=notice_id,
+            notice_id=source_notice_id,
         )
         towers = await self.repo.list_towers_for_notice(
             organization_id=self.organization_id,
-            notice_id=notice_id,
+            notice_id=source_notice_id,
         )
         attachments = await self.repo.list_attachments(
             organization_id=self.organization_id,
-            notice_id=notice_id,
+            notice_id=source_notice_id,
         )
 
         sequence_number = await self.repo.allocate_sequence_number(
@@ -421,7 +438,7 @@ class NoticesService:
             scope_type=str(source["scope_type"]),
             publish_at=None,
             published_at=None,
-            duplicate_of_id=notice_id,
+            duplicate_of_id=source_notice_id,
             created_by_user_id=self.user_id,
             updated_by_user_id=self.user_id,
         )
@@ -444,40 +461,6 @@ class NoticesService:
             attachments=attachment_inputs or None,
         )
         return await self.get_notice(project_id=project_id, notice_id=new_id)
-
-    async def get_banner_slots(self, *, project_id: str) -> BannerSlotsResponse:
-        """Return six banner slots for a project."""
-        pins = await self.repo.list_active_pins_with_notices(
-            organization_id=self.organization_id,
-            project_id=project_id,
-        )
-        pin_by_slot = {int(row["slot_index"]): row for row in pins}
-        slots: list[BannerSlotResponse] = []
-        for slot_index in range(1, NOTICE_MAX_PIN_SLOTS + 1):
-            pin = pin_by_slot.get(slot_index)
-            if pin is None:
-                slots.append(
-                    BannerSlotResponse(slot_index=slot_index, category_label=None, notice=None)
-                )
-                continue
-            category = str(pin["category"])
-            slots.append(
-                BannerSlotResponse(
-                    slot_index=slot_index,
-                    category_label=NOTICE_CATEGORY_LABELS.get(category, category),
-                    notice=BannerSlotNoticeResponse(
-                        id=str(pin["notice_id"]),
-                        display_code=str(pin["display_code"]),
-                        title=str(pin["title"]),
-                        category=NoticeCategory(category),
-                    ),
-                )
-            )
-        return BannerSlotsResponse(
-            max_slots=NOTICE_MAX_PIN_SLOTS,
-            occupied_count=len(pins),
-            slots=slots,
-        )
 
     async def pin_notice(
         self,

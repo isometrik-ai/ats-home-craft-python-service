@@ -27,7 +27,7 @@ Community admins publish notices for a **project** (`projects` = gated community
 | **Live immutability** | Published notices **cannot be edited** — delete or copy via Create Notice                           |
 | **Duplicate live**    | UI prefills Create Notice; **`POST /notices`**, not duplicate API                                   |
 | **Banner pins**       | **6 generic slots**; **only live** notices; slot header = notice **category label**; click → detail |
-| **Soft delete**       | Audit retained; restore → draft                                                                     |
+| **Soft delete**       | Audit retained; restore creates new draft copy (duplicate semantics)                                |
 
 ### Membership alignment ([ADR 0011](./0011-project-membership.md))
 
@@ -76,7 +76,7 @@ Prefix: **`/v1/projects/{project_id}/notices`**
 
 Staff access: permission (e.g. `projects_management.*` or dedicated `notices_management.*`) **and** [ADR 0011 staff project access](./0011-project-membership.md#2-staff-access-formula).
 
-Key endpoints: summary, list, banner-slots, CRUD, pin/unpin, reach-estimate, duplicate (draft/scheduled only).
+Key endpoints: summary, list, CRUD, pin/unpin, reach-estimate, duplicate (draft/scheduled only).
 
 Resident Phase 2: **`/v1/notices`** — feed + banner + like.
 

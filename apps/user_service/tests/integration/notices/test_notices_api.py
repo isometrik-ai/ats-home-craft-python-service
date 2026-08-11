@@ -13,7 +13,6 @@ from apps.user_service.app.schemas.enums import (
     NoticeStatus,
 )
 from apps.user_service.app.schemas.notices import (
-    BannerSlotsResponse,
     NoticeDetailResponse,
     NoticeListItemResponse,
     NoticeSummaryResponse,
@@ -210,24 +209,8 @@ async def test_restore_project_notice(monkeypatch, client):
     monkeypatch.setattr(f"{_SERVICE}.restore_notice", fake_restore_notice)
 
     res = await client.post(f"/v1/projects/{PROJECT_ID}/notices/{NOTICE_ID}/restore")
-    body = assert_success(res, 200)
+    body = assert_success(res, 201)
     assert body["data"]["status"] == "draft"
-
-
-@pytest.mark.asyncio
-async def test_get_banner_slots(monkeypatch, client):
-    """GET banner-slots returns six slots."""
-    _patch_admin_access(monkeypatch)
-
-    async def fake_get_banner_slots(_self, *, project_id: str):
-        del _self, project_id
-        return BannerSlotsResponse(max_slots=6, occupied_count=0, slots=[])
-
-    monkeypatch.setattr(f"{_SERVICE}.get_banner_slots", fake_get_banner_slots)
-
-    res = await client.get(f"/v1/projects/{PROJECT_ID}/notices/banner-slots")
-    body = assert_success(res, 200)
-    assert body["data"]["max_slots"] == 6
 
 
 @pytest.mark.asyncio

@@ -112,38 +112,6 @@ async def list_project_notices(
     )
 
 
-@handle_api_exceptions("get project notice banner slots")
-@router.get(
-    "/{project_id}/notices/banner-slots",
-    status_code=http_status.HTTP_200_OK,
-    summary="Banner slot grid for a project",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("100/minute")
-async def get_project_notice_banner_slots(
-    request: Request,
-    project_id: str = Path(..., description="Project identifier (UUID string)."),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Return six banner slots (occupied or empty)."""
-    user_context = await ensure_staff_project_access(
-        current_user=current_user,
-        db_connection=db_connection,
-        project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
-        request=request,
-    )
-    service = NoticesService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_banner_slots(project_id=project_id)
-    return success_response(
-        request=request,
-        message_key="notices.success.banner_slots_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data.model_dump(mode="json"),
-    )
-
-
 @handle_api_exceptions("get project notice reach estimate")
 @router.get(
     "/{project_id}/notices/reach-estimate",
@@ -371,13 +339,13 @@ async def delete_project_notice(
 @handle_api_exceptions("restore project notice")
 @router.post(
     "/{project_id}/notices/{notice_id}/restore",
-    status_code=http_status.HTTP_200_OK,
-    summary="Restore a deleted notice to draft",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Restore a deleted notice as a new draft copy",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("60/minute")
 @audit_api_call(
-    action_type="UPDATE",
+    action_type="CREATE",
     data_classification="internal",
     compliance_tags=["audit_required"],
     table_name="notices",
@@ -390,7 +358,7 @@ async def restore_project_notice(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Restore deleted notice as draft."""
+    """Create a new draft notice copied from a deleted notice (original stays deleted)."""
     user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
@@ -404,15 +372,16 @@ async def restore_project_notice(
         request,
         user_context,
         table="notices",
-        requested_id=notice_id,
-        description=f"Restored notice: {data.display_code}",
+        requested_id=data.id,
+        description=f"Restored deleted notice {notice_id} as new draft: {data.display_code}",
         risk_level="medium",
         new_data=data.model_dump(mode="json"),
     )
     return success_response(
         request=request,
         message_key="notices.success.restored",
-        custom_code=CustomStatusCode.SUCCESS,
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
         data=data.model_dump(mode="json"),
     )
 

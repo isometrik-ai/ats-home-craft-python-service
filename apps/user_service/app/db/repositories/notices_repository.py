@@ -1079,44 +1079,6 @@ class NoticesRepository(BaseRepository):
             notice_id=notice_id,
         )
 
-    async def restore_notice(
-        self,
-        *,
-        organization_id: str,
-        project_id: str,
-        notice_id: str,
-        updated_by_user_id: str | None,
-    ) -> dict[str, Any] | None:
-        """Restore deleted notice to draft."""
-        row = await self.db_connection.fetchrow(
-            """
-            UPDATE notices
-            SET status = 'draft',
-                deleted_at = NULL,
-                deleted_reason = NULL,
-                publish_at = NULL,
-                published_at = NULL,
-                updated_by_user_id = $4::uuid,
-                updated_at = now()
-            WHERE organization_id = $1::uuid
-              AND project_id = $2::uuid
-              AND id = $3::uuid
-              AND status = 'deleted'
-            RETURNING id::text AS id
-            """,
-            organization_id,
-            project_id,
-            notice_id,
-            updated_by_user_id,
-        )
-        if row is None:
-            return None
-        return await self.fetch_notice_by_id(
-            organization_id=organization_id,
-            project_id=project_id,
-            notice_id=notice_id,
-        )
-
     async def list_notices_published_since(
         self,
         *,
