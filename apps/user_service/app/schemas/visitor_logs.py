@@ -283,6 +283,7 @@ class VisitorLogOverviewResponse(BaseModel):
                 "inside_now": 3,
                 "awaiting_approval": 1,
                 "walk_ins": 6,
+                "exited": 2,
                 "denied_expired": 3,
             }
         },
@@ -294,6 +295,10 @@ class VisitorLogOverviewResponse(BaseModel):
     inside_now: int = Field(..., description="Entered visits not yet marked exit.")
     awaiting_approval: int = Field(..., description="Walk-ins pending resident approval.")
     walk_ins: int = Field(..., description="Walk-in entries raised at the gate in range.")
+    exited: int = Field(
+        ...,
+        description="Visits marked exit (visit_status=exited; matches the Completed tab filter).",
+    )
     denied_expired: int = Field(
         ...,
         description="Expired passes and denied/cancelled visits with no entry.",
@@ -317,6 +322,7 @@ class VisitorLogOverviewApiResponse(BaseModel):
                     "inside_now": 3,
                     "awaiting_approval": 1,
                     "walk_ins": 6,
+                    "exited": 2,
                     "denied_expired": 3,
                 },
             }

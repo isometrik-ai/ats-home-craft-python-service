@@ -311,6 +311,7 @@ async def test_get_overview():
         "inside_now": 3,
         "awaiting_approval": 1,
         "walk_ins": 6,
+        "exited": 5,
         "denied_expired": 3,
     }
     svc = _service(logs_repo=logs_repo)

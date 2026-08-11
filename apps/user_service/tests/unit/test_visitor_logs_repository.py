@@ -156,6 +156,7 @@ async def test_get_overview_aggregates():
             "inside_now": 3,
             "awaiting_approval": 2,
             "walk_ins": 4,
+            "exited": 3,
             "denied_expired": 1,
         }
     )
@@ -173,11 +174,13 @@ async def test_get_overview_aggregates():
     assert result["inside_now"] == 3
     assert result["awaiting_approval"] == 2
     assert result["walk_ins"] == 4
+    assert result["exited"] == 3
     assert result["denied_expired"] == 1
     overview_query = conn.fetchrow_calls[0][0]
     assert "UNION ALL" in overview_query
     assert VisitorLogVisitStatus.INSIDE.value in overview_query
     assert VisitorLogVisitStatus.AWAITING_APPROVAL.value in overview_query
+    assert VisitorLogVisitStatus.EXITED.value in overview_query
 
 
 @pytest.mark.asyncio
@@ -211,6 +214,7 @@ async def test_get_overview_unit_scope():
             "inside_now": 1,
             "awaiting_approval": 0,
             "walk_ins": 1,
+            "exited": 0,
             "denied_expired": 0,
         }
     )
@@ -329,6 +333,7 @@ async def test_get_overview_empty_row():
     )
     assert result["total_entries"] == 0
     assert result["inside_now"] == 0
+    assert result["exited"] == 0
 
 
 @pytest.mark.asyncio
