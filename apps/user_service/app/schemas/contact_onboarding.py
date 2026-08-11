@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import (
     CommunicationPreferences,
+    ContactDetailsResponse,
     FlexibleOptionalDate,
 )
 from apps.user_service.app.schemas.enums import (
@@ -617,6 +618,8 @@ class HouseholdInvitationValidateResponse(BaseModel):
     organization_name: str | None = None
     phone_masked: str | None = None
     expires_at: str | None = None
+    invitation_status: str | None = None
+    already_accepted: bool = False
 
 
 class HouseholdInvitationDeclineResponse(BaseModel):
@@ -653,3 +656,219 @@ class HouseholdInvitationAcceptResponse(BaseModel):
     expires_in: int | None = None
     expires_at: datetime | None = None
     user: HouseholdInvitationUserInfo
+
+
+class AddHouseholdMemberResponse(BaseModel):
+    """Result of adding a household member."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    contact_id: str
+    contact_unit_id: str
+    member_status: str
+    invitation_id: str | None = None
+    phone_masked: str | None = None
+    invite_url: str | None = None
+
+
+class RemoveHouseholdMemberResponse(BaseModel):
+    """Result of removing a household member."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_unit_id: str
+    contact_id: str
+    contact_deleted: bool = False
+
+
+class HouseholdInvitationSentResponse(BaseModel):
+    """Result after creating or resending a household invitation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    invitation_id: str
+    contact_unit_id: str
+    member_status: str
+    phone_masked: str | None = None
+    invite_url: str | None = None
+
+
+class OnboardingStatusApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/status."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: OnboardingStatusResponse
+
+
+class ContactPropertiesListApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/properties."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[ContactPropertyProjectGroupResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ClaimPropertiesApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/properties/confirm and /claim."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ClaimPropertiesResponse
+
+
+class ContactProfileApiResponse(BaseModel):
+    """API envelope for GET/PATCH /contact-onboarding/profile."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ContactDetailsResponse
+
+
+class VehicleCatalogApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/vehicles/options."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: VehicleCatalogResponse
+
+
+class VehicleListApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/vehicles."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[VehicleResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class VehicleDetailApiResponse(BaseModel):
+    """API envelope for vehicle detail and mutation endpoints."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: VehicleResponse
+
+
+class ContactOnboardingMessageApiResponse(BaseModel):
+    """API envelope for endpoints that return success without a data payload."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+
+
+class HouseholdMemberListApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/household."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[HouseholdMemberResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class AddHouseholdMemberApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: AddHouseholdMemberResponse
+
+
+class HouseholdMemberApiResponse(BaseModel):
+    """API envelope for household member update and invitation revoke."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdMemberResponse
+
+
+class HouseholdInvitationValidateApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/invitations/validate."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationValidateResponse
+
+
+class HouseholdInvitationAcceptApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/invitations/accept."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationAcceptResponse
+
+
+class HouseholdInvitationDeclineApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/invitations/decline."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationDeclineResponse
+
+
+class HouseholdInvitationSentApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/{id}/resend-invitation."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationSentResponse
+
+
+class RemoveHouseholdMemberApiResponse(BaseModel):
+    """API envelope for DELETE /contact-onboarding/household/{id}."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: RemoveHouseholdMemberResponse
+
+
+class SetDefaultUnitApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/default-unit."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ContactUnitSummaryResponse
