@@ -552,29 +552,45 @@ async def test_remove_not_found():
 
 @pytest.mark.asyncio
 async def test_list_vehicles_for_contact():
-    """List vehicles normalizes repository rows."""
+    """List vehicles includes parking allotment without unit summary."""
     svc = _service()
-    svc.repo.list_by_contact.return_value = [
-        {
-            "id": "v1",
-            "organization_id": "org-1",
-            "project_id": "p1",
-            "contact_id": "c1",
-            "unit_id": "u1",
-            "vehicle_type": "four_wheeler",
-            "registration_number": "MH12AB1234",
-            "photo_paths": [],
-            "status": VehicleStatus.APPROVED.value,
-            "status_updated_at": "2026-07-16T10:00:00Z",
-            "created_at": "2026-07-16T09:00:00Z",
-            "updated_at": "2026-07-16T10:00:00Z",
-            "sort_order": 0,
-        }
-    ]
+    svc.repo.list_details_by_contact = AsyncMock(
+        return_value=[
+            {
+                "id": "v1",
+                "organization_id": "org-1",
+                "project_id": "p1",
+                "contact_id": "c1",
+                "unit_id": "u1",
+                "vehicle_type": "four_wheeler",
+                "registration_number": "MH12AB1234",
+                "photo_paths": [],
+                "status": VehicleStatus.APPROVED.value,
+                "status_updated_at": "2026-07-16T10:00:00Z",
+                "created_at": "2026-07-16T09:00:00Z",
+                "updated_at": "2026-07-16T10:00:00Z",
+                "sort_order": 0,
+                "parking_slot_id": "slot-1",
+                "parking_slot_row_id": "slot-1",
+                "parking_slot_number": 12,
+                "parking_slot_status": "assigned",
+                "parking_facility_id": "fac-1",
+                "parking_facility_name": "Basement Parking",
+                "parking_facility_location_type": "tower",
+                "parking_facility_floor_level": "B1",
+                "parking_facility_wing": "A",
+                "parking_facility_tower_id": "tower-1",
+            }
+        ]
+    )
 
     rows = await svc.list_vehicles(contact_id="c1")
 
     assert rows[0]["registration_number"] == "MH12AB1234"
+    assert "unit" not in rows[0]
+    assert rows[0]["parking_allotment"]["id"] == "slot-1"
+    assert rows[0]["parking_allotment"]["slot_number"] == 12
+    assert rows[0]["parking_allotment"]["facility"]["name"] == "Basement Parking"
 
 
 @pytest.mark.asyncio
@@ -828,19 +844,6 @@ async def test_list_project_vehicles_passes_vehicle_type_and_fuel_type():
 
 
 @pytest.mark.asyncio
-async def test_complete_vehicles_step():
-    """Complete vehicles step marks onboarding step done."""
-    svc = _service()
-    svc.contact_units_repo = AsyncMock()
-    svc.unit_onboarding_repo = AsyncMock()
-    svc.contact_units_repo.get_owned_by_contact.return_value = {"id": "cu-1"}
-
-    await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")
-
-    svc.unit_onboarding_repo.complete_step.assert_awaited_once()
-
-
-@pytest.mark.asyncio
 async def test_build_parking_allotment_returns_none_without_slot():
     """Rows without an assigned parking slot skip nested parking summary."""
     svc = _service()
@@ -906,12 +909,12 @@ async def test_list_vehicles_with_unit_filter():
     svc.contact_units_repo = AsyncMock()
     svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
     svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
-    svc.repo.list_by_contact = AsyncMock(return_value=[])
+    svc.repo.list_details_by_contact = AsyncMock(return_value=[])
 
     await svc.list_vehicles(contact_id="c1", unit_id="u1")
 
     svc.contact_units_repo.contact_has_active_unit.assert_awaited_once()
-    svc.repo.list_by_contact.assert_awaited_once_with(
+    svc.repo.list_details_by_contact.assert_awaited_once_with(
         organization_id="org-1",
         contact_id="c1",
         unit_id="u1",
@@ -1277,15 +1280,3 @@ async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
         vehicle_id="v1",
     )
     assert result["status"] == VehicleStatus.REMOVED.value
-
-
-@pytest.mark.asyncio
-async def test_complete_vehicles_step_not_found():
-    """Complete step fails when contact unit is missing."""
-    svc = _service()
-    svc.contact_units_repo = AsyncMock()
-    svc.unit_onboarding_repo = AsyncMock()
-    svc.contact_units_repo.get_owned_by_contact = AsyncMock(return_value=None)
-
-    with pytest.raises(NotFoundException):
-        await svc.complete_vehicles_step(contact_id="c1", contact_unit_id="cu-1")

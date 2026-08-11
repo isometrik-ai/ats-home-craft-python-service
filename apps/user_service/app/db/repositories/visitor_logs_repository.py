@@ -771,11 +771,13 @@ TRIM(
                 "inside_now": 0,
                 "awaiting_approval": 0,
                 "walk_ins": 0,
+                "exited": 0,
                 "denied_expired": 0,
             }
 
         awaiting = VisitorLogVisitStatus.AWAITING_APPROVAL.value
         inside = VisitorLogVisitStatus.INSIDE.value
+        exited = VisitorLogVisitStatus.EXITED.value
         denied = VisitorLogVisitStatus.DENIED.value
         expired = VisitorLogVisitStatus.EXPIRED.value
 
@@ -793,6 +795,9 @@ TRIM(
                 WHERE source = 'walk_in'
               )::int AS walk_ins,
               COUNT(*) FILTER (
+                WHERE visit_status = '{exited}'
+              )::int AS exited,
+              COUNT(*) FILTER (
                 WHERE visit_status IN ('{denied}', '{expired}')
               )::int AS denied_expired
             FROM ({union_sql}) combined
@@ -807,5 +812,6 @@ TRIM(
             "inside_now": int(payload.get("inside_now") or 0),
             "awaiting_approval": int(payload.get("awaiting_approval") or 0),
             "walk_ins": int(payload.get("walk_ins") or 0),
+            "exited": int(payload.get("exited") or 0),
             "denied_expired": int(payload.get("denied_expired") or 0),
         }

@@ -7,12 +7,6 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
-from apps.user_service.app.db.repositories.contact_onboarding_repository import (
-    ContactOnboardingRepository,
-)
-from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
-    ContactUnitOnboardingRepository,
-)
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
@@ -29,7 +23,6 @@ from apps.user_service.app.schemas.contact_onboarding import (
     VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import (
-    ContactOnboardingStep,
     VehicleFuelType,
     VehicleStatus,
     VehicleType,
@@ -68,8 +61,6 @@ class VehiclesService:
         self.parking_slots_repo = ParkingSlotsRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
-        self.onboarding_repo = ContactOnboardingRepository(db_connection)
-        self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
@@ -274,6 +265,17 @@ class VehiclesService:
             "avatar_url": avatar_url,
         }
 
+    def _serialize_contact_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Map a contact vehicle list row to API shape with parking allotment only."""
+        out = self._normalize_vehicle(row)
+        out["parking_allotment"] = self._build_parking_allotment(row)
+        for key in self._PARKING_ROW_KEYS:
+            out.pop(key, None)
+        payload = VehicleResponse.model_validate(out).model_dump(mode="json")
+        for key in ("unit", "owner", "approved_by", "rejected_by"):
+            payload.pop(key, None)
+        return payload
+
     def _serialize_admin_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a project vehicle row to the admin list API contract."""
         payload = self._normalize_project_vehicle(row)
@@ -411,12 +413,12 @@ class VehiclesService:
         assert org_id
         if unit_id:
             await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
-        rows = await self.repo.list_by_contact(
+        rows = await self.repo.list_details_by_contact(
             organization_id=org_id,
             contact_id=contact_id,
             unit_id=unit_id,
         )
-        return [self._normalize_vehicle(row) for row in rows]
+        return [self._serialize_contact_vehicle(row) for row in rows]
 
     async def get_vehicle_detail(
         self,
@@ -930,29 +932,3 @@ class VehiclesService:
             },
         )
         return normalized
-
-    async def complete_vehicles_step(
-        self,
-        *,
-        contact_id: str,
-        contact_unit_id: str,
-    ) -> None:
-        """Mark the vehicles onboarding step complete for one unit."""
-        org_id = self.user_context.organization_id
-        assert org_id
-        row = await self.contact_units_repo.get_owned_by_contact(
-            organization_id=org_id,
-            contact_id=contact_id,
-            contact_unit_id=contact_unit_id,
-        )
-        if not row:
-            raise NotFoundException(
-                message_key="contact_onboarding.errors.contact_unit_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        await self.unit_onboarding_repo.complete_step(
-            organization_id=org_id,
-            contact_id=contact_id,
-            contact_unit_id=contact_unit_id,
-            step_key=ContactOnboardingStep.VEHICLES.value,
-        )

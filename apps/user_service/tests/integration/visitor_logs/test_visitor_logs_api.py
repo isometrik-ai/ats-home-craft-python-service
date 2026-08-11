@@ -46,6 +46,7 @@ _FAKE_OVERVIEW = {
     "inside_now": 3,
     "awaiting_approval": 1,
     "walk_ins": 6,
+    "exited": 5,
     "denied_expired": 3,
 }
 
@@ -133,6 +134,7 @@ async def test_get_visitor_log_overview(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"]["total_entries"] == 28
     assert body["data"]["walk_ins"] == 6
+    assert body["data"]["exited"] == 5
 
 
 @pytest.mark.asyncio

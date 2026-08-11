@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 from asyncpg.exceptions import UniqueViolationError
@@ -13,9 +14,6 @@ from apps.user_service.app.db.repositories.contact_onboarding_repository import 
 )
 from apps.user_service.app.db.repositories.contact_roles_repository import (
     ContactRolesRepository,
-)
-from apps.user_service.app.db.repositories.contact_unit_onboarding_repository import (
-    ContactUnitOnboardingRepository,
 )
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
@@ -37,13 +35,26 @@ from libs.shared_utils.status_codes import CustomStatusCode
 class ContactUnitsService:
     """Operations on contact_units."""
 
+    @staticmethod
+    def _validate_contact_unit_ids(contact_unit_ids: list[str]) -> list[str]:
+        """Normalize contact_unit ids and reject malformed UUIDs before DB calls."""
+        normalized: list[str] = []
+        for raw in contact_unit_ids:
+            try:
+                normalized.append(str(UUID(str(raw).strip())))
+            except ValueError as exc:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.invalid_contact_unit_id",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                ) from exc
+        return normalized
+
     def __init__(self, *, db_connection: asyncpg.Connection, user_context: UserContext) -> None:
         self.db_connection = db_connection
         self.user_context = user_context
         self.repo = ContactUnitsRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
-        self.unit_onboarding_repo = ContactUnitOnboardingRepository(db_connection)
         self.contact_roles_repo = ContactRolesRepository(db_connection)
 
     @staticmethod
@@ -172,6 +183,7 @@ class ContactUnitsService:
         contact_unit_ids: list[str],
     ) -> list[dict[str, Any]]:
         """Activate selected pending units or raise when any id is invalid."""
+        contact_unit_ids = self._validate_contact_unit_ids(contact_unit_ids)
         conflicts = await self.repo.find_active_primary_conflicts(
             organization_id=organization_id,
             contact_id=contact_id,
@@ -207,45 +219,22 @@ class ContactUnitsService:
         """Map confirmed contact_unit rows to API items."""
         return [{"id": row["id"], "status": row["status"]} for row in rows]
 
-    async def confirm_properties(
+    async def _accept_pending_units(
         self,
         *,
         contact_id: str,
         contact_unit_ids: list[str],
         default_contact_unit_id: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Confirm selected pending units and complete the properties step."""
+    ) -> dict[str, Any]:
+        """Activate pending units immediately and return acceptance summary."""
         org_id = self.user_context.organization_id
         assert org_id
-        profile_step = await self.onboarding_repo.list_steps(
-            organization_id=org_id,
-            contact_id=contact_id,
-        )
-        profile_status = next(
-            (
-                row.get("status")
-                for row in profile_step
-                if row.get("step_key") == ContactOnboardingStep.COMPLETE_PROFILE.value
-            ),
-            None,
-        )
-        if profile_status not in {"completed", "skipped"}:
-            raise ValidationException(
-                message_key="contact_onboarding.errors.profile_step_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
         updated = await self._confirm_pending_units(
             organization_id=org_id,
             contact_id=contact_id,
             contact_unit_ids=contact_unit_ids,
         )
         confirmed_ids = [str(row["id"]) for row in updated]
-        await self.unit_onboarding_repo.ensure_steps_for_units(
-            organization_id=org_id,
-            contact_id=contact_id,
-            contact_unit_ids=confirmed_ids,
-        )
 
         if len(updated) == 1:
             await self.repo.set_default_login(
@@ -253,12 +242,8 @@ class ContactUnitsService:
                 contact_id=contact_id,
                 contact_unit_id=str(updated[0]["id"]),
             )
-            await self.onboarding_repo.complete_step(
-                organization_id=org_id,
-                contact_id=contact_id,
-                step_key=ContactOnboardingStep.CHOOSE_UNIT.value,
-            )
         elif default_contact_unit_id:
+            default_contact_unit_id = self._validate_contact_unit_ids([default_contact_unit_id])[0]
             if default_contact_unit_id not in confirmed_ids:
                 raise ValidationException(
                     message_key="contact_onboarding.errors.contact_unit_not_found",
@@ -269,57 +254,7 @@ class ContactUnitsService:
                 contact_id=contact_id,
                 contact_unit_id=default_contact_unit_id,
             )
-            await self.onboarding_repo.complete_step(
-                organization_id=org_id,
-                contact_id=contact_id,
-                step_key=ContactOnboardingStep.CHOOSE_UNIT.value,
-            )
 
-        await self.onboarding_repo.complete_step(
-            organization_id=org_id,
-            contact_id=contact_id,
-            step_key=ContactOnboardingStep.SELECT_PROPERTIES.value,
-        )
-        if await self.onboarding_repo.is_wizard_completed(
-            organization_id=org_id,
-            contact_id=contact_id,
-        ):
-            await self.repo.activate_units_by_ids(
-                organization_id=org_id,
-                contact_id=contact_id,
-                contact_unit_ids=confirmed_ids,
-            )
-        return self._confirmed_items(updated)
-
-    async def claim_properties(
-        self,
-        *,
-        contact_id: str,
-        contact_unit_ids: list[str],
-    ) -> dict[str, Any]:
-        """Accept pending units after onboarding is already complete."""
-        org_id = self.user_context.organization_id
-        assert org_id
-        if not await self.onboarding_repo.is_wizard_completed(
-            organization_id=org_id,
-            contact_id=contact_id,
-        ):
-            raise ValidationException(
-                message_key="contact_onboarding.errors.onboarding_not_completed_use_confirm",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        updated = await self._confirm_pending_units(
-            organization_id=org_id,
-            contact_id=contact_id,
-            contact_unit_ids=contact_unit_ids,
-        )
-        confirmed_ids = [str(row["id"]) for row in updated]
-        await self.unit_onboarding_repo.ensure_steps_for_units(
-            organization_id=org_id,
-            contact_id=contact_id,
-            contact_unit_ids=confirmed_ids,
-        )
         await self.repo.activate_units_by_ids(
             organization_id=org_id,
             contact_id=contact_id,
@@ -339,10 +274,51 @@ class ContactUnitsService:
             "requires_default_unit": active_count > 1 and not has_default,
         }
 
+    async def confirm_properties(
+        self,
+        *,
+        contact_id: str,
+        contact_unit_ids: list[str],
+        default_contact_unit_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Accept selected pending units (same behavior as claim; no wizard gates)."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        result = await self._accept_pending_units(
+            contact_id=contact_id,
+            contact_unit_ids=contact_unit_ids,
+            default_contact_unit_id=default_contact_unit_id,
+        )
+        await self.onboarding_repo.complete_step(
+            organization_id=org_id,
+            contact_id=contact_id,
+            step_key=ContactOnboardingStep.SELECT_PROPERTIES.value,
+        )
+        if not result["requires_default_unit"]:
+            await self.onboarding_repo.complete_step(
+                organization_id=org_id,
+                contact_id=contact_id,
+                step_key=ContactOnboardingStep.CHOOSE_UNIT.value,
+            )
+        return result
+
+    async def claim_properties(
+        self,
+        *,
+        contact_id: str,
+        contact_unit_ids: list[str],
+    ) -> dict[str, Any]:
+        """Accept pending units (alias of confirm; no onboarding completion required)."""
+        return await self._accept_pending_units(
+            contact_id=contact_id,
+            contact_unit_ids=contact_unit_ids,
+        )
+
     async def set_default_unit(self, *, contact_id: str, contact_unit_id: str) -> dict[str, Any]:
         """Set the default login unit and complete the choose-unit step."""
         org_id = self.user_context.organization_id
         assert org_id
+        contact_unit_id = self._validate_contact_unit_ids([contact_unit_id])[0]
         row = await self.repo.set_default_login(
             organization_id=org_id,
             contact_id=contact_id,

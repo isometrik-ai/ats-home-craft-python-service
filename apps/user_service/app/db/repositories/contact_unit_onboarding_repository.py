@@ -47,7 +47,7 @@ class ContactUnitOnboardingRepository(BaseRepository):
         contact_id: str,
         contact_unit_ids: list[str],
     ) -> None:
-        """Ensure unit steps exist for each contact_unit row."""
+        """Ensure unit steps exist for each contact_unit row (legacy; prefer lazy seed on complete/skip)."""
         for contact_unit_id in contact_unit_ids:
             await self.ensure_steps(
                 organization_id=organization_id,
@@ -125,7 +125,12 @@ class ContactUnitOnboardingRepository(BaseRepository):
         contact_unit_id: str,
         step_key: str,
     ) -> dict[str, Any] | None:
-        """Mark a unit-level step completed."""
+        """Mark a unit-level step completed (seeds rows on first use)."""
+        await self.ensure_steps(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            contact_unit_id=contact_unit_id,
+        )
         row = await self.db_connection.fetchrow(
             """
             UPDATE contact_unit_onboarding_steps
@@ -154,7 +159,12 @@ class ContactUnitOnboardingRepository(BaseRepository):
         contact_unit_id: str,
         step_key: str,
     ) -> dict[str, Any] | None:
-        """Mark a unit-level step skipped."""
+        """Mark a unit-level step skipped (seeds rows on first use)."""
+        await self.ensure_steps(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            contact_unit_id=contact_unit_id,
+        )
         row = await self.db_connection.fetchrow(
             """
             UPDATE contact_unit_onboarding_steps

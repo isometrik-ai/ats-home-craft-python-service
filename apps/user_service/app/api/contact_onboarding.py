@@ -11,23 +11,37 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_service
 from apps.user_service.app.schemas.contact_onboarding import (
     AcceptHouseholdInvitationRequest,
+    AddHouseholdMemberApiResponse,
+    ClaimPropertiesApiResponse,
     ClaimPropertiesRequest,
     ClaimPropertiesResponse,
-    CompleteOnboardingRequest,
     CompleteProfileRequest,
-    CompleteStepRequest,
-    CompleteUnitStepRequest,
     ConfirmPropertiesRequest,
+    ContactOnboardingMessageApiResponse,
+    ContactProfileApiResponse,
+    ContactPropertiesListApiResponse,
     ContactPropertyProjectGroupResponse,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
     DeclineHouseholdInvitationRequest,
+    HouseholdInvitationAcceptApiResponse,
+    HouseholdInvitationDeclineApiResponse,
+    HouseholdInvitationSentApiResponse,
+    HouseholdInvitationValidateApiResponse,
+    HouseholdMemberApiResponse,
+    HouseholdMemberListApiResponse,
+    OnboardingStatusApiResponse,
+    RemoveHouseholdMemberApiResponse,
     ResubmitVehicleRequest,
+    SetDefaultUnitApiResponse,
     SetDefaultUnitRequest,
     UpdateHouseholdMemberRequest,
     UpdateVehicleRequest,
     ValidateHouseholdInvitationRequest,
+    VehicleCatalogApiResponse,
     VehicleCatalogResponse,
+    VehicleDetailApiResponse,
+    VehicleListApiResponse,
     VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import VehicleType
@@ -66,6 +80,98 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 }
 
 
+def _ok_response(
+    model: type,
+    description: str,
+    *,
+    status_code: int = http_status.HTTP_200_OK,
+) -> dict[int | str, dict]:
+    """Build OpenAPI responses for a successful JSON envelope."""
+    return {
+        **COMMON_ERROR_RESPONSES,
+        status_code: {"model": model, "description": description},
+    }
+
+
+def _created_response(model: type, description: str) -> dict[int | str, dict]:
+    """Build OpenAPI responses for HTTP 201 success."""
+    return _ok_response(model, description, status_code=http_status.HTTP_201_CREATED)
+
+
+STATUS_SUCCESS_RESPONSES = _ok_response(
+    OnboardingStatusApiResponse,
+    "Onboarding prompts for the authenticated contact.",
+)
+PROPERTIES_LIST_SUCCESS_RESPONSES = _ok_response(
+    ContactPropertiesListApiResponse,
+    "Pending and active properties grouped by project.",
+)
+CLAIM_PROPERTIES_SUCCESS_RESPONSES = _ok_response(
+    ClaimPropertiesApiResponse,
+    "Confirmed or claimed contact units with default-unit hint.",
+)
+PROFILE_SUCCESS_RESPONSES = _ok_response(
+    ContactProfileApiResponse,
+    "Contact profile details.",
+)
+VEHICLE_CATALOG_SUCCESS_RESPONSES = _ok_response(
+    VehicleCatalogApiResponse,
+    "Vehicle brand, model, and color picker options.",
+)
+VEHICLE_LIST_SUCCESS_RESPONSES = _ok_response(
+    VehicleListApiResponse,
+    "Vehicles registered by the authenticated contact.",
+)
+VEHICLE_DETAIL_SUCCESS_RESPONSES = _ok_response(
+    VehicleDetailApiResponse,
+    "Vehicle detail including unit and parking allotment.",
+)
+VEHICLE_CREATED_SUCCESS_RESPONSES = _created_response(
+    VehicleDetailApiResponse,
+    "Newly registered vehicle.",
+)
+VEHICLE_WITHDRAW_SUCCESS_RESPONSES = _ok_response(
+    ContactOnboardingMessageApiResponse,
+    "Pending vehicle request withdrawn.",
+)
+HOUSEHOLD_LIST_SUCCESS_RESPONSES = _ok_response(
+    HouseholdMemberListApiResponse,
+    "Household members linked to the contact's units.",
+)
+ADD_HOUSEHOLD_MEMBER_SUCCESS_RESPONSES = _created_response(
+    AddHouseholdMemberApiResponse,
+    "New household member linked to the unit.",
+)
+HOUSEHOLD_MEMBER_SUCCESS_RESPONSES = _ok_response(
+    HouseholdMemberApiResponse,
+    "Updated household member.",
+)
+INVITATION_VALIDATE_SUCCESS_RESPONSES = _ok_response(
+    HouseholdInvitationValidateApiResponse,
+    "Invitation token validation result.",
+)
+INVITATION_ACCEPT_SUCCESS_RESPONSES = _ok_response(
+    HouseholdInvitationAcceptApiResponse,
+    "Invitation accepted; session tokens returned.",
+)
+INVITATION_DECLINE_SUCCESS_RESPONSES = _ok_response(
+    HouseholdInvitationDeclineApiResponse,
+    "Invitation declined.",
+)
+INVITATION_RESEND_SUCCESS_RESPONSES = _ok_response(
+    HouseholdInvitationSentApiResponse,
+    "Invitation SMS resent.",
+)
+REMOVE_HOUSEHOLD_MEMBER_SUCCESS_RESPONSES = _ok_response(
+    RemoveHouseholdMemberApiResponse,
+    "Household member removed.",
+)
+SET_DEFAULT_UNIT_SUCCESS_RESPONSES = _ok_response(
+    SetDefaultUnitApiResponse,
+    "Default login unit updated.",
+)
+
+
 def _service(
     *,
     db_connection: asyncpg.Connection,
@@ -84,8 +190,9 @@ def _service(
 @router.get(
     "/status",
     status_code=http_status.HTTP_200_OK,
-    summary="Get onboarding wizard status",
-    responses=COMMON_ERROR_RESPONSES,
+    summary="Get onboarding status",
+    response_model=None,
+    responses=STATUS_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def get_onboarding_status(
@@ -93,7 +200,7 @@ async def get_onboarding_status(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return onboarding wizard status for the authenticated contact."""
+    """Return onboarding prompts for the authenticated contact."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -125,7 +232,8 @@ async def get_onboarding_status(
     "/properties",
     status_code=http_status.HTTP_200_OK,
     summary="List claimable properties",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=PROPERTIES_LIST_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_properties(
@@ -160,7 +268,8 @@ async def list_properties(
     "/properties/confirm",
     status_code=http_status.HTTP_200_OK,
     summary="Confirm selected properties",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=CLAIM_PROPERTIES_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -198,11 +307,12 @@ async def confirm_properties(
         risk_level="high",
         new_data=data,
     )
+    payload = ClaimPropertiesResponse.model_validate(data).model_dump(exclude_none=True)
     return success_response(
         request=request,
         message_key="contact_onboarding.success.properties_confirmed",
         custom_code=CustomStatusCode.SUCCESS,
-        data={"items": data},
+        data=payload,
     )
 
 
@@ -215,7 +325,8 @@ async def confirm_properties(
         "Accept pending unit allotments when onboarding is already finished. "
         "Sets activated_at on claimed units and returns whether a default login unit is needed."
     ),
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=CLAIM_PROPERTIES_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -266,7 +377,8 @@ async def claim_properties(
     "/profile",
     status_code=http_status.HTTP_200_OK,
     summary="Get contact profile for onboarding",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=PROFILE_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def get_profile(
@@ -297,7 +409,8 @@ async def get_profile(
     "/profile",
     status_code=http_status.HTTP_200_OK,
     summary="Complete profile step",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=PROFILE_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -350,7 +463,8 @@ async def complete_profile(
         "Returns static picker options from vehicle_catalog.json for the given vehicle_type. "
         "Optional brand_id narrows models to one brand; search filters names."
     ),
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_CATALOG_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def get_vehicle_catalog(
@@ -390,7 +504,8 @@ async def get_vehicle_catalog(
     "/vehicles",
     status_code=http_status.HTTP_200_OK,
     summary="List vehicles",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_LIST_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_vehicles(
@@ -428,7 +543,8 @@ async def list_vehicles(
     "/vehicles",
     status_code=http_status.HTTP_201_CREATED,
     summary="Register a vehicle",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_CREATED_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -480,7 +596,8 @@ async def create_vehicle(
         "Returns one vehicle registered by the authenticated contact, including "
         "assigned unit summary and parking slot allotment when approved."
     ),
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_DETAIL_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def get_vehicle_detail(
@@ -515,7 +632,8 @@ async def get_vehicle_detail(
     "/vehicles/{vehicle_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Update a vehicle",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_DETAIL_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -567,7 +685,8 @@ async def update_vehicle(
     "/vehicles/{vehicle_id}/resubmit",
     status_code=http_status.HTTP_200_OK,
     summary="Resubmit a rejected vehicle request",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_DETAIL_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -619,7 +738,8 @@ async def resubmit_vehicle(
     "/vehicles/{vehicle_id}/withdraw",
     status_code=http_status.HTTP_200_OK,
     summary="Withdraw a pending vehicle request",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_WITHDRAW_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -667,7 +787,8 @@ async def withdraw_vehicle(
     "/vehicles/{vehicle_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Remove an approved vehicle",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=VEHICLE_DETAIL_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -712,110 +833,13 @@ async def remove_vehicle(
     )
 
 
-@handle_api_exceptions("complete vehicles step")
-@router.post(
-    "/steps/vehicles/complete",
-    status_code=http_status.HTTP_200_OK,
-    summary="Mark vehicles step complete",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("30/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["audit_required"],
-    table_name="contact_unit_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def complete_vehicles_step(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteUnitStepRequest = Body(...),
-):
-    """Mark the vehicles onboarding step complete for one unit."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_unit_onboarding_steps",
-        requested_id=body.contact_unit_id,
-        description=f"Completed vehicles step for contact: {contact['id']}",
-        risk_level="medium",
-    )
-    vehicles_service = VehiclesService(
-        db_connection=db_connection,
-        user_context=user_context,
-    )
-    await vehicles_service.complete_vehicles_step(
-        contact_id=str(contact["id"]),
-        contact_unit_id=body.contact_unit_id,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.step_completed",
-        custom_code=CustomStatusCode.SUCCESS,
-    )
-
-
-@handle_api_exceptions("skip onboarding step")
-@router.post(
-    "/steps/skip",
-    status_code=http_status.HTTP_200_OK,
-    summary="Skip an optional onboarding step",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("30/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["gdpr", "pii", "audit_required"],
-    table_name="contact_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def skip_onboarding_step(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteStepRequest = Body(...),
-):
-    """Skip an optional onboarding step."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_onboarding_steps",
-        requested_id=str(contact["id"]),
-        description=f"Skipped onboarding step for contact: {contact['id']}",
-        risk_level="medium",
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=None,
-    )
-    await service.skip_step(
-        contact_id=str(contact["id"]),
-        step_key=body.step_key.value,
-        contact_unit_id=body.contact_unit_id,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.step_skipped",
-        custom_code=CustomStatusCode.SUCCESS,
-    )
-
-
 @handle_api_exceptions("list household members")
 @router.get(
     "/household",
     status_code=http_status.HTTP_200_OK,
     summary="List household members",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=HOUSEHOLD_LIST_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_household(
@@ -854,7 +878,8 @@ async def list_household(
     "/household",
     status_code=http_status.HTTP_201_CREATED,
     summary="Add household member",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=ADD_HOUSEHOLD_MEMBER_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -907,7 +932,8 @@ async def add_household_member(
     "/household/{contact_unit_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Update household member",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=HOUSEHOLD_MEMBER_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -976,7 +1002,8 @@ def _invitation_service(
     "/household/invitations/validate",
     status_code=http_status.HTTP_200_OK,
     summary="Validate household invitation token",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=INVITATION_VALIDATE_SUCCESS_RESPONSES,
 )
 @limiter.limit("60/minute")
 async def validate_household_invitation(
@@ -1000,7 +1027,8 @@ async def validate_household_invitation(
     "/household/invitations/accept",
     status_code=http_status.HTTP_200_OK,
     summary="Accept household invitation",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=INVITATION_ACCEPT_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -1061,7 +1089,8 @@ async def accept_household_invitation(
     "/household/invitations/decline",
     status_code=http_status.HTTP_200_OK,
     summary="Decline household invitation",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=INVITATION_DECLINE_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -1109,7 +1138,8 @@ async def decline_household_invitation(
     "/household/{contact_unit_id}/revoke-invitation",
     status_code=http_status.HTTP_200_OK,
     summary="Revoke a pending household invitation",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=HOUSEHOLD_MEMBER_SUCCESS_RESPONSES,
 )
 @limiter.limit("10/minute")
 @audit_api_call(
@@ -1160,7 +1190,8 @@ async def revoke_household_invitation(
     "/household/{contact_unit_id}/resend-invitation",
     status_code=http_status.HTTP_200_OK,
     summary="Resend household invitation SMS",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=INVITATION_RESEND_SUCCESS_RESPONSES,
 )
 @limiter.limit("10/minute")
 @audit_api_call(
@@ -1211,7 +1242,8 @@ async def resend_household_invitation(
     "/household/{contact_unit_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Remove household member",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=REMOVE_HOUSEHOLD_MEMBER_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -1257,61 +1289,13 @@ async def remove_household_member(
     )
 
 
-@handle_api_exceptions("complete household step")
-@router.post(
-    "/steps/household/complete",
-    status_code=http_status.HTTP_200_OK,
-    summary="Mark household step complete",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("30/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["audit_required"],
-    table_name="contact_unit_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def complete_household_step(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteUnitStepRequest = Body(...),
-):
-    """Mark the household onboarding step complete for one unit."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_unit_onboarding_steps",
-        requested_id=body.contact_unit_id,
-        description=f"Completed household step for contact: {contact['id']}",
-        risk_level="medium",
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=None,
-    )
-    await service.complete_household_step(
-        contact_id=str(contact["id"]),
-        contact_unit_id=body.contact_unit_id,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.step_completed",
-        custom_code=CustomStatusCode.SUCCESS,
-    )
-
-
 @handle_api_exceptions("set default login unit")
 @router.post(
     "/default-unit",
     status_code=http_status.HTTP_200_OK,
     summary="Choose default unit to login",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=SET_DEFAULT_UNIT_SUCCESS_RESPONSES,
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -1351,94 +1335,6 @@ async def set_default_unit(
     return success_response(
         request=request,
         message_key="contact_onboarding.success.default_unit_set",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("get onboarding review")
-@router.get(
-    "/review",
-    status_code=http_status.HTTP_200_OK,
-    summary="Review onboarding summary",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("100/minute")
-async def get_review(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-    sb_client: AsyncClient = Depends(supabase_service),
-):
-    """Return aggregated onboarding review data."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=sb_client,
-    )
-    data = await service.get_review(contact_id=str(contact["id"]))
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.review_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("complete contact onboarding")
-@router.post(
-    "/complete",
-    status_code=http_status.HTTP_200_OK,
-    summary="Finalize onboarding",
-    description=(
-        "Finalize onboarding and activate confirmed properties. Optionally pass "
-        "`contact_unit_ids` to finish a subset now; other active properties are moved "
-        "back to pending and can be claimed later via POST /properties/claim."
-    ),
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("10/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["gdpr", "pii", "audit_required"],
-    table_name="contact_onboarding_steps",
-    category="CONTACT_ONBOARDING",
-)
-async def complete_onboarding(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-    body: CompleteOnboardingRequest | None = Body(default=None),
-):
-    """Finalize contact onboarding and activate assigned units."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    service = _service(
-        db_connection=db_connection,
-        user_context=user_context,
-        sb_client=None,
-    )
-    data = await service.complete_onboarding(
-        contact_id=str(contact["id"]),
-        body=body,
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="contact_onboarding_steps",
-        requested_id=str(contact["id"]),
-        description=f"Completed onboarding for contact: {contact['id']}",
-        risk_level="high",
-        new_data=data,
-    )
-    return success_response(
-        request=request,
-        message_key="contact_onboarding.success.onboarding_completed",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

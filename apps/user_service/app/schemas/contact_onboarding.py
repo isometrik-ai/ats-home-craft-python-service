@@ -16,7 +16,6 @@ from apps.user_service.app.schemas.contacts import (
 from apps.user_service.app.schemas.enums import (
     ContactBloodGroup,
     ContactGender,
-    ContactOnboardingStep,
     ContactUnitRelationship,
     VehicleFuelType,
     VehicleStatus,
@@ -146,21 +145,6 @@ class ClaimPropertiesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     contact_unit_ids: list[str] = Field(..., min_length=1)
-
-
-class CompleteOnboardingRequest(BaseModel):
-    """Finalize onboarding for all or a subset of active properties."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    contact_unit_ids: list[str] | None = Field(
-        default=None,
-        min_length=1,
-        description=(
-            "Optional active contact_unit ids to finalize now. Omitted ids are moved back "
-            "to pending and can be claimed later via POST /properties/claim."
-        ),
-    )
 
 
 class ClaimPropertiesResponse(BaseModel):
@@ -514,40 +498,6 @@ class SetDefaultUnitRequest(BaseModel):
     contact_unit_id: str
 
 
-class CompleteUnitStepRequest(BaseModel):
-    """Complete a unit-scoped onboarding step (vehicles or household)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    contact_unit_id: str
-
-
-class CompleteStepRequest(BaseModel):
-    """Mark an optional step complete (unit-scoped for vehicles/household)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    step_key: ContactOnboardingStep
-    contact_unit_id: str | None = Field(
-        None,
-        description="Required when step_key is vehicles or household.",
-    )
-
-    @model_validator(mode="after")
-    def validate_unit_step(self) -> CompleteStepRequest:
-        """Unit-scoped steps require contact_unit_id."""
-        unit_steps = {
-            ContactOnboardingStep.VEHICLES.value,
-            ContactOnboardingStep.HOUSEHOLD.value,
-        }
-        if self.step_key.value in unit_steps and not self.contact_unit_id:
-            raise ValidationException(
-                message_key="contact_onboarding.errors.unit_step_requires_contact_unit",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return self
-
-
 class AdminAssignUnitRequest(BaseModel):
     """Admin pre-allotment of a unit to a contact."""
 
@@ -584,39 +534,25 @@ class ContactUnitAssignmentResponse(BaseModel):
     created_at: str | None = None
 
 
-class OnboardingStepResponse(BaseModel):
-    """Single wizard step."""
+class OnboardingPromptResponse(BaseModel):
+    """Optional home-screen action for the contact (nothing here blocks app usage)."""
 
-    step_key: str
-    status: str
-    completed_at: str | None = None
+    model_config = ConfigDict(extra="allow")
 
-
-class UnitOnboardingStepResponse(BaseModel):
-    """Single unit-scoped wizard step."""
-
-    step_key: str
-    status: str
-    completed_at: str | None = None
-
-
-class UnitOnboardingProgressResponse(BaseModel):
-    """Per-unit vehicles/household progress."""
-
-    contact_unit_id: str
-    unit_id: str
-    unit_code: str | None = None
-    steps: list[UnitOnboardingStepResponse] = Field(default_factory=list)
+    type: str
+    contact_unit_id: str | None = None
+    unit_id: str | None = None
 
 
 class OnboardingStatusResponse(BaseModel):
-    """Wizard progress."""
+    """Onboarding prompts for the authenticated contact."""
 
-    setup_current_step: str | None
-    current_contact_unit_id: str | None = None
+    profile_complete: bool = False
+    pending_unit_count: int = 0
+    active_unit_count: int = 0
+    requires_default_unit: bool = False
+    prompts: list[OnboardingPromptResponse] = Field(default_factory=list)
     is_completed: bool
-    steps: list[OnboardingStepResponse]
-    unit_onboarding: list[UnitOnboardingProgressResponse] = Field(default_factory=list)
 
 
 class HouseholdMemberResponse(BaseModel):
@@ -682,6 +618,8 @@ class HouseholdInvitationValidateResponse(BaseModel):
     organization_name: str | None = None
     phone_masked: str | None = None
     expires_at: str | None = None
+    invitation_status: str | None = None
+    already_accepted: bool = False
 
 
 class HouseholdInvitationDeclineResponse(BaseModel):
@@ -720,11 +658,217 @@ class HouseholdInvitationAcceptResponse(BaseModel):
     user: HouseholdInvitationUserInfo
 
 
-class OnboardingReviewResponse(BaseModel):
-    """Review screen aggregate."""
+class AddHouseholdMemberResponse(BaseModel):
+    """Result of adding a household member."""
 
-    contact: ContactDetailsResponse
-    units: list[ContactUnitSummaryResponse]
-    vehicles: list[VehicleResponse]
-    household: list[HouseholdMemberResponse]
-    steps: list[OnboardingStepResponse]
+    model_config = ConfigDict(extra="ignore")
+
+    contact_id: str
+    contact_unit_id: str
+    member_status: str
+    invitation_id: str | None = None
+    phone_masked: str | None = None
+    invite_url: str | None = None
+
+
+class RemoveHouseholdMemberResponse(BaseModel):
+    """Result of removing a household member."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_unit_id: str
+    contact_id: str
+    contact_deleted: bool = False
+
+
+class HouseholdInvitationSentResponse(BaseModel):
+    """Result after creating or resending a household invitation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    invitation_id: str
+    contact_unit_id: str
+    member_status: str
+    phone_masked: str | None = None
+    invite_url: str | None = None
+
+
+class OnboardingStatusApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/status."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: OnboardingStatusResponse
+
+
+class ContactPropertiesListApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/properties."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[ContactPropertyProjectGroupResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ClaimPropertiesApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/properties/confirm and /claim."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ClaimPropertiesResponse
+
+
+class ContactProfileApiResponse(BaseModel):
+    """API envelope for GET/PATCH /contact-onboarding/profile."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ContactDetailsResponse
+
+
+class VehicleCatalogApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/vehicles/options."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: VehicleCatalogResponse
+
+
+class VehicleListApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/vehicles."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[VehicleResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class VehicleDetailApiResponse(BaseModel):
+    """API envelope for vehicle detail and mutation endpoints."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: VehicleResponse
+
+
+class ContactOnboardingMessageApiResponse(BaseModel):
+    """API envelope for endpoints that return success without a data payload."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+
+
+class HouseholdMemberListApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/household."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[HouseholdMemberResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class AddHouseholdMemberApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: AddHouseholdMemberResponse
+
+
+class HouseholdMemberApiResponse(BaseModel):
+    """API envelope for household member update and invitation revoke."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdMemberResponse
+
+
+class HouseholdInvitationValidateApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/invitations/validate."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationValidateResponse
+
+
+class HouseholdInvitationAcceptApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/invitations/accept."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationAcceptResponse
+
+
+class HouseholdInvitationDeclineApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/invitations/decline."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationDeclineResponse
+
+
+class HouseholdInvitationSentApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/household/{id}/resend-invitation."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdInvitationSentResponse
+
+
+class RemoveHouseholdMemberApiResponse(BaseModel):
+    """API envelope for DELETE /contact-onboarding/household/{id}."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: RemoveHouseholdMemberResponse
+
+
+class SetDefaultUnitApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/default-unit."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ContactUnitSummaryResponse
