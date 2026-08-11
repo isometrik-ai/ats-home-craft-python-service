@@ -343,8 +343,15 @@ async def test_get_log_detail_returns_pass_timeline():
             "id": "evt-1",
             "event_type": PassEventType.CHECKED_IN.value,
             "actor_user_id": "guard-1",
-            "occurred_at": datetime(2026, 6, 9, 9, 12, tzinfo=timezone.utc),
-        }
+            "occurred_at": datetime(2026, 6, 9, 9, 0, tzinfo=timezone.utc),
+            "entry_method": "code",
+        },
+        {
+            "id": "evt-2",
+            "event_type": PassEventType.CHECKED_OUT.value,
+            "actor_user_id": "guard-1",
+            "occurred_at": datetime(2026, 6, 9, 9, 6, tzinfo=timezone.utc),
+        },
     ]
     passes_repo = _FakePassesRepo(row=pass_row)
     events_repo = _FakeEventsRepo(events=events)
@@ -369,6 +376,7 @@ async def test_get_log_detail_returns_pass_timeline():
                     "created_by_contact_id": "owner-1",
                     "guest_phone_isd_code": "+91",
                     "guest_phone_number": "9876543210",
+                    "vehicle_number": "MH12AB1234",
                     "pass_image_path": "org/passes/pass-4821.png",
                     "events": events or [],
                     "include_events": include_events,
@@ -390,7 +398,11 @@ async def test_get_log_detail_returns_pass_timeline():
     assert detail["visitor_phone_number"] == "9876543210"
     assert detail["resident"]["contact_id"] == "owner-1"
     assert detail["resident"]["role"] == "Owner"
-    assert detail["visit_status"] == VisitorLogVisitStatus.INSIDE.value
+    assert detail["visit_status"] == VisitorLogVisitStatus.EXITED.value
+    assert detail["visitor_type"] == VisitorType.GUEST.value
+    assert detail["entry_method"] == "code"
+    assert detail["vehicle_number"] == "MH12AB1234"
+    assert detail["time_spent_minutes"] == 6
 
 
 @pytest.mark.asyncio
@@ -415,6 +427,16 @@ async def test_get_log_detail_returns_walk_in_when_pass_missing():
                 }
             ]
 
+        async def list_events(self, **_kwargs):
+            return [
+                {
+                    "id": "evt-enter-1",
+                    "event_type": WalkInEventType.ENTERED.value,
+                    "actor_user_id": "guard-1",
+                    "occurred_at": datetime(2026, 8, 7, 9, 22, tzinfo=timezone.utc),
+                }
+            ]
+
     class _FakeWalkInService:
         def __init__(self):
             self.repo = _FakeWalkInRepo()
@@ -424,6 +446,8 @@ async def test_get_log_detail_returns_walk_in_when_pass_missing():
                 "id": row["id"],
                 "project_id": row["project_id"],
                 "status": "exited",
+                "entered_at": "2026-08-07T09:22:00+00:00",
+                "exited_at": "2026-08-07T10:05:00+00:00",
                 "visitor_phone_isd_code": "+91",
                 "visitor_phone_number": "9876501234",
                 "visitor_photo_paths": ["org/walk-ins/photo-1.jpg"],
@@ -442,7 +466,7 @@ async def test_get_log_detail_returns_walk_in_when_pass_missing():
                     {
                         "id": "evt-enter-1",
                         "event_type": WalkInEventType.ENTERED.value,
-                        "actor_user_id": "guard-1",
+                        "actor_label": "Mr Ajay Guard",
                     }
                 ],
             }
@@ -474,6 +498,46 @@ async def test_get_log_detail_returns_walk_in_when_pass_missing():
     assert len(detail["vehicle_photo_urls"]) == 1
     assert detail["image_urls"] == detail["visitor_photo_urls"] + detail["vehicle_photo_urls"]
     assert detail["visit_status"] == VisitorLogVisitStatus.EXITED.value
+    assert detail["visitor_type"] == VisitorType.VISITOR.value
+    assert detail["entry_method"] == "manual"
+    assert detail["vehicle_number"] is None
+    assert detail["time_spent_minutes"] == 43
+
+
+@pytest.mark.asyncio
+async def test_get_log_detail_guard_name_from_actor_label_when_user_id_missing():
+    """Detail guard fields should fall back to actor_label like the list API."""
+    pass_row = {
+        "id": "pass-1",
+        "unit_id": "unit-1",
+        "created_by_contact_id": "owner-1",
+        "pass_type": "guest",
+        "status": "approved",
+    }
+    events = [
+        {
+            "id": "evt-1",
+            "event_type": PassEventType.CHECKED_IN.value,
+            "actor_label": "Gate Guard Sharma",
+            "occurred_at": datetime(2026, 6, 9, 9, 0, tzinfo=timezone.utc),
+        },
+    ]
+    passes_repo = _FakePassesRepo(row=pass_row)
+    events_repo = _FakeEventsRepo(events=events)
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+    svc._passes_service = type(
+        "Passes",
+        (),
+        {
+            "_normalize_event": staticmethod(lambda row: row),
+            "_normalize_pass": staticmethod(
+                lambda row, events=None, include_events=False: {**row, "events": events or []}
+            ),
+        },
+    )()
+    detail = await svc.get_log_detail(pass_id="pass-1")
+    assert detail["guard_user_id"] is None
+    assert detail["guard_name"] == "Gate Guard Sharma"
 
 
 def test_pass_visit_status_exited_with_check_in_and_out():

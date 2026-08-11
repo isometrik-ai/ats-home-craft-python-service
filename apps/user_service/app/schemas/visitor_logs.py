@@ -379,6 +379,9 @@ class VisitorLogPassDetailData(PassResponse):
                 "guard_user_id": "d4772ff8-eb05-47f7-84ee-b235ff512157",
                 "guard_name": "Mr. Ajay Thakur Guard",
                 "visit_status": VisitorLogVisitStatus.EXITED.value,
+                "visitor_type": VisitorType.GUEST.value,
+                "entry_method": PassEntryMethod.CODE.value,
+                "time_spent_minutes": 0,
                 "resident": _EXAMPLE_UNIT_RESIDENT,
                 "pass_image_url": "https://media.houseofapps.ai/org/passes/pass-4821.png",
                 "image_urls": ["https://media.houseofapps.ai/org/passes/pass-4821.png"],
@@ -411,6 +414,18 @@ class VisitorLogPassDetailData(PassResponse):
             "Unified visit status aligned with the list API: awaiting_approval, approved, "
             "inside, exited, expired, or denied."
         ),
+    )
+    visitor_type: str = Field(
+        ...,
+        description="High-level visitor category (guest or visitor), aligned with the list API.",
+    )
+    entry_method: str | None = Field(
+        None,
+        description="How the visitor was admitted at the gate (from the latest check-in event).",
+    )
+    time_spent_minutes: int | None = Field(
+        None,
+        description="Minutes between check-in and check-out when both exist.",
     )
     visitor_phone_isd_code: str | None = Field(
         None,
@@ -464,6 +479,10 @@ class VisitorLogWalkInDetailData(WalkInDetailResponse):
                 "guard_user_id": "d4772ff8-eb05-47f7-84ee-b235ff512157",
                 "guard_name": "Mr. Ajay Thakur Guard",
                 "visit_status": VisitorLogVisitStatus.EXITED.value,
+                "visitor_type": VisitorType.VISITOR.value,
+                "entry_method": PassEntryMethod.MANUAL.value,
+                "vehicle_number": None,
+                "time_spent_minutes": 43,
                 "resident": _EXAMPLE_UNIT_RESIDENT,
                 "visitor_photo_urls": ["https://media.houseofapps.ai/org/walk-ins/photo-1.jpg"],
                 "vehicle_photo_urls": [],
@@ -518,6 +537,22 @@ class VisitorLogWalkInDetailData(WalkInDetailResponse):
             "inside, exited, expired, or denied."
         ),
     )
+    visitor_type: str = Field(
+        ...,
+        description="High-level visitor category (always visitor for walk-ins).",
+    )
+    entry_method: str = Field(
+        ...,
+        description="Walk-ins are always recorded as manual gate entry.",
+    )
+    vehicle_number: str | None = Field(
+        None,
+        description="Vehicle registration when captured (walk-ins do not store this today).",
+    )
+    time_spent_minutes: int | None = Field(
+        None,
+        description="Minutes between entered_at and exited_at when both exist.",
+    )
     resident: VisitorLogResidentResponse | None = Field(
         None,
         description="Flat resident who approved the primary visited flat.",
@@ -561,6 +596,10 @@ class VisitorLogDetailApiResponse(BaseModel):
                     "guard_user_id": "d4772ff8-eb05-47f7-84ee-b235ff512157",
                     "guard_name": "Mr. Ajay Thakur Guard",
                     "visit_status": VisitorLogVisitStatus.EXITED.value,
+                    "visitor_type": VisitorType.GUEST.value,
+                    "entry_method": PassEntryMethod.CODE.value,
+                    "vehicle_number": None,
+                    "time_spent_minutes": 43,
                     "resident": _EXAMPLE_UNIT_RESIDENT,
                     "pass_image_url": "https://media.houseofapps.ai/org/passes/pass-4821.png",
                     "image_urls": ["https://media.houseofapps.ai/org/passes/pass-4821.png"],
