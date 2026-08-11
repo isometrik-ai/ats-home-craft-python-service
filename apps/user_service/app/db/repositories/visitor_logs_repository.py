@@ -67,6 +67,7 @@ _UNION_OUTPUT_COLUMNS = """
   out_time,
   flats_count,
   pass_image_path,
+  daily_help_category_name,
   visitor_photo_paths,
   vehicle_photo_paths,
   sort_time,
@@ -342,14 +343,20 @@ TRIM(
 """
         return f"""
               p.created_by_contact_id::text AS resident_contact_id,
-              {person_name} AS resident_person_name,
-              {
+              CASE
+                WHEN p.created_by_contact_id IS NOT NULL THEN {person_name}
+                ELSE NULL
+              END AS resident_person_name,
+              CASE
+                WHEN p.created_by_contact_id IS NOT NULL AND p.unit_id IS NOT NULL THEN {
             cls._contact_role_sql(
                 org_expr="p.organization_id",
                 contact_expr="p.created_by_contact_id",
                 unit_expr="p.unit_id",
             )
-        } AS resident_role,
+        }
+                ELSE NULL
+              END AS resident_role,
         """
 
     @classmethod
@@ -448,15 +455,22 @@ TRIM(
               ci.occurred_at AS in_time,
               co.occurred_at AS out_time,
               NULL::integer AS flats_count,
-              p.pass_image_path,
+              COALESCE(p.pass_image_path, dh.photo_path) AS pass_image_path,
               NULL::text[] AS visitor_photo_paths,
               NULL::text[] AS vehicle_photo_paths,
               COALESCE(ci.occurred_at, p.valid_from) AS sort_time,
-              p.created_at AS tie_breaker
+              p.created_at AS tie_breaker,
+              dhc.name AS daily_help_category_name
             FROM passes p
-            JOIN units u ON u.id = p.unit_id
+            LEFT JOIN units u ON u.id = p.unit_id
             LEFT JOIN towers t ON t.id = u.tower_id
-            JOIN contacts creator ON creator.id = p.created_by_contact_id
+            LEFT JOIN contacts creator ON creator.id = p.created_by_contact_id
+            LEFT JOIN daily_help_profiles dh
+              ON dh.id = p.daily_help_id
+             AND dh.organization_id = p.organization_id
+            LEFT JOIN daily_help_categories dhc
+              ON dhc.id = dh.category_id
+             AND dhc.organization_id = dh.organization_id
             LEFT JOIN LATERAL (
                 SELECT
                   pe.occurred_at,
@@ -575,7 +589,8 @@ TRIM(
               w.visitor_photo_paths,
               w.vehicle_photo_paths,
               COALESCE(w.entered_at, w.requested_at) AS sort_time,
-              w.created_at AS tie_breaker
+              w.created_at AS tie_breaker,
+              NULL::text AS daily_help_category_name
             FROM walk_in_entries w
             LEFT JOIN organization_members requester
               ON requester.organization_id = w.organization_id

@@ -1364,6 +1364,7 @@ class PassType(str, Enum):
     DELIVERY = "delivery"
     CAB = "cab"
     SERVICE = "service"
+    DAILY_HELP = "daily_help"
     OTHER = "other"
     WALK_IN = "walk_in"  # visitor logs filter only; not stored on passes.pass_type
 
@@ -1558,6 +1559,98 @@ TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES: tuple[TenantRequestDocumentType, ...] = 
     TenantRequestDocumentType.ID_PROOF,
     TenantRequestDocumentType.RENTAL_AGREEMENT,
     TenantRequestDocumentType.POLICE_VERIFICATION,
+)
+
+
+# ============================================================================
+# DAILY HELP ENUMS — mirror Postgres daily_help_* enums (ADR 0013)
+# ============================================================================
+
+
+class DailyHelpStatus(str, Enum):
+    """Daily help profile lifecycle status."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DELETED = "deleted"
+
+
+class DailyHelpCategoryStatus(str, Enum):
+    """Project category catalog row status."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+
+
+class DailyHelpDocumentType(str, Enum):
+    """Document slot type on a daily help profile."""
+
+    PHOTO = "photo"
+    ID_PROOF = "id_proof"
+    POLICE_VERIFICATION = "police_verification"
+    OTHER = "other"
+
+
+class DailyHelpEventType(str, Enum):
+    """Append-only daily help audit events."""
+
+    CREATED = "created"
+    UPDATED = "updated"
+    STATUS_CHANGED = "status_changed"
+    DOCUMENT_ADDED = "document_added"
+    DOCUMENT_REMOVED = "document_removed"
+    PASS_ISSUED = "pass_issued"
+    PASS_CANCELLED = "pass_cancelled"
+    DELETED = "deleted"
+    RESTORED = "restored"
+    HOUSEHOLD_LINKED = "household_linked"
+    HOUSEHOLD_REMOVED = "household_removed"
+
+
+class DailyHelpActorType(str, Enum):
+    """Who recorded a daily help event."""
+
+    STAFF = "staff"
+    RESIDENT = "resident"
+    SYSTEM = "system"
+
+
+class DailyHelpHouseholdLinkStatus(str, Enum):
+    """Resident household link status."""
+
+    ACTIVE = "active"
+    REMOVED = "removed"
+
+
+class DailyHelpAvailabilityPeriod(str, Enum):
+    """Free-time slot period label."""
+
+    MORNING = "morning"
+    EVENING = "evening"
+    FULL_DAY = "full_day"
+    OTHER = "other"
+
+
+class DailyHelpRatingTrait(str, Enum):
+    """Resident rating trait tags."""
+
+    VERY_PUNCTUAL = "very_punctual"
+    QUITE_REGULAR = "quite_regular"
+    EXCEPTIONAL_SERVICE = "exceptional_service"
+    GREAT_ATTITUDE = "great_attitude"
+
+
+DEFAULT_DAILY_HELP_CATEGORY_NAMES: tuple[str, ...] = (
+    "Maid",
+    "Cook",
+    "Nanny",
+    "Driver",
+    "Milk Delivery",
+    "Newspaper",
+    "Laundry",
+    "Gardener",
+    "Car Cleaner",
+    "Other",
 )
 
 

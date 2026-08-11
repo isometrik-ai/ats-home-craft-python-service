@@ -11,6 +11,10 @@ from apps.user_service.app.api.contact_onboarding import (
 from apps.user_service.app.api.contacts import router as contacts_router
 from apps.user_service.app.api.contacts_imports import router as contacts_imports_router
 from apps.user_service.app.api.custom_fields import router as custom_fields_router
+from apps.user_service.app.api.daily_help import router as daily_help_router
+from apps.user_service.app.api.daily_help_resident import (
+    router as daily_help_resident_router,
+)
 from apps.user_service.app.api.dashboard import router as dashboard_router
 from apps.user_service.app.api.email_templates import router as email_templates_router
 from apps.user_service.app.api.entity_lists import router as entity_lists_router
@@ -83,6 +87,8 @@ router.include_router(contacts_router)
 router.include_router(contact_onboarding_router)
 router.include_router(tenant_requests_owner_router)
 router.include_router(tenant_requests_router)
+router.include_router(daily_help_router)
+router.include_router(daily_help_resident_router)
 router.include_router(notices_router)
 router.include_router(notices_resident_router)
 router.include_router(notices_internal_router)

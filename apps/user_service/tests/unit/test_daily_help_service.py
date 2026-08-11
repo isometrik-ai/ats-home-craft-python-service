@@ -1,0 +1,167 @@
+"""Unit tests for DailyHelpService helpers and orchestration."""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from apps.user_service.app.schemas.daily_help import CreateDailyHelpRequest
+from apps.user_service.app.schemas.enums import (
+    DailyHelpStatus,
+    PassType,
+    VisitorType,
+)
+from apps.user_service.app.services.daily_help_service import DailyHelpService
+from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
+from apps.user_service.app.utils.common_utils import UserContext
+from libs.shared_utils.http_exceptions import NotFoundException
+
+
+def _user_context() -> UserContext:
+    return UserContext(
+        user_id="staff-1",
+        email="staff@example.com",
+        organization_id="org-1",
+    )
+
+
+def test_build_display_name_includes_initials_and_parts():
+    """Display name joins non-empty name parts."""
+    name = DailyHelpService._build_display_name(
+        initials="Mrs.",
+        first_name="Lakshmi",
+        middle_name=None,
+        last_name="Devi",
+    )
+    assert name == "Mrs. Lakshmi Devi"
+
+
+def test_mask_phone_number_hides_all_but_last_four():
+    """Resident directory masks phone numbers."""
+    assert DailyHelpService._mask_phone_number("9655011223") == "XXXXXX1223"
+
+
+def test_visitor_type_daily_help_maps_to_visitor():
+    """Daily help pass rows use visitor type in logs."""
+    visitor_type = VisitorLogsService._visitor_type_from_row(
+        {"pass_type": PassType.DAILY_HELP.value}
+    )
+    assert visitor_type == VisitorType.VISITOR.value
+
+
+def _mock_transaction_conn():
+    """Asyncpg connection mock with transaction context manager."""
+    conn = MagicMock()
+
+    @asynccontextmanager
+    async def _transaction():
+        yield conn
+
+    conn.transaction = _transaction
+    return conn
+
+
+@pytest.mark.asyncio
+async def test_create_profile_issues_pass_and_links():
+    """Create profile inserts pass and links linked_pass_id."""
+    conn = _mock_transaction_conn()
+    svc = DailyHelpService(db_connection=conn, user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.categories_repo = MagicMock()
+    svc.categories_repo.get_by_id = AsyncMock(
+        return_value={
+            "id": "cat-1",
+            "name": "Maid",
+            "status": "active",
+        }
+    )
+    svc.repo = MagicMock()
+    svc.repo.generate_unique_passcode = AsyncMock(return_value="4821")
+    svc.repo.insert_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "display_name": "Mrs. Lakshmi Devi",
+            "category_id": "cat-1",
+            "category_name": "Maid",
+            "gate_passcode": "4821",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "phone_isd_code": "+91",
+            "phone_number": "9655011223",
+            "photo_path": "org/photo.jpg",
+        }
+    )
+    svc.repo.insert_document = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.link_pass_id = AsyncMock(return_value={"linked_pass_id": "pass-1"})
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
+    svc._resolve_created_by_name = AsyncMock(return_value="Admin User")
+
+    body = CreateDailyHelpRequest(
+        initials="Mrs.",
+        first_name="Lakshmi",
+        last_name="Devi",
+        phone_isd_code="+91",
+        phone_number="9655011223",
+        category_id="cat-1",
+    )
+    result = await svc.create_profile(project_id="project-1", body=body)
+
+    assert result.id == "profile-1"
+    assert result.gate_passcode == "4821"
+    svc.passes_repo.insert_daily_help.assert_awaited_once()
+    pass_payload = svc.passes_repo.insert_daily_help.await_args.args[0]
+    assert pass_payload["pass_type"] == PassType.DAILY_HELP.value
+    assert pass_payload["code"] == "4821"
+    svc.repo.link_pass_id.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deactivate_cancels_linked_pass():
+    """Deactivate sets profile inactive and cancels linked pass."""
+    conn = _mock_transaction_conn()
+    svc = DailyHelpService(db_connection=conn, user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "linked_pass_id": "pass-1",
+        }
+    )
+    svc.repo.update_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.INACTIVE.value,
+            "linked_pass_id": "pass-1",
+        }
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.cancel_by_pass_id = AsyncMock(return_value={"id": "pass-1"})
+
+    result = await svc.deactivate_profile(project_id="project-1", profile_id="profile-1")
+
+    assert result.status == DailyHelpStatus.INACTIVE.value
+    svc.passes_repo.cancel_by_pass_id.assert_awaited_once_with(
+        organization_id="org-1",
+        pass_id="pass-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_detail_raises_when_missing():
+    """Missing profile returns not found."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.get_detail(project_id="project-1", profile_id="missing")

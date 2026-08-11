@@ -576,6 +576,8 @@ class VisitorLogsService:
         pass_type = str(row.get("pass_type") or "")
         if pass_type == PassType.GUEST.value:
             return VisitorType.GUEST.value
+        if pass_type == PassType.DAILY_HELP.value:
+            return VisitorType.VISITOR.value
         return VisitorType.VISITOR.value
 
     def _normalize_list_item(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -605,6 +607,7 @@ class VisitorLogsService:
             "access_status": row.get("access_status"),
             "visit_status": str(row.get("visit_status") or ""),
             "visitor_type": self._visitor_type_from_row(row),
+            "daily_help_category_name": row.get("daily_help_category_name"),
             "pass_code": row.get("pass_code"),
             "is_private": bool(row.get("is_private") or False),
             "in_time": format_iso_datetime(in_time),

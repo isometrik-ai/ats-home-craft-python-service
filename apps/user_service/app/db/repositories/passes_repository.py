@@ -61,6 +61,7 @@ SELECT
   p.unit_id::text AS unit_id,
   u.tower_id::text AS tower_id,
   p.host_contact_id::text AS host_contact_id,
+  p.daily_help_id::text AS daily_help_id,
   p.pass_type::text AS pass_type,
   p.guest_name,
   p.guest_phone_isd_code,
@@ -80,6 +81,7 @@ SELECT
   p.pass_image_path,
   p.notes,
   p.created_by_contact_id::text AS created_by_contact_id,
+  p.created_by_user_id::text AS created_by_user_id,
   p.created_at,
   p.updated_at,
   u.code AS unit_code,
@@ -92,12 +94,12 @@ SELECT
   creator.first_name AS creator_first_name,
   creator.last_name AS creator_last_name
 FROM passes p
-JOIN units u ON u.id = p.unit_id
+LEFT JOIN units u ON u.id = p.unit_id
 LEFT JOIN towers t ON t.id = u.tower_id
 LEFT JOIN floors f ON f.id = u.floor_id
 LEFT JOIN unit_configs uc ON uc.id = u.config_id
-JOIN contacts host ON host.id = p.host_contact_id
-JOIN contacts creator ON creator.id = p.created_by_contact_id
+LEFT JOIN contacts host ON host.id = p.host_contact_id
+LEFT JOIN contacts creator ON creator.id = p.created_by_contact_id
 WHERE p.organization_id = $1::uuid
 """
 
@@ -254,6 +256,112 @@ class PassesRepository(BaseRepository):
             data["created_by_contact_id"],
         )
         return dict(row)
+
+    async def insert_daily_help(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Insert a project-level daily help recurring pass."""
+        row = await self.db_connection.fetchrow(
+            """
+            INSERT INTO passes (
+                organization_id, project_id, unit_id, host_contact_id,
+                daily_help_id, pass_type, guest_name, guest_phone_isd_code, guest_phone_number,
+                visitor_count, vehicle_number, purpose,
+                valid_from, valid_until, validity_type,
+                allow_multiple_entries, is_private, max_entries, entry_count,
+                status, code, pass_image_path, notes,
+                created_by_contact_id, created_by_user_id
+            )
+            VALUES (
+                $1::uuid, $2::uuid, NULL, NULL,
+                $3::uuid, $4::pass_type, $5, $6, $7,
+                $8, $9, $10,
+                $11, $12, $13::pass_validity_type,
+                $14, $15, $16, $17,
+                $18::pass_status, $19, $20, $21,
+                NULL, $22::uuid
+            )
+            RETURNING id::text AS id
+            """,
+            data["organization_id"],
+            data["project_id"],
+            data["daily_help_id"],
+            data["pass_type"],
+            data["guest_name"],
+            data.get("guest_phone_isd_code"),
+            data.get("guest_phone_number"),
+            data.get("visitor_count", 1),
+            data.get("vehicle_number"),
+            data.get("purpose"),
+            data["valid_from"],
+            data["valid_until"],
+            data["validity_type"],
+            data.get("allow_multiple_entries", True),
+            data.get("is_private", False),
+            data.get("max_entries"),
+            data.get("entry_count", 0),
+            data.get("status", PassStatus.ACTIVE.value),
+            data["code"],
+            data.get("pass_image_path"),
+            data.get("notes"),
+            data["created_by_user_id"],
+        )
+        return dict(row)
+
+    async def update_daily_help_guest_snapshot(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+        guest_name: str,
+        guest_phone_isd_code: str | None,
+        guest_phone_number: str | None,
+        pass_image_path: str | None,
+    ) -> dict[str, Any] | None:
+        """Sync guest snapshot fields on a daily help pass after profile edit."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE passes
+            SET guest_name = $3,
+                guest_phone_isd_code = $4,
+                guest_phone_number = $5,
+                pass_image_path = $6,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+              AND daily_help_id IS NOT NULL
+            RETURNING id::text AS id
+            """,
+            organization_id,
+            pass_id,
+            guest_name,
+            guest_phone_isd_code,
+            guest_phone_number,
+            pass_image_path,
+        )
+        return dict(row) if row else None
+
+    async def cancel_by_pass_id(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+    ) -> dict[str, Any] | None:
+        """Cancel an active pass by id (daily help or staff paths)."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE passes
+            SET status = $3::pass_status,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+              AND status = $4::pass_status
+            RETURNING id::text AS id, status::text AS status
+            """,
+            organization_id,
+            pass_id,
+            PassStatus.CANCELLED.value,
+            PassStatus.ACTIVE.value,
+        )
+        return dict(row) if row else None
 
     async def get_owned_by_contact(
         self,
