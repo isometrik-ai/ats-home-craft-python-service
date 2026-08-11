@@ -387,6 +387,7 @@ permission OK  AND  (org-wide view  OR  active project_members row)
 | Visitor logs                   | `GET /visitor-logs?project_id=`      | Query; omit for org-wide admin if API allows |
 | Fees / invoices                | Mix of org-wide vs project routes    | Check each screen’s API                      |
 | Move events                    | Resolved from unit → project         | Unit picker within active project            |
+| **Notices (Community)**        | `/projects/{project_id}/notices`     | Path; Live tab banner slots (6 pins)         |
 | Contact registry filter        | `POST /contacts/list` + `project_id` | Filter “This community only”                 |
 | Project teams                  | `GET /teams?project_id=`             | Inside project settings                      |
 | Project members                | `/projects/{id}/members`             | Path                                         |
@@ -441,13 +442,15 @@ type ResidentContext = {
 
 ### Scoped features
 
-| Feature             | Scope to                 |
-| ------------------- | ------------------------ |
-| Gate passes         | `project_id` + `unit_id` |
-| Visitors            | Same unit                |
-| Fee invoices        | Unit / contact_unit      |
-| Documents, vehicles | `contact_unit_id`        |
-| Tenant requests     | Unit in project          |
+| Feature             | Scope to                                  |
+| ------------------- | ----------------------------------------- |
+| Gate passes         | `project_id` + `unit_id`                  |
+| Visitors            | Same unit                                 |
+| Fee invoices        | Unit / contact_unit                       |
+| Documents, vehicles | `contact_unit_id`                         |
+| Tenant requests     | Unit in project                           |
+| **Notices feed**    | `project_id` + role/tower match (Phase 2) |
+| **Notice banner**   | Up to 6 pinned live notices for project   |
 
 Switching property clears unit-scoped caches the same way staff project switch works.
 
@@ -488,6 +491,7 @@ type ResidentContext = {
 ["projects", orgId, "mine"]
 ["project", orgId, projectId, "members"]
 ["visitor-logs", orgId, projectId, filters]
+["notices", orgId, projectId, filters]
 ["contacts", orgId, { projectId }] // null = org-wide
 ```
 
@@ -516,6 +520,7 @@ flowchart TD
   PHome --> Setup[Setup wizard]
   PHome --> Visitors[Visitor logs]
   PHome --> Fees[Fees]
+  PHome --> Notices[Community notices]
   PHome --> ProjTeams[Project teams]
   PHome --> Units[Units and residents]
 ```

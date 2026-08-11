@@ -32,6 +32,9 @@ from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.leads import router as leads_router
 from apps.user_service.app.api.maintenance_fees import router as maintenance_fees_router
 from apps.user_service.app.api.move_events import router as move_events_router
+from apps.user_service.app.api.notices import router as notices_router
+from apps.user_service.app.api.notices_internal import router as notices_internal_router
+from apps.user_service.app.api.notices_resident import router as notices_resident_router
 from apps.user_service.app.api.organization import router as organization_router
 from apps.user_service.app.api.organization_memory import (
     router as organization_memory_router,
@@ -80,6 +83,9 @@ router.include_router(contacts_router)
 router.include_router(contact_onboarding_router)
 router.include_router(tenant_requests_owner_router)
 router.include_router(tenant_requests_router)
+router.include_router(notices_router)
+router.include_router(notices_resident_router)
+router.include_router(notices_internal_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
 router.include_router(walk_ins_router)
