@@ -231,15 +231,11 @@ async def test_list_resident_categories_includes_profile_previews():
     svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
     svc.contact_units_repo = MagicMock()
     svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
-    svc.contact_units_repo.get_unit_project = AsyncMock(
-        return_value={"project_id": "project-1"}
-    )
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
     svc.setup_service = MagicMock()
     svc.setup_service.ensure_project = AsyncMock()
     svc.categories_repo = MagicMock()
-    svc.categories_repo.list_by_project = AsyncMock(
-        return_value=[{"id": "cat-1", "name": "Maids"}]
-    )
+    svc.categories_repo.list_by_project = AsyncMock(return_value=[{"id": "cat-1", "name": "Maids"}])
     svc.repo = MagicMock()
     svc.repo.list_profiles = AsyncMock(
         return_value=(
