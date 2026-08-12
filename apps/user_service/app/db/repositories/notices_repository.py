@@ -517,6 +517,48 @@ class NoticesRepository(BaseRepository):
         )
         return [dict(row) for row in rows], total
 
+    async def list_attachments_for_notices(
+        self,
+        *,
+        organization_id: str,
+        notice_ids: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return attachments grouped by notice id."""
+        if not notice_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              notice_id::text AS notice_id,
+              id::text AS id,
+              file_path,
+              file_name,
+              mime_type,
+              size_bytes,
+              sort_order
+            FROM notice_attachments
+            WHERE organization_id = $1::uuid
+              AND notice_id = ANY($2::uuid[])
+            ORDER BY notice_id, sort_order, created_at
+            """,
+            organization_id,
+            notice_ids,
+        )
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            notice_id = str(row["notice_id"])
+            grouped.setdefault(notice_id, []).append(
+                {
+                    "id": str(row["id"]),
+                    "file_path": row["file_path"],
+                    "file_name": row.get("file_name"),
+                    "mime_type": row["mime_type"],
+                    "size_bytes": int(row["size_bytes"]),
+                    "sort_order": int(row["sort_order"]),
+                }
+            )
+        return grouped
+
     async def deactivate_pins_for_notice(
         self,
         *,

@@ -563,6 +563,56 @@ async def deactivate_project_daily_help_profile(
     )
 
 
+@handle_api_exceptions("reactivate project daily help profile")
+@router.post(
+    "/{project_id}/daily-help/{profile_id}/reactivate",
+    status_code=http_status.HTTP_200_OK,
+    summary="Reactivate an inactive daily help profile",
+    response_model=None,
+    responses=MESSAGE_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_profiles",
+    category="DAILY_HELP",
+)
+async def reactivate_project_daily_help_profile(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Mark an inactive daily help profile active and re-issue its gate pass when needed."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.reactivate_profile(project_id=project_id, profile_id=profile_id)
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_profiles",
+        requested_id=profile_id,
+        description=f"Reactivated daily help profile: {profile_id}",
+        risk_level="medium",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.reactivated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
 @handle_api_exceptions("delete project daily help profile")
 @router.post(
     "/{project_id}/daily-help/{profile_id}/delete",

@@ -61,7 +61,7 @@ def _created_response(model: type, description: str) -> dict[int | str, dict]:
 
 CATEGORIES_SUCCESS_RESPONSES = _ok_response(
     ResidentDailyHelpCategoryStatsApiResponse,
-    "Active categories with inside/open-to-work/newly-added stats.",
+    "Active categories with stats and up to four profile previews each.",
 )
 LIST_SUCCESS_RESPONSES = _ok_response(
     ResidentDailyHelpListApiResponse,
@@ -112,7 +112,7 @@ async def list_resident_daily_help_categories(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return active categories with inside/open-to-work/newly-added stats."""
+    """Return active categories with stats and up to four profile previews each."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )

@@ -403,6 +403,17 @@ class ResidentDailyHelpListItemResponse(BaseModel):
     has_household_link: bool = False
 
 
+class ResidentDailyHelpProfilePreviewResponse(BaseModel):
+    """Compact profile row for category home avatar strip (max 4 per category)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    display_name: str
+    photo_path: str | None = None
+    initials: str | None = None
+
+
 class ResidentDailyHelpCategoryStatsResponse(BaseModel):
     """Footer stats on resident category home."""
 
@@ -414,6 +425,9 @@ class ResidentDailyHelpCategoryStatsResponse(BaseModel):
     open_to_work_count: int = 0
     newly_added_count: int = 0
     profile_count: int = 0
+    preview_profiles: list[ResidentDailyHelpProfilePreviewResponse] = Field(
+        default_factory=list
+    )
 
 
 class DailyHelpMessageResponse(BaseModel):

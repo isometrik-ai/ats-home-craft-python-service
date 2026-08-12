@@ -925,6 +925,44 @@
       }
     }
   },
+  "daily_help": {
+    "errors": {
+      "not_found": "The daily help profile could not be found.",
+      "already_deleted": "This daily help profile has been deleted and cannot be modified.",
+      "invalid_category": "The selected daily help category is invalid or inactive.",
+      "duplicate_category_name": "A category with this name already exists in the project.",
+      "unit_not_accessible": "You do not have access to daily help for the selected unit.",
+      "not_inactive": "Only inactive daily help profiles can be reactivated.",
+      "not_deleted": "Only deleted daily help profiles can be restored.",
+      "document_not_found": "The document could not be found on this profile.",
+      "unsupported_export_format": "Only CSV export is supported.",
+      "duplicate_household_link": "This helper is already linked to your household.",
+      "link_not_found": "The household link could not be found."
+    },
+    "success": {
+      "summary_retrieved": "Daily help summary retrieved successfully.",
+      "list_retrieved": "Daily help profiles retrieved successfully.",
+      "categories_retrieved": "Daily help categories retrieved successfully.",
+      "category_created": "Daily help category created successfully.",
+      "category_updated": "Daily help category updated successfully.",
+      "created": "Daily help profile created successfully.",
+      "retrieved": "Daily help profile retrieved successfully.",
+      "updated": "Daily help profile updated successfully.",
+      "deactivated": "Daily help profile deactivated successfully.",
+      "reactivated": "Daily help profile reactivated successfully.",
+      "deleted": "Daily help profile deleted successfully.",
+      "restored": "Daily help profile restored successfully.",
+      "document_added": "Document added to daily help profile successfully.",
+      "document_deleted": "Document removed from daily help profile successfully.",
+      "availability_updated": "Daily help availability updated successfully.",
+      "attendance_retrieved": "Daily help attendance retrieved successfully.",
+      "search_retrieved": "Daily help search results retrieved successfully.",
+      "household_linked": "Daily help helper linked to your household successfully.",
+      "household_removed": "Daily help helper removed from your household successfully.",
+      "rating_created": "Daily help rating submitted successfully.",
+      "rating_summary_retrieved": "Daily help rating summary retrieved successfully."
+    }
+  },
   "notices": {
     "errors": {
       "title_too_long": "Notice title cannot exceed 70 characters.",

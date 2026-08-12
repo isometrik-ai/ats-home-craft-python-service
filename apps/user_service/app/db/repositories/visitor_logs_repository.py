@@ -663,21 +663,25 @@ TRIM(
         )
 
         args: list[Any] = [organization_id, range_start, range_end]
-        pass_filter_sql, pass_filter_args, next_idx = self._build_pass_filters(
-            search=search,
-            pass_type=pass_type,
-            entry_method=entry_method,
-            access_status=access_status,
-            tower_id=tower_id,
-            project_id=project_id,
-            unit_id=unit_id,
-            param_index=4,
-        )
-        args.extend(pass_filter_args)
+        next_idx = 4
+
+        pass_filter_sql = ""
+        if include_passes:
+            pass_filter_sql, pass_filter_args, next_idx = self._build_pass_filters(
+                search=search,
+                pass_type=pass_type,
+                entry_method=entry_method,
+                access_status=access_status,
+                tower_id=tower_id,
+                project_id=project_id,
+                unit_id=unit_id,
+                param_index=next_idx,
+            )
+            args.extend(pass_filter_args)
 
         walk_in_filter_sql = ""
         if include_walk_ins:
-            walk_in_filter_sql, walk_in_filter_args, _ = self._build_walk_in_filters(
+            walk_in_filter_sql, walk_in_filter_args, next_idx = self._build_walk_in_filters(
                 search=search,
                 tower_id=tower_id,
                 project_id=project_id,

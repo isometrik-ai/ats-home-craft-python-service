@@ -102,7 +102,18 @@ class NoticesService:
             limit=query.page_size,
             offset=offset,
         )
-        return [self._to_list_item(row) for row in rows], total
+        notice_ids = [str(row["id"]) for row in rows]
+        attachments_by_notice = await self.repo.list_attachments_for_notices(
+            organization_id=self.organization_id,
+            notice_ids=notice_ids,
+        )
+        return [
+            self._to_list_item(
+                row,
+                attachments=attachments_by_notice.get(str(row["id"]), []),
+            )
+            for row in rows
+        ], total
 
     async def get_notice(
         self,
@@ -739,7 +750,12 @@ class NoticesService:
             created_by_user_id=row.get("created_by_user_id"),
         )
 
-    def _to_list_item(self, row: dict[str, Any]) -> NoticeListItemResponse:
+    def _to_list_item(
+        self,
+        row: dict[str, Any],
+        *,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> NoticeListItemResponse:
         status = NoticeStatus(str(row["status"]))
         category = str(row["category"])
         scope_type = NoticeScopeType(str(row["scope_type"]))
@@ -767,6 +783,7 @@ class NoticesService:
             like_count=int(row.get("like_count") or 0),
             editable=status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED},
             created_at=row["created_at"],
+            attachments=[NoticeAttachmentResponse(**item) for item in (attachments or [])],
         )
 
     def _scope_label(

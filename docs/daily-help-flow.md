@@ -49,6 +49,7 @@ visitor passes and visitor logs** — we do **not** create `contacts` rows or au
 | View detail drawer                                  | `GET /projects/{project_id}/daily-help/{id}`                         |
 | Edit details                                        | `PATCH /projects/{project_id}/daily-help/{id}`                       |
 | Mark inactive                                       | `POST /projects/{project_id}/daily-help/{id}/deactivate`             |
+| Reactivate inactive                                 | `POST /projects/{project_id}/daily-help/{id}/reactivate`             |
 | Delete record                                       | `POST /projects/{project_id}/daily-help/{id}/delete`                 |
 | Restore (optional)                                  | `POST /projects/{project_id}/daily-help/{id}/restore`                |
 | Add / remove document                               | `POST/PATCH/DELETE .../documents`                                    |
@@ -270,6 +271,7 @@ Returns full name breakdown, contacts, category, gender, DOB, status, documents 
 ```http
 PATCH /v1/projects/{project_id}/daily-help/{id}
 POST /v1/projects/{project_id}/daily-help/{id}/deactivate
+POST /v1/projects/{project_id}/daily-help/{id}/reactivate
 POST /v1/projects/{project_id}/daily-help/{id}/delete
 ```
 
