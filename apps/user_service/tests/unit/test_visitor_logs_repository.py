@@ -148,6 +148,28 @@ async def test_list_logs_walk_in_type_filter():
 
 
 @pytest.mark.asyncio
+async def test_list_logs_walk_in_search_uses_consecutive_params():
+    """Walk-in search must not leave unused pass-branch bind parameters."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.list_logs(
+        organization_id="org-1",
+        pass_type=WALK_IN_LOG_TYPE,
+        search="babita",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        page=1,
+        page_size=20,
+    )
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "walk_in_entries" in count_query
+    assert "FROM passes p" not in count_query
+    assert "w.visitor_first_name ILIKE $4" in count_query
+    assert "$5" not in count_query.split("w.visitor_first_name ILIKE $4")[1].split("ORDER BY")[0]
+    assert count_args[3] == "%babita%"
+
+
+@pytest.mark.asyncio
 async def test_get_overview_aggregates():
     """Overview query counts UI card metrics from the expanded union."""
     conn = _FakeConn(
