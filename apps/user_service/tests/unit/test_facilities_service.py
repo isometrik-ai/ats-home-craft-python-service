@@ -21,6 +21,7 @@ from libs.shared_utils.http_exceptions import NotFoundException, ValidationExcep
 
 PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 FACILITY_ID = "22222222-2222-2222-2222-222222222222"
+TOWER_ID = "33333333-3333-3333-3333-333333333333"
 
 
 def _ctx() -> UserContext:
@@ -50,6 +51,8 @@ def _service() -> FacilitiesService:
     svc.parking_slots_repo.bulk_insert_slots = AsyncMock()
     svc.parking_slots_repo.list_by_facility = AsyncMock(return_value=[{"id": "slot-1"}])
     svc.parking_slots_repo.delete_by_facility = AsyncMock()
+    svc.towers_repo = MagicMock()
+    svc.towers_repo.get_tower = AsyncMock(return_value={"id": TOWER_ID, "has_wings": True})
     return svc
 
 
@@ -154,6 +157,7 @@ async def test_update_facility_rejects_invalid_in_tower_without_wing():
             "name": "Club",
             "facility_type": "club",
             "location_type": FacilityLocationType.IN_TOWER.value,
+            "tower_id": TOWER_ID,
         }
     )
 
@@ -163,6 +167,41 @@ async def test_update_facility_rejects_invalid_in_tower_without_wing():
             facility_id=FACILITY_ID,
             body=UpdateFacilityRequest(name="Clubhouse"),
         )
+
+
+@pytest.mark.asyncio
+async def test_create_facility_in_tower_without_wing_when_tower_has_no_wings():
+    """Wingless towers allow in_tower facilities with tower_id and floor only."""
+    svc = _service()
+    svc.towers_repo.get_tower = AsyncMock(return_value={"id": TOWER_ID, "has_wings": False})
+    body = CreateFacilityRequest(
+        name="Kids Play Area",
+        facility_type="Recreation",
+        location_type=FacilityLocationType.IN_TOWER,
+        tower_id=TOWER_ID,
+        floor_level="G+1",
+    )
+
+    result = await svc.create_facility(project_id=PROJECT_ID, body=body)
+
+    assert result["id"] == FACILITY_ID
+    svc.towers_repo.get_tower.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_facility_in_tower_requires_wing_when_tower_has_wings():
+    """Towers with wings still require wing on in_tower facilities."""
+    svc = _service()
+    body = CreateFacilityRequest(
+        name="Gym",
+        facility_type="Recreation",
+        location_type=FacilityLocationType.IN_TOWER,
+        tower_id=TOWER_ID,
+        floor_level="G+1",
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.create_facility(project_id=PROJECT_ID, body=body)
 
 
 @pytest.mark.asyncio

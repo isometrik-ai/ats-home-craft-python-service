@@ -235,7 +235,7 @@ Validated in `app/services/project_setup_validation.py` (towers + facilities).
 | ------------- | ------------------- | ----------------------------------------------------- |
 | Tower         | `custom_prefix`     | `numbering_pattern = "custom"`                        |
 | Plot item     | `description`       | Optional (e.g. "Near park, road-facing")              |
-| Facility      | `wing`              | `location_type = "in_tower"`                          |
+| Facility      | `wing`              | `location_type = "in_tower"` and tower `has_wings = true` |
 | Facility      | `capacity_persons`  | `facility_type = "events"` (integer > 0)              |
 | Facility      | `parking_slots`     | `facility_type = "parking"` (integer > 0)             |
 | Facility      | `parking_user_type` | `facility_type = "parking"` (`resident` / `visitors`) |

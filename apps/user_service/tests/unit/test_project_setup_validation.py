@@ -19,14 +19,27 @@ def test_validate_tower_custom_prefix_required():
 
 
 def test_validate_facility_wing_for_in_tower():
-    """Indoor tower facilities require wing."""
+    """Indoor tower facilities require wing when the tower has wings."""
     with pytest.raises(ValidationException):
         validate_facility_payload(
             {
                 "facility_type": "sports",
                 "location_type": FacilityLocationType.IN_TOWER.value,
-            }
+            },
+            tower_has_wings=True,
         )
+
+
+def test_validate_facility_wing_optional_when_tower_has_no_wings():
+    """Wing is optional for in_tower facilities on wingless towers."""
+    validate_facility_payload(
+        {
+            "facility_type": "sports",
+            "location_type": FacilityLocationType.IN_TOWER.value,
+            "tower_id": "tower-1",
+        },
+        tower_has_wings=False,
+    )
 
 
 def test_validate_facility_events_capacity():
