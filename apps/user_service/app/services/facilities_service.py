@@ -13,8 +13,7 @@ from apps.user_service.app.db.repositories.parking_slots_repository import (
     ParkingSlotsRepository,
 )
 from apps.user_service.app.db.repositories.towers_repository import TowersRepository
-from apps.user_service.app.schemas.enums import ProjectSetupStep
-from apps.user_service.app.schemas.enums import FacilityLocationType
+from apps.user_service.app.schemas.enums import FacilityLocationType, ProjectSetupStep
 from apps.user_service.app.schemas.project_inventory import (
     CreateFacilityRequest,
     UpdateFacilityRequest,

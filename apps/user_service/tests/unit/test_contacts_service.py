@@ -1760,7 +1760,9 @@ async def test_update_contact_sync_auth_phone(monkeypatch):
         },
     )
     svc = _service(contacts_repo=repo)
+    mock_validate = AsyncMock()
     mock_sync = AsyncMock()
+    svc._validate_contact_auth_identity_update = mock_validate  # type: ignore[method-assign]
     svc._sync_contact_auth_phone = mock_sync  # type: ignore[method-assign]
 
     await svc.update_contact(
@@ -1770,6 +1772,7 @@ async def test_update_contact_sync_auth_phone(monkeypatch):
         ),
     )
 
+    mock_validate.assert_awaited_once()
     mock_sync.assert_awaited_once()
 
 
@@ -1777,7 +1780,7 @@ async def test_update_contact_sync_auth_phone(monkeypatch):
 async def test_update_contact_emails(monkeypatch):
     """Update contact replaces emails jsonb list."""
     _patch_custom_fields(monkeypatch)
-    current = _contact_detail()
+    current = _contact_detail(user_id=None)
     repo = _FakeContactsRepo(contact_for_update=current, echo_update=True)
     svc = _service(contacts_repo=repo)
 
@@ -2570,3 +2573,125 @@ async def test_sync_contact_auth_phone_conflict(mock_user_repo_cls: MagicMock):
             user_id=USER_ID,
             phone=Phone(phone_number="9876543210", phone_isd_code="+91", is_primary=True),
         )
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contacts_service.UserRepository",
+)
+async def test_sync_contact_auth_email_conflict(mock_user_repo_cls: MagicMock):
+    """Sync auth email rejects email owned by another user."""
+    mock_user_repo_cls.return_value.get_auth_user_by_email = AsyncMock(return_value={"id": "other"})
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+
+    with pytest.raises(ConflictException):
+        await svc._sync_contact_auth_email(
+            user_id=USER_ID,
+            email="taken@example.com",
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_contact_sync_auth_email(monkeypatch):
+    """Update contact syncs auth email when primary email changes."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        user_id=USER_ID,
+        emails=[{"email": "old@example.com", "is_primary": True}],
+    )
+    repo = _FakeContactsRepo(contact_for_update=current, echo_update=True)
+    svc = _service(contacts_repo=repo)
+    mock_validate = AsyncMock()
+    mock_sync = AsyncMock()
+    svc._validate_contact_auth_identity_update = mock_validate  # type: ignore[method-assign]
+    svc._sync_contact_auth_email = mock_sync  # type: ignore[method-assign]
+
+    await svc.update_contact(
+        contact_id=CONTACT_ID,
+        body=UpdateContactRequest(
+            emails=[Email(email="new@example.com", is_primary=True)],
+        ),
+    )
+
+    mock_validate.assert_awaited_once()
+    mock_sync.assert_awaited_once_with(user_id=USER_ID, email="new@example.com")
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contacts_service.UserRepository")
+async def test_update_contact_auth_phone_email_mismatch(mock_user_repo_cls, monkeypatch):
+    """Updating both phone and email rejects cross-account auth matches."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        user_id=USER_ID,
+        phones=[{"phone_number": "111", "phone_isd_code": "+1", "is_primary": True}],
+        emails=[{"email": "old@example.com", "is_primary": True}],
+    )
+    repo = _FakeContactsRepo(contact_for_update=current, echo_update=True)
+    svc = _service(contacts_repo=repo)
+    mock_user_repo_cls.return_value.get_auth_users_by_phone_or_email = AsyncMock(
+        return_value=[{"id": "user-a"}, {"id": "user-b"}],
+    )
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.update_contact(
+            contact_id=CONTACT_ID,
+            body=UpdateContactRequest(
+                phones=[Phone(phone_number="222", phone_isd_code="+1", is_primary=True)],
+                emails=[Email(email="new@example.com", is_primary=True)],
+            ),
+        )
+
+    assert exc_info.value.message_key == "contacts.errors.primary_email_phone_auth_mismatch"
+    assert repo.last_update_kwargs is None
+
+
+@pytest.mark.asyncio
+async def test_update_contact_rejects_duplicate_org_email(monkeypatch):
+    """Update contact rejects primary email already used by another contact."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        emails=[{"email": "old@example.com", "is_primary": True}],
+    )
+    repo = _FakeContactsRepo(
+        contact_for_update=current,
+        contact_id_by_email="990e8400-e29b-41d4-a716-446655440099",
+    )
+    svc = _service(contacts_repo=repo)
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.update_contact(
+            contact_id=CONTACT_ID,
+            body=UpdateContactRequest(
+                emails=[Email(email="taken@example.com", is_primary=True)],
+            ),
+        )
+
+    assert exc_info.value.message_key == "contacts.errors.email_already_exists"
+    assert repo.last_update_kwargs is None
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contacts_service.UserRepository")
+async def test_validate_contact_auth_identity_update_email_conflict(mock_user_repo_cls):
+    """Auth email update rejects email owned by another auth user."""
+    mock_user_repo_cls.return_value.get_auth_user_by_email = AsyncMock(
+        return_value={"id": "other-user"},
+    )
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc._validate_contact_auth_identity_update(
+            user_id=USER_ID,
+            email="taken@example.com",
+        )
+
+    assert exc_info.value.message_key == "clients.errors.email_already_exists"

@@ -231,15 +231,15 @@ POST /v1/projects/{project_id}/site-map/overlays
 
 Validated in `app/services/project_setup_validation.py` (towers + facilities).
 
-| Step / entity | API field           | Required when                                         |
-| ------------- | ------------------- | ----------------------------------------------------- |
-| Tower         | `custom_prefix`     | `numbering_pattern = "custom"`                        |
-| Plot item     | `description`       | Optional (e.g. "Near park, road-facing")              |
+| Step / entity | API field           | Required when                                             |
+| ------------- | ------------------- | --------------------------------------------------------- |
+| Tower         | `custom_prefix`     | `numbering_pattern = "custom"`                            |
+| Plot item     | `description`       | Optional (e.g. "Near park, road-facing")                  |
 | Facility      | `wing`              | `location_type = "in_tower"` and tower `has_wings = true` |
-| Facility      | `capacity_persons`  | `facility_type = "events"` (integer > 0)              |
-| Facility      | `parking_slots`     | `facility_type = "parking"` (integer > 0)             |
-| Facility      | `parking_user_type` | `facility_type = "parking"` (`resident` / `visitors`) |
-| Facility      | `extra_attributes`  | Optional JSON object; defaults to `{}` on create      |
+| Facility      | `capacity_persons`  | `facility_type = "events"` (integer > 0)                  |
+| Facility      | `parking_slots`     | `facility_type = "parking"` (integer > 0)                 |
+| Facility      | `parking_user_type` | `facility_type = "parking"` (`resident` / `visitors`)     |
+| Facility      | `extra_attributes`  | Optional JSON object; defaults to `{}` on create          |
 
 When a **parking** facility is created, the API auto-provisions `facility_parking_slots` rows
 (`slot_number` 1…N). These are separate from Step 8 `parking_zones` (tower basement ranges).
