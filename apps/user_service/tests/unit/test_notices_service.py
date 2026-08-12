@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -12,8 +13,28 @@ from apps.user_service.app.schemas.enums import (
     NoticeScopeType,
     NoticeStatus,
 )
+from apps.user_service.app.schemas.notices import NoticeListQuery
 from apps.user_service.app.services.notices_service import NoticesService
+from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import ConflictException, ValidationException
+
+PROJECT_ID = "11111111-1111-1111-1111-111111111111"
+NOTICE_ID = "44444444-4444-4444-4444-444444444444"
+
+
+def _service() -> NoticesService:
+    svc = NoticesService(
+        db_connection=MagicMock(),
+        user_context=UserContext(
+            user_id="user-1",
+            email="owner@example.com",
+            organization_id="org-1",
+        ),
+    )
+    svc.repo = MagicMock()
+    svc.repo.list_notices = AsyncMock(return_value=([], 0))
+    svc.repo.list_attachments_for_notices = AsyncMock(return_value={})
+    return svc
 
 
 def test_validate_content_title_too_long():
@@ -78,3 +99,58 @@ def test_resolve_publish_state_draft():
 
 def test_pin_expires_at_manual():
     assert NoticesService._pin_expires_at(NoticePinDuration.MANUAL) is None
+
+
+@pytest.mark.asyncio
+async def test_list_notices_includes_attachments():
+    svc = _service()
+    created_at = datetime.now(timezone.utc)
+    svc.repo.list_notices = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": NOTICE_ID,
+                    "display_code": "NTC-1",
+                    "status": "live",
+                    "title": "Pool closure",
+                    "description": "Closed tomorrow",
+                    "category": "maintenance",
+                    "scope_type": "whole_society",
+                    "recipient_groups": ["Owner"],
+                    "scope_label": None,
+                    "published_at": created_at,
+                    "publish_at": None,
+                    "deleted_at": None,
+                    "pinned": False,
+                    "pin_slot_index": None,
+                    "view_count": 0,
+                    "like_count": 0,
+                    "created_at": created_at,
+                }
+            ],
+            1,
+        )
+    )
+    svc.repo.list_attachments_for_notices = AsyncMock(
+        return_value={
+            NOTICE_ID: [
+                {
+                    "id": "att-1",
+                    "file_path": "org/project/notices/pool.jpg",
+                    "file_name": "pool.jpg",
+                    "mime_type": "image/jpeg",
+                    "size_bytes": 1024,
+                    "sort_order": 0,
+                }
+            ]
+        }
+    )
+
+    items, total = await svc.list_notices(
+        project_id=PROJECT_ID,
+        query=NoticeListQuery(),
+    )
+
+    assert total == 1
+    assert len(items[0].attachments) == 1
+    assert items[0].attachments[0].file_path == "org/project/notices/pool.jpg"

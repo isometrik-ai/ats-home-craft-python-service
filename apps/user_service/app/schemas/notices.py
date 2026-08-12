@@ -187,6 +187,7 @@ class NoticeListItemResponse(BaseModel):
     like_count: int = 0
     editable: bool = False
     created_at: datetime
+    attachments: list[NoticeAttachmentResponse] = Field(default_factory=list)
 
 
 class NoticeDetailResponse(BaseModel):
