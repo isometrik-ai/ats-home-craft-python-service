@@ -72,11 +72,11 @@ class NoticeRecipientResolutionService:
 
         rows = await self.db_connection.fetch(
             """
-            SELECT DISTINCT linked_user_id::text AS user_id
+            SELECT DISTINCT user_id::text AS user_id
             FROM contacts
             WHERE organization_id = $1::uuid
               AND id = ANY($2::uuid[])
-              AND linked_user_id IS NOT NULL
+              AND user_id IS NOT NULL
             """,
             organization_id,
             list(contact_ids),

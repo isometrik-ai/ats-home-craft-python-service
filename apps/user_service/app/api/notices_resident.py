@@ -59,7 +59,7 @@ async def get_resident_notice_banner(
     )
     items = await service.get_banner(
         contact_id=str(contact["id"]),
-        contact_user_id=str(contact["linked_user_id"]) if contact.get("linked_user_id") else None,
+        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
         query=query,
     )
     return list_response(
@@ -97,7 +97,7 @@ async def list_resident_notices(
     )
     items, total = await service.list_notices(
         contact_id=str(contact["id"]),
-        contact_user_id=str(contact["linked_user_id"]) if contact.get("linked_user_id") else None,
+        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
         query=query,
     )
     return list_response(
@@ -135,7 +135,7 @@ async def get_resident_notice(
     )
     data = await service.get_notice(
         contact_id=str(contact["id"]),
-        contact_user_id=str(contact["linked_user_id"]) if contact.get("linked_user_id") else None,
+        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
         notice_id=notice_id,
     )
     return success_response(
@@ -170,7 +170,7 @@ async def like_resident_notice(
     )
     data = await service.like_notice(
         contact_id=str(contact["id"]),
-        contact_user_id=str(contact["linked_user_id"]) if contact.get("linked_user_id") else None,
+        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
         notice_id=notice_id,
     )
     return success_response(
@@ -205,7 +205,7 @@ async def unlike_resident_notice(
     )
     data = await service.unlike_notice(
         contact_id=str(contact["id"]),
-        contact_user_id=str(contact["linked_user_id"]) if contact.get("linked_user_id") else None,
+        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
         notice_id=notice_id,
     )
     return success_response(

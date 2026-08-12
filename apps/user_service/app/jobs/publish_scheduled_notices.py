@@ -68,7 +68,7 @@ async def publish_scheduled_notices(
                 message_key="notifications.push.notices.published",
                 notification_type="notice_published",
                 feed_type="notices",
-                template_params={"title": str(notice["title"])},
+                params={"title": str(notice["title"])},
             )
     return published_ids
 
