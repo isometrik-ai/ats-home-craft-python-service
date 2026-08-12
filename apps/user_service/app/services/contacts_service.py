@@ -106,6 +106,7 @@ from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.auth_repository import (
     create_user,
     get_user_by_id,
+    update_email,
     update_phone,
 )
 from libs.shared_utils.custom_field_filtering import normalize_dropdown_filters_payload
@@ -177,6 +178,45 @@ def _contact_phone_sync_info(
     )
     primary_phone = next(phone for phone in phones if phone.is_primary) if sync_auth_phone else None
     return sync_auth_phone, primary_phone
+
+
+def _normalize_email_item(email: Any) -> dict[str, Any]:
+    """Normalize email item."""
+    if hasattr(email, "model_dump"):
+        return email.model_dump()
+    if isinstance(email, dict):
+        return email
+    return {}
+
+
+def _get_primary_email_identity(emails: list[Any] | None) -> str | None:
+    """Return normalized primary email, if any."""
+    for email in emails or []:
+        item = _normalize_email_item(email)
+        if item.get("is_primary"):
+            raw = str(item.get("email") or "").strip().lower()
+            return raw or None
+    return None
+
+
+def _primary_email_changed(old_emails: Any, new_emails: list[Any]) -> bool:
+    """True when the primary email assignment or address changed."""
+    old_primary = _get_primary_email_identity(parse_json_any(old_emails, default=[]))
+    new_primary = _get_primary_email_identity(new_emails)
+    return old_primary != new_primary
+
+
+def _contact_email_sync_info(
+    *,
+    current: dict[str, Any],
+    emails: list[Any],
+) -> tuple[bool, str | None]:
+    """Return whether auth email should sync and the new primary email."""
+    sync_auth_email = bool(current.get("user_id")) and _primary_email_changed(
+        current.get("emails"), emails
+    )
+    new_email = _get_primary_email_identity(emails) if sync_auth_email else None
+    return sync_auth_email, new_email
 
 
 class ContactsService:
@@ -640,6 +680,30 @@ class ContactsService:
                 custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
             )
 
+    async def _sync_contact_auth_email(self, *, user_id: str, email: str) -> None:
+        """Update linked Supabase auth user when the contact primary email changes."""
+        if not self.supabase_client:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+
+        email_norm = email.strip().lower()
+        user_repo = UserRepository(db_connection=self.db_connection)
+        existing_user = await user_repo.get_auth_user_by_email(email_norm)
+        if existing_user and str(existing_user["id"]) != user_id:
+            raise ConflictException(
+                message_key="clients.errors.email_already_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        updated = await update_email(self.supabase_client, user_id, email_norm)
+        if not updated:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+
     async def _prepare_optional_contact_company_association(
         self,
         *,
@@ -754,18 +818,68 @@ class ContactsService:
         )
         return None, company_data, company_addresses, make_primary
 
-    async def _assert_contact_email_unique(self, *, organization_id: str, email: str) -> None:
+    async def _assert_contact_email_unique(
+        self,
+        *,
+        organization_id: str,
+        email: str,
+        exclude_contact_id: str | None = None,
+    ) -> None:
         """Raise ConflictException if a contact with this email already exists in the org."""
         existing_contact_id = await self.contacts_repo.get_contact_id_by_email(
             organization_id=organization_id,
             email=email,
         )
-        if existing_contact_id:
+        if existing_contact_id and existing_contact_id != exclude_contact_id:
             raise ConflictException(
                 message_key="contacts.errors.email_already_exists",
                 custom_code=CustomStatusCode.CONFLICT,
                 params={"client_id": existing_contact_id},
             )
+
+    async def _validate_contact_auth_identity_update(
+        self,
+        *,
+        user_id: str,
+        phone: str | None = None,
+        email: str | None = None,
+    ) -> None:
+        """Ensure updated phone/email can be assigned to the contact's auth user."""
+        phone_norm = phone or None
+        email_norm = email.strip().lower() if email else None
+        if not phone_norm and not email_norm:
+            return
+
+        user_repo = UserRepository(db_connection=self.db_connection)
+        if phone_norm and email_norm:
+            auth_matches = await user_repo.get_auth_users_by_phone_or_email(
+                phone=phone_norm,
+                email=email_norm,
+            )
+            matched_user_ids = {
+                str(match["id"]) for match in auth_matches if match.get("id") is not None
+            }
+            if len(matched_user_ids) > 1:
+                raise ConflictException(
+                    message_key="contacts.errors.primary_email_phone_auth_mismatch",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+        if phone_norm:
+            existing_phone_user = await user_repo.get_auth_user_by_phone(phone_norm)
+            if existing_phone_user and str(existing_phone_user["id"]) != user_id:
+                raise ConflictException(
+                    message_key="clients.errors.phone_number_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+        if email_norm:
+            existing_email_user = await user_repo.get_auth_user_by_email(email_norm)
+            if existing_email_user and str(existing_email_user["id"]) != user_id:
+                raise ConflictException(
+                    message_key="clients.errors.email_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
 
     @staticmethod
     def _phone_match_key(*, phone_number: str, phone_isd_code: str | None = None) -> str:
@@ -1748,8 +1862,46 @@ class ContactsService:
                 phones=body.phones,
             )
 
+        sync_auth_email = False
+        new_primary_email: str | None = None
         if body.emails is not None:
             update_data["emails"] = _serialize_jsonb_list(body.emails)
+            if _primary_email_changed(current.get("emails"), body.emails):
+                changed_primary_email = _get_primary_email_identity(body.emails)
+                if changed_primary_email:
+                    await self._assert_contact_email_unique(
+                        organization_id=org_id,
+                        email=changed_primary_email,
+                        exclude_contact_id=contact_id,
+                    )
+            sync_auth_email, new_primary_email = _contact_email_sync_info(
+                current=current,
+                emails=body.emails,
+            )
+
+        linked_user_id = str(current["user_id"]) if current.get("user_id") else None
+        if linked_user_id and (sync_auth_phone or sync_auth_email):
+            phone_norm = (
+                self._normalize_full_phone(primary_phone.phone_isd_code, primary_phone.phone_number)
+                if sync_auth_phone and primary_phone is not None
+                else None
+            )
+            email_norm = new_primary_email if sync_auth_email else None
+            await self._validate_contact_auth_identity_update(
+                user_id=linked_user_id,
+                phone=phone_norm,
+                email=email_norm,
+            )
+            if sync_auth_phone and primary_phone is not None:
+                await self._sync_contact_auth_phone(
+                    user_id=linked_user_id,
+                    phone=primary_phone,
+                )
+            if sync_auth_email and new_primary_email:
+                await self._sync_contact_auth_email(
+                    user_id=linked_user_id,
+                    email=new_primary_email,
+                )
 
         jsonb_list_fields = (
             ("social_pages", "contacts.errors.social_page_not_found"),
@@ -1789,12 +1941,6 @@ class ContactsService:
         new_snapshot: dict[str, Any] = dict(current)
         if isinstance(updated_row, dict):
             new_snapshot.update(updated_row)
-
-        if sync_auth_phone and primary_phone is not None and updated_row is not None:
-            await self._sync_contact_auth_phone(
-                user_id=str(current["user_id"]),
-                phone=primary_phone,
-            )
 
         updated_addresses = await self._apply_contact_addresses_delta(
             contact_id=contact_id,

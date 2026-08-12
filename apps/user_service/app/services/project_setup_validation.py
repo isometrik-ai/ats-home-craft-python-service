@@ -31,14 +31,22 @@ def validate_tower_numbering(
         )
 
 
-def validate_facility_payload(data: dict[str, Any]) -> None:
+def validate_facility_payload(
+    data: dict[str, Any],
+    *,
+    tower_has_wings: bool | None = None,
+) -> None:
     """Validate conditional facility fields based on type and location."""
     facility_type = normalize_facility_type(data.get("facility_type"))
     location_type = data.get("location_type")
     if isinstance(location_type, FacilityLocationType):
         location_type = location_type.value
 
-    if location_type == FacilityLocationType.IN_TOWER.value and not data.get("wing"):
+    if (
+        location_type == FacilityLocationType.IN_TOWER.value
+        and not data.get("wing")
+        and tower_has_wings is not False
+    ):
         raise ValidationException(
             message_key="project_setup.errors.facility_wing_required",
             custom_code=CustomStatusCode.VALIDATION_ERROR,

@@ -8,6 +8,7 @@ import asyncpg
 from supabase import AsyncClient
 
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
+    CONTACT_LEVEL_STEP_KEYS,
     ContactOnboardingRepository,
 )
 from apps.user_service.app.db.repositories.contact_roles_repository import (
@@ -19,6 +20,7 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
+    CompleteOnboardingRequest,
     CompleteProfileRequest,
     CreateHouseholdMemberRequest,
     UpdateHouseholdMemberRequest,
@@ -50,6 +52,7 @@ from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
 )
 from libs.shared_utils.http_exceptions import (
+    ConflictException,
     NotFoundException,
     ValidationException,
 )
@@ -179,6 +182,17 @@ class ContactOnboardingService:
             prompts.append({"type": "choose_default_unit"})
         return prompts
 
+    async def _auto_complete_legacy_wizard_steps(self, *, contact_id: str) -> None:
+        """Mark legacy wizard steps completed so older integrations stay green."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        for step_key in CONTACT_LEVEL_STEP_KEYS:
+            await self.onboarding_repo.complete_step(
+                organization_id=org_id,
+                contact_id=contact_id,
+                step_key=step_key,
+            )
+
     @staticmethod
     def _step_status(steps: list[dict[str, Any]], step_key: str) -> str:
         """Return the status string for a step key, defaulting to not_started."""
@@ -269,6 +283,106 @@ class ContactOnboardingService:
             step_key=ContactOnboardingStep.COMPLETE_PROFILE.value,
         )
         return profile
+
+    async def get_review(self, *, contact_id: str) -> dict[str, Any]:
+        """Aggregate contact, units, vehicles, and household for the review screen."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        contacts_service = ContactsService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+            supabase_client=self.supabase_client,
+        )
+        contact = await contacts_service.get_contact_details(contact_id=contact_id)
+        units = await self.contact_units_service.list_my_properties(contact_id=contact_id)
+        vehicles = await self.vehicles_service.list_vehicles(contact_id=contact_id)
+        household = await self.list_household(contact_id=contact_id)
+        return {
+            "contact": contact,
+            "units": units,
+            "vehicles": vehicles,
+            "household": household,
+        }
+
+    async def complete_onboarding(
+        self,
+        *,
+        contact_id: str,
+        body: CompleteOnboardingRequest | None = None,
+    ) -> dict[str, Any]:
+        """Finalize onboarding and activate confirmed properties."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        payload = body or CompleteOnboardingRequest()
+
+        active_unit_ids = await self.contact_units_repo.list_active_contact_unit_ids(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        if not active_unit_ids:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.no_active_units",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        status = await self.get_status(contact_id=contact_id)
+        if status["is_completed"]:
+            raise ConflictException(
+                message_key="contact_onboarding.errors.already_completed",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        if payload.contact_unit_ids is None:
+            completing_unit_ids = active_unit_ids
+            defer_unit_ids: list[str] = []
+        else:
+            completing_unit_ids = list(dict.fromkeys(payload.contact_unit_ids))
+            invalid_ids = set(completing_unit_ids) - set(active_unit_ids)
+            if invalid_ids:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.partial_complete_units_not_active",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            defer_unit_ids = [
+                unit_id for unit_id in active_unit_ids if unit_id not in completing_unit_ids
+            ]
+
+        if not completing_unit_ids:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.no_active_units",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        default_unit_id = await self.contact_units_repo.get_default_login_contact_unit_id(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        if not default_unit_id or default_unit_id not in completing_unit_ids:
+            await self.contact_units_repo.set_default_login(
+                organization_id=org_id,
+                contact_id=contact_id,
+                contact_unit_id=completing_unit_ids[0],
+            )
+
+        if defer_unit_ids:
+            await self.contact_units_repo.defer_active_units_to_pending(
+                organization_id=org_id,
+                contact_id=contact_id,
+                contact_unit_ids=defer_unit_ids,
+            )
+
+        await self.contact_units_repo.activate_units_by_ids(
+            organization_id=org_id,
+            contact_id=contact_id,
+            contact_unit_ids=completing_unit_ids,
+        )
+        await self._auto_complete_legacy_wizard_steps(contact_id=contact_id)
+
+        result = await self.get_status(contact_id=contact_id)
+        result["completed_contact_unit_ids"] = completing_unit_ids
+        if defer_unit_ids:
+            result["deferred_contact_unit_ids"] = defer_unit_ids
+        return result
 
     _REISSUABLE_HOUSEHOLD_INVITATION_STATUSES = frozenset(
         {

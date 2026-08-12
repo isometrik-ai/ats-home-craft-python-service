@@ -12,7 +12,8 @@ from apps.user_service.app.db.repositories.facilities_repository import (
 from apps.user_service.app.db.repositories.parking_slots_repository import (
     ParkingSlotsRepository,
 )
-from apps.user_service.app.schemas.enums import ProjectSetupStep
+from apps.user_service.app.db.repositories.towers_repository import TowersRepository
+from apps.user_service.app.schemas.enums import FacilityLocationType, ProjectSetupStep
 from apps.user_service.app.schemas.project_inventory import (
     CreateFacilityRequest,
     UpdateFacilityRequest,
@@ -41,6 +42,7 @@ class FacilitiesService:
         self.user_context = user_context
         self.facilities_repo = FacilitiesRepository(db_connection)
         self.parking_slots_repo = ParkingSlotsRepository(db_connection)
+        self.towers_repo = TowersRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection, user_context=user_context
         )
@@ -70,6 +72,35 @@ class FacilitiesService:
         if body.parking_user_type:
             data["parking_user_type"] = body.parking_user_type.value
         return data
+
+    async def _resolve_tower_has_wings(
+        self,
+        *,
+        project_id: str,
+        data: dict[str, Any],
+    ) -> bool | None:
+        """Return whether the referenced tower uses wings, when location is in_tower."""
+        location_type = data.get("location_type")
+        if isinstance(location_type, FacilityLocationType):
+            location_type = location_type.value
+        if location_type != FacilityLocationType.IN_TOWER.value:
+            return None
+
+        tower_id = data.get("tower_id")
+        if not tower_id:
+            return None
+
+        tower = await self.towers_repo.get_tower(
+            organization_id=self._org_id,
+            project_id=project_id,
+            tower_id=str(tower_id),
+        )
+        if not tower:
+            raise NotFoundException(
+                message_key="project_setup.errors.tower_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return bool(tower.get("has_wings"))
 
     async def _ensure_facility(self, *, project_id: str, facility_id: str) -> dict[str, Any]:
         """Return the facility row or raise 404."""
@@ -107,7 +138,8 @@ class FacilitiesService:
         """Create a facility and provision parking slots when applicable."""
         await self.setup_service.ensure_project(project_id=project_id)
         data = self._serialize_create_facility(body)
-        validate_facility_payload(data)
+        tower_has_wings = await self._resolve_tower_has_wings(project_id=project_id, data=data)
+        validate_facility_payload(data, tower_has_wings=tower_has_wings)
         data["organization_id"] = self._org_id
         data["project_id"] = project_id
         inserted = await self.facilities_repo.insert_facility(data)
@@ -151,7 +183,11 @@ class FacilitiesService:
         current = await self._ensure_facility(project_id=project_id, facility_id=facility_id)
         patch = self._serialize_update_facility(body)
         merged = {**serialize_row(current), **patch}
-        validate_facility_payload(merged)
+        tower_has_wings = await self._resolve_tower_has_wings(
+            project_id=project_id,
+            data=merged,
+        )
+        validate_facility_payload(merged, tower_has_wings=tower_has_wings)
         updated = await self.facilities_repo.update_facility(
             organization_id=self._org_id,
             project_id=project_id,

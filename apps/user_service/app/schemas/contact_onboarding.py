@@ -130,6 +130,21 @@ class ConfirmPropertiesRequest(BaseModel):
     )
 
 
+class CompleteOnboardingRequest(BaseModel):
+    """Finalize onboarding for all or a subset of active properties."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_unit_ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description=(
+            "Optional active contact_unit ids to finalize now. Omitted ids are moved back "
+            "to pending and can be claimed later via POST /properties/claim."
+        ),
+    )
+
+
 class ConfirmedPropertyItem(BaseModel):
     """One contact_unit row confirmed or claimed."""
 
@@ -555,6 +570,22 @@ class OnboardingStatusResponse(BaseModel):
     is_completed: bool
 
 
+class OnboardingReviewResponse(BaseModel):
+    """Review screen aggregate before finalize."""
+
+    contact: ContactDetailsResponse
+    units: list[ContactUnitSummaryResponse]
+    vehicles: list[VehicleResponse]
+    household: list[HouseholdMemberResponse]
+
+
+class CompleteOnboardingResponse(OnboardingStatusResponse):
+    """Result after POST /contact-onboarding/complete."""
+
+    completed_contact_unit_ids: list[str] = Field(default_factory=list)
+    deferred_contact_unit_ids: list[str] | None = None
+
+
 class HouseholdMemberResponse(BaseModel):
     """Family member linked to a unit."""
 
@@ -701,6 +732,26 @@ class OnboardingStatusApiResponse(BaseModel):
     statusCode: int
     code: str
     data: OnboardingStatusResponse
+
+
+class OnboardingReviewApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/review."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: OnboardingReviewResponse
+
+
+class CompleteOnboardingApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/complete."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: CompleteOnboardingResponse
 
 
 class ContactPropertiesListApiResponse(BaseModel):
