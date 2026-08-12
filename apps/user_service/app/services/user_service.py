@@ -36,6 +36,7 @@ from apps.user_service.app.schemas.users import (
 from apps.user_service.app.services.organization_service import OrganizationService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    coerce_json_list,
     format_iso_datetime,
     parse_json_field,
 )
@@ -1027,6 +1028,7 @@ class UserService:  # pylint: disable=too-many-public-methods
                 last_active_at=format_iso_datetime(u.get("last_active_at")),
                 permissions_count=permissions_count_map.get(str(u.get("role_id")), 0),
                 isometrik_user_id=u.get("isometrik_user_id"),
+                custom_fields=coerce_json_list(u.get("custom_fields")),
             )
             for u in users_data
         ]

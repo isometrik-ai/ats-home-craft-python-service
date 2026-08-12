@@ -529,6 +529,7 @@ class OrganizationMemberRepository:
                 om.updated_at,
                 om.last_active_at,
                 om.isometrik_user_id,
+                om.custom_fields,
                 COALESCE(au.raw_user_meta_data->'alternate_emails', '[]'::jsonb) AS alternate_emails
             FROM organization_members om
             LEFT JOIN auth.users au ON au.id = om.user_id
@@ -542,6 +543,7 @@ class OrganizationMemberRepository:
         for row in rows:
             row_dict = dict(row)
             row_dict["alternate_emails"] = parse_json_field(row_dict.get("alternate_emails"))
+            row_dict["custom_fields"] = parse_json_field(row_dict.get("custom_fields")) or []
             result.append(row_dict)
         return result
 

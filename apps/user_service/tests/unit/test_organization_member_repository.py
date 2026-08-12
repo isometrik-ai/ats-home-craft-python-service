@@ -1,5 +1,6 @@
 """Unit tests for OrganizationMemberRepository with fake connection."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -140,6 +141,28 @@ async def test_get_users_details_list_with_search():
     query, args = conn.fetch_calls[0]
     assert "ILIKE" in query
     assert args[-2:] == (5, 10)
+
+
+@pytest.mark.asyncio
+async def test_users_list_selects_custom_fields() -> None:
+    """Users list query selects om.custom_fields and parses JSONB rows."""
+    conn = _FakeConn(
+        rows=[
+            {
+                "user_id": "u1",
+                "email": "u1@example.com",
+                "custom_fields": json.dumps([{"field_id": "f1", "value": "Legal"}]),
+                "alternate_emails": "[]",
+            }
+        ]
+    )
+    repo = OrganizationMemberRepository(db_connection=conn)
+
+    rows = await repo.get_users_details_list(organization_id="org-1")
+
+    query = conn.fetch_calls[0][0]
+    assert "om.custom_fields" in query
+    assert rows[0]["custom_fields"] == [{"field_id": "f1", "value": "Legal"}]
 
 
 @pytest.mark.asyncio
