@@ -425,9 +425,7 @@ class ResidentDailyHelpCategoryStatsResponse(BaseModel):
     open_to_work_count: int = 0
     newly_added_count: int = 0
     profile_count: int = 0
-    preview_profiles: list[ResidentDailyHelpProfilePreviewResponse] = Field(
-        default_factory=list
-    )
+    preview_profiles: list[ResidentDailyHelpProfilePreviewResponse] = Field(default_factory=list)
 
 
 class DailyHelpMessageResponse(BaseModel):
