@@ -949,5 +949,5 @@ class NoticesService:
                 message_key="notifications.push.notices.published",
                 notification_type="notice_published",
                 feed_type="notices",
-                template_params={"title": title},
+                params={"title": title},
             )
