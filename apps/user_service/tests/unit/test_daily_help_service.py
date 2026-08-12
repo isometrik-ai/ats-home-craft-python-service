@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -16,7 +15,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
 
 
 def _user_context() -> UserContext:
@@ -51,23 +50,10 @@ def test_visitor_type_daily_help_maps_to_visitor():
     assert visitor_type == VisitorType.VISITOR.value
 
 
-def _mock_transaction_conn():
-    """Asyncpg connection mock with transaction context manager."""
-    conn = MagicMock()
-
-    @asynccontextmanager
-    async def _transaction():
-        yield conn
-
-    conn.transaction = _transaction
-    return conn
-
-
 @pytest.mark.asyncio
 async def test_create_profile_issues_pass_and_links():
     """Create profile inserts pass and links linked_pass_id."""
-    conn = _mock_transaction_conn()
-    svc = DailyHelpService(db_connection=conn, user_context=_user_context())
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
     svc.setup_service = MagicMock()
     svc.setup_service.ensure_project = AsyncMock()
     svc.categories_repo = MagicMock()
@@ -122,8 +108,7 @@ async def test_create_profile_issues_pass_and_links():
 @pytest.mark.asyncio
 async def test_deactivate_cancels_linked_pass():
     """Deactivate sets profile inactive and cancels linked pass."""
-    conn = _mock_transaction_conn()
-    svc = DailyHelpService(db_connection=conn, user_context=_user_context())
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
     svc.setup_service = MagicMock()
     svc.setup_service.ensure_project = AsyncMock()
     svc.repo = MagicMock()
@@ -152,6 +137,80 @@ async def test_deactivate_cancels_linked_pass():
         organization_id="org-1",
         pass_id="pass-1",
     )
+
+
+@pytest.mark.asyncio
+async def test_reactivate_reissues_pass_when_cancelled():
+    """Reactivate sets profile active and re-issues pass when linked pass is cancelled."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.INACTIVE.value,
+            "linked_pass_id": "pass-1",
+            "display_name": "Helper",
+            "phone_isd_code": "+91",
+            "phone_number": "9999999999",
+            "gate_passcode": "4821",
+            "photo_path": None,
+        }
+    )
+    svc.repo.update_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "linked_pass_id": "pass-1",
+            "display_name": "Helper",
+            "phone_isd_code": "+91",
+            "phone_number": "9999999999",
+            "gate_passcode": "4821",
+            "photo_path": None,
+        }
+    )
+    svc.repo.link_pass_id = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.get_by_id = AsyncMock(return_value={"id": "pass-1", "status": "cancelled"})
+    svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-2"})
+
+    result = await svc.reactivate_profile(project_id="project-1", profile_id="profile-1")
+
+    assert result.status == DailyHelpStatus.ACTIVE.value
+    svc.passes_repo.insert_daily_help.assert_awaited_once()
+    svc.repo.link_pass_id.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reactivate_raises_when_not_inactive():
+    """Reactivate rejects active or deleted profiles."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={"id": "profile-1", "status": DailyHelpStatus.ACTIVE.value}
+    )
+
+    result = await svc.reactivate_profile(project_id="project-1", profile_id="profile-1")
+    assert result.status == DailyHelpStatus.ACTIVE.value
+
+
+@pytest.mark.asyncio
+async def test_reactivate_raises_when_deleted():
+    """Reactivate rejects deleted profiles (use restore instead)."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={"id": "profile-1", "status": DailyHelpStatus.DELETED.value}
+    )
+
+    with pytest.raises(ConflictException):
+        await svc.reactivate_profile(project_id="project-1", profile_id="profile-1")
 
 
 @pytest.mark.asyncio

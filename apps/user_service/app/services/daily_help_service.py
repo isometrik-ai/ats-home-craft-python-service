@@ -314,6 +314,49 @@ class DailyHelpService:
             pass_id=str(pass_id),
         )
 
+    async def _reissue_pass_if_needed(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        row: dict[str, Any],
+        user_id: str | None,
+    ) -> None:
+        """Re-issue recurring pass when linked pass is missing or not active."""
+        linked_pass_id = row.get("linked_pass_id")
+        needs_pass = True
+        if linked_pass_id:
+            pass_row = await self.passes_repo.get_by_id(
+                organization_id=self.organization_id,
+                pass_id=str(linked_pass_id),
+            )
+            needs_pass = not pass_row or str(pass_row.get("status")) != PassStatus.ACTIVE.value
+
+        if not needs_pass:
+            return
+
+        pass_row = await self._issue_recurring_pass(
+            project_id=project_id,
+            profile_id=profile_id,
+            display_name=str(row["display_name"]),
+            phone_isd_code=str(row["phone_isd_code"]),
+            phone_number=str(row["phone_number"]),
+            gate_passcode=str(row["gate_passcode"]),
+            photo_path=row.get("photo_path"),
+        )
+        await self.repo.link_pass_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            pass_id=str(pass_row["id"]),
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.PASS_ISSUED.value,
+            actor_user_id=user_id,
+            payload={"pass_id": str(pass_row["id"])},
+        )
+
     async def _append_event(
         self,
         *,
@@ -787,71 +830,70 @@ class DailyHelpService:
         )
         user_id = self.user_context.user_id
 
-        async with self.db_connection.transaction():
-            profile = await self.repo.insert_profile(
+        profile = await self.repo.insert_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            initials=body.initials,
+            first_name=body.first_name,
+            middle_name=body.middle_name,
+            last_name=body.last_name,
+            display_name=display_name,
+            phone_isd_code=body.phone_isd_code,
+            phone_number=body.phone_number,
+            alternate_phone_isd_code=body.alternate_phone_isd_code,
+            alternate_phone_number=body.alternate_phone_number,
+            category_id=body.category_id,
+            gender=body.gender,
+            date_of_birth=body.date_of_birth,
+            photo_path=body.photo_path,
+            gate_passcode=gate_passcode,
+            status=DailyHelpStatus.ACTIVE.value,
+            created_by_user_id=str(user_id) if user_id else None,
+        )
+        profile_id = str(profile["id"])
+
+        for doc in body.documents:
+            await self.repo.insert_document(
                 organization_id=self.organization_id,
-                project_id=project_id,
-                initials=body.initials,
-                first_name=body.first_name,
-                middle_name=body.middle_name,
-                last_name=body.last_name,
-                display_name=display_name,
-                phone_isd_code=body.phone_isd_code,
-                phone_number=body.phone_number,
-                alternate_phone_isd_code=body.alternate_phone_isd_code,
-                alternate_phone_number=body.alternate_phone_number,
-                category_id=body.category_id,
-                gender=body.gender,
-                date_of_birth=body.date_of_birth,
-                photo_path=body.photo_path,
-                gate_passcode=gate_passcode,
-                status=DailyHelpStatus.ACTIVE.value,
-                created_by_user_id=str(user_id) if user_id else None,
-            )
-            profile_id = str(profile["id"])
-
-            for doc in body.documents:
-                await self.repo.insert_document(
-                    organization_id=self.organization_id,
-                    profile_id=profile_id,
-                    document_type=doc.document_type.value,
-                    label=doc.label,
-                    file_path=doc.file_path,
-                    file_name=doc.file_name,
-                    mime_type=doc.mime_type,
-                    file_size_bytes=doc.file_size_bytes,
-                    sort_order=doc.sort_order,
-                    uploaded_by_user_id=str(user_id) if user_id else None,
-                )
-
-            pass_row = await self._issue_recurring_pass(
-                project_id=project_id,
                 profile_id=profile_id,
-                display_name=display_name,
-                phone_isd_code=body.phone_isd_code,
-                phone_number=body.phone_number,
-                gate_passcode=gate_passcode,
-                photo_path=body.photo_path,
-            )
-            pass_id = str(pass_row["id"])
-            await self.repo.link_pass_id(
-                organization_id=self.organization_id,
-                project_id=project_id,
-                profile_id=profile_id,
-                pass_id=pass_id,
+                document_type=doc.document_type.value,
+                label=doc.label,
+                file_path=doc.file_path,
+                file_name=doc.file_name,
+                mime_type=doc.mime_type,
+                file_size_bytes=doc.file_size_bytes,
+                sort_order=doc.sort_order,
+                uploaded_by_user_id=str(user_id) if user_id else None,
             )
 
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.CREATED.value,
-                actor_user_id=str(user_id) if user_id else None,
-            )
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.PASS_ISSUED.value,
-                actor_user_id=str(user_id) if user_id else None,
-                payload={"pass_id": pass_id},
-            )
+        pass_row = await self._issue_recurring_pass(
+            project_id=project_id,
+            profile_id=profile_id,
+            display_name=display_name,
+            phone_isd_code=body.phone_isd_code,
+            phone_number=body.phone_number,
+            gate_passcode=gate_passcode,
+            photo_path=body.photo_path,
+        )
+        pass_id = str(pass_row["id"])
+        await self.repo.link_pass_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            pass_id=pass_id,
+        )
+
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.CREATED.value,
+            actor_user_id=str(user_id) if user_id else None,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.PASS_ISSUED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={"pass_id": pass_id},
+        )
 
         created_by_name = await self._resolve_created_by_name(user_id)
         return CreateDailyHelpResponse(
@@ -905,30 +947,29 @@ class DailyHelpService:
             )
 
         user_id = self.user_context.user_id
-        async with self.db_connection.transaction():
-            updated = await self.repo.update_profile(
-                organization_id=self.organization_id,
-                project_id=project_id,
-                profile_id=profile_id,
-                fields=patch,
-                updated_by_user_id=str(user_id) if user_id else None,
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields=patch,
+            updated_by_user_id=str(user_id) if user_id else None,
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
-            if not updated:
-                raise NotFoundException(
-                    message_key="daily_help.errors.not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
-            identity_changed = bool(
-                name_fields | {"phone_isd_code", "phone_number", "photo_path"} & patch.keys()
-            )
-            if identity_changed:
-                await self._sync_pass_guest_snapshot(row=updated)
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.UPDATED.value,
-                actor_user_id=str(user_id) if user_id else None,
-                payload={"fields": sorted(patch.keys())},
-            )
+        identity_changed = bool(
+            name_fields | {"phone_isd_code", "phone_number", "photo_path"} & patch.keys()
+        )
+        if identity_changed:
+            await self._sync_pass_guest_snapshot(row=updated)
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.UPDATED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={"fields": sorted(patch.keys())},
+        )
 
         return await self._serialize_detail(row=updated)
 
@@ -945,30 +986,75 @@ class DailyHelpService:
             return DailyHelpMessageResponse(id=profile_id, status=DailyHelpStatus.INACTIVE.value)
 
         user_id = self.user_context.user_id
-        async with self.db_connection.transaction():
-            updated = await self.repo.update_profile(
-                organization_id=self.organization_id,
-                project_id=project_id,
-                profile_id=profile_id,
-                fields={"status": DailyHelpStatus.INACTIVE.value},
-                updated_by_user_id=str(user_id) if user_id else None,
-            )
-            await self._cancel_linked_pass(pass_id=row.get("linked_pass_id"))
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.STATUS_CHANGED.value,
-                actor_user_id=str(user_id) if user_id else None,
-                payload={"status": DailyHelpStatus.INACTIVE.value},
-            )
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.PASS_CANCELLED.value,
-                actor_user_id=str(user_id) if user_id else None,
-            )
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={"status": DailyHelpStatus.INACTIVE.value},
+            updated_by_user_id=str(user_id) if user_id else None,
+        )
+        await self._cancel_linked_pass(pass_id=row.get("linked_pass_id"))
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.STATUS_CHANGED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={"status": DailyHelpStatus.INACTIVE.value},
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.PASS_CANCELLED.value,
+            actor_user_id=str(user_id) if user_id else None,
+        )
 
         return DailyHelpMessageResponse(
             id=profile_id,
             status=str((updated or row).get("status") or DailyHelpStatus.INACTIVE.value),
+        )
+
+    async def reactivate_profile(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+    ) -> DailyHelpMessageResponse:
+        """Mark an inactive profile active and re-issue pass when needed."""
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_not_deleted(row)
+        status = str(row.get("status"))
+        if status == DailyHelpStatus.ACTIVE.value:
+            return DailyHelpMessageResponse(id=profile_id, status=DailyHelpStatus.ACTIVE.value)
+        if status != DailyHelpStatus.INACTIVE.value:
+            raise ValidationException(
+                message_key="daily_help.errors.not_inactive",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        user_id = self.user_context.user_id
+        actor_user_id = str(user_id) if user_id else None
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={"status": DailyHelpStatus.ACTIVE.value},
+            updated_by_user_id=actor_user_id,
+        )
+        assert updated
+        await self._reissue_pass_if_needed(
+            project_id=project_id,
+            profile_id=profile_id,
+            row=updated,
+            user_id=actor_user_id,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.STATUS_CHANGED.value,
+            actor_user_id=actor_user_id,
+            payload={"status": DailyHelpStatus.ACTIVE.value},
+        )
+
+        return DailyHelpMessageResponse(
+            id=profile_id,
+            status=DailyHelpStatus.ACTIVE.value,
         )
 
     async def delete_profile(
@@ -984,28 +1070,27 @@ class DailyHelpService:
 
         user_id = self.user_context.user_id
         now = datetime.now(timezone.utc)
-        async with self.db_connection.transaction():
-            updated = await self.repo.update_profile(
-                organization_id=self.organization_id,
-                project_id=project_id,
-                profile_id=profile_id,
-                fields={
-                    "status": DailyHelpStatus.DELETED.value,
-                    "deleted_at": now,
-                },
-                updated_by_user_id=str(user_id) if user_id else None,
-            )
-            await self._cancel_linked_pass(pass_id=row.get("linked_pass_id"))
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.DELETED.value,
-                actor_user_id=str(user_id) if user_id else None,
-            )
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.PASS_CANCELLED.value,
-                actor_user_id=str(user_id) if user_id else None,
-            )
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={
+                "status": DailyHelpStatus.DELETED.value,
+                "deleted_at": now,
+            },
+            updated_by_user_id=str(user_id) if user_id else None,
+        )
+        await self._cancel_linked_pass(pass_id=row.get("linked_pass_id"))
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.DELETED.value,
+            actor_user_id=str(user_id) if user_id else None,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.PASS_CANCELLED.value,
+            actor_user_id=str(user_id) if user_id else None,
+        )
 
         return DailyHelpMessageResponse(
             id=profile_id,
@@ -1027,56 +1112,29 @@ class DailyHelpService:
             )
 
         user_id = self.user_context.user_id
-        async with self.db_connection.transaction():
-            updated = await self.repo.update_profile(
-                organization_id=self.organization_id,
-                project_id=project_id,
-                profile_id=profile_id,
-                fields={
-                    "status": DailyHelpStatus.ACTIVE.value,
-                    "deleted_at": None,
-                },
-                updated_by_user_id=str(user_id) if user_id else None,
-            )
-            assert updated
-
-            linked_pass_id = updated.get("linked_pass_id")
-            needs_pass = True
-            if linked_pass_id:
-                pass_row = await self.passes_repo.get_by_id(
-                    organization_id=self.organization_id,
-                    pass_id=str(linked_pass_id),
-                )
-                needs_pass = not pass_row or str(pass_row.get("status")) != PassStatus.ACTIVE.value
-
-            if needs_pass:
-                pass_row = await self._issue_recurring_pass(
-                    project_id=project_id,
-                    profile_id=profile_id,
-                    display_name=str(updated["display_name"]),
-                    phone_isd_code=str(updated["phone_isd_code"]),
-                    phone_number=str(updated["phone_number"]),
-                    gate_passcode=str(updated["gate_passcode"]),
-                    photo_path=updated.get("photo_path"),
-                )
-                await self.repo.link_pass_id(
-                    organization_id=self.organization_id,
-                    project_id=project_id,
-                    profile_id=profile_id,
-                    pass_id=str(pass_row["id"]),
-                )
-                await self._append_event(
-                    profile_id=profile_id,
-                    event_type=DailyHelpEventType.PASS_ISSUED.value,
-                    actor_user_id=str(user_id) if user_id else None,
-                    payload={"pass_id": str(pass_row["id"])},
-                )
-
-            await self._append_event(
-                profile_id=profile_id,
-                event_type=DailyHelpEventType.RESTORED.value,
-                actor_user_id=str(user_id) if user_id else None,
-            )
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={
+                "status": DailyHelpStatus.ACTIVE.value,
+                "deleted_at": None,
+            },
+            updated_by_user_id=str(user_id) if user_id else None,
+        )
+        assert updated
+        actor_user_id = str(user_id) if user_id else None
+        await self._reissue_pass_if_needed(
+            project_id=project_id,
+            profile_id=profile_id,
+            row=updated,
+            user_id=actor_user_id,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.RESTORED.value,
+            actor_user_id=actor_user_id,
+        )
 
         return DailyHelpMessageResponse(
             id=profile_id,
