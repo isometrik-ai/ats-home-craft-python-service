@@ -12,6 +12,7 @@ from apps.user_service.app.db.repositories.contact_onboarding_repository import 
 )
 from apps.user_service.app.schemas.common import Phone
 from apps.user_service.app.schemas.contact_onboarding import (
+    CompleteOnboardingRequest,
     CompleteProfileRequest,
     CreateHouseholdMemberRequest,
     UpdateHouseholdMemberRequest,
@@ -31,6 +32,7 @@ from apps.user_service.app.services.contact_onboarding_service import (
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
+    ConflictException,
     NotFoundException,
     ValidationException,
 )
@@ -118,8 +120,16 @@ class _FakeOnboardingRepo:
 
     async def complete_step(self, **kwargs):
         """Record complete_step call."""
-        self.complete_step_calls.append(kwargs["step_key"])
-        return {"step_key": kwargs["step_key"], "status": SetupStepStatus.COMPLETED.value}
+        step_key = kwargs["step_key"]
+        self.complete_step_calls.append(step_key)
+        for row in self.steps:
+            if row.get("step_key") == step_key:
+                row["status"] = SetupStepStatus.COMPLETED.value
+        if self.profile_steps is not None:
+            for row in self.profile_steps:
+                if row.get("step_key") == step_key:
+                    row["status"] = SetupStepStatus.COMPLETED.value
+        return {"step_key": step_key, "status": SetupStepStatus.COMPLETED.value}
 
     async def skip_step(self, **kwargs):
         """Record skip_step call."""
@@ -754,6 +764,122 @@ async def test_complete_profile_can_clear_gender(monkeypatch):
     update_body = contacts_service.update_contact.await_args.kwargs["body"]
     assert "gender" in update_body.model_fields_set
     assert update_body.gender is None
+
+
+@pytest.mark.asyncio
+async def test_get_review_aggregates_sections(monkeypatch):
+    """get_review combines contact, units, vehicles, and household."""
+    svc = _service()
+    contacts_service = MagicMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"id": "contact-1"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+    svc.contact_units_service.list_my_properties = AsyncMock(return_value=[{"id": "cu-1"}])
+    svc.vehicles_service.list_vehicles = AsyncMock(return_value=[])
+    svc.list_household = AsyncMock(return_value=[])
+
+    result = await svc.get_review(contact_id="contact-1")
+
+    assert result["contact"]["id"] == "contact-1"
+    assert result["units"] == [{"id": "cu-1"}]
+    assert result["vehicles"] == []
+    assert result["household"] == []
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding_rejects_already_completed():
+    """Already completed onboarding raises ConflictException."""
+    repo = _FakeOnboardingRepo(
+        _contact_steps(
+            overrides={
+                ContactOnboardingStep.COMPLETE_PROFILE.value: SetupStepStatus.COMPLETED.value,
+            }
+        )
+    )
+    units_repo = _FakeContactUnitsRepo(active_count=1, has_default=True, contact_unit_links=[])
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    with pytest.raises(ConflictException):
+        await svc.complete_onboarding(contact_id="contact-1")
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding_requires_active_units():
+    """Completion requires at least one active unit."""
+    repo = _FakeOnboardingRepo(_terminal_contact_steps())
+    units_repo = _FakeContactUnitsRepo(active_count=0)
+    unit_repo = _FakeUnitOnboardingRepo(all_terminal=True)
+    svc = _service(
+        onboarding_repo=repo,
+        contact_units_repo=units_repo,
+        unit_onboarding_repo=unit_repo,
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.complete_onboarding(contact_id="contact-1")
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding_auto_sets_default_unit():
+    """Finalize auto-picks a default unit when missing."""
+    repo = _FakeOnboardingRepo(_contact_steps())
+    units_repo = _FakeContactUnitsRepo(
+        active_count=2, has_default=False, default_contact_unit_id=None
+    )
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    result = await svc.complete_onboarding(contact_id="contact-1")
+
+    assert units_repo.default_contact_unit_id == "cu-1"
+    assert result["is_completed"] is True
+    assert result["completed_contact_unit_ids"] == ["cu-1", "cu-2"]
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding_succeeds_without_unit_steps():
+    """Finalize no longer requires vehicles/household wizard steps."""
+    repo = _FakeOnboardingRepo(_contact_steps())
+    units_repo = _FakeContactUnitsRepo(
+        active_count=2, has_default=False, default_contact_unit_id=None
+    )
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    result = await svc.complete_onboarding(contact_id="contact-1")
+
+    assert units_repo.activate_called is True
+    assert result["is_completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding_partial_finalize():
+    """Partial finalize activates selected units and defers the rest to pending."""
+    repo = _FakeOnboardingRepo(_contact_steps())
+    units_repo = _FakeContactUnitsRepo(
+        active_count=3,
+        active_unit_ids=["cu-1", "cu-2", "cu-3"],
+        has_default=False,
+        default_contact_unit_id=None,
+    )
+    unit_repo = _FakeUnitOnboardingRepo(all_terminal=True)
+    svc = _service(
+        onboarding_repo=repo,
+        contact_units_repo=units_repo,
+        unit_onboarding_repo=unit_repo,
+    )
+
+    result = await svc.complete_onboarding(
+        contact_id="contact-1",
+        body=CompleteOnboardingRequest(contact_unit_ids=["cu-1"]),
+    )
+
+    assert units_repo.activated_unit_ids == ["cu-1"]
+    assert units_repo.deferred_unit_ids == ["cu-2", "cu-3"]
+    assert units_repo.default_contact_unit_id == "cu-1"
+    assert result["completed_contact_unit_ids"] == ["cu-1"]
+    assert result["deferred_contact_unit_ids"] == ["cu-2", "cu-3"]
+    assert result["is_completed"] is True
 
 
 @pytest.mark.asyncio

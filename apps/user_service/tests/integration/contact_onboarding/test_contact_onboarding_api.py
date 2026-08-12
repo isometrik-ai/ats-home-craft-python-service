@@ -31,6 +31,23 @@ _FAKE_HOUSEHOLD_MEMBER = {
     "relationship": "spouse",
 }
 
+_FAKE_REVIEW = {
+    "contact": _FAKE_PROFILE,
+    "units": [{"id": CONTACT_UNIT_ID, "code": "A-101"}],
+    "vehicles": [],
+    "household": [_FAKE_HOUSEHOLD_MEMBER],
+}
+
+_FAKE_COMPLETE = {
+    "profile_complete": True,
+    "pending_unit_count": 0,
+    "active_unit_count": 1,
+    "requires_default_unit": False,
+    "prompts": [],
+    "is_completed": True,
+    "completed_contact_unit_ids": [CONTACT_UNIT_ID],
+}
+
 
 def _patch_contact_context(monkeypatch) -> None:
     """Patch onboarding contact context for authenticated contact routes."""
@@ -711,6 +728,53 @@ async def test_remove_household_member(monkeypatch, client):
     res = await client.delete(f"/v1/contact-onboarding/household/{CONTACT_UNIT_ID}")
     body = assert_success(res, 200)
     assert body["data"]["removed"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_review(monkeypatch, client):
+    """GET /contact-onboarding/review returns onboarding summary."""
+
+    _patch_contact_context(monkeypatch)
+
+    async def fake_get_review(_self, *, contact_id: str):
+        del _self
+        assert contact_id == CONTACT_ID
+        return _FAKE_REVIEW
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service."
+        "ContactOnboardingService.get_review",
+        fake_get_review,
+    )
+
+    res = await client.get("/v1/contact-onboarding/review")
+    body = assert_success(res, 200)
+    assert body["data"]["contact"]["first_name"] == "Jane"
+    assert body["data"]["units"][0]["code"] == "A-101"
+
+
+@pytest.mark.asyncio
+async def test_complete_onboarding(monkeypatch, client):
+    """POST /contact-onboarding/complete finalizes onboarding."""
+
+    _patch_contact_context(monkeypatch)
+
+    async def fake_complete_onboarding(_self, *, contact_id: str, body=None):
+        del _self
+        assert contact_id == CONTACT_ID
+        assert body is None
+        return _FAKE_COMPLETE
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service."
+        "ContactOnboardingService.complete_onboarding",
+        fake_complete_onboarding,
+    )
+
+    res = await client.post("/v1/contact-onboarding/complete")
+    body = assert_success(res, 200)
+    assert body["data"]["is_completed"] is True
+    assert body["data"]["completed_contact_unit_ids"] == [CONTACT_UNIT_ID]
 
 
 @pytest.mark.asyncio

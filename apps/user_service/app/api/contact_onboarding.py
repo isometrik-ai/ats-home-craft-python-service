@@ -15,6 +15,8 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ClaimPropertiesApiResponse,
     ClaimPropertiesRequest,
     ClaimPropertiesResponse,
+    CompleteOnboardingApiResponse,
+    CompleteOnboardingRequest,
     CompleteProfileRequest,
     ConfirmPropertiesRequest,
     ContactOnboardingMessageApiResponse,
@@ -30,6 +32,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     HouseholdInvitationValidateApiResponse,
     HouseholdMemberApiResponse,
     HouseholdMemberListApiResponse,
+    OnboardingReviewApiResponse,
     OnboardingStatusApiResponse,
     RemoveHouseholdMemberApiResponse,
     ResubmitVehicleRequest,
@@ -169,6 +172,14 @@ REMOVE_HOUSEHOLD_MEMBER_SUCCESS_RESPONSES = _ok_response(
 SET_DEFAULT_UNIT_SUCCESS_RESPONSES = _ok_response(
     SetDefaultUnitApiResponse,
     "Default login unit updated.",
+)
+REVIEW_SUCCESS_RESPONSES = _ok_response(
+    OnboardingReviewApiResponse,
+    "Aggregated onboarding review before finalize.",
+)
+COMPLETE_SUCCESS_RESPONSES = _ok_response(
+    CompleteOnboardingApiResponse,
+    "Onboarding finalized; selected properties activated.",
 )
 
 
@@ -1284,6 +1295,96 @@ async def remove_household_member(
     return success_response(
         request=request,
         message_key="contact_onboarding.success.household_member_removed",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("get onboarding review")
+@router.get(
+    "/review",
+    status_code=http_status.HTTP_200_OK,
+    summary="Review onboarding summary",
+    response_model=None,
+    responses=REVIEW_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_review(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
+):
+    """Return aggregated onboarding review data."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=sb_client,
+    )
+    data = await service.get_review(contact_id=str(contact["id"]))
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.review_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("complete contact onboarding")
+@router.post(
+    "/complete",
+    status_code=http_status.HTTP_200_OK,
+    summary="Finalize onboarding",
+    description=(
+        "Finalize onboarding and activate confirmed properties. Optionally pass "
+        "`contact_unit_ids` to finish a subset now; other active properties are moved "
+        "back to pending and can be claimed later via POST /properties/claim."
+    ),
+    response_model=None,
+    responses=COMPLETE_SUCCESS_RESPONSES,
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contact_onboarding_steps",
+    category="CONTACT_ONBOARDING",
+)
+async def complete_onboarding(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: CompleteOnboardingRequest | None = Body(default=None),
+):
+    """Finalize contact onboarding and activate assigned units."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=None,
+    )
+    data = await service.complete_onboarding(
+        contact_id=str(contact["id"]),
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contact_onboarding_steps",
+        requested_id=str(contact["id"]),
+        description=f"Completed onboarding for contact: {contact['id']}",
+        risk_level="high",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.onboarding_completed",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )
