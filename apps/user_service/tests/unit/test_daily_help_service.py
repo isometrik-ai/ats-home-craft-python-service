@@ -165,3 +165,52 @@ async def test_get_detail_raises_when_missing():
 
     with pytest.raises(NotFoundException):
         await svc.get_detail(project_id="project-1", profile_id="missing")
+
+
+@pytest.mark.asyncio
+async def test_list_resident_categories_includes_profile_previews():
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(
+        return_value={"project_id": "project-1"}
+    )
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.categories_repo = MagicMock()
+    svc.categories_repo.list_by_project = AsyncMock(
+        return_value=[{"id": "cat-1", "name": "Maids"}]
+    )
+    svc.repo = MagicMock()
+    svc.repo.list_profiles = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": f"profile-{idx}",
+                    "display_name": f"Helper {idx}",
+                    "photo_path": f"photo-{idx}.jpg",
+                    "initials": "Ms.",
+                    "open_to_work": idx == 0,
+                    "created_at": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    ),
+                    "linked_pass_id": None,
+                }
+                for idx in range(6)
+            ],
+            6,
+        )
+    )
+    svc.events_repo = MagicMock()
+    svc.events_repo.has_open_check_in = AsyncMock(return_value=False)
+
+    items = await svc.list_resident_categories(
+        contact_id="contact-1",
+        unit_id="unit-1",
+    )
+
+    assert len(items) == 1
+    assert items[0].profile_count == 6
+    assert len(items[0].preview_profiles) == 4
+    assert items[0].preview_profiles[0].display_name == "Helper 0"
+    assert items[0].preview_profiles[0].photo_path == "photo-0.jpg"

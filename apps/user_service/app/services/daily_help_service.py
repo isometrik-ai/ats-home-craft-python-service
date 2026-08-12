@@ -48,6 +48,7 @@ from apps.user_service.app.schemas.daily_help import (
     ResidentDailyHelpCategoryStatsResponse,
     ResidentDailyHelpListItemResponse,
     ResidentDailyHelpListQuery,
+    ResidentDailyHelpProfilePreviewResponse,
     ResidentDailyHelpSearchQuery,
     UpdateDailyHelpCategoryRequest,
     UpdateDailyHelpRequest,
@@ -72,6 +73,7 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.status_codes import CustomStatusCode
 
+_CATEGORY_PREVIEW_LIMIT = 4
 _NEWLY_ADDED_DAYS = 30
 _RECURRING_PASS_YEARS = 10
 
@@ -355,6 +357,16 @@ class DailyHelpService:
             profile_id=profile_id,
         )
         return bool(links)
+
+    @staticmethod
+    def _serialize_profile_preview(row: dict[str, Any]) -> ResidentDailyHelpProfilePreviewResponse:
+        """Map a profile row to a compact category-home preview."""
+        return ResidentDailyHelpProfilePreviewResponse(
+            id=str(row["id"]),
+            display_name=str(row["display_name"]),
+            photo_path=row.get("photo_path"),
+            initials=row.get("initials"),
+        )
 
     def _serialize_category(self, row: dict[str, Any]) -> DailyHelpCategoryResponse:
         """Map a category row to API shape."""
@@ -1250,6 +1262,10 @@ class DailyHelpService:
                     open_to_work_count=open_to_work_count,
                     newly_added_count=newly_added_count,
                     profile_count=len(rows),
+                    preview_profiles=[
+                        self._serialize_profile_preview(row)
+                        for row in rows[:_CATEGORY_PREVIEW_LIMIT]
+                    ],
                 )
             )
         return stats
