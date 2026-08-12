@@ -211,6 +211,32 @@ async def test_get_user_profile_by_id_with_org():
 
 
 @pytest.mark.asyncio
+async def test_add_member_serializes_custom_fields() -> None:
+    """add_member INSERT includes custom_fields JSONB."""
+    conn = _FakeConn(row={"user_id": "u1"})
+    repo = OrganizationMemberRepository(db_connection=conn)
+
+    payload = [{"field_id": "f1", "value": "Legal", "type": "text", "instance_id": "i1"}]
+    await repo.add_member(
+        organization_id="org-1",
+        member_data={
+            "user_id": "u1",
+            "email": "u1@example.com",
+            "role_id": "role-1",
+            "role": "member",
+            "member_role": "member",
+            "custom_fields": payload,
+        },
+    )
+
+    query, args = conn.fetchrow_calls[0]
+    assert "custom_fields" in query
+    assert "custom_fields = EXCLUDED.custom_fields" in query
+    assert isinstance(args[-1], str)
+    assert json.loads(args[-1]) == payload
+
+
+@pytest.mark.asyncio
 async def test_fetch_context_for_member_role_change():
     """Role-change context loads org and member rows in one query."""
     conn = _async_mock_conn(row={"created_by_id": "owner", "target_user_id": "u2"})

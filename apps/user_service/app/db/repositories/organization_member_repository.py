@@ -13,10 +13,15 @@ from apps.user_service.app.schemas.enums import (
     OrganizationMemberStatus,
     OrganizationStatus,
 )
-from apps.user_service.app.utils.common_utils import parse_json_field
+from apps.user_service.app.utils.common_utils import (
+    parse_json_field,
+    serialize_jsonb_param,
+)
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("organization_member_repository")
+
+ORGANIZATION_MEMBER_JSONB_COLUMNS: frozenset[str] = frozenset({"custom_fields"})
 
 
 class OrganizationMemberRepository:
@@ -35,6 +40,11 @@ class OrganizationMemberRepository:
         status = member_data.get("status") or OrganizationMemberStatus.ACTIVE.value
         member_id = member_data.get("id")
         tags = member_data.get("tags") or []
+        custom_fields_param = serialize_jsonb_param(
+            "custom_fields",
+            member_data.get("custom_fields") or [],
+            ORGANIZATION_MEMBER_JSONB_COLUMNS,
+        )
 
         # Upsert on (user_id, organization_id) so a previously soft-deleted member
         # is reactivated rather than triggering a unique-constraint violation when
@@ -55,6 +65,7 @@ class OrganizationMemberRepository:
                 salutation = EXCLUDED.salutation,
                 invited_by = EXCLUDED.invited_by,
                 tags = EXCLUDED.tags,
+                custom_fields = EXCLUDED.custom_fields,
                 joined_at = NOW(),
                 updated_at = NOW()
         """
@@ -81,12 +92,13 @@ class OrganizationMemberRepository:
                     timezone,
                     salutation,
                     invited_by,
-                    tags
+                    tags,
+                    custom_fields
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
                     $9, NOW(), NOW(), NOW(),
-                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16, $17::text[]
+                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16, $17::text[], $18::jsonb
                 )
                 {on_conflict_clause}
                 RETURNING *
@@ -110,6 +122,7 @@ class OrganizationMemberRepository:
                 member_data.get("salutation"),
                 member_data.get("invited_by"),
                 tags,
+                custom_fields_param,
             )
         else:
             query = f"""
@@ -132,12 +145,13 @@ class OrganizationMemberRepository:
                     timezone,
                     salutation,
                     invited_by,
-                    tags
+                    tags,
+                    custom_fields
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     $8, NOW(), NOW(), NOW(),
-                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15, $16::text[]
+                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15, $16::text[], $17::jsonb
                 )
                 {on_conflict_clause}
                 RETURNING *
@@ -160,6 +174,7 @@ class OrganizationMemberRepository:
                 member_data.get("salutation"),
                 member_data.get("invited_by"),
                 tags,
+                custom_fields_param,
             )
         return dict(row) if row else {}
 
