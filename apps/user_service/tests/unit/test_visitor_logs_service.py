@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.enums import (
     WalkInEventType,
     WalkInStatus,
 )
+from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import UserContext
 
@@ -619,6 +620,75 @@ async def test_get_log_detail_shows_creator_without_unit_role():
     assert detail["resident"]["person_name"] == "Rasika Bharati"
     assert detail["resident"]["role"] is None
     assert detail["visit_status"] == VisitorLogVisitStatus.EXPIRED.value
+
+
+@pytest.mark.asyncio
+async def test_get_log_detail_daily_help_pass_null_unit_id():
+    """Daily help pass detail must not query residents with literal 'None' unit_id."""
+    now = datetime(2026, 6, 9, tzinfo=timezone.utc)
+    pass_row = {
+        "id": "pass-dh-1",
+        "organization_id": "org-1",
+        "project_id": "project-1",
+        "unit_id": None,
+        "host_contact_id": None,
+        "created_by_contact_id": None,
+        "pass_type": PassType.DAILY_HELP.value,
+        "guest_name": "Maid",
+        "guest_phone_isd_code": "+91",
+        "guest_phone_number": "9876543210",
+        "visitor_count": 1,
+        "vehicle_number": None,
+        "purpose": None,
+        "valid_from": now,
+        "valid_until": now,
+        "validity_type": "recurring",
+        "allow_multiple_entries": True,
+        "is_private": False,
+        "max_entries": None,
+        "entry_count": 0,
+        "status": "active",
+        "code": "1234",
+        "pass_image_path": None,
+        "notes": None,
+        "unit_code": None,
+        "unit_label": None,
+        "tower_name": None,
+        "floor_name": None,
+        "config_label": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    class _TrackingUnitsRepo(_FakeUnitsRepo):
+        async def get_contact_residents_batch(
+            self,
+            *,
+            organization_id: str,
+            contact_unit_pairs: list[tuple[str, str]],
+        ):
+            del organization_id
+            for _, unit_id in contact_unit_pairs:
+                assert unit_id != "None"
+            return {}
+
+    passes_repo = _FakePassesRepo(row=pass_row)
+    events_repo = _FakeEventsRepo(events=[])
+    svc = _service(
+        passes_repo=passes_repo,
+        events_repo=events_repo,
+        units_repo=_TrackingUnitsRepo(),
+    )
+    svc._passes_service = PassesService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+    )
+
+    detail = await svc.get_log_detail(pass_id="pass-dh-1")
+    assert detail["source"] == "pass"
+    assert detail["unit_id"] is None
+    assert detail["resident"] is None
+    assert detail["visitor_type"] == VisitorType.VISITOR.value
 
 
 def test_build_resident_without_unit_role():

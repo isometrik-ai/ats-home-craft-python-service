@@ -197,6 +197,14 @@ def test_derive_display_status_used_one_time():
     assert PassesService.derive_display_status(row, now=now) == PassDisplayStatus.USED.value
 
 
+def test_normalize_pass_preserves_null_foreign_keys():
+    """Daily help and other passes may omit unit_id and host_contact_id."""
+    svc = PassesService(db_connection=MagicMock(), user_context=_user_context())
+    normalized = svc._normalize_pass(_pass_row(unit_id=None, host_contact_id=None))
+    assert normalized["unit_id"] is None
+    assert normalized["host_contact_id"] is None
+
+
 @pytest.mark.asyncio
 async def test_create_pass_rejects_unowned_unit():
     """Create rejects units the host contact does not actively own."""
