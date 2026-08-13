@@ -223,6 +223,81 @@ async def test_reactivate_raises_when_deleted():
 
 
 @pytest.mark.asyncio
+async def test_list_profiles_includes_household_link_count():
+    """Admin list rows expose per-profile household link counts."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_profiles = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "profile-1",
+                    "organization_id": "org-1",
+                    "project_id": "project-1",
+                    "display_name": "Lakshmi",
+                    "category_id": "cat-1",
+                    "category_name": "Maid",
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "document_count": 2,
+                    "household_link_count": 3,
+                    "status": DailyHelpStatus.ACTIVE.value,
+                    "gate_passcode": "1234",
+                    "open_to_work": True,
+                    "created_at": __import__("datetime").datetime.now(
+                        __import__("datetime").timezone.utc
+                    ),
+                }
+            ],
+            1,
+        )
+    )
+
+    from apps.user_service.app.schemas.daily_help import DailyHelpListQuery
+
+    items, total = await svc.list_profiles(
+        project_id="project-1",
+        query=DailyHelpListQuery(page=1, page_size=20),
+    )
+
+    assert total == 1
+    assert items[0].household_link_count == 3
+
+
+@pytest.mark.asyncio
+async def test_list_household_links_returns_active_units():
+    """Admin can list active household unit links for a profile."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(return_value={"id": "profile-1"})
+    svc.repo.list_active_links_for_profile = AsyncMock(
+        return_value=[
+            {
+                "id": "link-1",
+                "unit_id": "unit-1",
+                "linked_by_contact_id": "owner-1",
+                "status": "active",
+                "started_at": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ),
+                "unit_code": "A-1203",
+                "unit_label": "A-1203",
+            }
+        ]
+    )
+
+    items = await svc.list_household_links(project_id="project-1", profile_id="profile-1")
+
+    assert len(items) == 1
+    assert items[0].unit_id == "unit-1"
+    assert items[0].unit_label == "A-1203"
+
+
+@pytest.mark.asyncio
 async def test_get_detail_raises_when_missing():
     """Missing profile returns not found."""
     svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())

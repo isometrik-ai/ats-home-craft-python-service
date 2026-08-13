@@ -943,6 +943,7 @@
     "success": {
       "summary_retrieved": "Daily help summary retrieved successfully.",
       "list_retrieved": "Daily help profiles retrieved successfully.",
+      "household_links_retrieved": "Daily help household links retrieved successfully.",
       "categories_retrieved": "Daily help categories retrieved successfully.",
       "category_created": "Daily help category created successfully.",
       "category_updated": "Daily help category updated successfully.",

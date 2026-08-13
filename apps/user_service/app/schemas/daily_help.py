@@ -535,6 +535,16 @@ class DailyHelpListApiResponse(BaseModel):
     total_pages: int
 
 
+class DailyHelpHouseholdLinkListApiResponse(BaseModel):
+    """API envelope for GET profile household links (admin)."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[DailyHelpHouseholdLinkResponse]
+
+
 class ResidentDailyHelpListApiResponse(BaseModel):
     """API envelope for resident daily help directory list/search."""
 
