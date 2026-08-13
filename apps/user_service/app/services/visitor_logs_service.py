@@ -48,6 +48,16 @@ class VisitorLogsService:
         }
     )
 
+    @staticmethod
+    def _optional_id(value: Any) -> str | None:
+        """Normalize optional UUID fields; treat null and literal 'None' as missing."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text or text.lower() == "none":
+            return None
+        return text
+
     def __init__(self, *, db_connection: asyncpg.Connection, user_context: UserContext) -> None:
         self.db_connection = db_connection
         self.user_context = user_context
@@ -227,6 +237,11 @@ class VisitorLogsService:
         if not contact_id:
             return None
 
+        contact_id = self._optional_id(contact_id)
+        unit_id = self._optional_id(unit_id)
+        if not contact_id:
+            return None
+
         if unit_id:
             key = UnitsRepository._resident_pair_key(contact_id, unit_id)
             residents_by_pair = await self.units_repo.get_contact_residents_batch(
@@ -316,12 +331,14 @@ class VisitorLogsService:
             detail["resident"] = primary_resident
             return detail
 
-        contact_id = str(detail.get("created_by_contact_id") or detail.get("host_contact_id") or "")
-        unit_id = str(detail.get("unit_id") or "")
+        contact_id = self._optional_id(
+            detail.get("created_by_contact_id") or detail.get("host_contact_id")
+        )
+        unit_id = self._optional_id(detail.get("unit_id"))
         detail["resident"] = await self._resolve_resident(
             organization_id=organization_id,
-            contact_id=contact_id or None,
-            unit_id=unit_id or None,
+            contact_id=contact_id,
+            unit_id=unit_id,
             person_name=self._contact_created_by(detail),
         )
         return detail

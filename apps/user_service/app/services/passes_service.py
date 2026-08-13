@@ -38,6 +38,14 @@ from libs.shared_utils.status_codes import CustomStatusCode
 _CODE_MAX_ATTEMPTS = 10
 
 
+def _optional_id(value: Any) -> str | None:
+    """Return a string id for API payloads, preserving null for optional FK columns."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 class PassesService:
     """Resident-facing visitor pass operations."""
 
@@ -138,8 +146,8 @@ class PassesService:
             "id": str(row["id"]),
             "organization_id": str(row["organization_id"]),
             "project_id": str(row["project_id"]),
-            "unit_id": str(row["unit_id"]),
-            "host_contact_id": str(row["host_contact_id"]),
+            "unit_id": _optional_id(row.get("unit_id")),
+            "host_contact_id": _optional_id(row.get("host_contact_id")),
             "pass_type": row.get("pass_type"),
             "guest_name": row.get("guest_name"),
             "guest_phone_isd_code": row.get("guest_phone_isd_code"),
@@ -178,7 +186,7 @@ class PassesService:
             "code": row.get("code"),
             "guest_name": row.get("guest_name"),
             "pass_type": row.get("pass_type"),
-            "unit_id": str(row["unit_id"]),
+            "unit_id": _optional_id(row.get("unit_id")),
             "unit_label": row.get("unit_label"),
             "tower_name": row.get("tower_name"),
             "valid_from": format_iso_datetime(row.get("valid_from")),
