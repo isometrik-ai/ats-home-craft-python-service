@@ -254,6 +254,7 @@ async def test_list_resident_categories_includes_profile_previews():
                     "display_name": f"Helper {idx}",
                     "photo_path": f"photo-{idx}.jpg",
                     "initials": "Ms.",
+                    "phone_isd_code": "+91",
                     "phone_number": "9655011223",
                     "open_to_work": idx == 0,
                     "created_at": __import__("datetime").datetime.now(
@@ -279,7 +280,7 @@ async def test_list_resident_categories_includes_profile_previews():
     assert len(items[0].preview_profiles) == 4
     assert items[0].preview_profiles[0].display_name == "Helper 0"
     assert items[0].preview_profiles[0].photo_path == "photo-0.jpg"
-    assert items[0].preview_profiles[0].phone == "XXXXXX1223"
+    assert items[0].preview_profiles[0].phone == "+91 9655011223"
 
 
 @pytest.mark.asyncio

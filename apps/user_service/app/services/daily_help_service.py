@@ -407,14 +407,15 @@ class DailyHelpService:
     @staticmethod
     def _serialize_profile_preview(row: dict[str, Any]) -> ResidentDailyHelpProfilePreviewResponse:
         """Map a profile row to a compact category-home preview."""
-        phone_number = str(row.get("phone_number") or "")
-        phone = DailyHelpService._mask_phone_number(phone_number) if phone_number else None
         return ResidentDailyHelpProfilePreviewResponse(
             id=str(row["id"]),
             display_name=str(row["display_name"]),
             photo_path=row.get("photo_path"),
             initials=row.get("initials"),
-            phone=phone,
+            phone=DailyHelpService._format_phone(
+                isd_code=row.get("phone_isd_code"),
+                phone_number=row.get("phone_number"),
+            ),
         )
 
     def _serialize_category(self, row: dict[str, Any]) -> DailyHelpCategoryResponse:
@@ -525,14 +526,10 @@ class DailyHelpService:
             unit_id=unit_id,
             profile_id=str(row["id"]),
         )
-        phone_number = str(row.get("phone_number") or "")
-        phone_isd = row.get("phone_isd_code")
-        if has_link:
-            phone = self._format_phone(isd_code=phone_isd, phone_number=phone_number)
-            phone_masked = False
-        else:
-            phone = self._mask_phone_number(phone_number) if phone_number else None
-            phone_masked = bool(phone_number)
+        phone = self._format_phone(
+            isd_code=row.get("phone_isd_code"),
+            phone_number=row.get("phone_number"),
+        )
 
         created_at = row.get("created_at")
         is_newly_added = False
@@ -551,7 +548,7 @@ class DailyHelpService:
             category_name=row.get("category_name"),
             photo_path=row.get("photo_path"),
             phone=phone,
-            phone_masked=phone_masked,
+            phone_masked=False,
             gate_passcode=row.get("gate_passcode"),
             household_link_count=int(row.get("household_link_count") or 0),
             open_to_work=bool(row.get("open_to_work")),
