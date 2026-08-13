@@ -49,8 +49,16 @@ class CreateDailyHelpRequest(BaseModel):
     gender: str | None = Field(None, max_length=50)
     date_of_birth: date | None = None
     photo_path: str | None = Field(None, max_length=2000)
-    open_to_work: bool = False
+    open_to_work: bool = True
     documents: list[DailyHelpDocumentInput] = Field(default_factory=list, max_length=20)
+
+
+class SetDailyHelpOpenToWorkRequest(BaseModel):
+    """Resident toggles whether a household-linked helper is open to work."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    open_to_work: bool
 
 
 class UpdateDailyHelpRequest(BaseModel):
@@ -474,6 +482,15 @@ class DailyHelpMessageResponse(BaseModel):
     status: str
 
 
+class DailyHelpOpenToWorkResponse(BaseModel):
+    """Result after toggling open_to_work on a profile."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    open_to_work: bool
+
+
 class DailyHelpCategoryListApiResponse(BaseModel):
     """API envelope for GET /projects/{project_id}/daily-help/categories."""
 
@@ -592,6 +609,16 @@ class DailyHelpMessageApiResponse(BaseModel):
     statusCode: int
     code: str
     data: DailyHelpMessageResponse
+
+
+class DailyHelpOpenToWorkApiResponse(BaseModel):
+    """API envelope for PATCH /daily-help/{profile_id}/open-to-work."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: DailyHelpOpenToWorkResponse
 
 
 class DailyHelpHouseholdLinkApiResponse(BaseModel):

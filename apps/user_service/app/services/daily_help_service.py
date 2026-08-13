@@ -42,6 +42,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpListItemResponse,
     DailyHelpListQuery,
     DailyHelpMessageResponse,
+    DailyHelpOpenToWorkResponse,
     DailyHelpRatingSummaryResponse,
     DailyHelpSummaryResponse,
     ReplaceDailyHelpAvailabilityRequest,
@@ -51,6 +52,7 @@ from apps.user_service.app.schemas.daily_help import (
     ResidentDailyHelpDetailResponse,
     ResidentDailyHelpProfilePreviewResponse,
     ResidentDailyHelpSearchQuery,
+    SetDailyHelpOpenToWorkRequest,
     UpdateDailyHelpCategoryRequest,
     UpdateDailyHelpRequest,
 )
@@ -1443,6 +1445,61 @@ class DailyHelpService:
         return await self._serialize_resident_detail(
             row=row,
             mask_phone=not has_link,
+        )
+
+    async def set_resident_open_to_work(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+        body: SetDailyHelpOpenToWorkRequest,
+    ) -> DailyHelpOpenToWorkResponse:
+        """Toggle open_to_work for a household-linked active profile."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_not_deleted(row)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if not await self._viewer_has_household_link(
+            unit_id=unit_id,
+            profile_id=profile_id,
+        ):
+            raise ValidationException(
+                message_key="daily_help.errors.household_link_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={"open_to_work": body.open_to_work},
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.UPDATED.value,
+            actor_type=DailyHelpActorType.RESIDENT.value,
+            actor_contact_id=contact_id,
+            payload={
+                "fields": ["open_to_work"],
+                "open_to_work": body.open_to_work,
+            },
+        )
+        return DailyHelpOpenToWorkResponse(
+            id=profile_id,
+            open_to_work=bool(updated.get("open_to_work")),
         )
 
     async def add_household_link(

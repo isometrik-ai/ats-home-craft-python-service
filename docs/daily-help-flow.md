@@ -65,6 +65,7 @@ visitor passes and visitor logs** — we do **not** create `contacts` rows or au
 | Profile detail                               | `GET /daily-help/{id}`                                        |
 | Add to Household                             | `POST /daily-help/{id}/household-links?unit_id=`              |
 | Remove from household                        | `DELETE /daily-help/{id}/household-links/{link_id}`           |
+| Toggle open to work                          | `PATCH /daily-help/{id}/open-to-work?unit_id=`                |
 | Category stats (Inside / Open to work / New) | Aggregates on list endpoints + visitor logs                   |
 
 **Resident mobile — Activities (existing — visitor logs)**
@@ -402,6 +403,16 @@ DELETE /v1/daily-help/{profile_id}/household-links/{link_id}
 ```
 
 Sets `status = removed`, `removed_at = now()`.
+
+### 6.4 Toggle open to work
+
+```http
+PATCH /v1/daily-help/{profile_id}/open-to-work?unit_id={unit_id}
+{ "open_to_work": true }
+```
+
+Requires an **active household link** between the caller's unit and the profile. Updates the
+project-wide `open_to_work` flag shown on category cards and directory badges.
 
 ______________________________________________________________________
 

@@ -21,3 +21,4 @@ def test_daily_help_resident_router_registered():
     assert "/daily-help/categories" in paths
     assert "/daily-help/search" in paths
     assert "/daily-help/{profile_id}/household-links" in paths
+    assert "/daily-help/{profile_id}/open-to-work" in paths
