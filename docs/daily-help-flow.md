@@ -360,7 +360,7 @@ GET /v1/daily-help/categories?unit_id={unit_id}
 ```
 
 Each category includes footer stats and up to **four** `preview_profiles` with `id`, `display_name`,
-`photo_path`, `initials`, and **masked** `phone` (same masking as directory list).
+`photo_path`, `initials`, and formatted `phone`.
 
 ### 6.1 Browse directory
 
@@ -368,8 +368,9 @@ Each category includes footer stats and up to **four** `preview_profiles` with `
 GET /v1/daily-help?unit_id={unit_id}&category_id={uuid}
 ```
 
-Only `status = active` profiles. Phone may be **masked** in list (`XXXXXX4197`) unless the viewer's
-**selected unit** has an active household link to that profile.
+Only `status = active` profiles. Phone is returned in full on list and category preview responses.
+Profile detail may still mask phone unless the viewer's **selected unit** has an active household
+link to that profile.
 
 ### 6.1b Profile detail (resident)
 
@@ -453,17 +454,17 @@ ______________________________________________________________________
 
 ## 9. How to make common changes
 
-| I want to…                       | Change here                                                                  |
-| -------------------------------- | ---------------------------------------------------------------------------- |
-| Add a category                   | `POST .../daily-help/categories` — no migration needed                       |
-| Deactivate a category            | `PATCH .../categories/{id}` `status=inactive`                                |
-| Change passcode length           | `DailyHelpService._generate_passcode` + passes validation                    |
-| Change notification recipients   | `daily_help_notification_service.py` + `ContactsRepository` role query       |
-| Show flat on visitor log row     | Join latest household link or check-in metadata in `visitor_logs_repository` |
-| Add overview card                | `visitor_logs_repository.get_overview` + schema                              |
-| Add rating / traits              | New tables in Phase 3 + resident POST endpoint                               |
-| Mask phone in directory          | `DailyHelpService._serialize_resident_list_item`                             |
-| Backfill legacy `service` passes | One-off migration script linking by phone match                              |
+| I want to…                       | Change here                                                                     |
+| -------------------------------- | ------------------------------------------------------------------------------- |
+| Add a category                   | `POST .../daily-help/categories` — no migration needed                          |
+| Deactivate a category            | `PATCH .../categories/{id}` `status=inactive`                                   |
+| Change passcode length           | `DailyHelpService._generate_passcode` + passes validation                       |
+| Change notification recipients   | `daily_help_notification_service.py` + `ContactsRepository` role query          |
+| Show flat on visitor log row     | Join latest household link or check-in metadata in `visitor_logs_repository`    |
+| Add overview card                | `visitor_logs_repository.get_overview` + schema                                 |
+| Add rating / traits              | New tables in Phase 3 + resident POST endpoint                                  |
+| Mask phone in profile detail     | `DailyHelpService.get_resident_detail` (`mask_phone` when not household-linked) |
+| Backfill legacy `service` passes | One-off migration script linking by phone match                                 |
 
 ______________________________________________________________________
 
