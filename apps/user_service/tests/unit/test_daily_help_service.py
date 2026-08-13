@@ -98,6 +98,8 @@ async def test_create_profile_issues_pass_and_links():
 
     assert result.id == "profile-1"
     assert result.gate_passcode == "4821"
+    insert_kwargs = svc.repo.insert_profile.await_args.kwargs
+    assert insert_kwargs["open_to_work"] is True
     svc.passes_repo.insert_daily_help.assert_awaited_once()
     pass_payload = svc.passes_repo.insert_daily_help.await_args.args[0]
     assert pass_payload["pass_type"] == PassType.DAILY_HELP.value
@@ -245,6 +247,7 @@ async def test_list_resident_categories_includes_profile_previews():
                     "display_name": f"Helper {idx}",
                     "photo_path": f"photo-{idx}.jpg",
                     "initials": "Ms.",
+                    "phone_number": "9655011223",
                     "open_to_work": idx == 0,
                     "created_at": __import__("datetime").datetime.now(
                         __import__("datetime").timezone.utc
@@ -269,3 +272,4 @@ async def test_list_resident_categories_includes_profile_previews():
     assert len(items[0].preview_profiles) == 4
     assert items[0].preview_profiles[0].display_name == "Helper 0"
     assert items[0].preview_profiles[0].photo_path == "photo-0.jpg"
+    assert items[0].preview_profiles[0].phone == "XXXXXX1223"

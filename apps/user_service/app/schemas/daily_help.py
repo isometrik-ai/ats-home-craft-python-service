@@ -49,6 +49,7 @@ class CreateDailyHelpRequest(BaseModel):
     gender: str | None = Field(None, max_length=50)
     date_of_birth: date | None = None
     photo_path: str | None = Field(None, max_length=2000)
+    open_to_work: bool = False
     documents: list[DailyHelpDocumentInput] = Field(default_factory=list, max_length=20)
 
 
@@ -412,6 +413,42 @@ class ResidentDailyHelpProfilePreviewResponse(BaseModel):
     display_name: str
     photo_path: str | None = None
     initials: str | None = None
+    phone: str | None = None
+
+
+class ResidentDailyHelpDetailResponse(BaseModel):
+    """Resident profile detail — no admin audit or internal org fields."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    project_id: str
+    initials: str | None = None
+    first_name: str
+    middle_name: str | None = None
+    last_name: str
+    display_name: str
+    phone_isd_code: str
+    phone_number: str
+    phone: str | None = None
+    alternate_phone_isd_code: str | None = None
+    alternate_phone_number: str | None = None
+    category_id: str
+    category_name: str | None = None
+    gender: str | None = None
+    date_of_birth: str | None = None
+    photo_path: str | None = None
+    gate_passcode: str
+    status: str
+    open_to_work: bool = False
+    linked_pass_id: str | None = None
+    document_count: int = 0
+    household_link_count: int = 0
+    documents: list[DailyHelpDocumentResponse] = Field(default_factory=list)
+    household_links: list[DailyHelpHouseholdLinkResponse] = Field(default_factory=list)
+    availability_slots: list[DailyHelpAvailabilitySlotResponse] = Field(default_factory=list)
+    rating_summary: DailyHelpRatingSummaryResponse | None = None
+    created_at: str | None = None
 
 
 class ResidentDailyHelpCategoryStatsResponse(BaseModel):
@@ -496,13 +533,23 @@ class ResidentDailyHelpListApiResponse(BaseModel):
 
 
 class DailyHelpDetailApiResponse(BaseModel):
-    """API envelope for profile detail."""
+    """API envelope for admin profile detail."""
 
     status: str
     message: str
     statusCode: int
     code: str
     data: DailyHelpDetailResponse
+
+
+class ResidentDailyHelpDetailApiResponse(BaseModel):
+    """API envelope for GET /daily-help/{profile_id} (resident)."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ResidentDailyHelpDetailResponse
 
 
 class CreateDailyHelpApiResponse(BaseModel):

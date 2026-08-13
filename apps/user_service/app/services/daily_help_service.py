@@ -48,6 +48,7 @@ from apps.user_service.app.schemas.daily_help import (
     ResidentDailyHelpCategoryStatsResponse,
     ResidentDailyHelpListItemResponse,
     ResidentDailyHelpListQuery,
+    ResidentDailyHelpDetailResponse,
     ResidentDailyHelpProfilePreviewResponse,
     ResidentDailyHelpSearchQuery,
     UpdateDailyHelpCategoryRequest,
@@ -404,11 +405,16 @@ class DailyHelpService:
     @staticmethod
     def _serialize_profile_preview(row: dict[str, Any]) -> ResidentDailyHelpProfilePreviewResponse:
         """Map a profile row to a compact category-home preview."""
+        phone_number = str(row.get("phone_number") or "")
+        phone = (
+            DailyHelpService._mask_phone_number(phone_number) if phone_number else None
+        )
         return ResidentDailyHelpProfilePreviewResponse(
             id=str(row["id"]),
             display_name=str(row["display_name"]),
             photo_path=row.get("photo_path"),
             initials=row.get("initials"),
+            phone=phone,
         )
 
     def _serialize_category(self, row: dict[str, Any]) -> DailyHelpCategoryResponse:
@@ -657,6 +663,31 @@ class DailyHelpService:
             deleted_at=format_iso_datetime(row.get("deleted_at")),
         )
 
+    async def _serialize_resident_detail(
+        self,
+        *,
+        row: dict[str, Any],
+        mask_phone: bool = False,
+    ) -> ResidentDailyHelpDetailResponse:
+        """Map a profile row to resident detail (no admin audit fields or events)."""
+        detail = await self._serialize_detail(
+            row=row,
+            include_events=False,
+            mask_phone=mask_phone,
+        )
+        return ResidentDailyHelpDetailResponse(
+            **detail.model_dump(
+                exclude={
+                    "organization_id",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "updated_at",
+                    "deleted_at",
+                    "events",
+                }
+            )
+        )
+
     # ------------------------------------------------------------------
     # Categories
     # ------------------------------------------------------------------
@@ -848,6 +879,7 @@ class DailyHelpService:
             photo_path=body.photo_path,
             gate_passcode=gate_passcode,
             status=DailyHelpStatus.ACTIVE.value,
+            open_to_work=body.open_to_work,
             created_by_user_id=str(user_id) if user_id else None,
         )
         profile_id = str(profile["id"])
@@ -1392,7 +1424,7 @@ class DailyHelpService:
         contact_id: str,
         unit_id: str,
         profile_id: str,
-    ) -> DailyHelpDetailResponse:
+    ) -> ResidentDailyHelpDetailResponse:
         """Return resident profile detail with optional phone masking."""
         project_id = await self._ensure_resident_unit(
             contact_id=contact_id,
@@ -1408,9 +1440,8 @@ class DailyHelpService:
             unit_id=unit_id,
             profile_id=profile_id,
         )
-        return await self._serialize_detail(
+        return await self._serialize_resident_detail(
             row=row,
-            include_events=False,
             mask_phone=not has_link,
         )
 

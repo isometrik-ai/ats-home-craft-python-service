@@ -11,10 +11,10 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.daily_help import (
     CreateDailyHelpRatingRequest,
     DailyHelpAttendanceApiResponse,
-    DailyHelpDetailApiResponse,
     DailyHelpHouseholdLinkApiResponse,
     DailyHelpRatingSummaryApiResponse,
     ResidentDailyHelpCategoryStatsApiResponse,
+    ResidentDailyHelpDetailApiResponse,
     ResidentDailyHelpListApiResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpSearchQuery,
@@ -72,7 +72,7 @@ SEARCH_SUCCESS_RESPONSES = _ok_response(
     "Search results for active daily help profiles.",
 )
 DETAIL_SUCCESS_RESPONSES = _ok_response(
-    DailyHelpDetailApiResponse,
+    ResidentDailyHelpDetailApiResponse,
     "Daily help profile detail; phone masked unless household-linked to the unit.",
 )
 HOUSEHOLD_LINK_CREATED_RESPONSES = _created_response(
