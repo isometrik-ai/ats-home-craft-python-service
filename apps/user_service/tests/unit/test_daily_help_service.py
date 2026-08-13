@@ -6,7 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from apps.user_service.app.schemas.daily_help import CreateDailyHelpRequest, SetDailyHelpOpenToWorkRequest
+from apps.user_service.app.schemas.daily_help import (
+    CreateDailyHelpRequest,
+    SetDailyHelpOpenToWorkRequest,
+)
 from apps.user_service.app.schemas.enums import (
     DailyHelpStatus,
     PassType,
@@ -15,7 +18,11 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ConflictException, NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 
 
 def _user_context() -> UserContext:

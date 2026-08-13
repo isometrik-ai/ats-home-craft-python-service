@@ -47,9 +47,9 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpSummaryResponse,
     ReplaceDailyHelpAvailabilityRequest,
     ResidentDailyHelpCategoryStatsResponse,
+    ResidentDailyHelpDetailResponse,
     ResidentDailyHelpListItemResponse,
     ResidentDailyHelpListQuery,
-    ResidentDailyHelpDetailResponse,
     ResidentDailyHelpProfilePreviewResponse,
     ResidentDailyHelpSearchQuery,
     SetDailyHelpOpenToWorkRequest,
@@ -408,9 +408,7 @@ class DailyHelpService:
     def _serialize_profile_preview(row: dict[str, Any]) -> ResidentDailyHelpProfilePreviewResponse:
         """Map a profile row to a compact category-home preview."""
         phone_number = str(row.get("phone_number") or "")
-        phone = (
-            DailyHelpService._mask_phone_number(phone_number) if phone_number else None
-        )
+        phone = DailyHelpService._mask_phone_number(phone_number) if phone_number else None
         return ResidentDailyHelpProfilePreviewResponse(
             id=str(row["id"]),
             display_name=str(row["display_name"]),
