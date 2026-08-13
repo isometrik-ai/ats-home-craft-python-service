@@ -6,7 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from apps.user_service.app.schemas.daily_help import CreateDailyHelpRequest
+from apps.user_service.app.schemas.daily_help import (
+    CreateDailyHelpRequest,
+    SetDailyHelpOpenToWorkRequest,
+)
 from apps.user_service.app.schemas.enums import (
     DailyHelpStatus,
     PassType,
@@ -15,7 +18,11 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 
 
 def _user_context() -> UserContext:
@@ -98,6 +105,8 @@ async def test_create_profile_issues_pass_and_links():
 
     assert result.id == "profile-1"
     assert result.gate_passcode == "4821"
+    insert_kwargs = svc.repo.insert_profile.await_args.kwargs
+    assert insert_kwargs["open_to_work"] is True
     svc.passes_repo.insert_daily_help.assert_awaited_once()
     pass_payload = svc.passes_repo.insert_daily_help.await_args.args[0]
     assert pass_payload["pass_type"] == PassType.DAILY_HELP.value
@@ -245,6 +254,7 @@ async def test_list_resident_categories_includes_profile_previews():
                     "display_name": f"Helper {idx}",
                     "photo_path": f"photo-{idx}.jpg",
                     "initials": "Ms.",
+                    "phone_number": "9655011223",
                     "open_to_work": idx == 0,
                     "created_at": __import__("datetime").datetime.now(
                         __import__("datetime").timezone.utc
@@ -269,3 +279,64 @@ async def test_list_resident_categories_includes_profile_previews():
     assert len(items[0].preview_profiles) == 4
     assert items[0].preview_profiles[0].display_name == "Helper 0"
     assert items[0].preview_profiles[0].photo_path == "photo-0.jpg"
+    assert items[0].preview_profiles[0].phone == "XXXXXX1223"
+
+
+@pytest.mark.asyncio
+async def test_set_resident_open_to_work_updates_profile():
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "open_to_work": False,
+        }
+    )
+    svc.repo.update_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "open_to_work": True,
+        }
+    )
+    svc.repo.list_links_for_units = AsyncMock(return_value=[{"id": "link-1"}])
+    svc.repo.insert_event = AsyncMock()
+
+    result = await svc.set_resident_open_to_work(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        body=SetDailyHelpOpenToWorkRequest(open_to_work=True),
+    )
+
+    assert result.id == "profile-1"
+    assert result.open_to_work is True
+    svc.repo.update_profile.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_resident_open_to_work_requires_household_link():
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={"id": "profile-1", "status": DailyHelpStatus.ACTIVE.value}
+    )
+    svc.repo.list_links_for_units = AsyncMock(return_value=[])
+
+    with pytest.raises(ValidationException):
+        await svc.set_resident_open_to_work(
+            contact_id="contact-1",
+            unit_id="unit-1",
+            profile_id="profile-1",
+            body=SetDailyHelpOpenToWorkRequest(open_to_work=False),
+        )

@@ -65,6 +65,7 @@ visitor passes and visitor logs** — we do **not** create `contacts` rows or au
 | Profile detail                               | `GET /daily-help/{id}`                                        |
 | Add to Household                             | `POST /daily-help/{id}/household-links?unit_id=`              |
 | Remove from household                        | `DELETE /daily-help/{id}/household-links/{link_id}`           |
+| Toggle open to work                          | `PATCH /daily-help/{id}/open-to-work?unit_id=`                |
 | Category stats (Inside / Open to work / New) | Aggregates on list endpoints + visitor logs                   |
 
 **Resident mobile — Activities (existing — visitor logs)**
@@ -193,6 +194,7 @@ POST /v1/projects/{project_id}/daily-help
   "gender": "Female",
   "date_of_birth": "1988-04-12",
   "photo_path": "org/daily-help/photo_lakshmi.jpg",
+  "open_to_work": true,
   "documents": [
     {
       "document_type": "id_proof",
@@ -214,7 +216,7 @@ POST /v1/projects/{project_id}/daily-help
 1. Validate project access + RBAC.
 1. Validate `category_id` belongs to project and is `active`.
 1. Generate unique 4-digit `gate_passcode` for project.
-1. Insert `daily_help_profiles` (`status = active`, `display_name` built from name parts).
+1. Insert `daily_help_profiles` (`status = active`, `open_to_work` defaults to `true`, `display_name` built from name parts).
 1. Insert `daily_help_documents` rows.
 1. Call `PassesService.create_daily_help_pass(...)`:
    - `pass_type = daily_help`, `validity_type = recurring`
@@ -351,6 +353,15 @@ ______________________________________________________________________
 
 ## 6. Resident flow (Phase 2)
 
+### 6.0 Category home
+
+```http
+GET /v1/daily-help/categories?unit_id={unit_id}
+```
+
+Each category includes footer stats and up to **four** `preview_profiles` with `id`, `display_name`,
+`photo_path`, `initials`, and **masked** `phone` (same masking as directory list).
+
 ### 6.1 Browse directory
 
 ```http
@@ -359,6 +370,16 @@ GET /v1/daily-help?unit_id={unit_id}&category_id={uuid}
 
 Only `status = active` profiles. Phone may be **masked** in list (`XXXXXX4197`) unless the viewer's
 **selected unit** has an active household link to that profile.
+
+### 6.1b Profile detail (resident)
+
+```http
+GET /v1/daily-help/{profile_id}?unit_id={unit_id}
+```
+
+Resident detail omits admin-only fields (`organization_id`, `created_by_user_id`, `created_by_name`,
+`updated_at`, `deleted_at`) and does **not** include the admin audit `events[]` timeline. Only
+**active** `household_links` are returned.
 
 ### 6.2 Add to Household
 
@@ -382,6 +403,16 @@ DELETE /v1/daily-help/{profile_id}/household-links/{link_id}
 ```
 
 Sets `status = removed`, `removed_at = now()`.
+
+### 6.4 Toggle open to work
+
+```http
+PATCH /v1/daily-help/{profile_id}/open-to-work?unit_id={unit_id}
+{ "open_to_work": true }
+```
+
+Requires an **active household link** between the caller's unit and the profile. Updates the
+project-wide `open_to_work` flag shown on category cards and directory badges.
 
 ______________________________________________________________________
 

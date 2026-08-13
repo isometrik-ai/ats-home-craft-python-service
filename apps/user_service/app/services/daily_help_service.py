@@ -42,14 +42,17 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpListItemResponse,
     DailyHelpListQuery,
     DailyHelpMessageResponse,
+    DailyHelpOpenToWorkResponse,
     DailyHelpRatingSummaryResponse,
     DailyHelpSummaryResponse,
     ReplaceDailyHelpAvailabilityRequest,
     ResidentDailyHelpCategoryStatsResponse,
+    ResidentDailyHelpDetailResponse,
     ResidentDailyHelpListItemResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpProfilePreviewResponse,
     ResidentDailyHelpSearchQuery,
+    SetDailyHelpOpenToWorkRequest,
     UpdateDailyHelpCategoryRequest,
     UpdateDailyHelpRequest,
 )
@@ -404,11 +407,14 @@ class DailyHelpService:
     @staticmethod
     def _serialize_profile_preview(row: dict[str, Any]) -> ResidentDailyHelpProfilePreviewResponse:
         """Map a profile row to a compact category-home preview."""
+        phone_number = str(row.get("phone_number") or "")
+        phone = DailyHelpService._mask_phone_number(phone_number) if phone_number else None
         return ResidentDailyHelpProfilePreviewResponse(
             id=str(row["id"]),
             display_name=str(row["display_name"]),
             photo_path=row.get("photo_path"),
             initials=row.get("initials"),
+            phone=phone,
         )
 
     def _serialize_category(self, row: dict[str, Any]) -> DailyHelpCategoryResponse:
@@ -657,6 +663,31 @@ class DailyHelpService:
             deleted_at=format_iso_datetime(row.get("deleted_at")),
         )
 
+    async def _serialize_resident_detail(
+        self,
+        *,
+        row: dict[str, Any],
+        mask_phone: bool = False,
+    ) -> ResidentDailyHelpDetailResponse:
+        """Map a profile row to resident detail (no admin audit fields or events)."""
+        detail = await self._serialize_detail(
+            row=row,
+            include_events=False,
+            mask_phone=mask_phone,
+        )
+        return ResidentDailyHelpDetailResponse(
+            **detail.model_dump(
+                exclude={
+                    "organization_id",
+                    "created_by_user_id",
+                    "created_by_name",
+                    "updated_at",
+                    "deleted_at",
+                    "events",
+                }
+            )
+        )
+
     # ------------------------------------------------------------------
     # Categories
     # ------------------------------------------------------------------
@@ -848,6 +879,7 @@ class DailyHelpService:
             photo_path=body.photo_path,
             gate_passcode=gate_passcode,
             status=DailyHelpStatus.ACTIVE.value,
+            open_to_work=body.open_to_work,
             created_by_user_id=str(user_id) if user_id else None,
         )
         profile_id = str(profile["id"])
@@ -1392,7 +1424,7 @@ class DailyHelpService:
         contact_id: str,
         unit_id: str,
         profile_id: str,
-    ) -> DailyHelpDetailResponse:
+    ) -> ResidentDailyHelpDetailResponse:
         """Return resident profile detail with optional phone masking."""
         project_id = await self._ensure_resident_unit(
             contact_id=contact_id,
@@ -1408,10 +1440,64 @@ class DailyHelpService:
             unit_id=unit_id,
             profile_id=profile_id,
         )
-        return await self._serialize_detail(
+        return await self._serialize_resident_detail(
             row=row,
-            include_events=False,
             mask_phone=not has_link,
+        )
+
+    async def set_resident_open_to_work(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+        body: SetDailyHelpOpenToWorkRequest,
+    ) -> DailyHelpOpenToWorkResponse:
+        """Toggle open_to_work for a household-linked active profile."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_not_deleted(row)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if not await self._viewer_has_household_link(
+            unit_id=unit_id,
+            profile_id=profile_id,
+        ):
+            raise ValidationException(
+                message_key="daily_help.errors.household_link_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={"open_to_work": body.open_to_work},
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.UPDATED.value,
+            actor_type=DailyHelpActorType.RESIDENT.value,
+            actor_contact_id=contact_id,
+            payload={
+                "fields": ["open_to_work"],
+                "open_to_work": body.open_to_work,
+            },
+        )
+        return DailyHelpOpenToWorkResponse(
+            id=profile_id,
+            open_to_work=bool(updated.get("open_to_work")),
         )
 
     async def add_household_link(

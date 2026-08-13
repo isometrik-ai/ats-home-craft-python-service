@@ -937,7 +937,8 @@
       "document_not_found": "The document could not be found on this profile.",
       "unsupported_export_format": "Only CSV export is supported.",
       "duplicate_household_link": "This helper is already linked to your household.",
-      "link_not_found": "The household link could not be found."
+      "link_not_found": "The household link could not be found.",
+      "household_link_required": "Link this helper to your household before updating open to work."
     },
     "success": {
       "summary_retrieved": "Daily help summary retrieved successfully.",
@@ -960,7 +961,8 @@
       "household_linked": "Daily help helper linked to your household successfully.",
       "household_removed": "Daily help helper removed from your household successfully.",
       "rating_created": "Daily help rating submitted successfully.",
-      "rating_summary_retrieved": "Daily help rating summary retrieved successfully."
+      "rating_summary_retrieved": "Daily help rating summary retrieved successfully.",
+      "open_to_work_updated": "Open to work status updated successfully."
     }
   },
   "notices": {

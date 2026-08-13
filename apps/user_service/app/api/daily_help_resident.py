@@ -11,13 +11,15 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.daily_help import (
     CreateDailyHelpRatingRequest,
     DailyHelpAttendanceApiResponse,
-    DailyHelpDetailApiResponse,
     DailyHelpHouseholdLinkApiResponse,
+    DailyHelpOpenToWorkApiResponse,
     DailyHelpRatingSummaryApiResponse,
     ResidentDailyHelpCategoryStatsApiResponse,
+    ResidentDailyHelpDetailApiResponse,
     ResidentDailyHelpListApiResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpSearchQuery,
+    SetDailyHelpOpenToWorkRequest,
 )
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.utils.common_utils import (
@@ -72,7 +74,7 @@ SEARCH_SUCCESS_RESPONSES = _ok_response(
     "Search results for active daily help profiles.",
 )
 DETAIL_SUCCESS_RESPONSES = _ok_response(
-    DailyHelpDetailApiResponse,
+    ResidentDailyHelpDetailApiResponse,
     "Daily help profile detail; phone masked unless household-linked to the unit.",
 )
 HOUSEHOLD_LINK_CREATED_RESPONSES = _created_response(
@@ -82,6 +84,10 @@ HOUSEHOLD_LINK_CREATED_RESPONSES = _created_response(
 HOUSEHOLD_LINK_REMOVED_RESPONSES = _ok_response(
     DailyHelpHouseholdLinkApiResponse,
     "Household link removed from the resident unit.",
+)
+OPEN_TO_WORK_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpOpenToWorkApiResponse,
+    "Open-to-work flag updated for the household-linked profile.",
 )
 RATING_CREATED_RESPONSES = _created_response(
     DailyHelpRatingSummaryApiResponse,
@@ -228,6 +234,42 @@ async def get_resident_daily_help_profile(
     return success_response(
         request=request,
         message_key="daily_help.success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("set resident daily help open to work")
+@router.patch(
+    "/{profile_id}/open-to-work",
+    status_code=http_status.HTTP_200_OK,
+    summary="Toggle open-to-work for a household-linked daily help profile",
+    response_model=None,
+    responses=OPEN_TO_WORK_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def set_resident_daily_help_open_to_work(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    body: SetDailyHelpOpenToWorkRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Set whether a household-linked helper is open to work in the resident directory."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.set_resident_open_to_work(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        body=body,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.open_to_work_updated",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
     )
