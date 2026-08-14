@@ -311,6 +311,86 @@ async def test_get_detail_raises_when_missing():
 
 
 @pytest.mark.asyncio
+async def test_list_resident_household_links_returns_linked_profiles():
+    """Resident can list daily help profiles linked to their unit by category."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_active_links_for_unit = AsyncMock(
+        return_value=[
+            {
+                "id": "link-1",
+                "unit_id": "unit-1",
+                "linked_by_contact_id": "contact-1",
+                "status": "active",
+                "started_at": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ),
+                "profile_id": "profile-1",
+                "display_name": "Ramesh Kumar",
+                "initials": "Mr.",
+                "photo_path": "photo.jpg",
+                "phone_isd_code": "+91",
+                "phone_number": "9876543210",
+                "gate_passcode": "1234",
+                "open_to_work": True,
+                "linked_pass_id": None,
+                "category_id": "cat-1",
+                "category_name": "Maids",
+            }
+        ]
+    )
+    svc.repo.get_rating_summaries_batch = AsyncMock(
+        return_value={"profile-1": {"rating_count": 1, "average_stars": 4.0}}
+    )
+    svc.events_repo = MagicMock()
+    svc.events_repo.has_open_check_in = AsyncMock(return_value=False)
+
+    items = await svc.list_resident_household_links(
+        contact_id="contact-1",
+        unit_id="unit-1",
+    )
+
+    assert len(items) == 1
+    assert items[0].category_id == "cat-1"
+    assert items[0].category_name == "Maids"
+    assert items[0].linked_count == 1
+    assert items[0].open_to_work_count == 1
+    assert len(items[0].linked_profiles) == 1
+    assert items[0].linked_profiles[0].link_id == "link-1"
+    assert items[0].linked_profiles[0].profile_id == "profile-1"
+    assert items[0].linked_profiles[0].display_name == "Ramesh Kumar"
+    assert items[0].linked_profiles[0].phone == "+91 9876543210"
+    assert items[0].linked_profiles[0].gate_passcode == "1234"
+    assert items[0].linked_profiles[0].open_to_work is True
+    assert items[0].linked_profiles[0].average_stars == 4.0
+
+
+@pytest.mark.asyncio
+async def test_list_resident_household_links_empty_when_no_links():
+    """Return an empty list when the unit has no household-linked profiles."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_active_links_for_unit = AsyncMock(return_value=[])
+
+    items = await svc.list_resident_household_links(
+        contact_id="contact-1",
+        unit_id="unit-1",
+    )
+
+    assert items == []
+
+
+@pytest.mark.asyncio
 async def test_list_resident_categories_includes_profile_previews():
     svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
     svc.contact_units_repo = MagicMock()

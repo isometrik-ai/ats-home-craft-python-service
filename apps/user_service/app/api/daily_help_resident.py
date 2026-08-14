@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.daily_help import (
     RemoveDailyHelpHouseholdLinkRequest,
     ResidentDailyHelpCategoryStatsApiResponse,
     ResidentDailyHelpDetailApiResponse,
+    ResidentDailyHelpHouseholdLinkListApiResponse,
     ResidentDailyHelpListApiResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpSearchQuery,
@@ -73,6 +74,10 @@ LIST_SUCCESS_RESPONSES = _ok_response(
 SEARCH_SUCCESS_RESPONSES = _ok_response(
     ResidentDailyHelpListApiResponse,
     "Search results for active daily help profiles.",
+)
+HOUSEHOLD_LINKS_LIST_SUCCESS_RESPONSES = _ok_response(
+    ResidentDailyHelpHouseholdLinkListApiResponse,
+    "Household-linked daily help profiles grouped by category.",
 )
 DETAIL_SUCCESS_RESPONSES = _ok_response(
     ResidentDailyHelpDetailApiResponse,
@@ -203,6 +208,38 @@ async def search_resident_daily_help_profiles(
         page_size=query.page_size,
         message_key="daily_help.success.search_retrieved",
         custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("list resident daily help household links")
+@router.get(
+    "/household-links",
+    status_code=http_status.HTTP_200_OK,
+    summary="List daily help profiles linked to resident unit",
+    response_model=None,
+    responses=HOUSEHOLD_LINKS_LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def list_resident_daily_help_household_links(
+    request: Request,
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return household-linked daily help profiles grouped by category."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items = await service.list_resident_household_links(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.resident_household_links_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        data=[item.model_dump() for item in items],
     )
 
 

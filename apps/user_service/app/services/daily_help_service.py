@@ -48,6 +48,8 @@ from apps.user_service.app.schemas.daily_help import (
     ReplaceDailyHelpAvailabilityRequest,
     ResidentDailyHelpCategoryStatsResponse,
     ResidentDailyHelpDetailResponse,
+    ResidentDailyHelpHouseholdLinkItemResponse,
+    ResidentDailyHelpHouseholdLinksCategoryResponse,
     ResidentDailyHelpListItemResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpProfilePreviewResponse,
@@ -486,6 +488,35 @@ class DailyHelpService:
             removal_reason=removal_reason,
             unit_code=row.get("unit_code"),
             unit_label=row.get("unit_label"),
+        )
+
+    async def _serialize_resident_household_link_item(
+        self,
+        row: dict[str, Any],
+        *,
+        average_stars: float | None = None,
+    ) -> ResidentDailyHelpHouseholdLinkItemResponse:
+        """Map a unit household link row with profile summary for resident API."""
+        stars = average_stars
+        if stars is not None and stars <= 0:
+            stars = None
+        return ResidentDailyHelpHouseholdLinkItemResponse(
+            link_id=str(row["id"]),
+            started_at=format_iso_datetime(row.get("started_at")),
+            profile_id=str(row["profile_id"]),
+            display_name=str(row["display_name"]),
+            photo_path=row.get("photo_path"),
+            initials=row.get("initials"),
+            phone=self._format_phone(
+                isd_code=row.get("phone_isd_code"),
+                phone_number=row.get("phone_number"),
+            ),
+            gate_passcode=row.get("gate_passcode"),
+            open_to_work=bool(row.get("open_to_work")),
+            average_stars=stars,
+            is_inside=await self._profile_is_inside(
+                linked_pass_id=row.get("linked_pass_id"),
+            ),
         )
 
     def _serialize_slot(self, row: dict[str, Any]) -> DailyHelpAvailabilitySlotResponse:
@@ -1452,6 +1483,73 @@ class DailyHelpService:
             for row in rows
         ]
         return items, total
+
+    async def list_resident_household_links(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+    ) -> list[ResidentDailyHelpHouseholdLinksCategoryResponse]:
+        """Return household-linked profiles grouped by category (linked categories only)."""
+        await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        rows = await self.repo.list_active_links_for_unit(
+            organization_id=self.organization_id,
+            unit_id=unit_id,
+        )
+        if not rows:
+            return []
+
+        category_order: list[str] = []
+        links_by_category: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            category_id = str(row["category_id"])
+            bucket = links_by_category.get(category_id)
+            if bucket is None:
+                category_order.append(category_id)
+                bucket = {
+                    "category_name": str(row.get("category_name") or ""),
+                    "rows": [],
+                }
+                links_by_category[category_id] = bucket
+            bucket["rows"].append(row)
+
+        rating_map = await self.repo.get_rating_summaries_batch(
+            organization_id=self.organization_id,
+            profile_ids=[str(row["profile_id"]) for row in rows],
+        )
+
+        grouped: list[ResidentDailyHelpHouseholdLinksCategoryResponse] = []
+        for category_id in category_order:
+            category_rows = links_by_category[category_id]["rows"]
+            inside_count = 0
+            open_to_work_count = 0
+            linked_profiles: list[ResidentDailyHelpHouseholdLinkItemResponse] = []
+            for row in category_rows:
+                if bool(row.get("open_to_work")):
+                    open_to_work_count += 1
+                if await self._profile_is_inside(linked_pass_id=row.get("linked_pass_id")):
+                    inside_count += 1
+                profile_id = str(row["profile_id"])
+                linked_profiles.append(
+                    await self._serialize_resident_household_link_item(
+                        row,
+                        average_stars=rating_map.get(profile_id, {}).get("average_stars"),
+                    )
+                )
+            grouped.append(
+                ResidentDailyHelpHouseholdLinksCategoryResponse(
+                    category_id=category_id,
+                    category_name=str(links_by_category[category_id]["category_name"]),
+                    linked_count=len(category_rows),
+                    inside_count=inside_count,
+                    open_to_work_count=open_to_work_count,
+                    linked_profiles=linked_profiles,
+                )
+            )
+        return grouped
 
     async def get_resident_detail(
         self,

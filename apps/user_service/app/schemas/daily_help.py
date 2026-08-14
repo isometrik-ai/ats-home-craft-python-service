@@ -436,6 +436,37 @@ class ResidentDailyHelpProfilePreviewResponse(BaseModel):
     average_stars: float | None = None
 
 
+class ResidentDailyHelpHouseholdLinkItemResponse(BaseModel):
+    """Daily help profile linked to the resident's unit."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    link_id: str
+    started_at: str | None = None
+    profile_id: str
+    display_name: str
+    photo_path: str | None = None
+    initials: str | None = None
+    phone: str | None = None
+    gate_passcode: str | None = None
+    open_to_work: bool = False
+    average_stars: float | None = None
+    is_inside: bool = False
+
+
+class ResidentDailyHelpHouseholdLinksCategoryResponse(BaseModel):
+    """Household-linked daily help profiles grouped by category."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    category_id: str
+    category_name: str
+    linked_count: int = 0
+    inside_count: int = 0
+    open_to_work_count: int = 0
+    linked_profiles: list[ResidentDailyHelpHouseholdLinkItemResponse] = Field(default_factory=list)
+
+
 class ResidentDailyHelpDetailResponse(BaseModel):
     """Resident profile detail — no admin audit or internal org fields."""
 
@@ -555,6 +586,16 @@ class DailyHelpHouseholdLinkListApiResponse(BaseModel):
     statusCode: int
     code: str
     data: list[DailyHelpHouseholdLinkResponse]
+
+
+class ResidentDailyHelpHouseholdLinkListApiResponse(BaseModel):
+    """API envelope for GET /daily-help/household-links (resident)."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[ResidentDailyHelpHouseholdLinksCategoryResponse]
 
 
 class ResidentDailyHelpListApiResponse(BaseModel):

@@ -686,6 +686,51 @@ class DailyHelpRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def list_active_links_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """List active household links for a unit with profile summary fields."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              hl.id::text AS id,
+              hl.unit_id::text AS unit_id,
+              hl.linked_by_contact_id::text AS linked_by_contact_id,
+              hl.status::text AS status,
+              hl.started_at,
+              p.id::text AS profile_id,
+              p.display_name,
+              p.initials,
+              p.photo_path,
+              p.phone_isd_code,
+              p.phone_number,
+              p.gate_passcode,
+              p.open_to_work,
+              p.linked_pass_id::text AS linked_pass_id,
+              p.category_id::text AS category_id,
+              c.name AS category_name
+            FROM daily_help_household_links hl
+            JOIN daily_help_profiles p
+              ON p.id = hl.daily_help_profile_id
+             AND p.organization_id = hl.organization_id
+            JOIN daily_help_categories c
+              ON c.id = p.category_id
+             AND c.organization_id = p.organization_id
+             AND c.project_id = p.project_id
+            WHERE hl.organization_id = $1::uuid
+              AND hl.unit_id = $2::uuid
+              AND hl.status = 'active'::daily_help_household_link_status
+              AND p.status = 'active'::daily_help_status
+            ORDER BY hl.started_at DESC, hl.id DESC
+            """,
+            organization_id,
+            unit_id,
+        )
+        return [dict(row) for row in rows]
+
     async def list_links_for_units(
         self,
         *,
