@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpHouseholdLinkApiResponse,
     DailyHelpOpenToWorkApiResponse,
     DailyHelpRatingSummaryApiResponse,
+    RemoveDailyHelpHouseholdLinkRequest,
     ResidentDailyHelpCategoryStatsApiResponse,
     ResidentDailyHelpDetailApiResponse,
     ResidentDailyHelpListApiResponse,
@@ -324,6 +325,7 @@ async def remove_daily_help_household_link(
     profile_id: str = Path(...),
     link_id: str = Path(...),
     unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    body: RemoveDailyHelpHouseholdLinkRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -337,6 +339,7 @@ async def remove_daily_help_household_link(
         unit_id=unit_id,
         profile_id=profile_id,
         link_id=link_id,
+        reason=body.reason,
     )
     return success_response(
         request=request,

@@ -463,6 +463,9 @@ class DailyHelpService:
 
     def _serialize_household_link(self, row: dict[str, Any]) -> DailyHelpHouseholdLinkResponse:
         """Map a household link row to API shape."""
+        removal_reason = row.get("removal_reason")
+        if isinstance(removal_reason, str):
+            removal_reason = removal_reason.strip() or None
         return DailyHelpHouseholdLinkResponse(
             id=str(row["id"]),
             unit_id=str(row["unit_id"]),
@@ -470,6 +473,7 @@ class DailyHelpService:
             status=str(row["status"]),
             started_at=format_iso_datetime(row.get("started_at")),
             removed_at=format_iso_datetime(row.get("removed_at")),
+            removal_reason=removal_reason,
             unit_code=row.get("unit_code"),
             unit_label=row.get("unit_label"),
         )
@@ -491,6 +495,7 @@ class DailyHelpService:
     def _serialize_admin_list_item(self, row: dict[str, Any]) -> DailyHelpListItemResponse:
         """Map a profile row to admin list shape."""
         created_at = format_iso_datetime(row.get("created_at"))
+        units_linked_count = int(row.get("household_link_count") or 0)
         return DailyHelpListItemResponse(
             id=str(row["id"]),
             organization_id=str(row["organization_id"]),
@@ -506,7 +511,7 @@ class DailyHelpService:
                 phone_number=row.get("phone_number"),
             ),
             document_count=int(row.get("document_count") or 0),
-            household_link_count=int(row.get("household_link_count") or 0),
+            household_link_count=units_linked_count,
             status=str(row["status"]),
             gate_passcode=row.get("gate_passcode"),
             open_to_work=bool(row.get("open_to_work")),
@@ -822,10 +827,11 @@ class DailyHelpService:
         """Paginated admin list with filters."""
         await self._ensure_project(project_id=project_id)
         offset = (query.page - 1) * query.page_size
+        status = query.status.value if query.status else None
         rows, total = await self.repo.list_profiles(
             organization_id=self.organization_id,
             project_id=project_id,
-            status=query.status.value if query.status else None,
+            status=status,
             category_id=query.category_id,
             search=query.search,
             limit=query.page_size,
@@ -833,6 +839,20 @@ class DailyHelpService:
         )
         items = [self._serialize_admin_list_item(row) for row in rows]
         return items, total
+
+    async def list_household_links(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+    ) -> list[DailyHelpHouseholdLinkResponse]:
+        """Return active household unit links for one profile."""
+        await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        link_rows = await self.repo.list_active_links_for_profile(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+        )
+        return [self._serialize_household_link(link) for link in link_rows]
 
     async def create_profile(
         self,
@@ -1549,6 +1569,7 @@ class DailyHelpService:
         unit_id: str,
         profile_id: str,
         link_id: str,
+        reason: str | None = None,
     ) -> DailyHelpHouseholdLinkResponse:
         """Remove a resident household link."""
         project_id = await self._ensure_resident_unit(
@@ -1571,6 +1592,7 @@ class DailyHelpService:
             organization_id=self.organization_id,
             profile_id=profile_id,
             link_id=link_id,
+            removal_reason=reason.strip() if reason and reason.strip() else None,
         )
         if not removed:
             raise NotFoundException(
@@ -1582,7 +1604,11 @@ class DailyHelpService:
             event_type=DailyHelpEventType.HOUSEHOLD_REMOVED.value,
             actor_type=DailyHelpActorType.RESIDENT.value,
             actor_contact_id=contact_id,
-            payload={"link_id": link_id, "unit_id": str(target["unit_id"])},
+            payload={
+                "link_id": link_id,
+                "unit_id": str(target["unit_id"]),
+                **({"reason": reason.strip()} if reason and reason.strip() else {}),
+            },
         )
         return self._serialize_household_link({**target, **removed})
 

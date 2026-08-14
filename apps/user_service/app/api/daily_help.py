@@ -21,6 +21,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpDetailApiResponse,
     DailyHelpDocumentApiResponse,
     DailyHelpExportQuery,
+    DailyHelpHouseholdLinkListApiResponse,
     DailyHelpListApiResponse,
     DailyHelpListQuery,
     DailyHelpMessageApiResponse,
@@ -128,6 +129,10 @@ AVAILABILITY_SUCCESS_RESPONSES = _ok_response(
 ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpAttendanceApiResponse,
     "Check-in count and events from the linked gate pass.",
+)
+HOUSEHOLD_LINK_LIST_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpHouseholdLinkListApiResponse,
+    "Active household unit links for the daily help profile.",
 )
 
 
@@ -455,6 +460,40 @@ async def get_project_daily_help_profile(
         message_key="daily_help.success.retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("list project daily help household links")
+@router.get(
+    "/{project_id}/daily-help/{profile_id}/household-links",
+    status_code=http_status.HTTP_200_OK,
+    summary="List household unit links for a daily help profile",
+    response_model=None,
+    responses=HOUSEHOLD_LINK_LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_project_daily_help_household_links(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return active flats linked to a daily help profile via resident households."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items = await service.list_household_links(project_id=project_id, profile_id=profile_id)
+    return success_response(
+        request=request,
+        message_key="daily_help.success.household_links_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=[item.model_dump() for item in items],
     )
 
 

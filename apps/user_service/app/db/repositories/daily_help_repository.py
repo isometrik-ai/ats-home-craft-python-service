@@ -291,18 +291,16 @@ class DailyHelpRepository(BaseRepository):
         )
         return dict(row) if row else None
 
-    async def list_profiles(
-        self,
+    @staticmethod
+    def _profile_list_where(
         *,
         organization_id: str,
         project_id: str,
         status: str | None = None,
         category_id: str | None = None,
         search: str | None = None,
-        limit: int,
-        offset: int,
-    ) -> tuple[list[dict[str, Any]], int]:
-        """Paginated admin/resident list with optional filters."""
+    ) -> tuple[str, list[Any]]:
+        """Build WHERE clause and args shared by profile list and link aggregates."""
         filters = ["p.organization_id = $1::uuid", "p.project_id = $2::uuid"]
         args: list[Any] = [organization_id, project_id]
         if status:
@@ -318,7 +316,27 @@ class DailyHelpRepository(BaseRepository):
                 f"(p.display_name ILIKE ${idx} OR p.phone_number ILIKE ${idx} "
                 f"OR p.gate_passcode ILIKE ${idx})"
             )
-        where_sql = " AND ".join(filters)
+        return " AND ".join(filters), args
+
+    async def list_profiles(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        status: str | None = None,
+        category_id: str | None = None,
+        search: str | None = None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated admin/resident list with optional filters."""
+        where_sql, args = self._profile_list_where(
+            organization_id=organization_id,
+            project_id=project_id,
+            status=status,
+            category_id=category_id,
+            search=search,
+        )
 
         count = await self.db_connection.fetchval(
             f"""
@@ -607,6 +625,7 @@ class DailyHelpRepository(BaseRepository):
         profile_id: str,
         link_id: str,
         removed_at: datetime | None = None,
+        removal_reason: str | None = None,
     ) -> dict[str, Any] | None:
         """Soft-remove a household link."""
         row = await self.db_connection.fetchrow(
@@ -614,6 +633,7 @@ class DailyHelpRepository(BaseRepository):
             UPDATE daily_help_household_links
             SET status = 'removed'::daily_help_household_link_status,
                 removed_at = COALESCE($4::timestamptz, now()),
+                removal_reason = $5,
                 updated_at = now()
             WHERE organization_id = $1::uuid
               AND daily_help_profile_id = $2::uuid
@@ -623,12 +643,14 @@ class DailyHelpRepository(BaseRepository):
               id::text AS id,
               unit_id::text AS unit_id,
               status::text AS status,
-              removed_at
+              removed_at,
+              removal_reason
             """,
             organization_id,
             profile_id,
             link_id,
             removed_at,
+            removal_reason,
         )
         return dict(row) if row else None
 
