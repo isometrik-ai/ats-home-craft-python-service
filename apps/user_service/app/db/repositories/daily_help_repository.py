@@ -1007,3 +1007,74 @@ class DailyHelpRepository(BaseRepository):
                 ],
             )
             return records
+
+    async def list_attendance_absence_dates_for_month(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        unit_id: str,
+        year: int,
+        month: int,
+    ) -> list[Any]:
+        """Return calendar dates marked absent by the resident for a month."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT attendance_date
+            FROM daily_help_attendance_absences
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = $2::uuid
+              AND unit_id = $3::uuid
+              AND EXTRACT(YEAR FROM attendance_date) = $4
+              AND EXTRACT(MONTH FROM attendance_date) = $5
+            ORDER BY attendance_date
+            """,
+            organization_id,
+            profile_id,
+            unit_id,
+            year,
+            month,
+        )
+        return [row["attendance_date"] for row in rows]
+
+    async def upsert_attendance_absence(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        profile_id: str,
+        unit_id: str,
+        marked_by_contact_id: str,
+        attendance_date: Any,
+    ) -> dict[str, Any]:
+        """Record or refresh a resident-reported absence for one calendar day."""
+        row = await self.db_connection.fetchrow(
+            """
+            INSERT INTO daily_help_attendance_absences (
+                organization_id,
+                project_id,
+                daily_help_profile_id,
+                unit_id,
+                marked_by_contact_id,
+                attendance_date
+            )
+            VALUES (
+                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::date
+            )
+            ON CONFLICT (daily_help_profile_id, unit_id, attendance_date)
+            DO UPDATE SET
+                marked_by_contact_id = EXCLUDED.marked_by_contact_id,
+                created_at = now()
+            RETURNING
+                id::text AS id,
+                attendance_date,
+                created_at
+            """,
+            organization_id,
+            project_id,
+            profile_id,
+            unit_id,
+            marked_by_contact_id,
+            attendance_date,
+        )
+        return dict(row)

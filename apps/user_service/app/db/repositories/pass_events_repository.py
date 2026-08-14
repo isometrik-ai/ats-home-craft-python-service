@@ -88,6 +88,83 @@ class PassEventsRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def list_check_ins_for_month(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+        year: int,
+        month: int,
+        timezone: str = "Asia/Kolkata",
+    ) -> list[dict[str, Any]]:
+        """Successful check-in events for a pass within a local calendar month."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              id::text AS id,
+              occurred_at
+            FROM pass_events
+            WHERE organization_id = $1::uuid
+              AND pass_id = $2::uuid
+              AND event_type = $3::pass_event_type
+              AND COALESCE(access_status::text, '') <> 'denied'
+              AND EXTRACT(YEAR FROM (occurred_at AT TIME ZONE $4)) = $5
+              AND EXTRACT(MONTH FROM (occurred_at AT TIME ZONE $4)) = $6
+            ORDER BY occurred_at ASC
+            """,
+            organization_id,
+            pass_id,
+            PassEventType.CHECKED_IN.value,
+            timezone,
+            year,
+            month,
+        )
+        return [dict(row) for row in rows]
+
+    async def list_check_in_dates_for_month(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+        year: int,
+        month: int,
+        timezone: str = "Asia/Kolkata",
+    ) -> list[Any]:
+        """Distinct local calendar dates with successful check-ins in a month."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT (occurred_at AT TIME ZONE $3)::date AS check_in_date
+            FROM pass_events
+            WHERE organization_id = $1::uuid
+              AND pass_id = $2::uuid
+              AND event_type = $4::pass_event_type
+              AND COALESCE(access_status::text, '') <> 'denied'
+              AND EXTRACT(YEAR FROM (occurred_at AT TIME ZONE $3)) = $5
+              AND EXTRACT(MONTH FROM (occurred_at AT TIME ZONE $3)) = $6
+            ORDER BY check_in_date
+            """,
+            organization_id,
+            pass_id,
+            timezone,
+            PassEventType.CHECKED_IN.value,
+            year,
+            month,
+        )
+        return [row["check_in_date"] for row in rows]
+
+    async def get_last_check_in(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the most recent successful check-in event for a pass."""
+        return await self.latest_event_by_type(
+            organization_id=organization_id,
+            pass_id=pass_id,
+            event_type=PassEventType.CHECKED_IN.value,
+        )
+
     async def latest_event_by_type(
         self,
         *,

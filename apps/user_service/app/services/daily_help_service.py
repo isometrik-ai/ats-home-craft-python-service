@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import calendar
 import csv
 import io
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from asyncpg import UniqueViolationError
@@ -64,7 +66,6 @@ from apps.user_service.app.schemas.enums import (
     DailyHelpCategoryStatus,
     DailyHelpEventType,
     DailyHelpStatus,
-    PassEventType,
     PassStatus,
     PassType,
     PassValidityType,
@@ -77,6 +78,8 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
+
+ATTENDANCE_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 _CATEGORY_PREVIEW_LIMIT = 4
 _NEWLY_ADDED_DAYS = 30
@@ -1828,33 +1831,184 @@ class DailyHelpService:
         project_id: str | None = None,
         contact_id: str | None = None,
         unit_id: str | None = None,
+        year: int | None = None,
+        month: int | None = None,
     ) -> dict[str, Any]:
-        """Return check-in count from linked pass events."""
+        """Return a monthly attendance calendar from gate check-ins and resident absences."""
         if contact_id and unit_id:
             project_id = await self._ensure_resident_unit(
                 contact_id=contact_id,
                 unit_id=unit_id,
             )
         assert project_id
-        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
-        linked_pass_id = row.get("linked_pass_id")
-        if not linked_pass_id:
-            return {"check_in_count": 0, "events": []}
 
-        events = await self.events_repo.list_by_pass(
-            organization_id=self.organization_id,
-            pass_id=str(linked_pass_id),
+        now = datetime.now(ATTENDANCE_TIMEZONE)
+        resolved_year = year if year is not None else now.year
+        resolved_month = month if month is not None else now.month
+        if resolved_month < 1 or resolved_month > 12:
+            raise ValidationException(
+                message_key="daily_help.errors.invalid_attendance_month",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        return await self._build_attendance_calendar(
+            profile_id=profile_id,
+            unit_id=unit_id,
+            year=resolved_year,
+            month=resolved_month,
+            linked_pass_id=row.get("linked_pass_id"),
         )
-        check_ins = [
-            {
-                "id": str(event["id"]),
-                "occurred_at": format_iso_datetime(event.get("occurred_at")),
-            }
-            for event in events
-            if str(event.get("event_type")) == PassEventType.CHECKED_IN.value
-            and str(event.get("access_status") or "") != "denied"
-        ]
-        return {"check_in_count": len(check_ins), "events": check_ins}
+
+    async def mark_attendance_absence(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+        attendance_date: date,
+    ) -> dict[str, Any]:
+        """Record that the helper did not visit the resident unit on a given day."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_not_deleted(row)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if not await self._viewer_has_household_link(
+            unit_id=unit_id,
+            profile_id=profile_id,
+        ):
+            raise ValidationException(
+                message_key="daily_help.errors.attendance_household_link_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        today = datetime.now(ATTENDANCE_TIMEZONE).date()
+        if attendance_date > today:
+            raise ValidationException(
+                message_key="daily_help.errors.attendance_date_in_future",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        linked_pass_id = row.get("linked_pass_id")
+        if linked_pass_id:
+            present_dates = await self.events_repo.list_check_in_dates_for_month(
+                organization_id=self.organization_id,
+                pass_id=str(linked_pass_id),
+                year=attendance_date.year,
+                month=attendance_date.month,
+            )
+            if attendance_date in set(present_dates):
+                raise ConflictException(
+                    message_key="daily_help.errors.attendance_already_checked_in",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+        await self.repo.upsert_attendance_absence(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            unit_id=unit_id,
+            marked_by_contact_id=contact_id,
+            attendance_date=attendance_date,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.ATTENDANCE_MARKED_ABSENT.value,
+            actor_type=DailyHelpActorType.RESIDENT.value,
+            actor_contact_id=contact_id,
+            payload={
+                "unit_id": unit_id,
+                "attendance_date": attendance_date.isoformat(),
+            },
+        )
+        return {"date": attendance_date.isoformat(), "status": "absent"}
+
+    async def _build_attendance_calendar(
+        self,
+        *,
+        profile_id: str,
+        unit_id: str | None,
+        year: int,
+        month: int,
+        linked_pass_id: str | None,
+    ) -> dict[str, Any]:
+        """Merge gate check-ins and unit-scoped resident absences for one month."""
+        days_in_month = calendar.monthrange(year, month)[1]
+        present_dates: set[date] = set()
+        absent_dates: set[date] = set()
+        events: list[dict[str, Any]] = []
+        last_check_in_at: str | None = None
+
+        if linked_pass_id:
+            pass_id = str(linked_pass_id)
+            present_dates = set(
+                await self.events_repo.list_check_in_dates_for_month(
+                    organization_id=self.organization_id,
+                    pass_id=pass_id,
+                    year=year,
+                    month=month,
+                )
+            )
+            month_events = await self.events_repo.list_check_ins_for_month(
+                organization_id=self.organization_id,
+                pass_id=pass_id,
+                year=year,
+                month=month,
+            )
+            events = [
+                {
+                    "id": str(event["id"]),
+                    "occurred_at": format_iso_datetime(event.get("occurred_at")),
+                }
+                for event in month_events
+            ]
+            last_event = await self.events_repo.get_last_check_in(
+                organization_id=self.organization_id,
+                pass_id=pass_id,
+            )
+            if last_event and str(last_event.get("access_status") or "") != "denied":
+                last_check_in_at = format_iso_datetime(last_event.get("occurred_at"))
+
+        if unit_id:
+            absent_dates = set(
+                await self.repo.list_attendance_absence_dates_for_month(
+                    organization_id=self.organization_id,
+                    profile_id=profile_id,
+                    unit_id=unit_id,
+                    year=year,
+                    month=month,
+                )
+            )
+
+        days: list[dict[str, Any]] = []
+        for day in range(1, days_in_month + 1):
+            current = date(year, month, day)
+            if current in present_dates:
+                status = "present"
+            elif current in absent_dates:
+                status = "absent"
+            else:
+                status = None
+            days.append({"date": current.isoformat(), "status": status})
+
+        return {
+            "year": year,
+            "month": month,
+            "days_in_month": days_in_month,
+            "present_count": len(present_dates),
+            "absent_count": len(absent_dates),
+            "last_check_in_at": last_check_in_at,
+            "days": days,
+            "check_in_count": len(present_dates),
+            "events": events,
+        }
 
     async def get_verify_profile_summary(
         self,

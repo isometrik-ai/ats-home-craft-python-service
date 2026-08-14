@@ -938,7 +938,11 @@
       "unsupported_export_format": "Only CSV export is supported.",
       "duplicate_household_link": "This helper is already linked to your household.",
       "link_not_found": "The household link could not be found.",
-      "household_link_required": "Link this helper to your household before updating open to work."
+      "household_link_required": "Link this helper to your household before updating open to work.",
+      "attendance_household_link_required": "Link this helper to your household before marking attendance.",
+      "attendance_date_in_future": "Attendance can only be marked for today or earlier dates.",
+      "attendance_already_checked_in": "This helper already checked in at the gate on the selected date.",
+      "invalid_attendance_month": "Attendance month must be between 1 and 12."
     },
     "success": {
       "summary_retrieved": "Daily help summary retrieved successfully.",
@@ -959,6 +963,7 @@
       "document_deleted": "Document removed from daily help profile successfully.",
       "availability_updated": "Daily help availability updated successfully.",
       "attendance_retrieved": "Daily help attendance retrieved successfully.",
+      "attendance_absence_marked": "Daily help absence recorded successfully.",
       "search_retrieved": "Daily help search results retrieved successfully.",
       "household_linked": "Daily help helper linked to your household successfully.",
       "household_removed": "Daily help helper removed from your household successfully.",

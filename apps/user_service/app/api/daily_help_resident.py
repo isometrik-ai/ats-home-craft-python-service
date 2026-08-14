@@ -14,6 +14,8 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpHouseholdLinkApiResponse,
     DailyHelpOpenToWorkApiResponse,
     DailyHelpRatingSummaryApiResponse,
+    MarkDailyHelpAttendanceAbsenceApiResponse,
+    MarkDailyHelpAttendanceAbsenceRequest,
     RemoveDailyHelpHouseholdLinkRequest,
     ResidentDailyHelpCategoryStatsApiResponse,
     ResidentDailyHelpDetailApiResponse,
@@ -105,7 +107,11 @@ RATING_SUMMARY_SUCCESS_RESPONSES = _ok_response(
 )
 ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpAttendanceApiResponse,
-    "Check-in count and events from the linked gate pass.",
+    "Monthly attendance calendar with present/absent days and gate check-in events.",
+)
+ATTENDANCE_ABSENCE_SUCCESS_RESPONSES = _ok_response(
+    MarkDailyHelpAttendanceAbsenceApiResponse,
+    "Calendar day marked absent for the household-linked helper.",
 )
 
 
@@ -461,7 +467,7 @@ async def get_daily_help_rating_summary(
 @router.get(
     "/{profile_id}/attendance",
     status_code=http_status.HTTP_200_OK,
-    summary="Check-in attendance for a daily help profile",
+    summary="Monthly attendance calendar for a daily help profile",
     response_model=None,
     responses=ATTENDANCE_SUCCESS_RESPONSES,
 )
@@ -470,10 +476,22 @@ async def get_resident_daily_help_attendance(
     request: Request,
     profile_id: str = Path(...),
     unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    year: int | None = Query(
+        None,
+        ge=2000,
+        le=2100,
+        description="Calendar year (defaults to current year in Asia/Kolkata).",
+    ),
+    month: int | None = Query(
+        None,
+        ge=1,
+        le=12,
+        description="Calendar month 1-12 (defaults to current month in Asia/Kolkata).",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return check-in count from the linked gate pass."""
+    """Return day-wise present/absent calendar for the selected month."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -482,10 +500,48 @@ async def get_resident_daily_help_attendance(
         contact_id=str(contact["id"]),
         unit_id=unit_id,
         profile_id=profile_id,
+        year=year,
+        month=month,
     )
     return success_response(
         request=request,
         message_key="daily_help.success.attendance_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("mark resident daily help attendance absence")
+@router.post(
+    "/{profile_id}/attendance/absence",
+    status_code=http_status.HTTP_200_OK,
+    summary="Mark a day absent when the helper did not visit",
+    response_model=None,
+    responses=ATTENDANCE_ABSENCE_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def mark_resident_daily_help_attendance_absence(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    body: MarkDailyHelpAttendanceAbsenceRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Record that the helper did not visit the resident unit on the given date."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.mark_attendance_absence(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        attendance_date=body.attendance_date,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.attendance_absence_marked",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

@@ -298,13 +298,46 @@ class DailyHelpAttendanceCheckInResponse(BaseModel):
     occurred_at: str | None = None
 
 
-class DailyHelpAttendanceResponse(BaseModel):
-    """Check-in attendance derived from the linked gate pass."""
+class DailyHelpAttendanceDayResponse(BaseModel):
+    """Single calendar day in a monthly attendance view."""
 
     model_config = ConfigDict(extra="ignore")
 
+    date: str
+    status: str | None = None
+
+
+class DailyHelpAttendanceResponse(BaseModel):
+    """Monthly attendance calendar derived from gate check-ins and resident absences."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    year: int
+    month: int
+    days_in_month: int = 0
+    present_count: int = 0
+    absent_count: int = 0
+    last_check_in_at: str | None = None
+    days: list[DailyHelpAttendanceDayResponse] = Field(default_factory=list)
     check_in_count: int = 0
     events: list[DailyHelpAttendanceCheckInResponse] = Field(default_factory=list)
+
+
+class MarkDailyHelpAttendanceAbsenceRequest(BaseModel):
+    """Resident marks that the helper did not visit on a given day."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    attendance_date: date
+
+
+class MarkDailyHelpAttendanceAbsenceResponse(BaseModel):
+    """Result of marking a single calendar day as absent."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    date: str
+    status: str = "absent"
 
 
 class DailyHelpSummaryResponse(BaseModel):
@@ -732,3 +765,13 @@ class DailyHelpAttendanceApiResponse(BaseModel):
     statusCode: int
     code: str
     data: DailyHelpAttendanceResponse
+
+
+class MarkDailyHelpAttendanceAbsenceApiResponse(BaseModel):
+    """API envelope for marking a resident-reported absence."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarkDailyHelpAttendanceAbsenceResponse
