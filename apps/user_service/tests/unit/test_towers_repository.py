@@ -180,7 +180,7 @@ async def test_gate_operations_with_operating_hours():
     )
     assert gate["id"] == gate_id
     _, args = conn.fetchrow_calls[0]
-    assert args[7] == {"mon": "09:00-18:00"}
+    assert args[7] == '{"mon": "09:00-18:00"}'
 
     gates = await repo.list_gates(organization_id=ORG_ID, tower_id=TOWER_ID)
     assert len(gates) == 1
