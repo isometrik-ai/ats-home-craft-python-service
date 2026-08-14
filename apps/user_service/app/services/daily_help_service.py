@@ -405,8 +405,15 @@ class DailyHelpService:
         return bool(links)
 
     @staticmethod
-    def _serialize_profile_preview(row: dict[str, Any]) -> ResidentDailyHelpProfilePreviewResponse:
+    def _serialize_profile_preview(
+        row: dict[str, Any],
+        *,
+        average_stars: float | None = None,
+    ) -> ResidentDailyHelpProfilePreviewResponse:
         """Map a profile row to a compact category-home preview."""
+        stars = average_stars
+        if stars is not None and stars <= 0:
+            stars = None
         return ResidentDailyHelpProfilePreviewResponse(
             id=str(row["id"]),
             display_name=str(row["display_name"]),
@@ -416,6 +423,9 @@ class DailyHelpService:
                 isd_code=row.get("phone_isd_code"),
                 phone_number=row.get("phone_number"),
             ),
+            open_to_work=bool(row.get("open_to_work")),
+            household_link_count=int(row.get("household_link_count") or 0),
+            average_stars=stars,
         )
 
     def _serialize_category(self, row: dict[str, Any]) -> DailyHelpCategoryResponse:
@@ -1361,6 +1371,11 @@ class DailyHelpService:
                 if await self._profile_is_inside(linked_pass_id=row.get("linked_pass_id")):
                     inside_count += 1
 
+            preview_rows = rows[:_CATEGORY_PREVIEW_LIMIT]
+            rating_map = await self.repo.get_rating_summaries_batch(
+                organization_id=self.organization_id,
+                profile_ids=[str(row["id"]) for row in preview_rows],
+            )
             stats.append(
                 ResidentDailyHelpCategoryStatsResponse(
                     category_id=category_id,
@@ -1370,8 +1385,11 @@ class DailyHelpService:
                     newly_added_count=newly_added_count,
                     profile_count=len(rows),
                     preview_profiles=[
-                        self._serialize_profile_preview(row)
-                        for row in rows[:_CATEGORY_PREVIEW_LIMIT]
+                        self._serialize_profile_preview(
+                            row,
+                            average_stars=rating_map.get(str(row["id"]), {}).get("average_stars"),
+                        )
+                        for row in preview_rows
                     ],
                 )
             )

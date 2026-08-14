@@ -431,6 +431,9 @@ class ResidentDailyHelpProfilePreviewResponse(BaseModel):
     photo_path: str | None = None
     initials: str | None = None
     phone: str | None = None
+    open_to_work: bool = False
+    household_link_count: int = 0
+    average_stars: float | None = None
 
 
 class ResidentDailyHelpDetailResponse(BaseModel):

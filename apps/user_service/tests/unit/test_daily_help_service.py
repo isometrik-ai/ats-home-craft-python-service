@@ -332,6 +332,7 @@ async def test_list_resident_categories_includes_profile_previews():
                     "phone_isd_code": "+91",
                     "phone_number": "9655011223",
                     "open_to_work": idx == 0,
+                    "household_link_count": idx + 1,
                     "created_at": __import__("datetime").datetime.now(
                         __import__("datetime").timezone.utc
                     ),
@@ -344,6 +345,11 @@ async def test_list_resident_categories_includes_profile_previews():
     )
     svc.events_repo = MagicMock()
     svc.events_repo.has_open_check_in = AsyncMock(return_value=False)
+    svc.repo.get_rating_summaries_batch = AsyncMock(
+        return_value={
+            "profile-0": {"rating_count": 2, "average_stars": 4.5},
+        }
+    )
 
     items = await svc.list_resident_categories(
         contact_id="contact-1",
@@ -356,6 +362,10 @@ async def test_list_resident_categories_includes_profile_previews():
     assert items[0].preview_profiles[0].display_name == "Helper 0"
     assert items[0].preview_profiles[0].photo_path == "photo-0.jpg"
     assert items[0].preview_profiles[0].phone == "+91 9655011223"
+    assert items[0].preview_profiles[0].open_to_work is True
+    assert items[0].preview_profiles[0].household_link_count == 1
+    assert items[0].preview_profiles[0].average_stars == 4.5
+    assert items[0].preview_profiles[1].average_stars is None
 
 
 @pytest.mark.asyncio

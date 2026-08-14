@@ -830,18 +830,17 @@ class DailyHelpRepository(BaseRepository):
         profile_id: str,
     ) -> dict[str, Any]:
         """Aggregate star rating and trait counts for a profile."""
-        summary_row = await self.db_connection.fetchrow(
-            """
-            SELECT
-              COUNT(*)::int AS rating_count,
-              COALESCE(AVG(stars), 0)::numeric(3, 2) AS average_stars
-            FROM daily_help_ratings
-            WHERE organization_id = $1::uuid
-              AND daily_help_profile_id = $2::uuid
-            """,
-            organization_id,
-            profile_id,
+        summaries = await self.get_rating_summaries_batch(
+            organization_id=organization_id,
+            profile_ids=[profile_id],
         )
+        summary = summaries.get(profile_id)
+        if summary is None:
+            return {
+                "rating_count": 0,
+                "average_stars": 0.0,
+                "trait_counts": {},
+            }
         trait_rows = await self.db_connection.fetch(
             """
             SELECT
@@ -860,9 +859,40 @@ class DailyHelpRepository(BaseRepository):
             profile_id,
         )
         return {
-            "rating_count": int(summary_row["rating_count"] or 0) if summary_row else 0,
-            "average_stars": (float(summary_row["average_stars"] or 0) if summary_row else 0.0),
+            **summary,
             "trait_counts": {str(row["trait"]): int(row["count"]) for row in trait_rows},
+        }
+
+    async def get_rating_summaries_batch(
+        self,
+        *,
+        organization_id: str,
+        profile_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Aggregate star averages for many profiles (preview/list enrichment)."""
+        unique_ids = [profile_id for profile_id in dict.fromkeys(profile_ids) if profile_id]
+        if not unique_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              daily_help_profile_id::text AS profile_id,
+              COUNT(*)::int AS rating_count,
+              COALESCE(AVG(stars), 0)::numeric(3, 2) AS average_stars
+            FROM daily_help_ratings
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = ANY($2::uuid[])
+            GROUP BY daily_help_profile_id
+            """,
+            organization_id,
+            unique_ids,
+        )
+        return {
+            str(row["profile_id"]): {
+                "rating_count": int(row["rating_count"] or 0),
+                "average_stars": float(row["average_stars"] or 0),
+            }
+            for row in rows
         }
 
     async def list_slots(
