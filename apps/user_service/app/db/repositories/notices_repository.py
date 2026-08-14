@@ -834,20 +834,40 @@ class NoticesRepository(BaseRepository):
         *,
         organization_id: str,
         notice_id: str,
-        contact_id: str,
+        contact_id: str | None = None,
+        user_id: str | None = None,
     ) -> bool:
         """Insert like if absent; return True if inserted."""
-        row = await self.db_connection.fetchrow(
-            """
-            INSERT INTO notice_likes (organization_id, notice_id, contact_id)
-            VALUES ($1::uuid, $2::uuid, $3::uuid)
-            ON CONFLICT (notice_id, contact_id) DO NOTHING
-            RETURNING id
-            """,
-            organization_id,
-            notice_id,
-            contact_id,
-        )
+        if contact_id is not None:
+            row = await self.db_connection.fetchrow(
+                """
+                INSERT INTO notice_likes (organization_id, notice_id, contact_id)
+                VALUES ($1::uuid, $2::uuid, $3::uuid)
+                ON CONFLICT (notice_id, contact_id)
+                    WHERE contact_id IS NOT NULL
+                DO NOTHING
+                RETURNING id
+                """,
+                organization_id,
+                notice_id,
+                contact_id,
+            )
+        elif user_id is not None:
+            row = await self.db_connection.fetchrow(
+                """
+                INSERT INTO notice_likes (organization_id, notice_id, user_id)
+                VALUES ($1::uuid, $2::uuid, $3::uuid)
+                ON CONFLICT (notice_id, user_id)
+                    WHERE user_id IS NOT NULL
+                DO NOTHING
+                RETURNING id
+                """,
+                organization_id,
+                notice_id,
+                user_id,
+            )
+        else:
+            return False
         if row is None:
             return False
         await self.db_connection.execute(
@@ -866,21 +886,38 @@ class NoticesRepository(BaseRepository):
         *,
         organization_id: str,
         notice_id: str,
-        contact_id: str,
+        contact_id: str | None = None,
+        user_id: str | None = None,
     ) -> bool:
         """Remove like if present; return True if deleted."""
-        row = await self.db_connection.fetchrow(
-            """
-            DELETE FROM notice_likes
-            WHERE organization_id = $1::uuid
-              AND notice_id = $2::uuid
-              AND contact_id = $3::uuid
-            RETURNING id
-            """,
-            organization_id,
-            notice_id,
-            contact_id,
-        )
+        if contact_id is not None:
+            row = await self.db_connection.fetchrow(
+                """
+                DELETE FROM notice_likes
+                WHERE organization_id = $1::uuid
+                  AND notice_id = $2::uuid
+                  AND contact_id = $3::uuid
+                RETURNING id
+                """,
+                organization_id,
+                notice_id,
+                contact_id,
+            )
+        elif user_id is not None:
+            row = await self.db_connection.fetchrow(
+                """
+                DELETE FROM notice_likes
+                WHERE organization_id = $1::uuid
+                  AND notice_id = $2::uuid
+                  AND user_id = $3::uuid
+                RETURNING id
+                """,
+                organization_id,
+                notice_id,
+                user_id,
+            )
+        else:
+            return False
         if row is None:
             return False
         await self.db_connection.execute(
@@ -899,21 +936,38 @@ class NoticesRepository(BaseRepository):
         *,
         organization_id: str,
         notice_id: str,
-        contact_id: str,
+        contact_id: str | None = None,
+        user_id: str | None = None,
     ) -> bool:
-        """Return whether contact liked a notice."""
-        row = await self.db_connection.fetchrow(
-            """
-            SELECT 1
-            FROM notice_likes
-            WHERE organization_id = $1::uuid
-              AND notice_id = $2::uuid
-              AND contact_id = $3::uuid
-            """,
-            organization_id,
-            notice_id,
-            contact_id,
-        )
+        """Return whether the viewer liked a notice (by contact or user)."""
+        if contact_id is not None:
+            row = await self.db_connection.fetchrow(
+                """
+                SELECT 1
+                FROM notice_likes
+                WHERE organization_id = $1::uuid
+                  AND notice_id = $2::uuid
+                  AND contact_id = $3::uuid
+                """,
+                organization_id,
+                notice_id,
+                contact_id,
+            )
+        elif user_id is not None:
+            row = await self.db_connection.fetchrow(
+                """
+                SELECT 1
+                FROM notice_likes
+                WHERE organization_id = $1::uuid
+                  AND notice_id = $2::uuid
+                  AND user_id = $3::uuid
+                """,
+                organization_id,
+                notice_id,
+                user_id,
+            )
+        else:
+            return False
         return row is not None
 
     async def list_live_notices_for_resident(

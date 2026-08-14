@@ -16,7 +16,7 @@ from apps.user_service.app.services.notices_resident_service import (
     NoticesResidentService,
 )
 from apps.user_service.app.utils.common_utils import (
-    extract_onboarding_contact_context,
+    extract_notice_viewer_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -39,7 +39,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 @router.get(
     "/banner",
     status_code=http_status.HTTP_200_OK,
-    summary="Pinned notices visible to resident",
+    summary="Pinned notices visible to resident or project member",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("60/minute")
@@ -50,16 +50,19 @@ async def get_resident_notice_banner(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return up to six pinned live notices visible to the caller."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
+    viewer = await extract_notice_viewer_context(
+        current_user,
+        db_connection,
+        project_id=query.project_id,
+        request=request,
     )
     service = NoticesResidentService(
         db_connection=db_connection,
-        user_context=user_context,
+        user_context=viewer.user_context,
     )
     items = await service.get_banner(
-        contact_id=str(contact["id"]),
-        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
+        contact_id=viewer.contact_id,
+        contact_user_id=viewer.contact_user_id,
         query=query,
     )
     return list_response(
@@ -77,7 +80,7 @@ async def get_resident_notice_banner(
 @router.get(
     "",
     status_code=http_status.HTTP_200_OK,
-    summary="Notice feed for resident",
+    summary="Notice feed for resident or project member",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("60/minute")
@@ -88,16 +91,19 @@ async def list_resident_notices(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return paginated live notices visible to the caller."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
+    viewer = await extract_notice_viewer_context(
+        current_user,
+        db_connection,
+        project_id=query.project_id,
+        request=request,
     )
     service = NoticesResidentService(
         db_connection=db_connection,
-        user_context=user_context,
+        user_context=viewer.user_context,
     )
     items, total = await service.list_notices(
-        contact_id=str(contact["id"]),
-        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
+        contact_id=viewer.contact_id,
+        contact_user_id=viewer.contact_user_id,
         query=query,
     )
     return list_response(
@@ -115,7 +121,7 @@ async def list_resident_notices(
 @router.get(
     "/{notice_id}",
     status_code=http_status.HTTP_200_OK,
-    summary="Notice detail for resident",
+    summary="Notice detail for resident or project member",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("60/minute")
@@ -126,16 +132,19 @@ async def get_resident_notice(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return notice detail and increment view count."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
+    viewer = await extract_notice_viewer_context(
+        current_user,
+        db_connection,
+        notice_id=notice_id,
+        request=request,
     )
     service = NoticesResidentService(
         db_connection=db_connection,
-        user_context=user_context,
+        user_context=viewer.user_context,
     )
     data = await service.get_notice(
-        contact_id=str(contact["id"]),
-        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
+        contact_id=viewer.contact_id,
+        contact_user_id=viewer.contact_user_id,
         notice_id=notice_id,
     )
     return success_response(
@@ -161,16 +170,19 @@ async def like_resident_notice(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Like a visible notice."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
+    viewer = await extract_notice_viewer_context(
+        current_user,
+        db_connection,
+        notice_id=notice_id,
+        request=request,
     )
     service = NoticesResidentService(
         db_connection=db_connection,
-        user_context=user_context,
+        user_context=viewer.user_context,
     )
     data = await service.like_notice(
-        contact_id=str(contact["id"]),
-        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
+        contact_id=viewer.contact_id,
+        contact_user_id=viewer.contact_user_id,
         notice_id=notice_id,
     )
     return success_response(
@@ -196,16 +208,19 @@ async def unlike_resident_notice(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Remove like from a visible notice."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
+    viewer = await extract_notice_viewer_context(
+        current_user,
+        db_connection,
+        notice_id=notice_id,
+        request=request,
     )
     service = NoticesResidentService(
         db_connection=db_connection,
-        user_context=user_context,
+        user_context=viewer.user_context,
     )
     data = await service.unlike_notice(
-        contact_id=str(contact["id"]),
-        contact_user_id=str(contact["user_id"]) if contact.get("user_id") else None,
+        contact_id=viewer.contact_id,
+        contact_user_id=viewer.contact_user_id,
         notice_id=notice_id,
     )
     return success_response(

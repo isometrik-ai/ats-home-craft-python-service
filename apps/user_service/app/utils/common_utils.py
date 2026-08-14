@@ -59,6 +59,16 @@ class UserContext:
 
 
 @dataclass
+class NoticeViewerContext:
+    """Caller context for resident/staff notice feed routes."""
+
+    user_context: UserContext
+    contact_id: str | None
+    contact_user_id: str
+    project_member_role: str | None = None
+
+
+@dataclass
 class PerformanceTimer:
     """Performance timing context manager and utility."""
 
@@ -576,6 +586,89 @@ async def extract_onboarding_contact_context(
             custom_code=CustomStatusCode.NOT_FOUND,
         )
     return user_context, contact
+
+
+async def extract_notice_viewer_context(
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    *,
+    project_id: str | None = None,
+    notice_id: str | None = None,
+    request: Request | None = None,
+) -> NoticeViewerContext:
+    """Resolve JWT to a notice feed viewer — resident contact or project member."""
+    from apps.user_service.app.db.repositories.contacts_repository import (
+        ContactsRepository,
+    )
+    from apps.user_service.app.db.repositories.projects_repository import (
+        ProjectsRepository,
+    )
+    from libs.shared_utils.http_exceptions import ForbiddenException, NotFoundException
+
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = user_context.organization_id
+    if not org_id:
+        raise ValidationException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+
+    contacts_repo = ContactsRepository(db_connection)
+    contact = await contacts_repo.get_active_contact_by_user_id(
+        user_id=user_context.user_id,
+        organization_id=org_id,
+    )
+    if contact:
+        contact_user_id = str(contact.get("user_id") or user_context.user_id)
+        return NoticeViewerContext(
+            user_context=user_context,
+            contact_id=str(contact["id"]),
+            contact_user_id=contact_user_id,
+        )
+
+    resolved_project_id = project_id
+    if not resolved_project_id and notice_id:
+        resolved_project_id = await db_connection.fetchval(
+            """
+            SELECT project_id::text
+            FROM notices
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            """,
+            org_id,
+            notice_id,
+        )
+        resolved_project_id = str(resolved_project_id) if resolved_project_id else None
+        if not resolved_project_id:
+            raise NotFoundException(
+                message_key="notices.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    if not resolved_project_id:
+        raise NotFoundException(
+            message_key="contact_onboarding.errors.contact_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+
+    projects_repo = ProjectsRepository(db_connection)
+    member = await projects_repo.get_active_member(
+        organization_id=org_id,
+        project_id=resolved_project_id,
+        user_id=user_context.user_id,
+    )
+    if not member:
+        raise ForbiddenException(
+            message_key="notices.errors.feed_access_denied",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    return NoticeViewerContext(
+        user_context=user_context,
+        contact_id=None,
+        contact_user_id=user_context.user_id,
+        project_member_role=str(member.get("role") or "") or None,
+    )
 
 
 async def require_organization_creator(

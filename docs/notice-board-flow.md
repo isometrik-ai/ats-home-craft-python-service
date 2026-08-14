@@ -111,7 +111,7 @@ Same 3-layer FastAPI pattern as the rest of the service:
 HTTP → API router → NoticesService (business rules) → NoticesRepository (SQL) → Postgres
          ↓
   ensure_staff_project_access(project_id)     [admin routes]
-  extract_onboarding_contact_context()        [resident routes, Phase 2]
+  extract_notice_viewer_context()           [resident routes, Phase 2]
 ```
 
 ### File map (to create)
@@ -156,16 +156,16 @@ Full column reference: [notice-board-schema.md](../../ats-home-craft-supabase/do
 
 ### Reused tables
 
-| Table                  | Role                                                                     |
-| ---------------------- | ------------------------------------------------------------------------ |
-| `projects`             | Community scope; all notices under `project_id`                          |
-| `towers`               | Tower picker when scope = by tower                                       |
-| `units`                | Tower linkage for Owner/Tenant reach + resident feed filter              |
-| `contacts`             | Like actor (Phase 2); admin `created_by` via user linkage                |
-| `contact_units`        | Active residency for reach + resident visibility                         |
-| `contact_roles`        | Owner / Tenant / Staff recipient resolution                              |
-| `organization_members` | Staff / Security recipient resolution                                    |
-| `project_members`      | Staff project access gate ([ADR 0011](./adr/0011-project-membership.md)) |
+| Table                  | Role                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------ |
+| `projects`             | Community scope; all notices under `project_id`                                      |
+| `towers`               | Tower picker when scope = by tower                                                   |
+| `units`                | Tower linkage for Owner/Tenant reach + resident feed filter                          |
+| `contacts`             | Like actor (Phase 2); admin `created_by` via user linkage                            |
+| `contact_units`        | Active residency for reach + resident visibility                                     |
+| `contact_roles`        | Owner / Tenant recipient resolution via units in project scope                       |
+| `project_members`      | Staff / Security recipient resolution ([ADR 0011](./adr/0011-project-membership.md)) |
+| `organization_members` | Staff admin access gate only — not notice audience for Staff/Security groups         |
 
 ### Status lifecycle
 
@@ -541,11 +541,11 @@ GET /v1/projects/{project_id}/notices/reach-estimate
 
 Returns approximate recipient count for the create form ("**N** people will receive this notice").
 
-| Group              | Resolution sketch                                                                                                                               |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Owner / Tenant** | Distinct `contact_id` from active `contact_roles` where `role_type` matches, `project_id` matches, and (if by tower) unit's `tower_id IN (...)` |
-| **Staff**          | Distinct contacts with active `contact_roles.role_type = 'Staff'` OR active org members with staff role (product TBD)                           |
-| **Security**       | Active `organization_members` with gate/security permissions for org                                                                            |
+| Group              | Resolution sketch                                                                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Owner / Tenant** | Distinct `contact_id` from active `contact_roles` on units in the project; tower scope applies when `scope_type = by_tower`. Resolved to portal `user_id` via `contacts.user_id` for push. |
+| **Staff**          | Active non-`security` `project_members` **plus** all active `security` project members (security also receives staff notices)                                                              |
+| **Security**       | Active `project_members` with `role = security` only — staff roles do **not** receive security-only notices                                                                                |
 
 Staff and Security counts ignore tower scope in Phase 1 (org/project scoped). Owner/Tenant scale
 by tower selection.
@@ -700,9 +700,9 @@ A notice is **visible** to a resident when **all** of:
 1. `status = live`
 1. Caller has active `contact_units` for the project (or org member for Security-only notices — TBD)
 1. Caller matches ≥1 `notice_recipients` group:
-   - **Owner / Tenant:** active `contact_roles` on a unit in scope
-   - **Staff:** active `contact_roles.role_type = Staff` or staff org member
-   - **Security:** org member with security permissions
+   - **Owner / Tenant:** active `contact_roles` on a unit in scope (via `contacts`)
+   - **Staff:** active non-`security` `project_members`, **and** security project members (staff notices also go to security)
+   - **Security:** active `project_members` with `role = security` only
 1. Scope matches:
    - `whole_society` → always (within project)
    - `by_tower` → caller's unit `tower_id` ∈ `notice_towers`
@@ -724,7 +724,7 @@ DELETE /v1/notices/{notice_id}/like
 - **Detail GET:** increment `view_count` (optional dedupe table later).
 - **Like:** upsert/delete `notice_likes`; update denormalized `like_count`.
 
-Auth: `extract_onboarding_contact_context()` — same as passes / tenant requests owner routes.
+Auth: `extract_notice_viewer_context()` — resolves **residents** via `contacts`, or **staff/security** via active `project_members` on the requested `project_id` (list/banner) or the notice's project (detail/like).
 
 ### 8.3 Push on publish (Phase 2b)
 
