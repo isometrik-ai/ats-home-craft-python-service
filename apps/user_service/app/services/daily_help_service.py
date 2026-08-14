@@ -1463,10 +1463,15 @@ class DailyHelpService:
             limit=query.page_size,
             offset=offset,
         )
+        rating_map = await self.repo.get_rating_summaries_batch(
+            organization_id=self.organization_id,
+            profile_ids=[str(row["id"]) for row in rows],
+        )
         items = [
             await self._serialize_resident_list_item(
                 row=row,
                 unit_id=query.unit_id,
+                rating_summary=rating_map.get(str(row["id"])),
             )
             for row in rows
         ]
@@ -1492,10 +1497,15 @@ class DailyHelpService:
             limit=query.page_size,
             offset=offset,
         )
+        rating_map = await self.repo.get_rating_summaries_batch(
+            organization_id=self.organization_id,
+            profile_ids=[str(row["id"]) for row in rows],
+        )
         items = [
             await self._serialize_resident_list_item(
                 row=row,
                 unit_id=query.unit_id,
+                rating_summary=rating_map.get(str(row["id"])),
             )
             for row in rows
         ]

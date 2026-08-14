@@ -8,6 +8,7 @@ import pytest
 
 from apps.user_service.app.schemas.daily_help import (
     CreateDailyHelpRequest,
+    ResidentDailyHelpListQuery,
     SetDailyHelpOpenToWorkRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -446,6 +447,65 @@ async def test_list_resident_categories_includes_profile_previews():
     assert items[0].preview_profiles[0].household_link_count == 1
     assert items[0].preview_profiles[0].average_stars == 4.5
     assert items[0].preview_profiles[1].average_stars is None
+
+
+@pytest.mark.asyncio
+async def test_list_resident_profiles_includes_average_stars():
+    """Directory list enriches cards with aggregated rating averages."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_profiles = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "profile-rated",
+                    "display_name": "Rated Helper",
+                    "category_id": "cat-1",
+                    "category_name": "Maid",
+                    "phone_isd_code": "+91",
+                    "phone_number": "9999999999",
+                    "gate_passcode": "1234",
+                    "household_link_count": 1,
+                    "open_to_work": True,
+                    "linked_pass_id": None,
+                    "created_at": None,
+                },
+                {
+                    "id": "profile-unrated",
+                    "display_name": "Unrated Helper",
+                    "category_id": "cat-1",
+                    "category_name": "Maid",
+                    "phone_isd_code": "+91",
+                    "phone_number": "8888888888",
+                    "gate_passcode": "5678",
+                    "household_link_count": 0,
+                    "open_to_work": False,
+                    "linked_pass_id": None,
+                    "created_at": None,
+                },
+            ],
+            2,
+        )
+    )
+    svc.repo.get_rating_summaries_batch = AsyncMock(
+        return_value={"profile-rated": {"rating_count": 1, "average_stars": 4.5}}
+    )
+    svc.repo.list_links_for_units = AsyncMock(return_value=[])
+
+    items, total = await svc.list_resident_profiles(
+        contact_id="contact-1",
+        query=ResidentDailyHelpListQuery(unit_id="unit-1", page=1, page_size=20),
+    )
+
+    assert total == 2
+    assert items[0].average_stars == 4.5
+    assert items[1].average_stars is None
+    svc.repo.get_rating_summaries_batch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
