@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpAttendanceApiResponse,
     DailyHelpHouseholdLinkApiResponse,
     DailyHelpOpenToWorkApiResponse,
+    DailyHelpRatingApiResponse,
     DailyHelpRatingSummaryApiResponse,
     MarkDailyHelpAttendanceAbsenceApiResponse,
     MarkDailyHelpAttendanceAbsenceRequest,
@@ -24,6 +25,7 @@ from apps.user_service.app.schemas.daily_help import (
     ResidentDailyHelpListQuery,
     ResidentDailyHelpSearchQuery,
     SetDailyHelpOpenToWorkRequest,
+    UpdateDailyHelpRatingRequest,
 )
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.utils.common_utils import (
@@ -104,6 +106,14 @@ RATING_CREATED_RESPONSES = _created_response(
 RATING_SUMMARY_SUCCESS_RESPONSES = _ok_response(
     DailyHelpRatingSummaryApiResponse,
     "Aggregated star average and trait counts for the profile.",
+)
+RATING_MINE_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpRatingApiResponse,
+    "The resident's own rating for the profile, or null when not yet rated.",
+)
+RATING_UPDATED_RESPONSES = _ok_response(
+    DailyHelpRatingApiResponse,
+    "Updated rating for the daily help profile.",
 )
 ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpAttendanceApiResponse,
@@ -426,6 +436,80 @@ async def create_daily_help_rating(
         custom_code=CustomStatusCode.CREATED,
         data=data.model_dump(),
         status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("get resident daily help rating")
+@router.get(
+    "/{profile_id}/ratings/mine",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get the resident's own rating for a daily help profile",
+    response_model=None,
+    responses=RATING_MINE_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def get_resident_daily_help_rating(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return the logged-in resident's rating for this profile, if one exists."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_resident_rating(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key=(
+            "daily_help.success.rating_retrieved"
+            if data
+            else "daily_help.success.rating_not_submitted"
+        ),
+        custom_code=CustomStatusCode.SUCCESS if data else CustomStatusCode.NO_CONTENT,
+        data=data.model_dump() if data else None,
+    )
+
+
+@handle_api_exceptions("update daily help rating")
+@router.put(
+    "/{profile_id}/ratings",
+    status_code=http_status.HTTP_200_OK,
+    summary="Update the resident's rating for a daily help profile",
+    response_model=None,
+    responses=RATING_UPDATED_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def update_daily_help_rating(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    body: UpdateDailyHelpRatingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Update stars, comment, and traits on an existing resident rating."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.update_rating(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        body=body,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.rating_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
     )
 
 

@@ -1,15 +1,14 @@
 # Daily Help Flow — Context & Change Guide
 
-> **Status: Proposed — not implemented.** This document is the build guide for **Daily Help** in
-> `user_service`: admin registry on the dashboard, resident directory + household links on mobile,
-> and gate **Activities** via the existing visitor logs / pass pipeline. Schema and decisions:
+> **Status: Implemented** (Phases 1–3 core APIs in `user_service`). Admin registry, resident directory,
+> household links, ratings, attendance calendar, and gate integration are live. Schema and decisions:
 > [ADR 0013](./adr/0013-daily-help.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/daily-help`
-- **Resident API prefix:** `/v1/daily-help` (Phase 2)
+- **Resident API prefix:** `/v1/daily-help`
 - **Gate / Activities:** existing `/v1/passes/*` + `/v1/visitor-logs/*` ([passes-validation-flow.md](./passes-validation-flow.md))
-- **DB schema:** `ats-home-craft-supabase` (migrations `20260811120000_*`, `20260811121000_*`, `20260811121500_*`, `20260811122000_*`)
+- **DB schema:** `ats-home-craft-supabase` (migrations `20260811120000_*`, `20260811121000_*`, `20260811121500_*`, `20260811122000_*`, `20260814160000_daily_help_attendance_absences.sql`)
 
 ______________________________________________________________________
 
@@ -54,28 +53,38 @@ visitor passes and visitor logs** — we do **not** create `contacts` rows or au
 | Restore (optional)                                  | `POST /projects/{project_id}/daily-help/{id}/restore`                |
 | Add / remove document                               | `POST/PATCH/DELETE .../documents`                                    |
 | Export                                              | `GET /projects/{project_id}/daily-help/export`                       |
+| Availability slots                                  | `PUT /projects/{project_id}/daily-help/{id}/availability`            |
+| Attendance calendar (gate check-ins)                | `GET /projects/{project_id}/daily-help/{id}/attendance?year=&month=` |
 
-**Resident mobile — Daily Help (Phase 2)**
+**Resident mobile — Daily Help**
 
-| Screen / element                             | Capability                                                    |
-| -------------------------------------------- | ------------------------------------------------------------- |
-| Category home (Maids, Cooks, …)              | `GET /daily-help/categories` + `GET /daily-help?category_id=` |
-| Search (name, mobile, passcode)              | `GET /daily-help/search?q=`                                   |
-| Profile card list                            | `GET /daily-help?category_id={uuid}`                          |
-| Profile detail                               | `GET /daily-help/{id}`                                        |
-| Add to Household                             | `POST /daily-help/{id}/household-links?unit_id=`              |
-| Remove from household                        | `DELETE /daily-help/{id}/household-links/{link_id}`           |
-| Toggle open to work                          | `PATCH /daily-help/{id}/open-to-work?unit_id=`                |
-| Category stats (Inside / Open to work / New) | Aggregates on list endpoints + visitor logs                   |
+| Screen / element                             | Capability                                                                           |
+| -------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Category home (Maids, Cooks, …)              | `GET /daily-help/categories?unit_id=`                                                |
+| Category preview cards                       | Each preview includes `average_stars`, `household_link_count`, `open_to_work`        |
+| Search (name, mobile, passcode)              | `GET /daily-help/search?unit_id=&q=`                                                 |
+| Profile card list                            | `GET /daily-help?unit_id=&category_id={uuid}`                                        |
+| My linked helpers (category groups)          | `GET /daily-help/household-links?unit_id=` (categories with `linked_count > 0` only) |
+| Profile detail                               | `GET /daily-help/{id}?unit_id=`                                                      |
+| Add to Household                             | `POST /daily-help/{id}/household-links?unit_id=`                                     |
+| Remove from household                        | `DELETE /daily-help/{id}/household-links/{link_id}?unit_id=`                         |
+| Toggle open to work                          | `PATCH /daily-help/{id}/open-to-work?unit_id=`                                       |
+| Rate helper (first time)                     | `POST /daily-help/{id}/ratings?unit_id=`                                             |
+| View my rating                               | `GET /daily-help/{id}/ratings/mine?unit_id=`                                         |
+| Update my rating                             | `PUT /daily-help/{id}/ratings?unit_id=`                                              |
+| Profile rating aggregate                     | `GET /daily-help/{id}/ratings/summary?unit_id=`                                      |
+| Attendance calendar (present / absent days)  | `GET /daily-help/{id}/attendance?unit_id=&year=&month=`                              |
+| Mark absent (helper did not visit)           | `POST /daily-help/{id}/attendance/absence?unit_id=`                                  |
+| Category stats (Inside / Open to work / New) | Aggregates on list + category endpoints                                              |
 
 **Resident mobile — Activities (existing — visitor logs)**
 
-| Screen / element                     | Capability                                                           |
-| ------------------------------------ | -------------------------------------------------------------------- |
-| Activity feed (maids, deliveries, …) | Client composes from visitor logs / pass list filtered by date       |
-| INSIDE / LEFT badge                  | `visit_status` from pass events                                      |
-| Rate now / Gatepass / Attendance     | Phase 2+; attendance = pass check-in history for `daily_help_id`     |
-| Filter by date                       | `GET /visitor-logs?pass_type=daily_help&date=` (extend query params) |
+| Screen / element                     | Capability                                                                          |
+| ------------------------------------ | ----------------------------------------------------------------------------------- |
+| Activity feed (maids, deliveries, …) | Client composes from visitor logs / pass list filtered by date                      |
+| INSIDE / LEFT badge                  | `visit_status` from pass events                                                     |
+| Rate now / Gatepass / Attendance     | Resident APIs: ratings + monthly attendance calendar; gate pass via linked passcode |
+| Filter by date                       | `GET /visitor-logs?pass_type=daily_help&date=` (extend query params)                |
 
 ______________________________________________________________________
 
@@ -92,23 +101,23 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
                           └── VisitorLogsService (read-only for Activities aggregates)
 ```
 
-### File map (to create)
+### File map (implemented)
 
-| Concern                    | File                                                                       |
-| -------------------------- | -------------------------------------------------------------------------- |
-| Admin routes               | `app/api/daily_help.py` (under projects router)                            |
-| Resident routes (Phase 2)  | `app/api/daily_help_resident.py`                                           |
-| Orchestration              | `app/services/daily_help_service.py`                                       |
-| Check-in/out notifications | `app/services/daily_help_notification_service.py`                          |
-| Pass hook                  | extend `app/services/pass_verification_service.py`                         |
-| SQL                        | `app/db/repositories/daily_help_repository.py`                             |
-| Category SQL               | `app/db/repositories/daily_help_categories_repository.py`                  |
-| Schemas                    | `app/schemas/daily_help.py`                                                |
-| Enums                      | `app/schemas/enums.py` — mirror Postgres enums                             |
-| Pass linkage               | extend `passes_service.py` / `passes_repository.py`                        |
-| Visitor logs filter        | extend `visitor_logs_repository.py` — `pass_type=daily_help`, join profile |
-| RBAC                       | `libs/shared_utils/common_query.py` — new permission codes or reuse        |
-| Tests                      | `tests/unit/test_daily_help_service.py`, `tests/integration/daily_help/`   |
+| Concern                    | File                                                                |
+| -------------------------- | ------------------------------------------------------------------- |
+| Admin routes               | `app/api/daily_help.py` (under projects router)                     |
+| Resident routes            | `app/api/daily_help_resident.py`                                    |
+| Orchestration              | `app/services/daily_help_service.py`                                |
+| Check-in/out notifications | `app/services/daily_help_notification_service.py`                   |
+| Pass hook                  | `app/services/pass_verification_service.py`                         |
+| SQL                        | `app/db/repositories/daily_help_repository.py`                      |
+| Pass events (attendance)   | `app/db/repositories/pass_events_repository.py`                     |
+| Category SQL               | `app/db/repositories/daily_help_categories_repository.py`           |
+| Schemas                    | `app/schemas/daily_help.py`                                         |
+| Enums                      | `app/schemas/enums.py` — mirror Postgres enums                      |
+| Pass linkage               | `passes_service.py` / `passes_repository.py`                        |
+| Visitor logs filter        | `visitor_logs_repository.py` — `pass_type=daily_help`, join profile |
+| Tests                      | `tests/unit/test_daily_help_service.py`, integration tests          |
 
 `DailyHelpService` **composes** `PassesService` to create/update/cancel the linked recurring pass in
 the same transaction as profile writes.
@@ -121,13 +130,17 @@ See [ADR 0013 § Schema](./adr/0013-daily-help.md#schema-proposed) for full DDL.
 
 ### New tables summary
 
-| Table                        | Purpose                                                                    |
-| ---------------------------- | -------------------------------------------------------------------------- |
-| `daily_help_categories`      | **Project-scoped category catalog** (admin CRUD)                           |
-| `daily_help_profiles`        | Person registry, `category_id` FK, status, gate passcode, `linked_pass_id` |
-| `daily_help_documents`       | Photo, ID proof, police verification, other files                          |
-| `daily_help_events`          | Audit timeline                                                             |
-| `daily_help_household_links` | Phase 2 — resident ↔ unit links                                            |
+| Table                            | Purpose                                                                    |
+| -------------------------------- | -------------------------------------------------------------------------- |
+| `daily_help_categories`          | **Project-scoped category catalog** (admin CRUD)                           |
+| `daily_help_profiles`            | Person registry, `category_id` FK, status, gate passcode, `linked_pass_id` |
+| `daily_help_documents`           | Photo, ID proof, police verification, other files                          |
+| `daily_help_events`              | Audit timeline                                                             |
+| `daily_help_household_links`     | Resident ↔ unit links (“Add to Household”)                                 |
+| `daily_help_availability_slots`  | Free-time windows (morning/evening) on profile                             |
+| `daily_help_ratings`             | Star ratings from residents (one per profile + unit + rater)               |
+| `daily_help_rating_traits`       | Trait tags per rating (`very_punctual`, …)                                 |
+| `daily_help_attendance_absences` | Resident-reported absences per profile + unit + calendar day               |
 
 ### Modified existing tables
 
@@ -360,7 +373,18 @@ GET /v1/daily-help/categories?unit_id={unit_id}
 ```
 
 Each category includes footer stats and up to **four** `preview_profiles` with `id`, `display_name`,
-`photo_path`, `initials`, and formatted `phone`.
+`photo_path`, `initials`, formatted `phone`, **`average_stars`**, **`household_link_count`**, and
+**`open_to_work`**.
+
+### 6.0b My household-linked helpers
+
+```http
+GET /v1/daily-help/household-links?unit_id={unit_id}
+```
+
+Returns **only categories with at least one active link** (`linked_count > 0`). Each category group
+includes `linked_count`, `inside_count`, `open_to_work_count`, and `linked_profiles[]` with profile
+summary fields (same shape as category preview cards).
 
 ### 6.1 Browse directory
 
@@ -415,6 +439,107 @@ PATCH /v1/daily-help/{profile_id}/open-to-work?unit_id={unit_id}
 Requires an **active household link** between the caller's unit and the profile. Updates the
 project-wide `open_to_work` flag shown on category cards and directory badges.
 
+### 6.5 Ratings
+
+One rating per **(profile, unit, resident contact)** — enforced by DB unique index
+`uq_daily_help_ratings_profile_unit_rater`.
+
+**Submit (first time):**
+
+```http
+POST /v1/daily-help/{profile_id}/ratings?unit_id={unit_id}
+{
+  "stars": 4.5,
+  "comment": "Very punctual",
+  "traits": ["very_punctual", "great_attitude"]
+}
+```
+
+Returns updated **aggregate summary** (`rating_count`, `average_stars`, `trait_counts`).
+Duplicate POST → `409` with `daily_help.errors.duplicate_rating` — use PUT to update.
+
+**View my rating:**
+
+```http
+GET /v1/daily-help/{profile_id}/ratings/mine?unit_id={unit_id}
+```
+
+Returns the resident's own rating (`id`, `stars`, `comment`, `traits`, `created_at`, `updated_at`)
+or `data: null` when not yet rated.
+
+**Update my rating:**
+
+```http
+PUT /v1/daily-help/{profile_id}/ratings?unit_id={unit_id}
+{
+  "stars": 5.0,
+  "comment": "Excellent service",
+  "traits": ["exceptional_service"]
+}
+```
+
+Returns the updated rating object. `404` if no prior rating exists.
+
+**Profile aggregate (all residents):**
+
+```http
+GET /v1/daily-help/{profile_id}/ratings/summary?unit_id={unit_id}
+```
+
+**Trait values:** `very_punctual`, `quite_regular`, `exceptional_service`, `great_attitude`
+**Stars:** `0.5` – `5.0` in `0.5` steps.
+
+**Recommended mobile flow:**
+
+1. `GET .../ratings/mine` — pre-fill form if `data` is non-null
+1. If null → `POST .../ratings`; if exists → `PUT .../ratings`
+1. Optionally refresh aggregate via `GET .../ratings/summary`
+
+### 6.6 Attendance calendar
+
+Combines **gate check-ins** (profile-level, from linked pass) with **resident-reported absences**
+(unit-scoped — helper did not visit *your* flat).
+
+```http
+GET /v1/daily-help/{profile_id}/attendance?unit_id={unit_id}&year=2024&month=5
+```
+
+Query params `year` and `month` default to the current calendar month in **Asia/Kolkata**.
+
+**Response shape:**
+
+| Field              | UI mapping                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `present_count`    | e.g. **21** in “21/30” summary                                                     |
+| `days_in_month`    | e.g. **30** in “21/30” summary                                                     |
+| `absent_count`     | Days marked absent by this resident for this unit                                  |
+| `last_check_in_at` | “Last checked N days ago”                                                          |
+| `days[]`           | Calendar grid: `{ "date": "2024-05-07", "status": "present" \| "absent" \| null }` |
+
+- **`present`** — successful gate check-in on that calendar day (local Asia/Kolkata date)
+- **`absent`** — resident marked via absence API for their unit
+- **`null`** — no record for that day
+
+**Mark absent** (requires active household link):
+
+```http
+POST /v1/daily-help/{profile_id}/attendance/absence?unit_id={unit_id}
+{ "attendance_date": "2024-05-22" }
+```
+
+**Rules:**
+
+- Date cannot be in the future
+- Cannot mark absent if helper already checked in at the gate that day
+- Upserts one row per `(profile, unit, date)` in `daily_help_attendance_absences`
+- Appends audit event `attendance_marked_absent`
+
+**Admin attendance** (gate check-ins only, no unit absences):
+
+```http
+GET /v1/projects/{project_id}/daily-help/{profile_id}/attendance?year=&month=
+```
+
 ______________________________________________________________________
 
 ## 7. Business rules & gating
@@ -462,60 +587,73 @@ ______________________________________________________________________
 | Change notification recipients   | `daily_help_notification_service.py` + `ContactsRepository` role query          |
 | Show flat on visitor log row     | Join latest household link or check-in metadata in `visitor_logs_repository`    |
 | Add overview card                | `visitor_logs_repository.get_overview` + schema                                 |
-| Add rating / traits              | New tables in Phase 3 + resident POST endpoint                                  |
+| Add rating / traits              | `POST/GET/PUT .../ratings` — see §6.5                                           |
+| Add attendance / mark absent     | `GET/POST .../attendance` — see §6.6                                            |
 | Mask phone in profile detail     | `DailyHelpService.get_resident_detail` (`mask_phone` when not household-linked) |
+| View / update resident rating    | `GET/PUT .../ratings/mine` and `PUT .../ratings` in `daily_help_resident.py`    |
+| Change attendance calendar logic | `DailyHelpService._build_attendance_calendar` + `pass_events_repository`        |
+| Add resident absence reason      | Extend `daily_help_attendance_absences` + mark-absence payload                  |
 | Backfill legacy `service` passes | One-off migration script linking by phone match                                 |
 
 ______________________________________________________________________
 
 ## 10. Error keys
 
-| Key                                          | When                                       |
-| -------------------------------------------- | ------------------------------------------ |
-| `daily_help.errors.not_found`                | Unknown profile id                         |
-| `daily_help.errors.already_deleted`          | Mutate deleted row                         |
-| `daily_help.errors.passcode_conflict`        | Rare passcode collision                    |
-| `daily_help.errors.invalid_category`         | Unknown or inactive `category_id`          |
-| `daily_help.errors.category_in_use`          | Delete category referenced by profiles     |
-| `daily_help.errors.duplicate_category_name`  | Name already exists in project             |
-| `daily_help.errors.unit_not_accessible`      | Resident link to unit they don't belong to |
-| `daily_help.errors.duplicate_household_link` | Active link already exists for unit        |
+| Key                                                    | When                                       |
+| ------------------------------------------------------ | ------------------------------------------ |
+| `daily_help.errors.not_found`                          | Unknown profile id                         |
+| `daily_help.errors.already_deleted`                    | Mutate deleted row                         |
+| `daily_help.errors.passcode_conflict`                  | Rare passcode collision                    |
+| `daily_help.errors.invalid_category`                   | Unknown or inactive `category_id`          |
+| `daily_help.errors.category_in_use`                    | Delete category referenced by profiles     |
+| `daily_help.errors.duplicate_category_name`            | Name already exists in project             |
+| `daily_help.errors.unit_not_accessible`                | Resident link to unit they don't belong to |
+| `daily_help.errors.duplicate_household_link`           | Active link already exists for unit        |
+| `daily_help.errors.household_link_required`            | Open-to-work toggle without household link |
+| `daily_help.errors.attendance_household_link_required` | Mark absent without household link         |
+| `daily_help.errors.attendance_date_in_future`          | Absence date is after today                |
+| `daily_help.errors.attendance_already_checked_in`      | Gate check-in exists on absence date       |
+| `daily_help.errors.duplicate_rating`                   | POST rating when one already exists        |
+| `daily_help.errors.rating_not_found`                   | PUT rating before first POST               |
+| `daily_help.errors.invalid_attendance_month`           | Month query param outside 1–12             |
 
 ______________________________________________________________________
 
 ## 11. Implementation phases
 
-### Phase 1 — Admin registry + categories + pass linkage
+### Phase 1 — Admin registry + categories + pass linkage ✅
 
-- [ ] Migrations: enums, **categories**, profiles, documents, events, `passes.daily_help_id`, `pass_type` value
-- [ ] Category CRUD + list for admin dropdown / resident home
-- [ ] `DailyHelpRepository` + `DailyHelpService`
-- [ ] Admin CRUD, summary, list filters, deactivate/delete
-- [ ] Auto-issue recurring pass on create; cancel on deactivate/delete
-- [ ] Unit tests for service + repository
+- [x] Migrations: enums, categories, profiles, documents, events, `passes.daily_help_id`, `pass_type` value
+- [x] Category CRUD + list for admin dropdown / resident home
+- [x] `DailyHelpRepository` + `DailyHelpService`
+- [x] Admin CRUD, summary, list filters, deactivate/delete
+- [x] Auto-issue recurring pass on create; cancel on deactivate/delete
+- [x] Unit tests for service + repository
 
-### Phase 1b — Hardening
+### Phase 1b — Hardening (partial)
 
 - [ ] Signed upload URLs for photo/documents
-- [ ] Export CSV
-- [ ] Visitor logs: filter by `pass_type=daily_help`, join profile + category on detail
-- [ ] Gate verify payload includes daily help summary
+- [x] Export CSV
+- [x] Visitor logs: filter by `pass_type=daily_help`, join profile + category on detail
+- [x] Gate verify payload includes daily help summary
 
-### Phase 2 — Resident directory + household + notifications
+### Phase 2 — Resident directory + household + notifications ✅
 
-- [ ] `daily_help_household_links` migration
-- [ ] Resident list/search/profile endpoints
-- [ ] Add/remove household link
-- [ ] **Check-in/out push to Owner + Tenant on linked units** (`DailyHelpNotificationService`)
-- [ ] Category aggregates (inside, open to work, newly added)
-- [ ] Integration tests
+- [x] `daily_help_household_links` migration
+- [x] Resident list/search/profile endpoints
+- [x] Add/remove household link (+ optional `removal_reason`)
+- [x] `GET /daily-help/household-links` — category-grouped linked profiles
+- [x] Check-in/out push to Owner + Tenant on linked units (`DailyHelpNotificationService`)
+- [x] Category aggregates + preview card fields (`average_stars`, `household_link_count`, `open_to_work`)
+- [x] Integration tests
 
-### Phase 3 — Engagement
+### Phase 3 — Engagement ✅
 
-- [ ] Ratings + trait tags
-- [ ] Attendance summary from pass events
-- [ ] `daily_help_availability_slots`
-- [ ] `open_to_work` toggle
+- [x] Ratings + trait tags (`POST`, `GET .../mine`, `PUT`, `GET .../summary`)
+- [x] Attendance monthly calendar from pass events + resident absences
+- [x] `daily_help_availability_slots` (admin replace)
+- [x] `open_to_work` toggle (resident, requires household link)
+- [x] `daily_help_attendance_absences` table + mark-absence API
 
 ______________________________________________________________________
 

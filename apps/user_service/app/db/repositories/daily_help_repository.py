@@ -848,6 +848,107 @@ class DailyHelpRepository(BaseRepository):
         )
         return rating
 
+    async def get_rating_by_rater(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        unit_id: str,
+        rated_by_contact_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one resident's rating for a profile and unit."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+                id::text AS id,
+                stars,
+                comment,
+                created_at,
+                updated_at
+            FROM daily_help_ratings
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = $2::uuid
+              AND unit_id = $3::uuid
+              AND rated_by_contact_id = $4::uuid
+            LIMIT 1
+            """,
+            organization_id,
+            profile_id,
+            unit_id,
+            rated_by_contact_id,
+        )
+        if not row:
+            return None
+        rating = dict(row)
+        rating["traits"] = await self.list_rating_traits(
+            organization_id=organization_id,
+            rating_id=str(rating["id"]),
+        )
+        return rating
+
+    async def update_rating(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        unit_id: str,
+        rated_by_contact_id: str,
+        stars: Decimal,
+        comment: str | None,
+        traits: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Update stars, comment, and trait tags for an existing rating."""
+        async with self.db_connection.transaction():
+            row = await self.db_connection.fetchrow(
+                """
+                UPDATE daily_help_ratings
+                SET stars = $5,
+                    comment = $6,
+                    updated_at = now()
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                  AND unit_id = $3::uuid
+                  AND rated_by_contact_id = $4::uuid
+                RETURNING id::text AS id, stars, comment, created_at, updated_at
+                """,
+                organization_id,
+                profile_id,
+                unit_id,
+                rated_by_contact_id,
+                stars,
+                comment,
+            )
+            if not row:
+                return None
+            rating = dict(row)
+            await self.db_connection.execute(
+                """
+                DELETE FROM daily_help_rating_traits
+                WHERE organization_id = $1::uuid
+                  AND daily_help_rating_id = $2::uuid
+                """,
+                organization_id,
+                rating["id"],
+            )
+            if traits:
+                await self.db_connection.executemany(
+                    """
+                    INSERT INTO daily_help_rating_traits (
+                        organization_id,
+                        daily_help_rating_id,
+                        trait
+                    )
+                    VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
+                    ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
+                    """,
+                    [(organization_id, rating["id"], trait) for trait in traits],
+                )
+            rating["traits"] = await self.list_rating_traits(
+                organization_id=organization_id,
+                rating_id=str(rating["id"]),
+            )
+            return rating
+
     async def list_rating_traits(
         self,
         *,

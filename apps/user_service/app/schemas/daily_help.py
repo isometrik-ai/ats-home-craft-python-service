@@ -160,6 +160,16 @@ class CreateDailyHelpRatingRequest(BaseModel):
     traits: list[DailyHelpRatingTrait] = Field(default_factory=list, max_length=10)
 
 
+class UpdateDailyHelpRatingRequest(BaseModel):
+    """Resident updates their existing rating for a daily help profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stars: Decimal = Field(..., ge=Decimal("0.5"), le=Decimal("5.0"))
+    comment: str | None = Field(None, max_length=2000)
+    traits: list[DailyHelpRatingTrait] = Field(default_factory=list, max_length=10)
+
+
 class DailyHelpListQuery(BaseModel):
     """Admin list filters for GET /projects/{project_id}/daily-help."""
 
@@ -287,6 +297,19 @@ class DailyHelpRatingSummaryResponse(BaseModel):
     rating_count: int = 0
     average_stars: float = 0.0
     trait_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class DailyHelpRatingResponse(BaseModel):
+    """One resident's rating for a daily help profile."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    stars: float
+    comment: str | None = None
+    traits: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class DailyHelpAttendanceCheckInResponse(BaseModel):
@@ -745,6 +768,16 @@ class DailyHelpRatingSummaryApiResponse(BaseModel):
     statusCode: int
     code: str
     data: DailyHelpRatingSummaryResponse
+
+
+class DailyHelpRatingApiResponse(BaseModel):
+    """API envelope for a resident's own rating."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: DailyHelpRatingResponse | None = None
 
 
 class ResidentDailyHelpCategoryStatsApiResponse(BaseModel):

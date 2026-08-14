@@ -45,6 +45,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpListQuery,
     DailyHelpMessageResponse,
     DailyHelpOpenToWorkResponse,
+    DailyHelpRatingResponse,
     DailyHelpRatingSummaryResponse,
     DailyHelpSummaryResponse,
     ReplaceDailyHelpAvailabilityRequest,
@@ -58,6 +59,7 @@ from apps.user_service.app.schemas.daily_help import (
     ResidentDailyHelpSearchQuery,
     SetDailyHelpOpenToWorkRequest,
     UpdateDailyHelpCategoryRequest,
+    UpdateDailyHelpRatingRequest,
     UpdateDailyHelpRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -491,6 +493,18 @@ class DailyHelpService:
             removal_reason=removal_reason,
             unit_code=row.get("unit_code"),
             unit_label=row.get("unit_label"),
+        )
+
+    @staticmethod
+    def _serialize_rating(row: dict[str, Any]) -> DailyHelpRatingResponse:
+        """Map a rating row to API shape."""
+        return DailyHelpRatingResponse(
+            id=str(row["id"]),
+            stars=float(row["stars"]),
+            comment=row.get("comment"),
+            traits=[str(trait) for trait in row.get("traits") or []],
+            created_at=format_iso_datetime(row.get("created_at")),
+            updated_at=format_iso_datetime(row.get("updated_at")),
         )
 
     async def _serialize_resident_household_link_item(
@@ -1756,9 +1770,74 @@ class DailyHelpService:
             )
 
         traits = [trait.value for trait in body.traits]
-        await self.repo.insert_rating(
+        try:
+            await self.repo.insert_rating(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                profile_id=profile_id,
+                unit_id=unit_id,
+                rated_by_contact_id=contact_id,
+                stars=body.stars,
+                comment=body.comment,
+                traits=traits,
+            )
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="daily_help.errors.duplicate_rating",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        return await self.get_rating_summary(
+            contact_id=contact_id,
+            unit_id=unit_id,
+            profile_id=profile_id,
+        )
+
+    async def get_resident_rating(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+    ) -> DailyHelpRatingResponse | None:
+        """Return the resident's own rating for a profile, if any."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        row = await self.repo.get_rating_by_rater(
             organization_id=self.organization_id,
-            project_id=project_id,
+            profile_id=profile_id,
+            unit_id=unit_id,
+            rated_by_contact_id=contact_id,
+        )
+        if not row:
+            return None
+        return self._serialize_rating(row)
+
+    async def update_rating(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+        body: UpdateDailyHelpRatingRequest,
+    ) -> DailyHelpRatingResponse:
+        """Update the resident's existing rating for a profile."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        traits = [trait.value for trait in body.traits]
+        updated = await self.repo.update_rating(
+            organization_id=self.organization_id,
             profile_id=profile_id,
             unit_id=unit_id,
             rated_by_contact_id=contact_id,
@@ -1766,11 +1845,12 @@ class DailyHelpService:
             comment=body.comment,
             traits=traits,
         )
-        return await self.get_rating_summary(
-            contact_id=contact_id,
-            unit_id=unit_id,
-            profile_id=profile_id,
-        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.rating_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return self._serialize_rating(updated)
 
     async def get_rating_summary(
         self,

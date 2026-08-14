@@ -686,3 +686,65 @@ async def test_mark_attendance_absence_rejects_gate_check_in_day():
             profile_id="profile-1",
             attendance_date=date(2024, 5, 22),
         )
+
+
+@pytest.mark.asyncio
+async def test_get_resident_rating_returns_existing_rating():
+    from datetime import datetime, timezone
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(return_value={"id": "profile-1"})
+    svc.repo.get_rating_by_rater = AsyncMock(
+        return_value={
+            "id": "rating-1",
+            "stars": 4.5,
+            "comment": "Great work",
+            "traits": ["very_punctual"],
+            "created_at": datetime(2024, 5, 1, tzinfo=timezone.utc),
+            "updated_at": datetime(2024, 5, 2, tzinfo=timezone.utc),
+        }
+    )
+
+    result = await svc.get_resident_rating(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+    )
+
+    assert result is not None
+    assert result.id == "rating-1"
+    assert result.stars == 4.5
+    assert result.traits == ["very_punctual"]
+
+
+@pytest.mark.asyncio
+async def test_update_rating_requires_existing_rating():
+    from decimal import Decimal
+
+    from apps.user_service.app.schemas.daily_help import UpdateDailyHelpRatingRequest
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={"id": "profile-1", "status": DailyHelpStatus.ACTIVE.value}
+    )
+    svc.repo.update_rating = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.update_rating(
+            contact_id="contact-1",
+            unit_id="unit-1",
+            profile_id="profile-1",
+            body=UpdateDailyHelpRatingRequest(stars=Decimal("5.0")),
+        )
