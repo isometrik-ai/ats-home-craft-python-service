@@ -61,6 +61,14 @@ class SetDailyHelpOpenToWorkRequest(BaseModel):
     open_to_work: bool
 
 
+class RemoveDailyHelpHouseholdLinkRequest(BaseModel):
+    """Optional context when a resident removes a household link."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str | None = Field(None, max_length=500)
+
+
 class UpdateDailyHelpRequest(BaseModel):
     """Admin patches identity and contact fields on a profile."""
 
@@ -254,6 +262,7 @@ class DailyHelpHouseholdLinkResponse(BaseModel):
     status: str
     started_at: str | None = None
     removed_at: str | None = None
+    removal_reason: str | None = None
     unit_code: str | None = None
     unit_label: str | None = None
 

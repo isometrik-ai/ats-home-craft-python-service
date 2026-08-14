@@ -625,6 +625,7 @@ class DailyHelpRepository(BaseRepository):
         profile_id: str,
         link_id: str,
         removed_at: datetime | None = None,
+        removal_reason: str | None = None,
     ) -> dict[str, Any] | None:
         """Soft-remove a household link."""
         row = await self.db_connection.fetchrow(
@@ -632,6 +633,7 @@ class DailyHelpRepository(BaseRepository):
             UPDATE daily_help_household_links
             SET status = 'removed'::daily_help_household_link_status,
                 removed_at = COALESCE($4::timestamptz, now()),
+                removal_reason = $5,
                 updated_at = now()
             WHERE organization_id = $1::uuid
               AND daily_help_profile_id = $2::uuid
@@ -641,12 +643,14 @@ class DailyHelpRepository(BaseRepository):
               id::text AS id,
               unit_id::text AS unit_id,
               status::text AS status,
-              removed_at
+              removed_at,
+              removal_reason
             """,
             organization_id,
             profile_id,
             link_id,
             removed_at,
+            removal_reason,
         )
         return dict(row) if row else None
 

@@ -463,6 +463,9 @@ class DailyHelpService:
 
     def _serialize_household_link(self, row: dict[str, Any]) -> DailyHelpHouseholdLinkResponse:
         """Map a household link row to API shape."""
+        removal_reason = row.get("removal_reason")
+        if isinstance(removal_reason, str):
+            removal_reason = removal_reason.strip() or None
         return DailyHelpHouseholdLinkResponse(
             id=str(row["id"]),
             unit_id=str(row["unit_id"]),
@@ -470,6 +473,7 @@ class DailyHelpService:
             status=str(row["status"]),
             started_at=format_iso_datetime(row.get("started_at")),
             removed_at=format_iso_datetime(row.get("removed_at")),
+            removal_reason=removal_reason,
             unit_code=row.get("unit_code"),
             unit_label=row.get("unit_label"),
         )
@@ -1565,6 +1569,7 @@ class DailyHelpService:
         unit_id: str,
         profile_id: str,
         link_id: str,
+        reason: str | None = None,
     ) -> DailyHelpHouseholdLinkResponse:
         """Remove a resident household link."""
         project_id = await self._ensure_resident_unit(
@@ -1587,6 +1592,7 @@ class DailyHelpService:
             organization_id=self.organization_id,
             profile_id=profile_id,
             link_id=link_id,
+            removal_reason=reason.strip() if reason and reason.strip() else None,
         )
         if not removed:
             raise NotFoundException(
@@ -1598,7 +1604,11 @@ class DailyHelpService:
             event_type=DailyHelpEventType.HOUSEHOLD_REMOVED.value,
             actor_type=DailyHelpActorType.RESIDENT.value,
             actor_contact_id=contact_id,
-            payload={"link_id": link_id, "unit_id": str(target["unit_id"])},
+            payload={
+                "link_id": link_id,
+                "unit_id": str(target["unit_id"]),
+                **({"reason": reason.strip()} if reason and reason.strip() else {}),
+            },
         )
         return self._serialize_household_link({**target, **removed})
 
