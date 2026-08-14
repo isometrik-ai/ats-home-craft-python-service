@@ -1605,6 +1605,7 @@ class DailyHelpEventType(str, Enum):
     RESTORED = "restored"
     HOUSEHOLD_LINKED = "household_linked"
     HOUSEHOLD_REMOVED = "household_removed"
+    ATTENDANCE_MARKED_ABSENT = "attendance_marked_absent"
 
 
 class DailyHelpActorType(str, Enum):

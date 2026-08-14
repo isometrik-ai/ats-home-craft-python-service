@@ -2,12 +2,12 @@
 
 |                  |                                                                                                                                                                                                                                                                        |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                                                                                                                                               |
+| **Status**       | Accepted — implemented in `user_service` (Phases 1–3 core)                                                                                                                                                                                                             |
 | **Date**         | 2026-08-11                                                                                                                                                                                                                                                             |
 | **Authors**      | Home Craft platform team                                                                                                                                                                                                                                               |
 | **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access) |
 | **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                               |
-| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql` (to be created in `ats-home-craft-supabase`)                                                    |
+| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql` (`ats-home-craft-supabase`)                |
 
 ______________________________________________________________________
 
@@ -24,18 +24,18 @@ delivery, and similar recurring service providers. Product UI spans:
 
 ### Product decisions (confirmed from screens)
 
-| #   | Decision                                                                                                                                                                                                                |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Daily help is not a `contacts` row and not an auth user.** Identity lives on dedicated registry tables only.                                                                                                          |
-| 2   | **Admin / project staff** create and maintain records for a **project** — no resident submission or approval queue.                                                                                                     |
-| 3   | **Documents on file only** — photo, ID proof, police verification, and ad-hoc uploads. No verify/reject step.                                                                                                           |
-| 4   | **Status:** `active`, `inactive`, `deleted` (soft delete). Deleted rows remain for audit; list tabs show counts.                                                                                                        |
-| 5   | **Categories are admin-maintained per project** — not a global Postgres enum. Each project defines its own category list (Maid, Cook, …).                                                                               |
-| 6   | **Gate / Activities** reuse the existing **pass check-in/out + visitor logs** pipeline — not a third parallel entry system.                                                                                             |
-| 7   | Each profile gets a **project-scoped gate passcode** (searchable in the app) backed by a **recurring pass** (`pass_type = daily_help`).                                                                                 |
-| 8   | **Add to Household** links a daily help profile to a **unit** (and the linking resident) without creating a contact for the helper.                                                                                     |
-| 9   | **Check-in/out notifications:** when a daily help person enters or exits at the gate, send push to **Owner and Tenant currently holding each linked unit** (via active `daily_help_household_links` + `contact_roles`). |
-| 10  | **Ratings, attendance, free time slots, “open to work”** are **Phase 2+** features derived from or stored beside the registry — not required for Phase 1.                                                               |
+| #   | Decision                                                                                                                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Daily help is not a `contacts` row and not an auth user.** Identity lives on dedicated registry tables only.                                                                                                                            |
+| 2   | **Admin / project staff** create and maintain records for a **project** — no resident submission or approval queue.                                                                                                                       |
+| 3   | **Documents on file only** — photo, ID proof, police verification, and ad-hoc uploads. No verify/reject step.                                                                                                                             |
+| 4   | **Status:** `active`, `inactive`, `deleted` (soft delete). Deleted rows remain for audit; list tabs show counts.                                                                                                                          |
+| 5   | **Categories are admin-maintained per project** — not a global Postgres enum. Each project defines its own category list (Maid, Cook, …).                                                                                                 |
+| 6   | **Gate / Activities** reuse the existing **pass check-in/out + visitor logs** pipeline — not a third parallel entry system.                                                                                                               |
+| 7   | Each profile gets a **project-scoped gate passcode** (searchable in the app) backed by a **recurring pass** (`pass_type = daily_help`).                                                                                                   |
+| 8   | **Add to Household** links a daily help profile to a **unit** (and the linking resident) without creating a contact for the helper.                                                                                                       |
+| 9   | **Check-in/out notifications:** when a daily help person enters or exits at the gate, send push to **Owner and Tenant currently holding each linked unit** (via active `daily_help_household_links` + `contact_roles`).                   |
+| 10  | **Ratings, attendance calendar, availability slots, “open to work”** — implemented in Phase 3. Ratings: one row per `(profile, unit, rater)` with trait tags. Attendance: gate check-ins merged with resident-reported absences per unit. |
 
 ### Screens (product)
 
@@ -77,10 +77,10 @@ delivery, and similar recurring service providers. Product UI spans:
 
 **Resident mobile — Profile + Activities**
 
-| Screen     | Notes                                                                                    |
-| ---------- | ---------------------------------------------------------------------------------------- |
-| Profile    | Attendance, ratings, free slots, “Works in N houses”, tenure — mostly Phase 2            |
-| Activities | **Existing visitor logs UI** — daily help rows come from `pass_type = daily_help` passes |
+| Screen     | Notes                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------- |
+| Profile    | Attendance calendar, ratings (view/update), availability, “Works in N houses”, tenure — resident APIs live |
+| Activities | **Existing visitor logs UI** — daily help rows come from `pass_type = daily_help` passes                   |
 
 ### Constraints (carried from existing flows)
 
@@ -115,15 +115,17 @@ Their name, phone, photo, and documents are stored on **`daily_help_profiles`** 
 
 ### 2. Five new core tables (Phase 1) + one link table (Phase 2)
 
-| Table                               | Phase | Purpose                                                                       |
-| ----------------------------------- | ----- | ----------------------------------------------------------------------------- |
-| **`daily_help_categories`**         | 1     | **Project-scoped category catalog** — admin-maintained labels (Maid, Cook, …) |
-| **`daily_help_profiles`**           | 1     | Project-scoped person registry: identity snapshot, category FK, status        |
-| **`daily_help_documents`**          | 1     | Photo, ID proof, police verification, and other file metadata                 |
-| **`daily_help_events`**             | 1     | Append-only audit (created, updated, status_changed, deleted, restored)       |
-| **`daily_help_household_links`**    | 2     | Resident “Add to Household” — profile ↔ unit, with linker contact             |
-| **`daily_help_availability_slots`** | 3     | Optional free-time windows (morning/evening)                                  |
-| **`daily_help_ratings`**            | 3     | Optional star rating + trait tags per resident interaction                    |
+| Table                                | Phase | Purpose                                                                       |
+| ------------------------------------ | ----- | ----------------------------------------------------------------------------- |
+| **`daily_help_categories`**          | 1     | **Project-scoped category catalog** — admin-maintained labels (Maid, Cook, …) |
+| **`daily_help_profiles`**            | 1     | Project-scoped person registry: identity snapshot, category FK, status        |
+| **`daily_help_documents`**           | 1     | Photo, ID proof, police verification, and other file metadata                 |
+| **`daily_help_events`**              | 1     | Append-only audit (created, updated, status_changed, deleted, restored)       |
+| **`daily_help_household_links`**     | 2     | Resident “Add to Household” — profile ↔ unit, with linker contact             |
+| **`daily_help_availability_slots`**  | 3     | Optional free-time windows (morning/evening)                                  |
+| **`daily_help_ratings`**             | 3     | Star rating + trait tags; unique per `(profile, unit, rated_by_contact_id)`   |
+| **`daily_help_rating_traits`**       | 3     | Trait enum tags attached to each rating row                                   |
+| **`daily_help_attendance_absences`** | 3     | Resident-reported absence per `(profile, unit, attendance_date)`              |
 
 Gate movement and **Activities** do **not** get new tables — they flow through **`passes` + `pass_events`**
 and the existing **visitor logs** union ([ADR 0004](./0004-pass-validation-gate.md)).
@@ -243,18 +245,20 @@ linked to any flat yet).
 | Admin    | `/v1/projects/{project_id}/daily-help` | Staff RBAC + `ensure_staff_project_access` |
 | Resident | `/v1/daily-help`                       | `extract_onboarding_contact_context()`     |
 
-Resident routes are **read-heavy** in Phase 2 (directory, profile, add/remove household link).
-Admin routes cover CRUD, **category management**, status changes, document upload metadata, export, summary.
+Resident routes cover directory, profile, household links, **open-to-work**, **ratings** (create /
+view mine / update / summary), and **attendance** (monthly calendar + mark absent). Admin routes cover
+CRUD, category management, status changes, document upload metadata, export, summary, availability,
+and gate check-in attendance calendar.
 
 ### 9. Visitor logs / Activities alignment
 
-| App “Activities” need            | Source                                                      |
-| -------------------------------- | ----------------------------------------------------------- |
-| Name, photo, category            | Join `passes.daily_help_id` → `daily_help_profiles`         |
-| INSIDE / LEFT                    | Existing `VisitorLogVisitStatus` from pass events           |
-| “Entered N times”                | Count `checked_in` events on linked pass                    |
-| Rate now / Attendance / Gatepass | Phase 2+ client actions; attendance = pass event aggregates |
-| Deliveries mixed in same feed    | Unchanged — visitor logs union (pass + walk-in)             |
+| App “Activities” need            | Source                                                                          |
+| -------------------------------- | ------------------------------------------------------------------------------- |
+| Name, photo, category            | Join `passes.daily_help_id` → `daily_help_profiles`                             |
+| INSIDE / LEFT                    | Existing `VisitorLogVisitStatus` from pass events                               |
+| “Entered N times”                | Count `checked_in` events on linked pass                                        |
+| Rate now / Attendance / Gatepass | Resident rating CRUD + monthly attendance calendar; gatepass = linked pass code |
+| Deliveries mixed in same feed    | Unchanged — visitor logs union (pass + walk-in)                                 |
 
 Filter visitor logs by `pass_type = daily_help` (and later `visitor_type` mapping in service layer).
 
@@ -292,7 +296,10 @@ CREATE TYPE public.daily_help_event_type AS ENUM (
   'pass_issued',
   'pass_cancelled',
   'deleted',
-  'restored'
+  'restored',
+  'household_linked',
+  'household_removed',
+  'attendance_marked_absent'
 );
 
 CREATE TYPE public.daily_help_actor_type AS ENUM (
@@ -449,6 +456,66 @@ Partial unique: at most one `photo` typed row may duplicate `profiles.photo_path
 
 **Partial unique:** one `active` link per `(daily_help_profile_id, unit_id)`.
 
+### `daily_help_ratings` (Phase 3)
+
+| Column                      | Type               | Notes                             |
+| --------------------------- | ------------------ | --------------------------------- |
+| `id`                        | uuid PK            |                                   |
+| `organization_id`           | uuid FK            |                                   |
+| `project_id`                | uuid FK            |                                   |
+| `daily_help_profile_id`     | uuid FK            |                                   |
+| `unit_id`                   | uuid FK → units    | Rater's unit context              |
+| `rated_by_contact_id`       | uuid FK → contacts | Resident who submitted the rating |
+| `stars`                     | numeric(2,1)       | 0.5 – 5.0                         |
+| `comment`                   | text               | Optional free text                |
+| `created_at` / `updated_at` | timestamptz        |                                   |
+
+**Unique:** `(daily_help_profile_id, unit_id, rated_by_contact_id)` — one rating per resident per unit.
+
+Child table **`daily_help_rating_traits`** stores trait enum values (`very_punctual`, `quite_regular`,
+`exceptional_service`, `great_attitude`).
+
+**Resident API:**
+
+- `POST /v1/daily-help/{id}/ratings?unit_id=` — create (409 if duplicate)
+- `GET /v1/daily-help/{id}/ratings/mine?unit_id=` — fetch caller's rating
+- `PUT /v1/daily-help/{id}/ratings?unit_id=` — update existing
+- `GET /v1/daily-help/{id}/ratings/summary?unit_id=` — aggregate average + trait counts
+
+### `daily_help_attendance_absences` (Phase 3)
+
+Migration `20260814160000_daily_help_attendance_absences.sql`.
+
+| Column                  | Type               | Notes                                      |
+| ----------------------- | ------------------ | ------------------------------------------ |
+| `id`                    | uuid PK            |                                            |
+| `organization_id`       | uuid FK            |                                            |
+| `project_id`            | uuid FK            |                                            |
+| `daily_help_profile_id` | uuid FK            |                                            |
+| `unit_id`               | uuid FK → units    | Resident unit reporting the absence        |
+| `marked_by_contact_id`  | uuid FK → contacts | Resident who marked absent                 |
+| `attendance_date`       | date NOT NULL      | Calendar day (Asia/Kolkata for gate merge) |
+| `created_at`            | timestamptz        |                                            |
+
+**Unique:** `(daily_help_profile_id, unit_id, attendance_date)`.
+
+**Attendance model:**
+
+- **Present** — derived from `pass_events` check-ins on the profile's linked pass (society gate; not unit-specific).
+- **Absent** — row in this table when a household-linked resident reports the helper did not visit their unit.
+- Monthly calendar API merges both sources per day: `present` | `absent` | `null`.
+
+**Resident API:**
+
+- `GET /v1/daily-help/{id}/attendance?unit_id=&year=&month=`
+- `POST /v1/daily-help/{id}/attendance/absence?unit_id=` with `{ "attendance_date": "YYYY-MM-DD" }`
+
+Requires active household link. Cannot mark absent on a future date or on a day with a gate check-in.
+
+### `daily_help_availability_slots` (Phase 3)
+
+Admin-managed via `PUT /v1/projects/{project_id}/daily-help/{id}/availability`.
+
 ______________________________________________________________________
 
 ## Consequences
@@ -461,7 +528,7 @@ ______________________________________________________________________
 - **Household links** enable “Works in N houses” without N passes.
 - **Project-specific categories** without enum migrations when a community adds a new service type.
 - **Targeted notifications** — only Owner/Tenant holders on linked flats, not all household members.
-- **Extensible** — ratings, availability, open-to-work are additive Phase 2/3 tables.
+- **Extensible** — ratings, availability, open-to-work, and attendance absences delivered in Phase 3.
 
 ### Negative / trade-offs
 
@@ -476,13 +543,11 @@ ______________________________________________________________________
 
 ### Follow-ups
 
-1. **Phase 1 implementation** — see [daily-help-flow.md](../daily-help-flow.md).
+1. Signed upload URLs for photo/documents (Phase 1b remainder).
 1. Extend visitor logs overview cards (`daily_help` count, category aggregates).
-1. Phase 2 resident directory + household links + **check-in/out push notifications**.
-1. Phase 3 ratings, attendance aggregates, free-time slots.
 1. Optional backfill: map historical `pass_type = service` passes to profiles.
 1. RLS policies keyed on `organization_id` + staff/resident access.
-1. Signed upload URLs for photo/documents (reuse storage patterns from vehicles / tenant requests).
+1. Optional: absence `reason` text column; undo/clear absence API.
 
 ______________________________________________________________________
 

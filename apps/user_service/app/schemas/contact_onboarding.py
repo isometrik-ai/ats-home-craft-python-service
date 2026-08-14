@@ -606,6 +606,18 @@ class HouseholdMemberResponse(BaseModel):
     can_resend_invitation: bool = False
 
 
+class HouseholdSummaryCountsResponse(BaseModel):
+    """Dashboard counts for the household manage screen."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    unit_id: str
+    family_count: int = 0
+    daily_help_count: int = 0
+    vehicles_count: int = 0
+    tenant_count: int = 0
+
+
 class AcceptHouseholdInvitationRequest(BaseModel):
     """Accept a household invitation via SMS deep-link token."""
 
@@ -843,6 +855,16 @@ class HouseholdMemberListApiResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class HouseholdSummaryApiResponse(BaseModel):
+    """API envelope for GET /contact-onboarding/household/summary."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: HouseholdSummaryCountsResponse
 
 
 class AddHouseholdMemberApiResponse(BaseModel):

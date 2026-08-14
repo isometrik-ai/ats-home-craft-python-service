@@ -703,6 +703,7 @@
       "step_completed": "Onboarding step completed successfully.",
       "step_skipped": "Onboarding step skipped successfully.",
       "household_retrieved": "Household members retrieved successfully.",
+      "household_summary_retrieved": "Household summary retrieved successfully.",
       "household_member_added": "Household member added successfully.",
       "household_member_updated": "Household member updated successfully.",
       "household_member_removed": "Household member removed successfully.",
@@ -938,12 +939,19 @@
       "unsupported_export_format": "Only CSV export is supported.",
       "duplicate_household_link": "This helper is already linked to your household.",
       "link_not_found": "The household link could not be found.",
-      "household_link_required": "Link this helper to your household before updating open to work."
+      "household_link_required": "Link this helper to your household before updating open to work.",
+      "duplicate_rating": "You have already rated this helper. Use update rating to change it.",
+      "rating_not_found": "You have not rated this helper yet.",
+      "attendance_household_link_required": "Link this helper to your household before marking attendance.",
+      "attendance_date_in_future": "Attendance can only be marked for today or earlier dates.",
+      "attendance_already_checked_in": "This helper already checked in at the gate on the selected date.",
+      "invalid_attendance_month": "Attendance month must be between 1 and 12."
     },
     "success": {
       "summary_retrieved": "Daily help summary retrieved successfully.",
       "list_retrieved": "Daily help profiles retrieved successfully.",
       "household_links_retrieved": "Daily help household links retrieved successfully.",
+      "resident_household_links_retrieved": "Linked daily help profiles retrieved successfully.",
       "categories_retrieved": "Daily help categories retrieved successfully.",
       "category_created": "Daily help category created successfully.",
       "category_updated": "Daily help category updated successfully.",
@@ -958,10 +966,14 @@
       "document_deleted": "Document removed from daily help profile successfully.",
       "availability_updated": "Daily help availability updated successfully.",
       "attendance_retrieved": "Daily help attendance retrieved successfully.",
+      "attendance_absence_marked": "Daily help absence recorded successfully.",
       "search_retrieved": "Daily help search results retrieved successfully.",
       "household_linked": "Daily help helper linked to your household successfully.",
       "household_removed": "Daily help helper removed from your household successfully.",
       "rating_created": "Daily help rating submitted successfully.",
+      "rating_retrieved": "Daily help rating retrieved successfully.",
+      "rating_not_submitted": "You have not rated this helper yet.",
+      "rating_updated": "Daily help rating updated successfully.",
       "rating_summary_retrieved": "Daily help rating summary retrieved successfully.",
       "open_to_work_updated": "Open to work status updated successfully."
     }

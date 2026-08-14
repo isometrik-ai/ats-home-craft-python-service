@@ -1112,6 +1112,29 @@ class ContactUnitsRepository(BaseRepository):
         )
         return int(count or 0)
 
+    async def count_family_members_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> int:
+        """Count active family members on a unit (relationship is not self)."""
+        count = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND status = $3::contact_unit_status
+              AND relationship <> $4::contact_unit_relationship
+            """,
+            organization_id,
+            unit_id,
+            ContactUnitStatus.ACTIVE.value,
+            ContactUnitRelationship.SELF.value,
+        )
+        return int(count or 0)
+
     async def get_unit_project(
         self,
         *,

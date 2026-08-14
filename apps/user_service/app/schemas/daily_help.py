@@ -160,6 +160,16 @@ class CreateDailyHelpRatingRequest(BaseModel):
     traits: list[DailyHelpRatingTrait] = Field(default_factory=list, max_length=10)
 
 
+class UpdateDailyHelpRatingRequest(BaseModel):
+    """Resident updates their existing rating for a daily help profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stars: Decimal = Field(..., ge=Decimal("0.5"), le=Decimal("5.0"))
+    comment: str | None = Field(None, max_length=2000)
+    traits: list[DailyHelpRatingTrait] = Field(default_factory=list, max_length=10)
+
+
 class DailyHelpListQuery(BaseModel):
     """Admin list filters for GET /projects/{project_id}/daily-help."""
 
@@ -289,6 +299,19 @@ class DailyHelpRatingSummaryResponse(BaseModel):
     trait_counts: dict[str, int] = Field(default_factory=dict)
 
 
+class DailyHelpRatingResponse(BaseModel):
+    """One resident's rating for a daily help profile."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    stars: float
+    comment: str | None = None
+    traits: list[str] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 class DailyHelpAttendanceCheckInResponse(BaseModel):
     """One gate check-in event for a daily help profile."""
 
@@ -298,13 +321,46 @@ class DailyHelpAttendanceCheckInResponse(BaseModel):
     occurred_at: str | None = None
 
 
-class DailyHelpAttendanceResponse(BaseModel):
-    """Check-in attendance derived from the linked gate pass."""
+class DailyHelpAttendanceDayResponse(BaseModel):
+    """Single calendar day in a monthly attendance view."""
 
     model_config = ConfigDict(extra="ignore")
 
+    date: str
+    status: str | None = None
+
+
+class DailyHelpAttendanceResponse(BaseModel):
+    """Monthly attendance calendar derived from gate check-ins and resident absences."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    year: int
+    month: int
+    days_in_month: int = 0
+    present_count: int = 0
+    absent_count: int = 0
+    last_check_in_at: str | None = None
+    days: list[DailyHelpAttendanceDayResponse] = Field(default_factory=list)
     check_in_count: int = 0
     events: list[DailyHelpAttendanceCheckInResponse] = Field(default_factory=list)
+
+
+class MarkDailyHelpAttendanceAbsenceRequest(BaseModel):
+    """Resident marks that the helper did not visit on a given day."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    attendance_date: date
+
+
+class MarkDailyHelpAttendanceAbsenceResponse(BaseModel):
+    """Result of marking a single calendar day as absent."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    date: str
+    status: str = "absent"
 
 
 class DailyHelpSummaryResponse(BaseModel):
@@ -431,6 +487,40 @@ class ResidentDailyHelpProfilePreviewResponse(BaseModel):
     photo_path: str | None = None
     initials: str | None = None
     phone: str | None = None
+    open_to_work: bool = False
+    household_link_count: int = 0
+    average_stars: float | None = None
+
+
+class ResidentDailyHelpHouseholdLinkItemResponse(BaseModel):
+    """Daily help profile linked to the resident's unit."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    link_id: str
+    started_at: str | None = None
+    profile_id: str
+    display_name: str
+    photo_path: str | None = None
+    initials: str | None = None
+    phone: str | None = None
+    gate_passcode: str | None = None
+    open_to_work: bool = False
+    average_stars: float | None = None
+    is_inside: bool = False
+
+
+class ResidentDailyHelpHouseholdLinksCategoryResponse(BaseModel):
+    """Household-linked daily help profiles grouped by category."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    category_id: str
+    category_name: str
+    linked_count: int = 0
+    inside_count: int = 0
+    open_to_work_count: int = 0
+    linked_profiles: list[ResidentDailyHelpHouseholdLinkItemResponse] = Field(default_factory=list)
 
 
 class ResidentDailyHelpDetailResponse(BaseModel):
@@ -554,6 +644,16 @@ class DailyHelpHouseholdLinkListApiResponse(BaseModel):
     data: list[DailyHelpHouseholdLinkResponse]
 
 
+class ResidentDailyHelpHouseholdLinkListApiResponse(BaseModel):
+    """API envelope for GET /daily-help/household-links (resident)."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[ResidentDailyHelpHouseholdLinksCategoryResponse]
+
+
 class ResidentDailyHelpListApiResponse(BaseModel):
     """API envelope for resident daily help directory list/search."""
 
@@ -670,6 +770,16 @@ class DailyHelpRatingSummaryApiResponse(BaseModel):
     data: DailyHelpRatingSummaryResponse
 
 
+class DailyHelpRatingApiResponse(BaseModel):
+    """API envelope for a resident's own rating."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: DailyHelpRatingResponse | None = None
+
+
 class ResidentDailyHelpCategoryStatsApiResponse(BaseModel):
     """API envelope for resident category footer stats."""
 
@@ -688,3 +798,13 @@ class DailyHelpAttendanceApiResponse(BaseModel):
     statusCode: int
     code: str
     data: DailyHelpAttendanceResponse
+
+
+class MarkDailyHelpAttendanceAbsenceApiResponse(BaseModel):
+    """API envelope for marking a resident-reported absence."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarkDailyHelpAttendanceAbsenceResponse

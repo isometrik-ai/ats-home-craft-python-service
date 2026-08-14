@@ -215,3 +215,27 @@ class ContactRolesRepository(BaseRepository):
             relationship=relationship,
             contact_unit_id=contact_unit_id,
         )
+
+    async def count_active_tenants_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> int:
+        """Count active Tenant roles on a unit (0 or 1 by DB constraint)."""
+        count = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM contact_roles
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND role_type = $3::public.contact_role_type
+              AND status = $4::public.contact_role_status
+              AND ended_at IS NULL
+            """,
+            organization_id,
+            unit_id,
+            ContactType.TENANT.value,
+            ContactRoleStatus.ACTIVE.value,
+        )
+        return int(count or 0)

@@ -1170,3 +1170,37 @@ async def test_update_household_member_enable_portal(monkeypatch):
     )
 
     svc.household_invitation_service.create_and_send.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_get_household_summary_returns_dashboard_counts():
+    """Household summary aggregates family, daily help, vehicles, and tenant counts."""
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.count_family_members_for_unit = AsyncMock(return_value=2)
+    svc.daily_help_repo = MagicMock()
+    svc.daily_help_repo.count_active_links_for_unit = AsyncMock(return_value=2)
+    svc.units_repo = MagicMock()
+    svc.units_repo.count_unit_vehicles = AsyncMock(return_value=(2, 1))
+    svc.contact_roles_repo.count_active_tenants_for_unit = AsyncMock(return_value=1)
+
+    result = await svc.get_household_summary(
+        contact_id="contact-1",
+        unit_id="unit-1",
+    )
+
+    assert result.unit_id == "unit-1"
+    assert result.family_count == 2
+    assert result.daily_help_count == 2
+    assert result.vehicles_count == 2
+    assert result.tenant_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_household_summary_requires_unit_access():
+    """Household summary rejects units the contact does not occupy."""
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=False)
+
+    with pytest.raises(ValidationException):
+        await svc.get_household_summary(contact_id="contact-1", unit_id="unit-1")

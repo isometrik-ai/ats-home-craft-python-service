@@ -16,6 +16,7 @@ _GATE_COLUMN_CASTS: dict[str, str] = {
     "gate_type": "::gate_type",
     "status": "::gate_status",
     "wing_id": "::uuid",
+    "operating_hours": "::jsonb",
 }
 
 _LIFT_COLUMN_CASTS: dict[str, str] = {
@@ -44,21 +45,20 @@ _TOWER_INSERT_COLUMNS: tuple[str, ...] = (
 
 
 def _coerce_jsonb(value: Any) -> Any:
-    """Normalize JSONB payloads for asyncpg without double-encoding strings."""
+    """Serialize JSONB payloads for asyncpg (expects JSON strings, not dicts)."""
     if value is None:
         return None
     if isinstance(value, (dict, list)):
-        return value
+        return json.dumps(value)
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
             return None
         try:
-            parsed = json.loads(stripped)
+            json.loads(stripped)
         except json.JSONDecodeError:
             return value
-        if isinstance(parsed, (dict, list)):
-            return parsed
+        return stripped
     return value
 
 

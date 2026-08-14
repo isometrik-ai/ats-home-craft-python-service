@@ -686,6 +686,75 @@ class DailyHelpRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def list_active_links_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """List active household links for a unit with profile summary fields."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              hl.id::text AS id,
+              hl.unit_id::text AS unit_id,
+              hl.linked_by_contact_id::text AS linked_by_contact_id,
+              hl.status::text AS status,
+              hl.started_at,
+              p.id::text AS profile_id,
+              p.display_name,
+              p.initials,
+              p.photo_path,
+              p.phone_isd_code,
+              p.phone_number,
+              p.gate_passcode,
+              p.open_to_work,
+              p.linked_pass_id::text AS linked_pass_id,
+              p.category_id::text AS category_id,
+              c.name AS category_name
+            FROM daily_help_household_links hl
+            JOIN daily_help_profiles p
+              ON p.id = hl.daily_help_profile_id
+             AND p.organization_id = hl.organization_id
+            JOIN daily_help_categories c
+              ON c.id = p.category_id
+             AND c.organization_id = p.organization_id
+             AND c.project_id = p.project_id
+            WHERE hl.organization_id = $1::uuid
+              AND hl.unit_id = $2::uuid
+              AND hl.status = 'active'::daily_help_household_link_status
+              AND p.status = 'active'::daily_help_status
+            ORDER BY hl.started_at DESC, hl.id DESC
+            """,
+            organization_id,
+            unit_id,
+        )
+        return [dict(row) for row in rows]
+
+    async def count_active_links_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> int:
+        """Count active household links on a unit with active daily help profiles."""
+        count = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM daily_help_household_links hl
+            JOIN daily_help_profiles p
+              ON p.id = hl.daily_help_profile_id
+             AND p.organization_id = hl.organization_id
+            WHERE hl.organization_id = $1::uuid
+              AND hl.unit_id = $2::uuid
+              AND hl.status = 'active'::daily_help_household_link_status
+              AND p.status = 'active'::daily_help_status
+            """,
+            organization_id,
+            unit_id,
+        )
+        return int(count or 0)
+
     async def list_links_for_units(
         self,
         *,
@@ -803,6 +872,107 @@ class DailyHelpRepository(BaseRepository):
         )
         return rating
 
+    async def get_rating_by_rater(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        unit_id: str,
+        rated_by_contact_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one resident's rating for a profile and unit."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+                id::text AS id,
+                stars,
+                comment,
+                created_at,
+                updated_at
+            FROM daily_help_ratings
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = $2::uuid
+              AND unit_id = $3::uuid
+              AND rated_by_contact_id = $4::uuid
+            LIMIT 1
+            """,
+            organization_id,
+            profile_id,
+            unit_id,
+            rated_by_contact_id,
+        )
+        if not row:
+            return None
+        rating = dict(row)
+        rating["traits"] = await self.list_rating_traits(
+            organization_id=organization_id,
+            rating_id=str(rating["id"]),
+        )
+        return rating
+
+    async def update_rating(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        unit_id: str,
+        rated_by_contact_id: str,
+        stars: Decimal,
+        comment: str | None,
+        traits: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Update stars, comment, and trait tags for an existing rating."""
+        async with self.db_connection.transaction():
+            row = await self.db_connection.fetchrow(
+                """
+                UPDATE daily_help_ratings
+                SET stars = $5,
+                    comment = $6,
+                    updated_at = now()
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                  AND unit_id = $3::uuid
+                  AND rated_by_contact_id = $4::uuid
+                RETURNING id::text AS id, stars, comment, created_at, updated_at
+                """,
+                organization_id,
+                profile_id,
+                unit_id,
+                rated_by_contact_id,
+                stars,
+                comment,
+            )
+            if not row:
+                return None
+            rating = dict(row)
+            await self.db_connection.execute(
+                """
+                DELETE FROM daily_help_rating_traits
+                WHERE organization_id = $1::uuid
+                  AND daily_help_rating_id = $2::uuid
+                """,
+                organization_id,
+                rating["id"],
+            )
+            if traits:
+                await self.db_connection.executemany(
+                    """
+                    INSERT INTO daily_help_rating_traits (
+                        organization_id,
+                        daily_help_rating_id,
+                        trait
+                    )
+                    VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
+                    ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
+                    """,
+                    [(organization_id, rating["id"], trait) for trait in traits],
+                )
+            rating["traits"] = await self.list_rating_traits(
+                organization_id=organization_id,
+                rating_id=str(rating["id"]),
+            )
+            return rating
+
     async def list_rating_traits(
         self,
         *,
@@ -830,18 +1000,17 @@ class DailyHelpRepository(BaseRepository):
         profile_id: str,
     ) -> dict[str, Any]:
         """Aggregate star rating and trait counts for a profile."""
-        summary_row = await self.db_connection.fetchrow(
-            """
-            SELECT
-              COUNT(*)::int AS rating_count,
-              COALESCE(AVG(stars), 0)::numeric(3, 2) AS average_stars
-            FROM daily_help_ratings
-            WHERE organization_id = $1::uuid
-              AND daily_help_profile_id = $2::uuid
-            """,
-            organization_id,
-            profile_id,
+        summaries = await self.get_rating_summaries_batch(
+            organization_id=organization_id,
+            profile_ids=[profile_id],
         )
+        summary = summaries.get(profile_id)
+        if summary is None:
+            return {
+                "rating_count": 0,
+                "average_stars": 0.0,
+                "trait_counts": {},
+            }
         trait_rows = await self.db_connection.fetch(
             """
             SELECT
@@ -860,9 +1029,40 @@ class DailyHelpRepository(BaseRepository):
             profile_id,
         )
         return {
-            "rating_count": int(summary_row["rating_count"] or 0) if summary_row else 0,
-            "average_stars": (float(summary_row["average_stars"] or 0) if summary_row else 0.0),
+            **summary,
             "trait_counts": {str(row["trait"]): int(row["count"]) for row in trait_rows},
+        }
+
+    async def get_rating_summaries_batch(
+        self,
+        *,
+        organization_id: str,
+        profile_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Aggregate star averages for many profiles (preview/list enrichment)."""
+        unique_ids = [profile_id for profile_id in dict.fromkeys(profile_ids) if profile_id]
+        if not unique_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              daily_help_profile_id::text AS profile_id,
+              COUNT(*)::int AS rating_count,
+              COALESCE(AVG(stars), 0)::numeric(3, 2) AS average_stars
+            FROM daily_help_ratings
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = ANY($2::uuid[])
+            GROUP BY daily_help_profile_id
+            """,
+            organization_id,
+            unique_ids,
+        )
+        return {
+            str(row["profile_id"]): {
+                "rating_count": int(row["rating_count"] or 0),
+                "average_stars": float(row["average_stars"] or 0),
+            }
+            for row in rows
         }
 
     async def list_slots(
@@ -932,3 +1132,74 @@ class DailyHelpRepository(BaseRepository):
                 ],
             )
             return records
+
+    async def list_attendance_absence_dates_for_month(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        unit_id: str,
+        year: int,
+        month: int,
+    ) -> list[Any]:
+        """Return calendar dates marked absent by the resident for a month."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT attendance_date
+            FROM daily_help_attendance_absences
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = $2::uuid
+              AND unit_id = $3::uuid
+              AND EXTRACT(YEAR FROM attendance_date) = $4
+              AND EXTRACT(MONTH FROM attendance_date) = $5
+            ORDER BY attendance_date
+            """,
+            organization_id,
+            profile_id,
+            unit_id,
+            year,
+            month,
+        )
+        return [row["attendance_date"] for row in rows]
+
+    async def upsert_attendance_absence(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        profile_id: str,
+        unit_id: str,
+        marked_by_contact_id: str,
+        attendance_date: Any,
+    ) -> dict[str, Any]:
+        """Record or refresh a resident-reported absence for one calendar day."""
+        row = await self.db_connection.fetchrow(
+            """
+            INSERT INTO daily_help_attendance_absences (
+                organization_id,
+                project_id,
+                daily_help_profile_id,
+                unit_id,
+                marked_by_contact_id,
+                attendance_date
+            )
+            VALUES (
+                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::date
+            )
+            ON CONFLICT (daily_help_profile_id, unit_id, attendance_date)
+            DO UPDATE SET
+                marked_by_contact_id = EXCLUDED.marked_by_contact_id,
+                created_at = now()
+            RETURNING
+                id::text AS id,
+                attendance_date,
+                created_at
+            """,
+            organization_id,
+            project_id,
+            profile_id,
+            unit_id,
+            marked_by_contact_id,
+            attendance_date,
+        )
+        return dict(row)

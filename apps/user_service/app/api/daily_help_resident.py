@@ -13,14 +13,19 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpAttendanceApiResponse,
     DailyHelpHouseholdLinkApiResponse,
     DailyHelpOpenToWorkApiResponse,
+    DailyHelpRatingApiResponse,
     DailyHelpRatingSummaryApiResponse,
+    MarkDailyHelpAttendanceAbsenceApiResponse,
+    MarkDailyHelpAttendanceAbsenceRequest,
     RemoveDailyHelpHouseholdLinkRequest,
     ResidentDailyHelpCategoryStatsApiResponse,
     ResidentDailyHelpDetailApiResponse,
+    ResidentDailyHelpHouseholdLinkListApiResponse,
     ResidentDailyHelpListApiResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpSearchQuery,
     SetDailyHelpOpenToWorkRequest,
+    UpdateDailyHelpRatingRequest,
 )
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.utils.common_utils import (
@@ -74,6 +79,10 @@ SEARCH_SUCCESS_RESPONSES = _ok_response(
     ResidentDailyHelpListApiResponse,
     "Search results for active daily help profiles.",
 )
+HOUSEHOLD_LINKS_LIST_SUCCESS_RESPONSES = _ok_response(
+    ResidentDailyHelpHouseholdLinkListApiResponse,
+    "Household-linked daily help profiles grouped by category.",
+)
 DETAIL_SUCCESS_RESPONSES = _ok_response(
     ResidentDailyHelpDetailApiResponse,
     "Daily help profile detail; phone masked unless household-linked to the unit.",
@@ -98,9 +107,21 @@ RATING_SUMMARY_SUCCESS_RESPONSES = _ok_response(
     DailyHelpRatingSummaryApiResponse,
     "Aggregated star average and trait counts for the profile.",
 )
+RATING_MINE_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpRatingApiResponse,
+    "The resident's own rating for the profile, or null when not yet rated.",
+)
+RATING_UPDATED_RESPONSES = _ok_response(
+    DailyHelpRatingApiResponse,
+    "Updated rating for the daily help profile.",
+)
 ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpAttendanceApiResponse,
-    "Check-in count and events from the linked gate pass.",
+    "Monthly attendance calendar with present/absent days and gate check-in events.",
+)
+ATTENDANCE_ABSENCE_SUCCESS_RESPONSES = _ok_response(
+    MarkDailyHelpAttendanceAbsenceApiResponse,
+    "Calendar day marked absent for the household-linked helper.",
 )
 
 
@@ -203,6 +224,38 @@ async def search_resident_daily_help_profiles(
         page_size=query.page_size,
         message_key="daily_help.success.search_retrieved",
         custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("list resident daily help household links")
+@router.get(
+    "/household-links",
+    status_code=http_status.HTTP_200_OK,
+    summary="List daily help profiles linked to resident unit",
+    response_model=None,
+    responses=HOUSEHOLD_LINKS_LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def list_resident_daily_help_household_links(
+    request: Request,
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return household-linked daily help profiles grouped by category."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items = await service.list_resident_household_links(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.resident_household_links_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        data=[item.model_dump() for item in items],
     )
 
 
@@ -386,6 +439,80 @@ async def create_daily_help_rating(
     )
 
 
+@handle_api_exceptions("get resident daily help rating")
+@router.get(
+    "/{profile_id}/ratings/mine",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get the resident's own rating for a daily help profile",
+    response_model=None,
+    responses=RATING_MINE_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def get_resident_daily_help_rating(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return the logged-in resident's rating for this profile, if one exists."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_resident_rating(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key=(
+            "daily_help.success.rating_retrieved"
+            if data
+            else "daily_help.success.rating_not_submitted"
+        ),
+        custom_code=CustomStatusCode.SUCCESS if data else CustomStatusCode.NO_CONTENT,
+        data=data.model_dump() if data else None,
+    )
+
+
+@handle_api_exceptions("update daily help rating")
+@router.put(
+    "/{profile_id}/ratings",
+    status_code=http_status.HTTP_200_OK,
+    summary="Update the resident's rating for a daily help profile",
+    response_model=None,
+    responses=RATING_UPDATED_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def update_daily_help_rating(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    body: UpdateDailyHelpRatingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Update stars, comment, and traits on an existing resident rating."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.update_rating(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        body=body,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.rating_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
 @handle_api_exceptions("get daily help rating summary")
 @router.get(
     "/{profile_id}/ratings/summary",
@@ -424,7 +551,7 @@ async def get_daily_help_rating_summary(
 @router.get(
     "/{profile_id}/attendance",
     status_code=http_status.HTTP_200_OK,
-    summary="Check-in attendance for a daily help profile",
+    summary="Monthly attendance calendar for a daily help profile",
     response_model=None,
     responses=ATTENDANCE_SUCCESS_RESPONSES,
 )
@@ -433,10 +560,22 @@ async def get_resident_daily_help_attendance(
     request: Request,
     profile_id: str = Path(...),
     unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    year: int | None = Query(
+        None,
+        ge=2000,
+        le=2100,
+        description="Calendar year (defaults to current year in Asia/Kolkata).",
+    ),
+    month: int | None = Query(
+        None,
+        ge=1,
+        le=12,
+        description="Calendar month 1-12 (defaults to current month in Asia/Kolkata).",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return check-in count from the linked gate pass."""
+    """Return day-wise present/absent calendar for the selected month."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -445,10 +584,48 @@ async def get_resident_daily_help_attendance(
         contact_id=str(contact["id"]),
         unit_id=unit_id,
         profile_id=profile_id,
+        year=year,
+        month=month,
     )
     return success_response(
         request=request,
         message_key="daily_help.success.attendance_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("mark resident daily help attendance absence")
+@router.post(
+    "/{profile_id}/attendance/absence",
+    status_code=http_status.HTTP_200_OK,
+    summary="Mark a day absent when the helper did not visit",
+    response_model=None,
+    responses=ATTENDANCE_ABSENCE_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def mark_resident_daily_help_attendance_absence(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    body: MarkDailyHelpAttendanceAbsenceRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Record that the helper did not visit the resident unit on the given date."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.mark_attendance_absence(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        attendance_date=body.attendance_date,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.attendance_absence_marked",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

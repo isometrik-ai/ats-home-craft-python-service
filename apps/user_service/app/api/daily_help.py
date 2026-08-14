@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Request, Response
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -128,7 +128,7 @@ AVAILABILITY_SUCCESS_RESPONSES = _ok_response(
 )
 ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpAttendanceApiResponse,
-    "Check-in count and events from the linked gate pass.",
+    "Monthly attendance calendar with gate check-in days and events.",
 )
 HOUSEHOLD_LINK_LIST_SUCCESS_RESPONSES = _ok_response(
     DailyHelpHouseholdLinkListApiResponse,
@@ -931,10 +931,22 @@ async def get_daily_help_attendance(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
     profile_id: str = Path(...),
+    year: int | None = Query(
+        None,
+        ge=2000,
+        le=2100,
+        description="Calendar year (defaults to current year in Asia/Kolkata).",
+    ),
+    month: int | None = Query(
+        None,
+        ge=1,
+        le=12,
+        description="Calendar month 1-12 (defaults to current month in Asia/Kolkata).",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return check-in history count from the linked gate pass."""
+    """Return monthly gate check-in calendar for a daily help profile."""
     user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
@@ -943,7 +955,12 @@ async def get_daily_help_attendance(
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_attendance(project_id=project_id, profile_id=profile_id)
+    data = await service.get_attendance(
+        project_id=project_id,
+        profile_id=profile_id,
+        year=year,
+        month=month,
+    )
     return success_response(
         request=request,
         message_key="daily_help.success.attendance_retrieved",

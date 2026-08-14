@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import calendar
 import csv
 import io
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from asyncpg import UniqueViolationError
@@ -43,17 +45,21 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpListQuery,
     DailyHelpMessageResponse,
     DailyHelpOpenToWorkResponse,
+    DailyHelpRatingResponse,
     DailyHelpRatingSummaryResponse,
     DailyHelpSummaryResponse,
     ReplaceDailyHelpAvailabilityRequest,
     ResidentDailyHelpCategoryStatsResponse,
     ResidentDailyHelpDetailResponse,
+    ResidentDailyHelpHouseholdLinkItemResponse,
+    ResidentDailyHelpHouseholdLinksCategoryResponse,
     ResidentDailyHelpListItemResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpProfilePreviewResponse,
     ResidentDailyHelpSearchQuery,
     SetDailyHelpOpenToWorkRequest,
     UpdateDailyHelpCategoryRequest,
+    UpdateDailyHelpRatingRequest,
     UpdateDailyHelpRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -62,7 +68,6 @@ from apps.user_service.app.schemas.enums import (
     DailyHelpCategoryStatus,
     DailyHelpEventType,
     DailyHelpStatus,
-    PassEventType,
     PassStatus,
     PassType,
     PassValidityType,
@@ -75,6 +80,8 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
+
+ATTENDANCE_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
 _CATEGORY_PREVIEW_LIMIT = 4
 _NEWLY_ADDED_DAYS = 30
@@ -405,8 +412,15 @@ class DailyHelpService:
         return bool(links)
 
     @staticmethod
-    def _serialize_profile_preview(row: dict[str, Any]) -> ResidentDailyHelpProfilePreviewResponse:
+    def _serialize_profile_preview(
+        row: dict[str, Any],
+        *,
+        average_stars: float | None = None,
+    ) -> ResidentDailyHelpProfilePreviewResponse:
         """Map a profile row to a compact category-home preview."""
+        stars = average_stars
+        if stars is not None and stars <= 0:
+            stars = None
         return ResidentDailyHelpProfilePreviewResponse(
             id=str(row["id"]),
             display_name=str(row["display_name"]),
@@ -416,6 +430,9 @@ class DailyHelpService:
                 isd_code=row.get("phone_isd_code"),
                 phone_number=row.get("phone_number"),
             ),
+            open_to_work=bool(row.get("open_to_work")),
+            household_link_count=int(row.get("household_link_count") or 0),
+            average_stars=stars,
         )
 
     def _serialize_category(self, row: dict[str, Any]) -> DailyHelpCategoryResponse:
@@ -476,6 +493,47 @@ class DailyHelpService:
             removal_reason=removal_reason,
             unit_code=row.get("unit_code"),
             unit_label=row.get("unit_label"),
+        )
+
+    @staticmethod
+    def _serialize_rating(row: dict[str, Any]) -> DailyHelpRatingResponse:
+        """Map a rating row to API shape."""
+        return DailyHelpRatingResponse(
+            id=str(row["id"]),
+            stars=float(row["stars"]),
+            comment=row.get("comment"),
+            traits=[str(trait) for trait in row.get("traits") or []],
+            created_at=format_iso_datetime(row.get("created_at")),
+            updated_at=format_iso_datetime(row.get("updated_at")),
+        )
+
+    async def _serialize_resident_household_link_item(
+        self,
+        row: dict[str, Any],
+        *,
+        average_stars: float | None = None,
+    ) -> ResidentDailyHelpHouseholdLinkItemResponse:
+        """Map a unit household link row with profile summary for resident API."""
+        stars = average_stars
+        if stars is not None and stars <= 0:
+            stars = None
+        return ResidentDailyHelpHouseholdLinkItemResponse(
+            link_id=str(row["id"]),
+            started_at=format_iso_datetime(row.get("started_at")),
+            profile_id=str(row["profile_id"]),
+            display_name=str(row["display_name"]),
+            photo_path=row.get("photo_path"),
+            initials=row.get("initials"),
+            phone=self._format_phone(
+                isd_code=row.get("phone_isd_code"),
+                phone_number=row.get("phone_number"),
+            ),
+            gate_passcode=row.get("gate_passcode"),
+            open_to_work=bool(row.get("open_to_work")),
+            average_stars=stars,
+            is_inside=await self._profile_is_inside(
+                linked_pass_id=row.get("linked_pass_id"),
+            ),
         )
 
     def _serialize_slot(self, row: dict[str, Any]) -> DailyHelpAvailabilitySlotResponse:
@@ -1361,6 +1419,11 @@ class DailyHelpService:
                 if await self._profile_is_inside(linked_pass_id=row.get("linked_pass_id")):
                     inside_count += 1
 
+            preview_rows = rows[:_CATEGORY_PREVIEW_LIMIT]
+            rating_map = await self.repo.get_rating_summaries_batch(
+                organization_id=self.organization_id,
+                profile_ids=[str(row["id"]) for row in preview_rows],
+            )
             stats.append(
                 ResidentDailyHelpCategoryStatsResponse(
                     category_id=category_id,
@@ -1370,8 +1433,11 @@ class DailyHelpService:
                     newly_added_count=newly_added_count,
                     profile_count=len(rows),
                     preview_profiles=[
-                        self._serialize_profile_preview(row)
-                        for row in rows[:_CATEGORY_PREVIEW_LIMIT]
+                        self._serialize_profile_preview(
+                            row,
+                            average_stars=rating_map.get(str(row["id"]), {}).get("average_stars"),
+                        )
+                        for row in preview_rows
                     ],
                 )
             )
@@ -1397,10 +1463,15 @@ class DailyHelpService:
             limit=query.page_size,
             offset=offset,
         )
+        rating_map = await self.repo.get_rating_summaries_batch(
+            organization_id=self.organization_id,
+            profile_ids=[str(row["id"]) for row in rows],
+        )
         items = [
             await self._serialize_resident_list_item(
                 row=row,
                 unit_id=query.unit_id,
+                rating_summary=rating_map.get(str(row["id"])),
             )
             for row in rows
         ]
@@ -1426,14 +1497,86 @@ class DailyHelpService:
             limit=query.page_size,
             offset=offset,
         )
+        rating_map = await self.repo.get_rating_summaries_batch(
+            organization_id=self.organization_id,
+            profile_ids=[str(row["id"]) for row in rows],
+        )
         items = [
             await self._serialize_resident_list_item(
                 row=row,
                 unit_id=query.unit_id,
+                rating_summary=rating_map.get(str(row["id"])),
             )
             for row in rows
         ]
         return items, total
+
+    async def list_resident_household_links(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+    ) -> list[ResidentDailyHelpHouseholdLinksCategoryResponse]:
+        """Return household-linked profiles grouped by category (linked categories only)."""
+        await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        rows = await self.repo.list_active_links_for_unit(
+            organization_id=self.organization_id,
+            unit_id=unit_id,
+        )
+        if not rows:
+            return []
+
+        category_order: list[str] = []
+        links_by_category: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            category_id = str(row["category_id"])
+            bucket = links_by_category.get(category_id)
+            if bucket is None:
+                category_order.append(category_id)
+                bucket = {
+                    "category_name": str(row.get("category_name") or ""),
+                    "rows": [],
+                }
+                links_by_category[category_id] = bucket
+            bucket["rows"].append(row)
+
+        rating_map = await self.repo.get_rating_summaries_batch(
+            organization_id=self.organization_id,
+            profile_ids=[str(row["profile_id"]) for row in rows],
+        )
+
+        grouped: list[ResidentDailyHelpHouseholdLinksCategoryResponse] = []
+        for category_id in category_order:
+            category_rows = links_by_category[category_id]["rows"]
+            inside_count = 0
+            open_to_work_count = 0
+            linked_profiles: list[ResidentDailyHelpHouseholdLinkItemResponse] = []
+            for row in category_rows:
+                if bool(row.get("open_to_work")):
+                    open_to_work_count += 1
+                if await self._profile_is_inside(linked_pass_id=row.get("linked_pass_id")):
+                    inside_count += 1
+                profile_id = str(row["profile_id"])
+                linked_profiles.append(
+                    await self._serialize_resident_household_link_item(
+                        row,
+                        average_stars=rating_map.get(profile_id, {}).get("average_stars"),
+                    )
+                )
+            grouped.append(
+                ResidentDailyHelpHouseholdLinksCategoryResponse(
+                    category_id=category_id,
+                    category_name=str(links_by_category[category_id]["category_name"]),
+                    linked_count=len(category_rows),
+                    inside_count=inside_count,
+                    open_to_work_count=open_to_work_count,
+                    linked_profiles=linked_profiles,
+                )
+            )
+        return grouped
 
     async def get_resident_detail(
         self,
@@ -1637,9 +1780,74 @@ class DailyHelpService:
             )
 
         traits = [trait.value for trait in body.traits]
-        await self.repo.insert_rating(
+        try:
+            await self.repo.insert_rating(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                profile_id=profile_id,
+                unit_id=unit_id,
+                rated_by_contact_id=contact_id,
+                stars=body.stars,
+                comment=body.comment,
+                traits=traits,
+            )
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="daily_help.errors.duplicate_rating",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        return await self.get_rating_summary(
+            contact_id=contact_id,
+            unit_id=unit_id,
+            profile_id=profile_id,
+        )
+
+    async def get_resident_rating(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+    ) -> DailyHelpRatingResponse | None:
+        """Return the resident's own rating for a profile, if any."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        row = await self.repo.get_rating_by_rater(
             organization_id=self.organization_id,
-            project_id=project_id,
+            profile_id=profile_id,
+            unit_id=unit_id,
+            rated_by_contact_id=contact_id,
+        )
+        if not row:
+            return None
+        return self._serialize_rating(row)
+
+    async def update_rating(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+        body: UpdateDailyHelpRatingRequest,
+    ) -> DailyHelpRatingResponse:
+        """Update the resident's existing rating for a profile."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        traits = [trait.value for trait in body.traits]
+        updated = await self.repo.update_rating(
+            organization_id=self.organization_id,
             profile_id=profile_id,
             unit_id=unit_id,
             rated_by_contact_id=contact_id,
@@ -1647,11 +1855,12 @@ class DailyHelpService:
             comment=body.comment,
             traits=traits,
         )
-        return await self.get_rating_summary(
-            contact_id=contact_id,
-            unit_id=unit_id,
-            profile_id=profile_id,
-        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.rating_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return self._serialize_rating(updated)
 
     async def get_rating_summary(
         self,
@@ -1712,33 +1921,184 @@ class DailyHelpService:
         project_id: str | None = None,
         contact_id: str | None = None,
         unit_id: str | None = None,
+        year: int | None = None,
+        month: int | None = None,
     ) -> dict[str, Any]:
-        """Return check-in count from linked pass events."""
+        """Return a monthly attendance calendar from gate check-ins and resident absences."""
         if contact_id and unit_id:
             project_id = await self._ensure_resident_unit(
                 contact_id=contact_id,
                 unit_id=unit_id,
             )
         assert project_id
-        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
-        linked_pass_id = row.get("linked_pass_id")
-        if not linked_pass_id:
-            return {"check_in_count": 0, "events": []}
 
-        events = await self.events_repo.list_by_pass(
-            organization_id=self.organization_id,
-            pass_id=str(linked_pass_id),
+        now = datetime.now(ATTENDANCE_TIMEZONE)
+        resolved_year = year if year is not None else now.year
+        resolved_month = month if month is not None else now.month
+        if resolved_month < 1 or resolved_month > 12:
+            raise ValidationException(
+                message_key="daily_help.errors.invalid_attendance_month",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        return await self._build_attendance_calendar(
+            profile_id=profile_id,
+            unit_id=unit_id,
+            year=resolved_year,
+            month=resolved_month,
+            linked_pass_id=row.get("linked_pass_id"),
         )
-        check_ins = [
-            {
-                "id": str(event["id"]),
-                "occurred_at": format_iso_datetime(event.get("occurred_at")),
-            }
-            for event in events
-            if str(event.get("event_type")) == PassEventType.CHECKED_IN.value
-            and str(event.get("access_status") or "") != "denied"
-        ]
-        return {"check_in_count": len(check_ins), "events": check_ins}
+
+    async def mark_attendance_absence(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        profile_id: str,
+        attendance_date: date,
+    ) -> dict[str, Any]:
+        """Record that the helper did not visit the resident unit on a given day."""
+        project_id = await self._ensure_resident_unit(
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_not_deleted(row)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if not await self._viewer_has_household_link(
+            unit_id=unit_id,
+            profile_id=profile_id,
+        ):
+            raise ValidationException(
+                message_key="daily_help.errors.attendance_household_link_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        today = datetime.now(ATTENDANCE_TIMEZONE).date()
+        if attendance_date > today:
+            raise ValidationException(
+                message_key="daily_help.errors.attendance_date_in_future",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        linked_pass_id = row.get("linked_pass_id")
+        if linked_pass_id:
+            present_dates = await self.events_repo.list_check_in_dates_for_month(
+                organization_id=self.organization_id,
+                pass_id=str(linked_pass_id),
+                year=attendance_date.year,
+                month=attendance_date.month,
+            )
+            if attendance_date in set(present_dates):
+                raise ConflictException(
+                    message_key="daily_help.errors.attendance_already_checked_in",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+        await self.repo.upsert_attendance_absence(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            unit_id=unit_id,
+            marked_by_contact_id=contact_id,
+            attendance_date=attendance_date,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.ATTENDANCE_MARKED_ABSENT.value,
+            actor_type=DailyHelpActorType.RESIDENT.value,
+            actor_contact_id=contact_id,
+            payload={
+                "unit_id": unit_id,
+                "attendance_date": attendance_date.isoformat(),
+            },
+        )
+        return {"date": attendance_date.isoformat(), "status": "absent"}
+
+    async def _build_attendance_calendar(
+        self,
+        *,
+        profile_id: str,
+        unit_id: str | None,
+        year: int,
+        month: int,
+        linked_pass_id: str | None,
+    ) -> dict[str, Any]:
+        """Merge gate check-ins and unit-scoped resident absences for one month."""
+        days_in_month = calendar.monthrange(year, month)[1]
+        present_dates: set[date] = set()
+        absent_dates: set[date] = set()
+        events: list[dict[str, Any]] = []
+        last_check_in_at: str | None = None
+
+        if linked_pass_id:
+            pass_id = str(linked_pass_id)
+            present_dates = set(
+                await self.events_repo.list_check_in_dates_for_month(
+                    organization_id=self.organization_id,
+                    pass_id=pass_id,
+                    year=year,
+                    month=month,
+                )
+            )
+            month_events = await self.events_repo.list_check_ins_for_month(
+                organization_id=self.organization_id,
+                pass_id=pass_id,
+                year=year,
+                month=month,
+            )
+            events = [
+                {
+                    "id": str(event["id"]),
+                    "occurred_at": format_iso_datetime(event.get("occurred_at")),
+                }
+                for event in month_events
+            ]
+            last_event = await self.events_repo.get_last_check_in(
+                organization_id=self.organization_id,
+                pass_id=pass_id,
+            )
+            if last_event and str(last_event.get("access_status") or "") != "denied":
+                last_check_in_at = format_iso_datetime(last_event.get("occurred_at"))
+
+        if unit_id:
+            absent_dates = set(
+                await self.repo.list_attendance_absence_dates_for_month(
+                    organization_id=self.organization_id,
+                    profile_id=profile_id,
+                    unit_id=unit_id,
+                    year=year,
+                    month=month,
+                )
+            )
+
+        days: list[dict[str, Any]] = []
+        for day in range(1, days_in_month + 1):
+            current = date(year, month, day)
+            if current in present_dates:
+                status = "present"
+            elif current in absent_dates:
+                status = "absent"
+            else:
+                status = None
+            days.append({"date": current.isoformat(), "status": status})
+
+        return {
+            "year": year,
+            "month": month,
+            "days_in_month": days_in_month,
+            "present_count": len(present_dates),
+            "absent_count": len(absent_dates),
+            "last_check_in_at": last_check_in_at,
+            "days": days,
+            "check_in_count": len(present_dates),
+            "events": events,
+        }
 
     async def get_verify_profile_summary(
         self,

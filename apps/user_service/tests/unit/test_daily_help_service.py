@@ -8,6 +8,7 @@ import pytest
 
 from apps.user_service.app.schemas.daily_help import (
     CreateDailyHelpRequest,
+    ResidentDailyHelpListQuery,
     SetDailyHelpOpenToWorkRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -311,6 +312,86 @@ async def test_get_detail_raises_when_missing():
 
 
 @pytest.mark.asyncio
+async def test_list_resident_household_links_returns_linked_profiles():
+    """Resident can list daily help profiles linked to their unit by category."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_active_links_for_unit = AsyncMock(
+        return_value=[
+            {
+                "id": "link-1",
+                "unit_id": "unit-1",
+                "linked_by_contact_id": "contact-1",
+                "status": "active",
+                "started_at": __import__("datetime").datetime.now(
+                    __import__("datetime").timezone.utc
+                ),
+                "profile_id": "profile-1",
+                "display_name": "Ramesh Kumar",
+                "initials": "Mr.",
+                "photo_path": "photo.jpg",
+                "phone_isd_code": "+91",
+                "phone_number": "9876543210",
+                "gate_passcode": "1234",
+                "open_to_work": True,
+                "linked_pass_id": None,
+                "category_id": "cat-1",
+                "category_name": "Maids",
+            }
+        ]
+    )
+    svc.repo.get_rating_summaries_batch = AsyncMock(
+        return_value={"profile-1": {"rating_count": 1, "average_stars": 4.0}}
+    )
+    svc.events_repo = MagicMock()
+    svc.events_repo.has_open_check_in = AsyncMock(return_value=False)
+
+    items = await svc.list_resident_household_links(
+        contact_id="contact-1",
+        unit_id="unit-1",
+    )
+
+    assert len(items) == 1
+    assert items[0].category_id == "cat-1"
+    assert items[0].category_name == "Maids"
+    assert items[0].linked_count == 1
+    assert items[0].open_to_work_count == 1
+    assert len(items[0].linked_profiles) == 1
+    assert items[0].linked_profiles[0].link_id == "link-1"
+    assert items[0].linked_profiles[0].profile_id == "profile-1"
+    assert items[0].linked_profiles[0].display_name == "Ramesh Kumar"
+    assert items[0].linked_profiles[0].phone == "+91 9876543210"
+    assert items[0].linked_profiles[0].gate_passcode == "1234"
+    assert items[0].linked_profiles[0].open_to_work is True
+    assert items[0].linked_profiles[0].average_stars == 4.0
+
+
+@pytest.mark.asyncio
+async def test_list_resident_household_links_empty_when_no_links():
+    """Return an empty list when the unit has no household-linked profiles."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_active_links_for_unit = AsyncMock(return_value=[])
+
+    items = await svc.list_resident_household_links(
+        contact_id="contact-1",
+        unit_id="unit-1",
+    )
+
+    assert items == []
+
+
+@pytest.mark.asyncio
 async def test_list_resident_categories_includes_profile_previews():
     svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
     svc.contact_units_repo = MagicMock()
@@ -332,6 +413,7 @@ async def test_list_resident_categories_includes_profile_previews():
                     "phone_isd_code": "+91",
                     "phone_number": "9655011223",
                     "open_to_work": idx == 0,
+                    "household_link_count": idx + 1,
                     "created_at": __import__("datetime").datetime.now(
                         __import__("datetime").timezone.utc
                     ),
@@ -344,6 +426,11 @@ async def test_list_resident_categories_includes_profile_previews():
     )
     svc.events_repo = MagicMock()
     svc.events_repo.has_open_check_in = AsyncMock(return_value=False)
+    svc.repo.get_rating_summaries_batch = AsyncMock(
+        return_value={
+            "profile-0": {"rating_count": 2, "average_stars": 4.5},
+        }
+    )
 
     items = await svc.list_resident_categories(
         contact_id="contact-1",
@@ -356,6 +443,69 @@ async def test_list_resident_categories_includes_profile_previews():
     assert items[0].preview_profiles[0].display_name == "Helper 0"
     assert items[0].preview_profiles[0].photo_path == "photo-0.jpg"
     assert items[0].preview_profiles[0].phone == "+91 9655011223"
+    assert items[0].preview_profiles[0].open_to_work is True
+    assert items[0].preview_profiles[0].household_link_count == 1
+    assert items[0].preview_profiles[0].average_stars == 4.5
+    assert items[0].preview_profiles[1].average_stars is None
+
+
+@pytest.mark.asyncio
+async def test_list_resident_profiles_includes_average_stars():
+    """Directory list enriches cards with aggregated rating averages."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_profiles = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "profile-rated",
+                    "display_name": "Rated Helper",
+                    "category_id": "cat-1",
+                    "category_name": "Maid",
+                    "phone_isd_code": "+91",
+                    "phone_number": "9999999999",
+                    "gate_passcode": "1234",
+                    "household_link_count": 1,
+                    "open_to_work": True,
+                    "linked_pass_id": None,
+                    "created_at": None,
+                },
+                {
+                    "id": "profile-unrated",
+                    "display_name": "Unrated Helper",
+                    "category_id": "cat-1",
+                    "category_name": "Maid",
+                    "phone_isd_code": "+91",
+                    "phone_number": "8888888888",
+                    "gate_passcode": "5678",
+                    "household_link_count": 0,
+                    "open_to_work": False,
+                    "linked_pass_id": None,
+                    "created_at": None,
+                },
+            ],
+            2,
+        )
+    )
+    svc.repo.get_rating_summaries_batch = AsyncMock(
+        return_value={"profile-rated": {"rating_count": 1, "average_stars": 4.5}}
+    )
+    svc.repo.list_links_for_units = AsyncMock(return_value=[])
+
+    items, total = await svc.list_resident_profiles(
+        contact_id="contact-1",
+        query=ResidentDailyHelpListQuery(unit_id="unit-1", page=1, page_size=20),
+    )
+
+    assert total == 2
+    assert items[0].average_stars == 4.5
+    assert items[1].average_stars is None
+    svc.repo.get_rating_summaries_batch.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -472,3 +622,189 @@ async def test_remove_household_link_records_optional_reason():
     event_kwargs = svc.repo.insert_event.await_args.kwargs
     assert event_kwargs["payload"]["reason"] == "No longer needed"
     assert event_kwargs["payload"]["link_id"] == "link-1"
+
+
+@pytest.mark.asyncio
+async def test_get_attendance_builds_monthly_calendar():
+    """Attendance merges gate check-ins and resident absences per day."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(return_value={"id": "profile-1", "linked_pass_id": "pass-1"})
+    svc.repo.list_attendance_absence_dates_for_month = AsyncMock(
+        return_value=[__import__("datetime").date(2024, 5, 7)]
+    )
+    svc.events_repo = MagicMock()
+    svc.events_repo.list_check_in_dates_for_month = AsyncMock(
+        return_value=[
+            __import__("datetime").date(2024, 5, 1),
+            __import__("datetime").date(2024, 5, 2),
+        ]
+    )
+    svc.events_repo.list_check_ins_for_month = AsyncMock(
+        return_value=[
+            {"id": "event-1", "occurred_at": __import__("datetime").datetime(2024, 5, 1, 9, 0)},
+        ]
+    )
+    svc.events_repo.get_last_check_in = AsyncMock(
+        return_value={
+            "id": "event-1",
+            "occurred_at": __import__("datetime").datetime(2024, 5, 2, 9, 0),
+            "access_status": "granted",
+        }
+    )
+
+    result = await svc.get_attendance(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        year=2024,
+        month=5,
+    )
+
+    assert result["year"] == 2024
+    assert result["month"] == 5
+    assert result["days_in_month"] == 31
+    assert result["present_count"] == 2
+    assert result["absent_count"] == 1
+    assert result["days"][0] == {"date": "2024-05-01", "status": "present"}
+    assert result["days"][6] == {"date": "2024-05-07", "status": "absent"}
+    assert result["days"][22] == {"date": "2024-05-23", "status": None}
+    assert len(result["events"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_mark_attendance_absence_records_resident_report():
+    """Marking absent persists the row and audit event when no gate check-in exists."""
+    from datetime import date
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "linked_pass_id": "pass-1",
+        }
+    )
+    svc.repo.list_links_for_units = AsyncMock(return_value=[{"id": "link-1"}])
+    svc.repo.upsert_attendance_absence = AsyncMock(
+        return_value={"id": "absence-1", "attendance_date": date(2024, 5, 22)}
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.events_repo = MagicMock()
+    svc.events_repo.list_check_in_dates_for_month = AsyncMock(return_value=[])
+
+    result = await svc.mark_attendance_absence(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        attendance_date=date(2024, 5, 22),
+    )
+
+    assert result == {"date": "2024-05-22", "status": "absent"}
+    svc.repo.upsert_attendance_absence.assert_awaited_once()
+    svc.repo.insert_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mark_attendance_absence_rejects_gate_check_in_day():
+    """Cannot mark absent when the helper already checked in at the gate."""
+    from datetime import date
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "linked_pass_id": "pass-1",
+        }
+    )
+    svc.repo.list_links_for_units = AsyncMock(return_value=[{"id": "link-1"}])
+    svc.events_repo = MagicMock()
+    svc.events_repo.list_check_in_dates_for_month = AsyncMock(return_value=[date(2024, 5, 22)])
+
+    with pytest.raises(ConflictException):
+        await svc.mark_attendance_absence(
+            contact_id="contact-1",
+            unit_id="unit-1",
+            profile_id="profile-1",
+            attendance_date=date(2024, 5, 22),
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_resident_rating_returns_existing_rating():
+    from datetime import datetime, timezone
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(return_value={"id": "profile-1"})
+    svc.repo.get_rating_by_rater = AsyncMock(
+        return_value={
+            "id": "rating-1",
+            "stars": 4.5,
+            "comment": "Great work",
+            "traits": ["very_punctual"],
+            "created_at": datetime(2024, 5, 1, tzinfo=timezone.utc),
+            "updated_at": datetime(2024, 5, 2, tzinfo=timezone.utc),
+        }
+    )
+
+    result = await svc.get_resident_rating(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+    )
+
+    assert result is not None
+    assert result.id == "rating-1"
+    assert result.stars == 4.5
+    assert result.traits == ["very_punctual"]
+
+
+@pytest.mark.asyncio
+async def test_update_rating_requires_existing_rating():
+    from decimal import Decimal
+
+    from apps.user_service.app.schemas.daily_help import UpdateDailyHelpRatingRequest
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "project-1"})
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={"id": "profile-1", "status": DailyHelpStatus.ACTIVE.value}
+    )
+    svc.repo.update_rating = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.update_rating(
+            contact_id="contact-1",
+            unit_id="unit-1",
+            profile_id="profile-1",
+            body=UpdateDailyHelpRatingRequest(stars=Decimal("5.0")),
+        )
