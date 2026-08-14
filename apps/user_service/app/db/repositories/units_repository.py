@@ -29,7 +29,17 @@ CASE
 END
 """
 
-_UNIT_OWNER_LATERAL_JOIN = """
+_UNIT_OWNER_ROLE_JOIN = """
+    JOIN contact_roles cr_owner
+        ON cr_owner.organization_id = cu.organization_id
+       AND cr_owner.contact_id = cu.contact_id
+       AND cr_owner.unit_id = cu.unit_id
+       AND cr_owner.status = 'active'::public.contact_role_status
+       AND cr_owner.ended_at IS NULL
+       AND cr_owner.role_type = 'Owner'::contact_role_type
+"""
+
+_UNIT_OWNER_LATERAL_JOIN = f"""
 LEFT JOIN LATERAL (
     SELECT
         c.id AS owner_contact_id,
@@ -43,6 +53,7 @@ LEFT JOIN LATERAL (
     JOIN contacts c
         ON c.id = cu.contact_id
        AND c.organization_id = cu.organization_id
+    {_UNIT_OWNER_ROLE_JOIN}
     WHERE cu.organization_id = u.organization_id
       AND cu.unit_id = u.id
       AND cu.status IN (
@@ -50,11 +61,7 @@ LEFT JOIN LATERAL (
           'pending'::contact_unit_status
       )
       AND c.status = 'active'
-    ORDER BY
-        CASE WHEN cu.relationship = 'self'::contact_unit_relationship THEN 0 ELSE 1 END,
-        cu.is_primary DESC,
-        cu.sort_order,
-        cu.created_at
+    ORDER BY cr_owner.started_at DESC, cu.created_at
     LIMIT 1
 ) owner_row ON TRUE
 """
@@ -578,7 +585,7 @@ class UnitsRepository(BaseRepository):
         organization_id: str,
         unit_id: str,
     ) -> dict[str, Any] | None:
-        """Return the primary unit assignee contact (pending or active allotment)."""
+        """Return the active Owner role holder on a unit (not the primary occupant)."""
         row = await self.db_connection.fetchrow(
             f"""
             SELECT
@@ -589,17 +596,7 @@ class UnitsRepository(BaseRepository):
                 cu.status::text AS status,
                 cu.assigned_at,
                 cu.created_at,
-                (
-                  SELECT cr.role_type::text
-                  FROM contact_roles cr
-                  WHERE cr.organization_id = cu.organization_id
-                    AND cr.contact_id = cu.contact_id
-                    AND cr.unit_id = cu.unit_id
-                    AND cr.status = 'active'::public.contact_role_status
-                    AND cr.ended_at IS NULL
-                  ORDER BY cr.started_at DESC
-                  LIMIT 1
-                ) AS contact_type,
+                cr_owner.role_type::text AS contact_type,
                 c.prefix,
                 c.first_name,
                 c.last_name,
@@ -611,6 +608,7 @@ class UnitsRepository(BaseRepository):
             JOIN contacts c
                 ON c.id = cu.contact_id
                AND c.organization_id = cu.organization_id
+            {_UNIT_OWNER_ROLE_JOIN}
             WHERE cu.organization_id = $1::uuid
               AND cu.unit_id = $2::uuid
               AND cu.status IN (
@@ -618,11 +616,7 @@ class UnitsRepository(BaseRepository):
                   'pending'::contact_unit_status
               )
               AND c.status = 'active'
-            ORDER BY
-                CASE WHEN cu.relationship = 'self'::contact_unit_relationship THEN 0 ELSE 1 END,
-                cu.is_primary DESC,
-                cu.sort_order,
-                cu.created_at
+            ORDER BY cr_owner.started_at DESC, cu.created_at
             LIMIT 1
             """,
             organization_id,

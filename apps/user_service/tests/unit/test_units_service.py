@@ -80,6 +80,27 @@ def test_resolve_unit_facing_by_kind():
     assert resolve_unit_facing({"config_kind": "plot", "config_facing": "north"}) == "north"
 
 
+def test_pick_unit_owner_prefers_owner_role():
+    """Owner role holder wins even when a tenant is the primary occupant."""
+    residents = [
+        {
+            "contact_id": "owner-1",
+            "contact_unit_id": "cu-owner",
+            "contact_type": "Owner",
+            "is_primary": False,
+            "relationship": "self",
+        },
+        {
+            "contact_id": "tenant-1",
+            "contact_unit_id": "cu-tenant",
+            "contact_type": "Tenant",
+            "is_primary": True,
+            "relationship": "self",
+        },
+    ]
+    assert pick_unit_owner(residents)["contact_id"] == "owner-1"
+
+
 def test_pick_unit_owner_prefers_primary():
     """Primary occupant selection prefers is_primary, then relationship=self."""
     residents = [
