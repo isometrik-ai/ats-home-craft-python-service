@@ -984,6 +984,8 @@
       "duplicate_live_forbidden": "Live notices cannot be duplicated. Use Create Notice instead.",
       "not_restorable": "Only deleted notices can be restored.",
       "project_access_denied": "You do not have access to manage notices for this project.",
+      "feed_access_denied": "You do not have access to notices for this project.",
+      "likes_require_contact": "Unable to like notices for this account.",
       "not_found": "The notice could not be found."
     },
     "success": {

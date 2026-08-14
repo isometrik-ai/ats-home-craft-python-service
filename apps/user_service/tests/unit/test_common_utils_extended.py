@@ -20,6 +20,7 @@ from apps.user_service.app.utils.common_utils import (
     coerce_json_list,
     enum_member_title_label,
     extract_audit_data_value,
+    extract_notice_viewer_context,
     extract_onboarding_contact_context,
     extract_user_context,
     format_iso_datetime,
@@ -426,6 +427,108 @@ async def test_extract_onboarding_contact_context_missing_contact():
         mock_repo_cls.return_value.get_active_contact_by_user_id = AsyncMock(return_value=None)
         with pytest.raises(NotFoundException):
             await extract_onboarding_contact_context(current_user, MagicMock())
+
+
+@pytest.mark.asyncio
+async def test_extract_notice_viewer_context_uses_contact_when_present():
+    """Residents with an active contact profile use contact-based viewer context."""
+    current_user = {
+        "sub": "user-1",
+        "email": "u@example.com",
+        "_session_context": {"organization_id": "org-1"},
+    }
+    with patch(
+        "apps.user_service.app.db.repositories.contacts_repository.ContactsRepository"
+    ) as mock_contacts_cls:
+        mock_contacts_cls.return_value.get_active_contact_by_user_id = AsyncMock(
+            return_value={"id": "contact-1", "user_id": "user-1"}
+        )
+        viewer = await extract_notice_viewer_context(
+            current_user,
+            MagicMock(),
+            project_id="project-1",
+        )
+    assert viewer.contact_id == "contact-1"
+    assert viewer.contact_user_id == "user-1"
+
+
+@pytest.mark.asyncio
+async def test_extract_notice_viewer_context_uses_project_member_for_staff():
+    """Staff/security without a contact profile resolve via project_members."""
+    current_user = {
+        "sub": "staff-1",
+        "email": "staff@example.com",
+        "_session_context": {"organization_id": "org-1"},
+    }
+    db = MagicMock()
+    with (
+        patch(
+            "apps.user_service.app.db.repositories.contacts_repository.ContactsRepository"
+        ) as mock_contacts_cls,
+        patch(
+            "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository"
+        ) as mock_projects_cls,
+    ):
+        mock_contacts_cls.return_value.get_active_contact_by_user_id = AsyncMock(return_value=None)
+        mock_projects_cls.return_value.get_active_member = AsyncMock(
+            return_value={"role": "security", "user_id": "staff-1"}
+        )
+        viewer = await extract_notice_viewer_context(
+            current_user,
+            db,
+            project_id="project-1",
+        )
+    assert viewer.contact_id is None
+    assert viewer.contact_user_id == "staff-1"
+    assert viewer.project_member_role == "security"
+
+
+@pytest.mark.asyncio
+async def test_extract_notice_viewer_context_denies_unassigned_staff():
+    """Staff without project assignment cannot open the notice feed."""
+    current_user = {
+        "sub": "staff-1",
+        "email": "staff@example.com",
+        "_session_context": {"organization_id": "org-1"},
+    }
+    with (
+        patch(
+            "apps.user_service.app.db.repositories.contacts_repository.ContactsRepository"
+        ) as mock_contacts_cls,
+        patch(
+            "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository"
+        ) as mock_projects_cls,
+    ):
+        mock_contacts_cls.return_value.get_active_contact_by_user_id = AsyncMock(return_value=None)
+        mock_projects_cls.return_value.get_active_member = AsyncMock(return_value=None)
+        with pytest.raises(ForbiddenException):
+            await extract_notice_viewer_context(
+                current_user,
+                MagicMock(),
+                project_id="project-1",
+            )
+
+
+@pytest.mark.asyncio
+async def test_extract_notice_viewer_context_missing_notice_returns_not_found():
+    """Detail routes return not found when the notice id does not exist."""
+    current_user = {
+        "sub": "staff-1",
+        "email": "staff@example.com",
+        "_session_context": {"organization_id": "org-1"},
+    }
+    db = MagicMock()
+    db.fetchval = AsyncMock(return_value=None)
+    with patch(
+        "apps.user_service.app.db.repositories.contacts_repository.ContactsRepository"
+    ) as mock_contacts_cls:
+        mock_contacts_cls.return_value.get_active_contact_by_user_id = AsyncMock(return_value=None)
+        with pytest.raises(NotFoundException):
+            await extract_notice_viewer_context(
+                current_user,
+                db,
+                notice_id="missing-notice",
+            )
 
 
 @pytest.mark.asyncio

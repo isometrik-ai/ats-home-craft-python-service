@@ -19,7 +19,7 @@ from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.http_exceptions import ForbiddenException, NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -44,7 +44,7 @@ class NoticesResidentService:
     async def list_notices(
         self,
         *,
-        contact_id: str,
+        contact_id: str | None,
         contact_user_id: str | None,
         query: ResidentNoticeListQuery,
     ) -> tuple[list[ResidentNoticeListItemResponse], int]:
@@ -62,13 +62,16 @@ class NoticesResidentService:
             limit=query.page_size,
             offset=offset,
         )
-        items = [await self._to_list_item(row, contact_id=contact_id) for row in rows]
+        items = [
+            await self._to_list_item(row, contact_id=contact_id, contact_user_id=contact_user_id)
+            for row in rows
+        ]
         return items, total
 
     async def get_banner(
         self,
         *,
-        contact_id: str,
+        contact_id: str | None,
         contact_user_id: str | None,
         query: ResidentBannerQuery,
     ) -> list[ResidentNoticeListItemResponse]:
@@ -94,13 +97,17 @@ class NoticesResidentService:
             )
             if row is None:
                 continue
-            items.append(await self._to_list_item(row, contact_id=contact_id))
+            items.append(
+                await self._to_list_item(
+                    row, contact_id=contact_id, contact_user_id=contact_user_id
+                )
+            )
         return items
 
     async def get_notice(
         self,
         *,
-        contact_id: str,
+        contact_id: str | None,
         contact_user_id: str | None,
         notice_id: str,
         increment_view: bool = True,
@@ -143,16 +150,17 @@ class NoticesResidentService:
                 message_key="notices.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return await self._to_detail(row, contact_id=contact_id)
+        return await self._to_detail(row, contact_id=contact_id, contact_user_id=contact_user_id)
 
     async def like_notice(
         self,
         *,
-        contact_id: str,
+        contact_id: str | None,
         contact_user_id: str | None,
         notice_id: str,
     ) -> ResidentNoticeDetailResponse:
         """Like a visible notice."""
+        like_kwargs = self._like_identity_kwargs(contact_id, contact_user_id)
         await self.get_notice(
             contact_id=contact_id,
             contact_user_id=contact_user_id,
@@ -162,7 +170,7 @@ class NoticesResidentService:
         await self.repo.upsert_like(
             organization_id=self.organization_id,
             notice_id=notice_id,
-            contact_id=contact_id,
+            **like_kwargs,
         )
         return await self.get_notice(
             contact_id=contact_id,
@@ -174,11 +182,12 @@ class NoticesResidentService:
     async def unlike_notice(
         self,
         *,
-        contact_id: str,
+        contact_id: str | None,
         contact_user_id: str | None,
         notice_id: str,
     ) -> ResidentNoticeDetailResponse:
         """Remove like from a visible notice."""
+        like_kwargs = self._like_identity_kwargs(contact_id, contact_user_id)
         await self.get_notice(
             contact_id=contact_id,
             contact_user_id=contact_user_id,
@@ -188,7 +197,7 @@ class NoticesResidentService:
         await self.repo.delete_like(
             organization_id=self.organization_id,
             notice_id=notice_id,
-            contact_id=contact_id,
+            **like_kwargs,
         )
         return await self.get_notice(
             contact_id=contact_id,
@@ -201,7 +210,7 @@ class NoticesResidentService:
         self,
         *,
         project_id: str,
-        contact_id: str,
+        contact_id: str | None,
         contact_user_id: str | None,
     ) -> list[str]:
         notice_ids = await self.repo.list_live_notice_ids_for_project(
@@ -220,11 +229,48 @@ class NoticesResidentService:
             contact_user_id=contact_user_id,
         )
 
+    @staticmethod
+    def _like_identity_kwargs(
+        contact_id: str | None,
+        contact_user_id: str | None,
+    ) -> dict[str, str]:
+        """Prefer contact likes for residents; staff/security use user_id."""
+        if contact_id:
+            return {"contact_id": contact_id}
+        if contact_user_id:
+            return {"user_id": contact_user_id}
+        raise ForbiddenException(
+            message_key="notices.errors.likes_require_contact",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    async def _liked_by_me(
+        self,
+        *,
+        notice_id: str,
+        contact_id: str | None,
+        contact_user_id: str | None,
+    ) -> bool:
+        if contact_id:
+            return await self.repo.contact_has_liked(
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+                contact_id=contact_id,
+            )
+        if contact_user_id:
+            return await self.repo.contact_has_liked(
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+                user_id=contact_user_id,
+            )
+        return False
+
     async def _to_list_item(
         self,
         row: dict[str, Any],
         *,
-        contact_id: str,
+        contact_id: str | None,
+        contact_user_id: str | None,
     ) -> ResidentNoticeListItemResponse:
         notice_id = str(row["id"])
         attachments = await self.repo.list_attachments(
@@ -232,10 +278,10 @@ class NoticesResidentService:
             notice_id=notice_id,
         )
         category = str(row["category"])
-        liked = await self.repo.contact_has_liked(
-            organization_id=self.organization_id,
+        liked = await self._liked_by_me(
             notice_id=notice_id,
             contact_id=contact_id,
+            contact_user_id=contact_user_id,
         )
         row.get("scope_label")
         if str(row.get("scope_type")) == NoticeScopeType.WHOLE_SOCIETY.value:
@@ -260,7 +306,8 @@ class NoticesResidentService:
         self,
         row: dict[str, Any],
         *,
-        contact_id: str,
+        contact_id: str | None,
+        contact_user_id: str | None,
     ) -> ResidentNoticeDetailResponse:
         notice_id = str(row["id"])
         attachments = await self.repo.list_attachments(
@@ -268,10 +315,10 @@ class NoticesResidentService:
             notice_id=notice_id,
         )
         category = str(row["category"])
-        liked = await self.repo.contact_has_liked(
-            organization_id=self.organization_id,
+        liked = await self._liked_by_me(
             notice_id=notice_id,
             contact_id=contact_id,
+            contact_user_id=contact_user_id,
         )
         scope_label = row.get("scope_label")
         if str(row.get("scope_type")) == NoticeScopeType.WHOLE_SOCIETY.value:
