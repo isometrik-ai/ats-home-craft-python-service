@@ -18,11 +18,16 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
 from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
+from apps.user_service.app.db.repositories.daily_help_repository import (
+    DailyHelpRepository,
+)
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
     CompleteOnboardingRequest,
     CompleteProfileRequest,
     CreateHouseholdMemberRequest,
+    HouseholdSummaryCountsResponse,
     UpdateHouseholdMemberRequest,
 )
 from apps.user_service.app.schemas.contacts import (
@@ -82,6 +87,8 @@ class ContactOnboardingService:
         self.vehicles_repo = VehiclesRepository(db_connection)
         self.contacts_repo = ContactsRepository(db_connection)
         self.contact_roles_repo = ContactRolesRepository(db_connection)
+        self.daily_help_repo = DailyHelpRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
         self.contact_units_service = ContactUnitsService(
             db_connection=db_connection,
             user_context=user_context,
@@ -458,6 +465,50 @@ class ContactOnboardingService:
             unit_id=unit_id,
         )
         return [self._format_household_member(row) for row in rows]
+
+    async def get_household_summary(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+    ) -> HouseholdSummaryCountsResponse:
+        """Return household dashboard counts for one unit the contact can access."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        has_unit = await self.contact_units_repo.contact_has_active_unit(
+            organization_id=org_id,
+            contact_id=contact_id,
+            unit_id=unit_id,
+        )
+        if not has_unit:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_not_assigned",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        family_count = await self.contact_units_repo.count_family_members_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        daily_help_count = await self.daily_help_repo.count_active_links_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        vehicles_count, _ = await self.units_repo.count_unit_vehicles(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        tenant_count = await self.contact_roles_repo.count_active_tenants_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        return HouseholdSummaryCountsResponse(
+            unit_id=unit_id,
+            family_count=family_count,
+            daily_help_count=daily_help_count,
+            vehicles_count=vehicles_count,
+            tenant_count=tenant_count,
+        )
 
     async def _load_household_member(
         self,

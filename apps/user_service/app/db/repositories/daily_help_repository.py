@@ -731,6 +731,30 @@ class DailyHelpRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def count_active_links_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> int:
+        """Count active household links on a unit with active daily help profiles."""
+        count = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM daily_help_household_links hl
+            JOIN daily_help_profiles p
+              ON p.id = hl.daily_help_profile_id
+             AND p.organization_id = hl.organization_id
+            WHERE hl.organization_id = $1::uuid
+              AND hl.unit_id = $2::uuid
+              AND hl.status = 'active'::daily_help_household_link_status
+              AND p.status = 'active'::daily_help_status
+            """,
+            organization_id,
+            unit_id,
+        )
+        return int(count or 0)
+
     async def list_links_for_units(
         self,
         *,

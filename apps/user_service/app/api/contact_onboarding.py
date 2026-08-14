@@ -32,6 +32,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     HouseholdInvitationValidateApiResponse,
     HouseholdMemberApiResponse,
     HouseholdMemberListApiResponse,
+    HouseholdSummaryApiResponse,
     OnboardingReviewApiResponse,
     OnboardingStatusApiResponse,
     RemoveHouseholdMemberApiResponse,
@@ -140,6 +141,10 @@ VEHICLE_WITHDRAW_SUCCESS_RESPONSES = _ok_response(
 HOUSEHOLD_LIST_SUCCESS_RESPONSES = _ok_response(
     HouseholdMemberListApiResponse,
     "Household members linked to the contact's units.",
+)
+HOUSEHOLD_SUMMARY_SUCCESS_RESPONSES = _ok_response(
+    HouseholdSummaryApiResponse,
+    "Household dashboard counts for family, daily help, vehicles, and tenant.",
 )
 ADD_HOUSEHOLD_MEMBER_SUCCESS_RESPONSES = _created_response(
     AddHouseholdMemberApiResponse,
@@ -881,6 +886,42 @@ async def list_household(
         total=len(items),
         message_key="contact_onboarding.success.household_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("get household summary counts")
+@router.get(
+    "/household/summary",
+    status_code=http_status.HTTP_200_OK,
+    summary="Household dashboard counts for a unit",
+    response_model=None,
+    responses=HOUSEHOLD_SUMMARY_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_household_summary(
+    request: Request,
+    unit_id: str = Query(..., description="Unit identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return family, daily help, vehicle, and tenant counts for the household screen."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=None,
+    )
+    data = await service.get_household_summary(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.household_summary_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
     )
 
 

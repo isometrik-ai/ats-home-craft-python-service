@@ -1,12 +1,12 @@
 # ADR 0001: Resident onboarding schema and backend model
 
-|                  |                                                                                                                                                                                                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted                                                                                                                                                                                                                                                                                 |
-| **Date**         | 2026-06-29                                                                                                                                                                                                                                                                               |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                 |
-| **Related docs** | [resident-onboarding-schema.md](../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md), [contact-roles-schema.md](../../../ats-home-craft-supabase/docs/contact-roles-schema.md), [project-setup-schema.md](../../../ats-home-craft-supabase/docs/project-setup-schema.md) |
-| **Migrations**   | `20260629110000_resident_onboarding_enums.sql`, `20260629111000_resident_onboarding_tables.sql`, `20260629112000_contacts_profile_fields.sql`                                                                                                                                            |
+|                  |                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Date**         | 2026-06-29                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Related docs** | [contact-onboarding-flow.md](../contact-onboarding-flow.md), [resident-onboarding-schema.md](../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md), [contact-roles-schema.md](../../../ats-home-craft-supabase/docs/contact-roles-schema.md), [project-setup-schema.md](../../../ats-home-craft-supabase/docs/project-setup-schema.md), [ADR 0007 — Tenant requests](./0007-tenant-requests.md) |
+| **Migrations**   | `20260629110000_resident_onboarding_enums.sql`, `20260629111000_resident_onboarding_tables.sql`, `20260629112000_contacts_profile_fields.sql`                                                                                                                                                                                                                                                                  |
 
 ______________________________________________________________________
 
@@ -15,7 +15,7 @@ ______________________________________________________________________
 Home Craft has two distinct setup flows:
 
 1. **Project Setup (admin)** — community admins configure inventory (`projects`, `towers`, `units`, …) via the dashboard wizard.
-1. **Resident Onboarding (mobile)** — owners/tenants claim units, complete profile, register vehicles, add household members, and activate portal access.
+1. **Resident Onboarding (mobile)** — owners/tenants claim units, complete profile, register vehicles, add household members, link daily help, and activate portal access. Tenant occupancy is a separate owner-initiated request flow ([ADR 0007](./0007-tenant-requests.md)).
 
 The mobile flow spans six screens: property selection → profile → vehicles → household → choose default unit → review.
 
@@ -89,20 +89,37 @@ Step status reuses **`setup_step_status`** from Project Setup (`not_started`, `i
 
 ### 5. Python service integration
 
-**Implemented (contacts module):**
+**Implemented (`apps/user_service`):**
+
+| Module                  | API prefix / routes                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `contact_onboarding`    | `/v1/contact-onboarding/*` — profile, properties, vehicles, household, prompts                            |
+| `contacts`              | `/v1/contacts/*` — identity CRUD (reused by household members)                                            |
+| `tenant_requests`       | Owner tenant requests; admin approve → tenant contact + unit link ([ADR 0007](./0007-tenant-requests.md)) |
+| `daily_help` (resident) | `/v1/daily-help/household-links` — helpers linked to unit                                                 |
+
+Core enums and profile fields:
 
 - `ContactGender`, `ContactBloodGroup` enums in `app/schemas/enums.py`
 - `CommunicationPreferences` model with defaults on `CreateContactRequest`
 - `gender`, `blood_group`, `communication_preferences`, `portal_access` on create/update/response schemas
 - `ContactsRepository` and `ContactsService` persist and normalize profile fields
 
-**Planned (separate modules):**
+**Household manage dashboard (2026-08):**
 
-| Area                 | Operations                                                      |
-| -------------------- | --------------------------------------------------------------- |
-| `contact-units`      | List claimable units, confirm selection, set `is_default_login` |
-| `vehicles`           | CRUD per contact                                                |
-| `contact-onboarding` | Get/update step status, complete wizard                         |
+`GET /v1/contact-onboarding/household/summary?unit_id=` returns aggregate counts for the mobile
+Household hub:
+
+| Count field        | Source                                              |
+| ------------------ | --------------------------------------------------- |
+| `family_count`     | `contact_units` (active, `relationship ≠ self`)     |
+| `daily_help_count` | `daily_help_household_links` (active profile links) |
+| `vehicles_count`   | `vehicles` (approved, on unit)                      |
+| `tenant_count`     | `contact_roles` (`role_type = Tenant`, active)      |
+
+Household **family** members are added via `POST /contact-onboarding/household`. **Tenants** are
+not family rows — they arrive through tenant request approval (one active tenant per unit; see
+[ADR 0007 §4](./0007-tenant-requests.md)).
 
 Household members use **`POST /contacts`** (identity) plus a **`contact_units`** link and a
 **`contact_roles`** row (`role_type = Family`) from the onboarding household step.
@@ -136,6 +153,7 @@ ______________________________________________________________________
 
 ### Follow-ups
 
+1. **Flow guide:** [contact-onboarding-flow.md](../contact-onboarding-flow.md)
 1. **Implementation plan:** [ADR 0002 — implementation plan](./0002-resident-onboarding-implementation.md)
 1. Add RLS policies keyed on `organization_id` and `contacts.user_id`.
 1. Seed/demo data linking demo contacts to `demo-residential` units.
@@ -158,6 +176,7 @@ ______________________________________________________________________
 
 ## References
 
+- Flow guide: [`contact-onboarding-flow.md`](../contact-onboarding-flow.md)
 - Schema detail: [`ats-home-craft-supabase/docs/resident-onboarding-schema.md`](../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md)
 - Project Setup (prerequisite inventory): [`ats-home-craft-supabase/docs/project-setup-schema.md`](../../../ats-home-craft-supabase/docs/project-setup-schema.md)
 - Contacts API: `apps/user_service/app/api/contacts.py`

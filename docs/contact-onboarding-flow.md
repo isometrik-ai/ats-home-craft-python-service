@@ -54,6 +54,44 @@ and clears the `complete_profile` prompt.
 **Vehicles / household:** Available anytime the contact has an active unit link. No wizard step
 completion or finalize endpoint is required.
 
+### Household manage screen (dashboard counts)
+
+The mobile **Household** hub shows four category cards (Family, Daily Help, Vehicles, Tenant) with
+counts before the user drills into each list. Use:
+
+```http
+GET /v1/contact-onboarding/household/summary?unit_id={unit_id}
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "unit_id": "unit-uuid",
+    "family_count": 2,
+    "daily_help_count": 2,
+    "vehicles_count": 2,
+    "tenant_count": 1
+  }
+}
+```
+
+| Field              | UI card    | Derivation                                                                 |
+| ------------------ | ---------- | -------------------------------------------------------------------------- |
+| `family_count`     | Family     | Active `contact_units` on unit where `relationship ≠ self`                 |
+| `daily_help_count` | Daily Help | Active `daily_help_household_links` with active daily help profiles        |
+| `vehicles_count`   | Vehicles   | Approved vehicles on unit (`vehicles.status = approved`, not soft-deleted) |
+| `tenant_count`     | Tenant     | Active `contact_roles` with `role_type = Tenant` on unit (0 or 1)          |
+
+Requires an active `contact_units` link for the caller on `unit_id`; otherwise `unit_not_assigned`.
+Drill-down uses existing list APIs (`GET /household`, `GET /daily-help/household-links`, `GET /vehicles`,
+tenant request APIs — see [tenant-requests-flow.md](./tenant-requests-flow.md)).
+
+> **Tenant limit:** Only **one active tenant per unit**. Enforced by DB unique indexes on
+> `contact_roles` and `tenant_requests`, and by superseding the previous tenant on approve.
+> See [ADR 0007](./adr/0007-tenant-requests.md) §4.
+
 ### Household-only members
 
 Contacts linked with `contact_units.relationship != self` only receive the `complete_profile` prompt.
@@ -120,6 +158,9 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | Step persistence                   | `app/db/repositories/contact_onboarding_repository.py`              |
 | Unit step persistence              | `app/db/repositories/contact_unit_onboarding_repository.py`         |
 | Unit links persistence             | `app/db/repositories/contact_units_repository.py`                   |
+| Contact roles persistence          | `app/db/repositories/contact_roles_repository.py`                   |
+| Daily help links (summary count)   | `app/db/repositories/daily_help_repository.py`                      |
+| Unit aggregates (vehicle count)    | `app/db/repositories/units_repository.py`                           |
 | Vehicles persistence               | `app/db/repositories/vehicles_repository.py`                        |
 | Contacts persistence               | `app/db/repositories/contacts_repository.py`                        |
 | Request/response models            | `app/schemas/contact_onboarding.py`                                 |
@@ -197,6 +238,7 @@ most endpoints take **no** contact id in the path.
 | POST   | `/v1/contact-onboarding/vehicles/{vehicle_id}/withdraw`                | Withdraw a pending request (hard-delete before approval)        |
 | DELETE | `/v1/contact-onboarding/vehicles/{vehicle_id}`                         | Soft-remove an approved vehicle (`status = removed`)            |
 | GET    | `/v1/contact-onboarding/household`                                     | List household/family members (`?unit_id=` optional)            |
+| GET    | `/v1/contact-onboarding/household/summary`                             | Dashboard counts for Family / Daily Help / Vehicles / Tenant    |
 | POST   | `/v1/contact-onboarding/household`                                     | Add a family member to a unit                                   |
 | PATCH  | `/v1/contact-onboarding/household/{contact_unit_id}`                   | Update a family member (name, relationship, portal_access)      |
 | DELETE | `/v1/contact-onboarding/household/{contact_unit_id}`                   | Remove a family member (deletes orphaned family contact)        |
@@ -293,6 +335,25 @@ in `contact_onboarding_service.py`, `contact_units_service.py`, and related serv
     member, sets the unit link to `pending`, and sends an SMS invite. Disabling `portal_access`
     cancels any pending invitation and reactivates the unit link.
   - SMS provider: wire in `app/utils/household_invitation_sms.py` (currently logs in dev).
+- **Household summary counts:** `GET /household/summary?unit_id=` aggregates four dashboard
+  card totals for the manage screen. Implemented in `ContactOnboardingService.get_household_summary`.
+  Tenant count uses `contact_roles.role_type = Tenant` with enum cast `public.contact_role_type`
+  (not `contact_type`).
+
+### Tenant linking (one per unit)
+
+Tenant occupancy is **not** added via `POST /household`. Owners submit a **tenant request**
+([tenant-requests-flow.md](./tenant-requests-flow.md)); admin approval creates the tenant contact,
+`contact_units` link (`relationship = self`), and `contact_roles` row (`role_type = Tenant`).
+
+| Rule                          | Enforcement                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| One in-flight request / unit  | `uq_tenant_requests_one_inflight_per_unit`                                   |
+| One approved tenant / unit    | `uq_tenant_requests_one_active_approved_per_unit`                            |
+| One active Tenant role / unit | `uq_contact_roles_active_tenant_per_unit`                                    |
+| New approve replaces old      | `TenantRequestsService.approve_request` supersedes prior tenant on same unit |
+
+`tenant_count` in household summary is therefore **0 or 1**.
 
 ______________________________________________________________________
 
@@ -814,23 +875,25 @@ ______________________________________________________________________
 
 ## 8. How to make common changes
 
-| I want to…                        | Change here                                                                        |
-| --------------------------------- | ---------------------------------------------------------------------------------- |
-| Add/remove a wizard step          | `ContactOnboardingStep` enum + Postgres enum + `ONBOARDING_STEP_KEYS` ordering     |
-| Add a field to a request/response | matching model in `schemas/contact_onboarding.py`                                  |
-| Add/rename a DB column            | new migration in `ats-home-craft-supabase` + repository SQL + schema model         |
-| Change how prompts are built      | `_build_onboarding_prompts` in `contact_onboarding_service.py`                     |
-| Add an endpoint                   | route in `api/contact_onboarding.py` → service method → repository method          |
-| Change a user‑facing message      | `app/locales/en.json` under `contact_onboarding.*`                                 |
-| Change vehicle approval workflow  | `vehicles_service.review_vehicle` + `PATCH /v1/projects/.../vehicle-requests/{id}` |
-| Wire household SMS delivery       | `app/utils/household_invitation_sms.py`                                            |
-| Change who can act                | `extract_onboarding_contact_context` (context resolution)                          |
+| I want to…                        | Change here                                                                                 |
+| --------------------------------- | ------------------------------------------------------------------------------------------- |
+| Add/remove a wizard step          | `ContactOnboardingStep` enum + Postgres enum + `ONBOARDING_STEP_KEYS` ordering              |
+| Add a field to a request/response | matching model in `schemas/contact_onboarding.py`                                           |
+| Add/rename a DB column            | new migration in `ats-home-craft-supabase` + repository SQL + schema model                  |
+| Change how prompts are built      | `_build_onboarding_prompts` in `contact_onboarding_service.py`                              |
+| Add an endpoint                   | route in `api/contact_onboarding.py` → service method → repository method                   |
+| Change a user‑facing message      | `app/locales/en.json` under `contact_onboarding.*`                                          |
+| Change vehicle approval workflow  | `vehicles_service.review_vehicle` + `PATCH /v1/projects/.../vehicle-requests/{id}`          |
+| Wire household SMS delivery       | `app/utils/household_invitation_sms.py`                                                     |
+| Change who can act                | `extract_onboarding_contact_context` (context resolution)                                   |
+| Change household dashboard counts | `get_household_summary` + repos: `contact_units`, `daily_help`, `units`, `contact_roles`    |
+| Add daily help to household hub   | Already counted via `daily_help_household_links`; list via `/v1/daily-help/household-links` |
 
 ______________________________________________________________________
 
 ## 9. Tests
 
-- `tests/unit/test_contact_onboarding_service.py` — prompt derivation, profile, household, confirm/claim helpers.
+- `tests/unit/test_contact_onboarding_service.py` — prompt derivation, profile, household, confirm/claim helpers, household summary counts.
 - `tests/unit/test_contact_units_service.py` — property confirm/claim after onboarding.
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`
@@ -839,6 +902,11 @@ ______________________________________________________________________
 
 ## Related
 
+- [contact-onboarding-app-integration.md](./contact-onboarding-app-integration.md) — mobile scenarios
+- [tenant-requests-flow.md](./tenant-requests-flow.md) — owner tenant requests and one-tenant-per-unit rules
+- [daily-help-flow.md](./daily-help-flow.md) — household-linked daily help (counted in summary)
+- [ADR 0007 — Tenant requests](./adr/0007-tenant-requests.md)
+- [ADR 0010 — Contact roles](./adr/0010-contact-roles.md)
 - Project setup wizard (admin side): `docs/project-setup-flow.md`. The two flows meet at
   **units** (project setup) and **vehicles** (onboarding submit → project admin review + parking slot).
   Schema reference: `ats-home-craft-supabase/docs/project-setup-schema.md`.

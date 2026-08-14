@@ -703,6 +703,7 @@
       "step_completed": "Onboarding step completed successfully.",
       "step_skipped": "Onboarding step skipped successfully.",
       "household_retrieved": "Household members retrieved successfully.",
+      "household_summary_retrieved": "Household summary retrieved successfully.",
       "household_member_added": "Household member added successfully.",
       "household_member_updated": "Household member updated successfully.",
       "household_member_removed": "Household member removed successfully.",
