@@ -249,6 +249,30 @@ class UnitsRepository(BaseRepository):
         )
         return dict(row)
 
+    async def bulk_insert_units(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Insert many unit rows in one statement."""
+        if not rows:
+            return []
+
+        columns = list(_UNIT_INSERT_COLUMNS)
+        ncols = len(columns)
+        value_groups: list[str] = []
+        values: list[Any] = []
+        for row_index, row in enumerate(rows):
+            placeholders: list[str] = []
+            for col_index, col in enumerate(columns):
+                param = row_index * ncols + col_index + 1
+                cast = _UNIT_COLUMN_CASTS.get(col, "")
+                placeholders.append(f"${param}{cast}")
+                values.append(row.get(col))
+            value_groups.append(f"({', '.join(placeholders)})")
+
+        query = (
+            f"INSERT INTO units ({', '.join(columns)}) VALUES {', '.join(value_groups)} RETURNING *"
+        )
+        records = await self.db_connection.fetch(query, *values)
+        return [dict(record) for record in records]
+
     async def get_unit(
         self, *, organization_id: str, project_id: str, unit_id: str
     ) -> dict[str, Any] | None:

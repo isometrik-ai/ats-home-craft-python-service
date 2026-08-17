@@ -1506,6 +1506,38 @@ async def test_create_unit(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_bulk_create_units(monkeypatch, client):
+    """POST /projects/{id}/units/bulk creates many units."""
+
+    _patch_projects_access(monkeypatch)
+
+    async def fake_create_units_bulk(_self, *, project_id: str, body):
+        del _self, project_id, body
+        return {
+            "items": [_FAKE_UNIT, {**_FAKE_UNIT, "id": "unit-2", "code": "A-102"}],
+            "created_count": 2,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.units_service.UnitsService.create_units_bulk",
+        fake_create_units_bulk,
+    )
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/units/bulk",
+        json={
+            "units": [
+                {"code": "A-101", "tower_id": TOWER_ID, "floor_id": FLOOR_ID},
+                {"code": "A-102", "tower_id": TOWER_ID, "floor_id": FLOOR_ID},
+            ]
+        },
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["created_count"] == 2
+    assert len(body["data"]["items"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_list_units(monkeypatch, client):
     """GET /projects/{id}/units lists units."""
 

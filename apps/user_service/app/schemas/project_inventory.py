@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.user_service.app.schemas.enums import (
     CommercialUnitType,
@@ -220,6 +220,32 @@ class CreateUnitRequest(BaseModel):
     sort_order: int = Field(default=0, ge=0)
     is_parking: bool = False
     plot_item_id: str | None = None
+
+
+class BulkCreateUnitsRequest(BaseModel):
+    """Create many units in one request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    units: list[CreateUnitRequest] = Field(..., min_length=1, max_length=200)
+
+    @field_validator("units")
+    @classmethod
+    def validate_unique_codes(cls, units: list[CreateUnitRequest]) -> list[CreateUnitRequest]:
+        """Reject duplicate unit codes within the same bulk payload."""
+        codes = [unit.code.strip().lower() for unit in units]
+        if len(codes) != len(set(codes)):
+            raise ValueError("unit codes must be unique within the request")
+        return units
+
+
+class BulkCreateUnitsResponse(BaseModel):
+    """Bulk unit creation result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[dict[str, Any]]
+    created_count: int = Field(..., ge=0)
 
 
 class UpdateUnitRequest(BaseModel):

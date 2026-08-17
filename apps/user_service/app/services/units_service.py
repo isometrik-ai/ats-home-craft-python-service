@@ -20,6 +20,7 @@ from apps.user_service.app.schemas.enums import (
     UnitStatus,
 )
 from apps.user_service.app.schemas.project_inventory import (
+    BulkCreateUnitsRequest,
     CreateParkingZoneRequest,
     CreateUnitRequest,
     UpdateUnitRequest,
@@ -273,6 +274,32 @@ class UnitsService:
             ) from exc
         await self._recount(project_id=project_id)
         return serialize_row(inserted)
+
+    async def create_units_bulk(
+        self,
+        *,
+        project_id: str,
+        body: BulkCreateUnitsRequest,
+    ) -> dict[str, Any]:
+        """Create many units in one transaction and recompute units_count once."""
+        await self.setup_service.ensure_project(project_id=project_id)
+        rows: list[dict[str, Any]] = []
+        for unit in body.units:
+            data = unit.model_dump()
+            data["status"] = unit.status.value
+            data["organization_id"] = self._org_id
+            data["project_id"] = project_id
+            rows.append(data)
+        try:
+            inserted = await self.units_repo.bulk_insert_units(rows)
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="project_setup.errors.duplicate_code",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        await self._recount(project_id=project_id)
+        items = [serialize_row(row) for row in inserted]
+        return {"items": items, "created_count": len(items)}
 
     async def list_units(
         self,
