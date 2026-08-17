@@ -151,6 +151,33 @@ class ContactOnboardingService:
         )
         return profile_status in TERMINAL_STEP_STATUSES
 
+    async def _is_review_complete(self, *, contact_id: str) -> bool:
+        """True when the contact finalized onboarding via POST /complete."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        steps = await self.onboarding_repo.list_steps(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
+        review_status = self._step_status(steps, ContactOnboardingStep.REVIEW.value)
+        return review_status in TERMINAL_STEP_STATUSES
+
+    @staticmethod
+    def _resolve_is_completed(
+        *,
+        profile_complete: bool,
+        active_count: int,
+        pending_self_unit_count: int,
+        household_only: bool,
+        review_complete: bool,
+    ) -> bool:
+        """Derive onboarding completion from wizard state, not empty prompts alone."""
+        if household_only or (active_count == 0 and pending_self_unit_count == 0):
+            return profile_complete
+        if active_count > 0:
+            return review_complete
+        return False
+
     async def _list_pending_self_units(self, *, contact_id: str) -> list[dict[str, Any]]:
         """Pending allotments where the contact is the primary occupant (relationship=self)."""
         org_id = self.user_context.organization_id
@@ -172,6 +199,9 @@ class ContactOnboardingService:
         profile_complete: bool,
         pending_self_units: list[dict[str, Any]],
         requires_default_unit: bool,
+        active_count: int,
+        household_only: bool,
+        review_complete: bool,
     ) -> list[dict[str, Any]]:
         """Build optional home-screen prompts (nothing here blocks app usage)."""
         prompts: list[dict[str, Any]] = []
@@ -187,6 +217,15 @@ class ContactOnboardingService:
             )
         if requires_default_unit:
             prompts.append({"type": "choose_default_unit"})
+        if (
+            not household_only
+            and active_count > 0
+            and profile_complete
+            and not pending_self_units
+            and not requires_default_unit
+            and not review_complete
+        ):
+            prompts.append({"type": "complete_onboarding"})
         return prompts
 
     async def _auto_complete_legacy_wizard_steps(self, *, contact_id: str) -> None:
@@ -230,20 +269,32 @@ class ContactOnboardingService:
         )
         requires_default_unit = active_count > 1 and not has_default
         household_only = await self._is_household_only_contact(contact_id)
+        review_complete = await self._is_review_complete(contact_id=contact_id)
+        requires_default = requires_default_unit and not household_only
 
         prompts = self._build_onboarding_prompts(
             profile_complete=profile_complete,
             pending_self_units=pending_self_units,
-            requires_default_unit=requires_default_unit and not household_only,
+            requires_default_unit=requires_default,
+            active_count=active_count,
+            household_only=household_only,
+            review_complete=review_complete,
+        )
+        is_completed = self._resolve_is_completed(
+            profile_complete=profile_complete,
+            active_count=active_count,
+            pending_self_unit_count=len(pending_self_units),
+            household_only=household_only,
+            review_complete=review_complete,
         )
 
         return {
             "profile_complete": profile_complete,
             "pending_unit_count": len(pending_self_units),
             "active_unit_count": active_count,
-            "requires_default_unit": requires_default_unit and not household_only,
+            "requires_default_unit": requires_default,
             "prompts": prompts,
-            "is_completed": not prompts,
+            "is_completed": is_completed,
         }
 
     async def get_profile(self, *, contact_id: str) -> dict[str, Any]:

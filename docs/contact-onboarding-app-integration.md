@@ -12,10 +12,11 @@ ______________________________________________________________________
 ## 1. Principles
 
 1. **Do not block the app** on onboarding. Show home and features even when `is_completed: false`.
-1. **Drive UI from `prompts[]` only** on `GET /status`. Do not use removed fields (`steps`, `setup_current_step`, `unit_onboarding`).
+1. **Drive UI from `prompts[]`** on `GET /status`. Do not use removed fields (`steps`, `setup_current_step`, `unit_onboarding`).
+1. **Use `is_completed` to hide the onboarding shell** — for owners with units it becomes `true` only after `POST /complete`, not when profile + unit accept alone.
 1. **Prompts are dismissible** — user can complete profile or accept units later from Settings.
 1. **Order is flexible** — accept unit before profile, or profile first; both work.
-1. **Refresh `/status`** after profile update, accept unit, or set default unit.
+1. **Refresh `/status`** after profile update, accept unit, set default unit, or finalize (`POST /complete`).
 
 ______________________________________________________________________
 
@@ -74,22 +75,35 @@ Authorization: Bearer <token>
 }
 ```
 
-| Field                   | Type  | App usage                            |
-| ----------------------- | ----- | ------------------------------------ |
-| `profile_complete`      | bool  | Profile done; hide profile nudge     |
-| `pending_unit_count`    | int   | Copy: “N properties waiting”         |
-| `active_unit_count`     | int   | Unit switcher; feature eligibility   |
-| `requires_default_unit` | bool  | Show default-unit picker when `true` |
-| `prompts`               | array | **Primary UI driver** — see §4       |
-| `is_completed`          | bool  | `true` → hide all onboarding banners |
+| Field                   | Type  | App usage                             |
+| ----------------------- | ----- | ------------------------------------- |
+| `profile_complete`      | bool  | Profile done; hide profile nudge      |
+| `pending_unit_count`    | int   | Copy: “N properties waiting”          |
+| `active_unit_count`     | int   | Unit switcher; feature eligibility    |
+| `requires_default_unit` | bool  | Show default-unit picker when `true`  |
+| `prompts`               | array | **Primary UI driver** — see §4        |
+| `is_completed`          | bool  | Onboarding wizard finished — see §3.1 |
+
+### 3.1 When is `is_completed` true?
+
+`is_completed` is **computed on every** `GET /status` — it is not a separate DB flag.
+
+| Contact type                                         | `is_completed: true` when                                    |
+| ---------------------------------------------------- | ------------------------------------------------------------ |
+| **Owner / tenant with ≥1 active unit**               | `POST /complete` has run (backend `review` step is terminal) |
+| **No units assigned**                                | Profile complete only                                        |
+| **Household-only member** (family link, no own unit) | Profile complete only                                        |
+
+> **Important:** Profile + accept unit alone does **not** set `is_completed: true`. After both are done, status shows `complete_onboarding` until the app calls `POST /complete` on the final review step. This prevents a killed/reopened app from treating onboarding as done prematurely.
 
 ### Prompt types
 
-| `type`                | Extra fields                 | Meaning                           |
-| --------------------- | ---------------------------- | --------------------------------- |
-| `complete_profile`    | —                            | Suggest profile form              |
-| `accept_unit`         | `contact_unit_id`, `unit_id` | Pending allotment to accept       |
-| `choose_default_unit` | —                            | 2+ active units, no default login |
+| `type`                | Extra fields                 | Meaning                                                  |
+| --------------------- | ---------------------------- | -------------------------------------------------------- |
+| `complete_profile`    | —                            | Suggest profile form                                     |
+| `accept_unit`         | `contact_unit_id`, `unit_id` | Pending allotment to accept                              |
+| `choose_default_unit` | —                            | 2+ active units, no default login                        |
+| `complete_onboarding` | —                            | Profile + units ready — show review and call `/complete` |
 
 ### Example — contact exists, no unit assigned yet
 
@@ -128,7 +142,24 @@ Authorization: Bearer <token>
 }
 ```
 
-### Example — fully done
+### Example — profile + unit accepted, finalize pending
+
+User finished profile and accepted a unit but has not called `POST /complete` yet (e.g. app was killed and reopened):
+
+```json
+{
+  "data": {
+    "profile_complete": true,
+    "pending_unit_count": 0,
+    "active_unit_count": 1,
+    "requires_default_unit": false,
+    "prompts": [{ "type": "complete_onboarding" }],
+    "is_completed": false
+  }
+}
+```
+
+### Example — fully done (owner with unit)
 
 ```json
 {
@@ -142,6 +173,8 @@ Authorization: Bearer <token>
   }
 }
 ```
+
+> Requires `POST /complete` after profile + unit steps for owners with active units.
 
 ______________________________________________________________________
 
@@ -289,10 +322,10 @@ Content-Type: application/json
 }
 ```
 
-| `requires_default_unit` | App action                      |
-| ----------------------- | ------------------------------- |
-| `false`                 | Refresh `/status`; done         |
-| `true`                  | Open default-unit picker → §4.3 |
+| `requires_default_unit` | App action                                      |
+| ----------------------- | ----------------------------------------------- |
+| `false`                 | Refresh `/status`; continue prompts or finalize |
+| `true`                  | Open default-unit picker → §4.3                 |
 
 **Claim (same activation, use anytime):**
 
@@ -329,7 +362,68 @@ Content-Type: application/json
 }
 ```
 
-**After success:** `GET /status` → prompt cleared.
+**After success:** `GET /status` → `choose_default_unit` prompt cleared.
+
+______________________________________________________________________
+
+### 4.4 Finalize onboarding (`POST /complete`)
+
+Call on the **last wizard screen** (review / finish) when profile and unit steps are done.
+Required for **`is_completed: true`** when the contact has at least one active unit.
+
+**Optional preview (review screen):**
+
+```http
+GET /v1/contact-onboarding/review
+Authorization: Bearer <token>
+```
+
+Returns contact profile, units, vehicles, and household aggregate.
+
+**Finalize:**
+
+```http
+POST /v1/contact-onboarding/complete
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+Empty body finalizes all active units:
+
+```json
+{}
+```
+
+Optional partial finalize (legacy — defers unselected active units back to `pending`):
+
+```json
+{
+  "contact_unit_ids": ["cu-A"]
+}
+```
+
+**Response** (same shape as `GET /status`, plus activation metadata):
+
+```json
+{
+  "data": {
+    "profile_complete": true,
+    "pending_unit_count": 0,
+    "active_unit_count": 1,
+    "requires_default_unit": false,
+    "prompts": [],
+    "is_completed": true,
+    "completed_contact_unit_ids": ["cu-A"]
+  }
+}
+```
+
+**After success:** `is_completed: true`; hide onboarding UI.
+
+| Error               | When                                                        |
+| ------------------- | ----------------------------------------------------------- |
+| `no_active_units`   | No active self unit — accept a unit via confirm/claim first |
+| `already_completed` | `GET /status` already returned `is_completed: true`         |
 
 ______________________________________________________________________
 
@@ -389,11 +483,13 @@ flowchart TD
     F -->|complete_profile| G[PATCH /profile]
     F -->|accept_unit| H[GET /properties then POST /confirm]
     F -->|choose_default_unit| I[POST /default-unit]
+    F -->|complete_onboarding| K[GET /review then POST /complete]
     G --> B
     H --> J{requires_default_unit?}
     J -->|Yes| I
     J -->|No| B
     I --> B
+    K --> D
 ```
 
 ______________________________________________________________________
@@ -414,27 +510,30 @@ ______________________________________________________________________
 
 **Setup:** Admin assigns one unit → contact sees accept prompt.
 
-| Step                  | Request                                                       | Expected `data` after                                               |
-| --------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
-| 1. Login              | `GET /status`                                                 | `prompts: [complete_profile, accept_unit]`, `pending_unit_count: 1` |
-| 2. (Optional) Profile | `PATCH /profile` `{ "first_name": "Jane", ... }`              | —                                                                   |
-| 3. Accept unit        | `POST /properties/confirm` `{ "contact_unit_ids": ["cu-A"] }` | `items[0].status: active`, `requires_default_unit: false`           |
-| 4. Refresh            | `GET /status`                                                 | `active_unit_count: 1`, `pending_unit_count: 0`, accept prompt gone |
-| 5. Profile if skipped | `PATCH /profile`                                              | —                                                                   |
-| 6. Done               | `GET /status`                                                 | `prompts: []`, `is_completed: true`                                 |
+| Step                  | Request                                                       | Expected `data` after                                                                                |
+| --------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 1. Login              | `GET /status`                                                 | `prompts: [complete_profile, accept_unit]`, `pending_unit_count: 1`                                  |
+| 2. (Optional) Profile | `PATCH /profile` `{ "first_name": "Jane", ... }`              | —                                                                                                    |
+| 3. Accept unit        | `POST /properties/confirm` `{ "contact_unit_ids": ["cu-A"] }` | `items[0].status: active`, `requires_default_unit: false`                                            |
+| 4. Refresh            | `GET /status`                                                 | `prompts: [complete_onboarding]` or `[complete_profile, complete_onboarding]`; `is_completed: false` |
+| 5. Profile if skipped | `PATCH /profile`                                              | —                                                                                                    |
+| 6. Finalize           | `POST /complete`                                              | `is_completed: true`, `prompts: []`                                                                  |
 
-**Minimal path (accept first, profile later):**
+**Minimal path (accept first, profile later, then finalize):**
 
 ```http
 GET  /v1/contact-onboarding/status
 POST /v1/contact-onboarding/properties/confirm
      {"contact_unit_ids":["cu-A"]}
 GET  /v1/contact-onboarding/status
-# … use app …
 PATCH /v1/contact-onboarding/profile
       {"first_name":"Jane","last_name":"Doe","phones":[{"number":"+919876543210","is_primary":true,"type":"mobile"}]}
 GET  /v1/contact-onboarding/status
+POST /v1/contact-onboarding/complete
+GET  /v1/contact-onboarding/status
 ```
+
+Expect final `GET /status`: `prompts: []`, `is_completed: true`.
 
 ______________________________________________________________________
 
@@ -486,7 +585,31 @@ Content-Type: application/json
 GET /v1/contact-onboarding/status
 ```
 
-Expect: `active_unit_count: 3`, no `accept_unit` prompts, no `choose_default_unit` if default was sent on confirm.
+Expect: `active_unit_count: 3`, no `accept_unit` prompts, no `choose_default_unit` if default was sent on confirm. Then `POST /complete` → `is_completed: true`.
+
+______________________________________________________________________
+
+### Scenario 3b — App killed after profile + accept (regression guard)
+
+User completes profile and accepts a unit, then force-closes the app before the review/finish screen.
+
+```http
+GET /v1/contact-onboarding/status
+```
+
+```json
+{
+  "data": {
+    "profile_complete": true,
+    "active_unit_count": 1,
+    "pending_unit_count": 0,
+    "prompts": [{ "type": "complete_onboarding" }],
+    "is_completed": false
+  }
+}
+```
+
+Resume wizard → `GET /review` (optional) → `POST /complete` → `is_completed: true`.
 
 ______________________________________________________________________
 
@@ -517,7 +640,7 @@ POST /v1/contact-onboarding/default-unit
 GET  /v1/contact-onboarding/status
 ```
 
-Expect: `requires_default_unit: false`, `choose_default_unit` prompt gone.
+Expect: `requires_default_unit: false`, `choose_default_unit` prompt gone; may show `complete_onboarding` until `POST /complete`.
 
 ______________________________________________________________________
 
@@ -572,10 +695,12 @@ GET /v1/contact-onboarding/status
         "unit_id": "unit-D"
       }
     ],
-    "is_completed": false
+    "is_completed": true
   }
 }
 ```
+
+> `is_completed` stays `true` because onboarding was already finalized (`review` step complete). Still show the `accept_unit` banner from `prompts[]`.
 
 ```http
 POST /v1/contact-onboarding/properties/claim
@@ -583,9 +708,9 @@ POST /v1/contact-onboarding/properties/claim
 GET  /v1/contact-onboarding/status
 ```
 
-If `requires_default_unit: true` → `POST /default-unit`.
+If `requires_default_unit: true` → `POST /default-unit`. No need to call `POST /complete` again.
 
-No full wizard reopens — single accept banner.
+No full wizard reopens — accept banner only.
 
 ______________________________________________________________________
 
@@ -652,7 +777,7 @@ POST /v1/contact-onboarding/properties/confirm
 GET  /v1/contact-onboarding/status
 ```
 
-Family link on unit A remains; owner link on B is now `active`. Both coexist.
+Family link on unit A remains; owner link on B is now `active`. Both coexist. Call `POST /complete` when ready → `is_completed: true`.
 
 ______________________________________________________________________
 
@@ -662,37 +787,47 @@ ______________________________________________________________________
 [Created, no units]
   prompts: [complete_profile]
   active: 0, pending: 0
+  is_completed: false → true after profile (no /complete needed)
 
 [Admin assigns 1 unit]
   prompts: [complete_profile, accept_unit]
   pending: 1
+  is_completed: false
 
 [User accepts unit]
-  prompts: [complete_profile] or []
+  prompts: [complete_profile, complete_onboarding] or [complete_onboarding]
   active: 1, pending: 0
+  is_completed: false
 
-[User completes profile]
+[User completes profile — owner with unit]
+  prompts: [complete_onboarding]
+  is_completed: false
+
+[User calls POST /complete]
   prompts: []
   is_completed: true
 
-[Admin assigns 2nd unit later]
+[Admin assigns 2nd unit later — already finalized]
   prompts: [accept_unit]
-  is_completed: false
+  is_completed: true (review already done — still show accept banner)
 
 [2+ active, no default]
   prompts: [..., choose_default_unit]
   requires_default_unit: true
+  is_completed: false
 ```
 
 ______________________________________________________________________
 
 ## 9. Error handling
 
-| Situation                     | Typical code | App action                |
-| ----------------------------- | ------------ | ------------------------- |
-| Unit not in pending list      | 422          | Refresh `GET /properties` |
-| Primary conflict (unit taken) | 422          | Show server `message`     |
-| Invalid `contact_unit_id`     | 422          | Refresh lists             |
+| Situation                     | Typical code | App action                        |
+| ----------------------------- | ------------ | --------------------------------- |
+| Unit not in pending list      | 422          | Refresh `GET /properties`         |
+| Primary conflict (unit taken) | 422          | Show server `message`             |
+| Invalid `contact_unit_id`     | 422          | Refresh lists                     |
+| Finalize with no active unit  | 422          | Accept a unit first               |
+| Finalize when already done    | 409          | Treat as success / refresh status |
 
 Always refresh `GET /status` and `GET /properties` after a failed confirm.
 
@@ -704,7 +839,8 @@ ______________________________________________________________________
 type OnboardingPrompt =
   | { type: "complete_profile" }
   | { type: "accept_unit"; contact_unit_id: string; unit_id: string }
-  | { type: "choose_default_unit" };
+  | { type: "choose_default_unit" }
+  | { type: "complete_onboarding" };
 
 interface OnboardingStatus {
   profile_complete: boolean;
@@ -713,6 +849,11 @@ interface OnboardingStatus {
   requires_default_unit: boolean;
   prompts: OnboardingPrompt[];
   is_completed: boolean;
+}
+
+interface CompleteOnboardingResponse extends OnboardingStatus {
+  completed_contact_unit_ids: string[];
+  deferred_contact_unit_ids?: string[];
 }
 
 interface ConfirmPropertiesResponse {
@@ -726,11 +867,13 @@ ______________________________________________________________________
 ## 11. Integration checklist
 
 - [ ] `GET /status` on login and after onboarding actions
-- [ ] UI driven by `prompts[]` only
+- [ ] UI driven by `prompts[]`; use `is_completed` to hide the onboarding shell
 - [ ] Main navigation never blocked by `is_completed: false`
 - [ ] Confirm body uses `contact_unit_ids` = `units[].id` from `GET /properties`
 - [ ] Handle `requires_default_unit` after confirm/claim
+- [ ] Handle `complete_onboarding` → `GET /review` (optional) → `POST /complete`
 - [ ] `POST /properties/claim` for later accepts (same as confirm)
+- [ ] Do not treat profile + unit accept alone as done — wait for `POST /complete` (owners with units)
 - [ ] Do not implement linear wizard or read removed status fields
 
 ______________________________________________________________________

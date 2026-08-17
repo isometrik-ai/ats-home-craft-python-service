@@ -29,6 +29,10 @@ from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.pass_validity import (
+    is_pass_expired_by_day,
+    is_pass_too_early_by_day,
+)
 from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ValidationException,
@@ -152,7 +156,7 @@ class PassVerificationService:
 
         valid_from = cls._parse_dt(row.get("valid_from"))
         valid_until = cls._parse_dt(row.get("valid_until"))
-        if status == PassStatus.EXPIRED.value or (valid_until and now > valid_until):
+        if status == PassStatus.EXPIRED.value or is_pass_expired_by_day(valid_until, now=now):
             return _Admissibility(
                 access_status=PassAccessStatus.EXPIRED.value,
                 can_check_in=False,
@@ -173,7 +177,7 @@ class PassVerificationService:
                 max_entries_reached=True,
             )
 
-        if valid_from and now < valid_from:
+        if is_pass_too_early_by_day(valid_from, now=now):
             return _Admissibility(
                 access_status=PassAccessStatus.APPROVED.value,
                 can_check_in=False,

@@ -14,7 +14,7 @@ ADRs capture significant design choices, the context behind them, and their cons
 | [0006](./0006-project-fee-configuration.md)          | Project fee configuration — schema and backend model  | Accepted           |
 | [0007](./0007-tenant-requests.md)                    | Tenant requests — owner submit, admin review          | Accepted (Phase 1) |
 | [0008](./0008-walk-in-entries.md)                    | Walk-in entries — security request, resident approval | Accepted (Phase 1) |
-| [0009](./0009-push-notifications-grpc.md)            | Push notifications via notification-service gRPC      | Proposed           |
+| [0009](./0009-push-notifications-grpc.md)            | Push notifications via notification-service gRPC      | Accepted           |
 | [0010](./0010-contact-roles.md)                      | Contact roles — unit-scoped role history              | Accepted           |
 | [0011](./0011-project-membership.md)                 | Project membership — org layer + project layer        | Proposed           |
 | [0012](./0012-notice-board.md)                       | Notice board — admin publish, resident feed           | Proposed           |

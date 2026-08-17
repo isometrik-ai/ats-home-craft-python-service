@@ -174,18 +174,28 @@ def test_derive_display_status_upcoming():
     """Future validity window maps to upcoming display status."""
     now = datetime.now(timezone.utc)
     row = _pass_row(
-        valid_from=now + timedelta(hours=2),
-        valid_until=now + timedelta(hours=5),
+        valid_from=now + timedelta(days=1),
+        valid_until=now + timedelta(days=2),
     )
     assert PassesService.derive_display_status(row, now=now) == PassDisplayStatus.UPCOMING.value
+
+
+def test_derive_display_status_active_same_day_before_start():
+    """Same calendar day before valid_from time maps to active display status."""
+    now = datetime.now(timezone.utc)
+    row = _pass_row(
+        valid_from=now + timedelta(minutes=3),
+        valid_until=now + timedelta(hours=5),
+    )
+    assert PassesService.derive_display_status(row, now=now) == PassDisplayStatus.ACTIVE.value
 
 
 def test_derive_display_status_expired():
     """Past validity window maps to expired display status."""
     now = datetime.now(timezone.utc)
     row = _pass_row(
-        valid_from=now - timedelta(hours=5),
-        valid_until=now - timedelta(hours=1),
+        valid_from=now - timedelta(days=2),
+        valid_until=now - timedelta(days=1),
     )
     assert PassesService.derive_display_status(row, now=now) == PassDisplayStatus.EXPIRED.value
 

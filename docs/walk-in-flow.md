@@ -1,6 +1,6 @@
 # Walk-in Flow — Context & Change Guide
 
-> **Status: Phase 1 implemented (API + service + migrations).** Push notifications and Visitor Logs union are follow-ups.
+> **Status: Phase 1 implemented (API + service + migrations + push notifications).** Visitor Logs union remains a follow-up.
 >
 > This document describes the **Walk-in** feature — security
 > marks **one enter** and **one exit** for the visit — in the same style as

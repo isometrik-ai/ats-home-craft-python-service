@@ -457,12 +457,36 @@ async def test_get_status_shows_accept_unit_prompt():
 
 
 @pytest.mark.asyncio
-async def test_get_status_completed_when_no_prompts():
-    """No prompts means the contact can use the app without onboarding banners."""
+async def test_get_status_not_completed_until_finalize():
+    """Profile + accepted unit stays incomplete until POST /complete (review step)."""
     repo = _FakeOnboardingRepo(
         _contact_steps(
             overrides={
                 ContactOnboardingStep.COMPLETE_PROFILE.value: SetupStepStatus.COMPLETED.value,
+                ContactOnboardingStep.SELECT_PROPERTIES.value: SetupStepStatus.COMPLETED.value,
+                ContactOnboardingStep.CHOOSE_UNIT.value: SetupStepStatus.COMPLETED.value,
+            }
+        )
+    )
+    units_repo = _FakeContactUnitsRepo(active_count=1, has_default=True, contact_unit_links=[])
+    svc = _service(onboarding_repo=repo, contact_units_repo=units_repo)
+
+    result = await svc.get_status(contact_id="contact-1")
+
+    assert result["profile_complete"] is True
+    assert result["active_unit_count"] == 1
+    assert result["is_completed"] is False
+    assert result["prompts"] == [{"type": "complete_onboarding"}]
+
+
+@pytest.mark.asyncio
+async def test_get_status_completed_when_no_prompts():
+    """Owners with an active unit are complete only after the review/finalize step."""
+    repo = _FakeOnboardingRepo(
+        _contact_steps(
+            overrides={
+                ContactOnboardingStep.COMPLETE_PROFILE.value: SetupStepStatus.COMPLETED.value,
+                ContactOnboardingStep.REVIEW.value: SetupStepStatus.COMPLETED.value,
             }
         )
     )
@@ -795,6 +819,7 @@ async def test_complete_onboarding_rejects_already_completed():
         _contact_steps(
             overrides={
                 ContactOnboardingStep.COMPLETE_PROFILE.value: SetupStepStatus.COMPLETED.value,
+                ContactOnboardingStep.REVIEW.value: SetupStepStatus.COMPLETED.value,
             }
         )
     )
