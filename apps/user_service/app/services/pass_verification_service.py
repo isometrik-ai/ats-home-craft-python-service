@@ -156,9 +156,7 @@ class PassVerificationService:
 
         valid_from = cls._parse_dt(row.get("valid_from"))
         valid_until = cls._parse_dt(row.get("valid_until"))
-        if status == PassStatus.EXPIRED.value or is_pass_expired_by_day(
-            valid_until, now=now
-        ):
+        if status == PassStatus.EXPIRED.value or is_pass_expired_by_day(valid_until, now=now):
             return _Admissibility(
                 access_status=PassAccessStatus.EXPIRED.value,
                 can_check_in=False,

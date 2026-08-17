@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from apps.user_service.app.utils.pass_validity import (
     is_pass_expired_by_day,
