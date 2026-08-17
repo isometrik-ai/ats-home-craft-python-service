@@ -568,6 +568,27 @@ async def test_get_contact_overview_forwards_status():
     assert repo.last_overview_kwargs == {
         "organization_id": ORG_ID,
         "status": ClientStatus.ACTIVE.value,
+        "project_id": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_get_contact_overview_forwards_project_id():
+    """Overview forwards optional project_id filter."""
+    repo = _FakeContactsRepo(overview={"total": 2, "owners": 1, "tenants": 1, "vendors": 0})
+    svc = _service(contacts_repo=repo)
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+
+    result = await svc.get_contact_overview(
+        status=ClientStatus.ACTIVE.value,
+        project_id=project_id,
+    )
+
+    assert result["total"] == 2
+    assert repo.last_overview_kwargs == {
+        "organization_id": ORG_ID,
+        "status": ClientStatus.ACTIVE.value,
+        "project_id": project_id,
     }
 
 
@@ -1743,6 +1764,28 @@ async def test_update_contact_can_clear_gender(monkeypatch):
 
     update_data = repo.last_update_kwargs["update_data"]
     assert update_data["gender"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_contact_sync_auth_phone_requires_supabase(monkeypatch):
+    """Update contact fails when auth phone sync is needed but Supabase is unavailable."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        user_id=USER_ID,
+        phones=[{"phone_number": "111", "phone_isd_code": "+1", "is_primary": True}],
+    )
+    repo = _FakeContactsRepo(contact_for_update=current, echo_update=True)
+    svc = _service(contacts_repo=repo)
+    svc.supabase_client = None
+    svc._validate_contact_auth_identity_update = AsyncMock()  # type: ignore[method-assign]
+
+    with pytest.raises(ServiceUnavailableException):
+        await svc.update_contact(
+            contact_id=CONTACT_ID,
+            body=UpdateContactRequest(
+                phones=[Phone(phone_number="222", phone_isd_code="+1", is_primary=True)]
+            ),
+        )
 
 
 @pytest.mark.asyncio

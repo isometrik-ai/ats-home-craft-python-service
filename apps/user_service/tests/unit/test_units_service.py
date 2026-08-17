@@ -488,9 +488,18 @@ class _FakeUnitsRepo:
 
     async def insert_unit(self, data: dict[str, Any]) -> dict[str, Any]:
         """Insert a unit row."""
-        row = {"id": "unit-1", **data}
+        row = {"id": f"unit-{len(self.units) + 1}", **data}
         self.units.append(row)
         return row
+
+    async def bulk_insert_units(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Insert many unit rows."""
+        inserted: list[dict[str, Any]] = []
+        for data in rows:
+            row = {"id": f"unit-{len(self.units) + 1}", **data}
+            self.units.append(row)
+            inserted.append(row)
+        return inserted
 
     async def list_units(self, **_kwargs) -> tuple[list[dict[str, Any]], int]:
         """Return all units and total count."""
@@ -560,6 +569,47 @@ async def test_create_unit_recounts_project():
 
     assert result["code"] == "A-101"
     assert len(repo.units) == 1
+
+
+@pytest.mark.asyncio
+async def test_create_units_bulk_inserts_all_and_recounts_once():
+    """Bulk create inserts all rows and recomputes units_count once."""
+    from apps.user_service.app.schemas.enums import UnitStatus
+    from apps.user_service.app.schemas.project_inventory import (
+        BulkCreateUnitsRequest,
+        CreateUnitRequest,
+    )
+
+    repo = _FakeUnitsRepo()
+    service = _units_service(units_repo=repo)
+    body = BulkCreateUnitsRequest(
+        units=[
+            CreateUnitRequest(code="A-101", status=UnitStatus.VACANT),
+            CreateUnitRequest(code="A-102", status=UnitStatus.VACANT),
+        ]
+    )
+
+    result = await service.create_units_bulk(project_id="proj-1", body=body)
+
+    assert result["created_count"] == 2
+    assert len(result["items"]) == 2
+    assert len(repo.units) == 2
+
+
+def test_bulk_create_units_request_rejects_duplicate_codes():
+    """Bulk payload rejects duplicate codes before hitting the database."""
+    from apps.user_service.app.schemas.project_inventory import (
+        BulkCreateUnitsRequest,
+        CreateUnitRequest,
+    )
+
+    with pytest.raises(ValueError, match="unique"):
+        BulkCreateUnitsRequest(
+            units=[
+                CreateUnitRequest(code="A-101"),
+                CreateUnitRequest(code="a-101"),
+            ]
+        )
 
 
 @pytest.mark.asyncio

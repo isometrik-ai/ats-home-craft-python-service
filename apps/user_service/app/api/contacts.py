@@ -482,7 +482,8 @@ async def search_contacts(
     summary="Get contact overview",
     description=(
         "Returns overview card counts (total, owners, tenants, vendors) for the Contacts registry. "
-        "Optional `status` aligns with the All / Active / Deleted tabs."
+        "Optional `status` aligns with the All / Active / Deleted tabs. "
+        "Optional `project_id` limits counts to contacts linked via active/pending contact_units."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -495,6 +496,10 @@ async def get_contact_overview(
         None,
         description="Optional contact status filter (active, inactive, prospect, deleted).",
     ),
+    project_id: str | None = Query(
+        None,
+        description="Optional project filter — contacts linked via active/pending contact_units.",
+    ),
 ):
     """Return overview card counts for the Contacts registry dashboard."""
     user_context = await check_permissions(
@@ -503,7 +508,10 @@ async def get_contact_overview(
         permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_contact_overview(status=status.value if status else None)
+    data = await service.get_contact_overview(
+        status=status.value if status else None,
+        project_id=project_id,
+    )
     payload = ContactOverviewResponse.model_validate(data).model_dump(exclude_none=True)
     return success_response(
         request=request,
@@ -594,6 +602,7 @@ async def update_contact(
     ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: UpdateContactRequest = Body(
         ...,
         description="Partial update payload. Only provided fields are updated.",
@@ -625,7 +634,11 @@ async def update_contact(
             db_connection=db_connection,
             permission_codes=CONTACTS_MANAGEMENT_EDIT,
         )
-        service = ContactsService(db_connection=db_connection, user_context=user_context)
+        service = ContactsService(
+            db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=sb_client,
+        )
         event_service = EventService(db_connection=db_connection)
         result = await service.update_contact(contact_id=contact_id, body=body)
         set_audit_context(

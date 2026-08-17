@@ -61,6 +61,7 @@ async def test_get_contact_overview_forwards_org_and_status():
     assert contacts_repo.last_kwargs == {
         "organization_id": "org-1",
         "status": ClientStatus.ACTIVE.value,
+        "project_id": None,
     }
 
 
@@ -76,4 +77,5 @@ async def test_get_contact_overview_default_status():
     assert contacts_repo.last_kwargs == {
         "organization_id": "org-1",
         "status": None,
+        "project_id": None,
     }

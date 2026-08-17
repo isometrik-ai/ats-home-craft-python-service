@@ -93,7 +93,14 @@ class ProjectMembersService:
             payload["joined_at"] = format_iso_datetime(payload["joined_at"])
         return ProjectMemberResponse.model_validate(payload)
 
-    async def list_members(self, *, project_id: str) -> list[ProjectMemberResponse]:
+    async def list_members(
+        self,
+        *,
+        project_id: str,
+        role: ProjectMemberRole | None = None,
+        status: ProjectMemberStatus | None = None,
+        search: str | None = None,
+    ) -> list[ProjectMemberResponse]:
         """List staff assigned to a project."""
         await self._ensure_can_view_members(project_id=project_id)
         await self.setup_service.ensure_project(project_id=project_id)
@@ -102,6 +109,9 @@ class ProjectMembersService:
         rows = await self.projects_repo.list_members_with_profiles(
             organization_id=org_id,
             project_id=project_id,
+            role=role.value if role else None,
+            status=status.value if status else None,
+            search=search,
         )
         return [self._to_response(row) for row in rows]
 

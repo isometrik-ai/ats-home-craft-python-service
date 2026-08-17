@@ -49,6 +49,11 @@ _FAKE_PROJECT_SUMMARY = {
     "property_types": ["residential"],
     "primary_measurement_unit": "sq_ft",
     "units_count": 0,
+    "unit_counts_by_property_type": {
+        "residential": 0,
+        "commercial": 0,
+        "plots": 0,
+    },
     "setup_current_step": "project_basics",
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-01-01T00:00:00Z",
@@ -1506,6 +1511,38 @@ async def test_create_unit(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_bulk_create_units(monkeypatch, client):
+    """POST /projects/{id}/units/bulk creates many units."""
+
+    _patch_projects_access(monkeypatch)
+
+    async def fake_create_units_bulk(_self, *, project_id: str, body):
+        del _self, project_id, body
+        return {
+            "items": [_FAKE_UNIT, {**_FAKE_UNIT, "id": "unit-2", "code": "A-102"}],
+            "created_count": 2,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.units_service.UnitsService.create_units_bulk",
+        fake_create_units_bulk,
+    )
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/units/bulk",
+        json={
+            "units": [
+                {"code": "A-101", "tower_id": TOWER_ID, "floor_id": FLOOR_ID},
+                {"code": "A-102", "tower_id": TOWER_ID, "floor_id": FLOOR_ID},
+            ]
+        },
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["created_count"] == 2
+    assert len(body["data"]["items"]) == 2
+
+
+@pytest.mark.asyncio
 async def test_list_units(monkeypatch, client):
     """GET /projects/{id}/units lists units."""
 
@@ -1923,8 +1960,15 @@ async def test_list_project_members(monkeypatch, client):
     """GET /projects/{project_id}/members returns assigned staff."""
     _patch_projects_access(monkeypatch)
 
-    async def fake_list_members(_self, *, project_id: str):
-        del _self
+    async def fake_list_members(
+        _self,
+        *,
+        project_id: str,
+        role=None,
+        status=None,
+        search=None,
+    ):
+        del _self, role, status, search
         assert project_id == PROJECT_ID
         return [ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)]
 
@@ -1937,6 +1981,44 @@ async def test_list_project_members(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"][0]["user_id"] == ADMIN_USER_ID
     assert body["data"][0]["role"] == "community_admin"
+
+
+@pytest.mark.asyncio
+async def test_list_project_members_with_filters(monkeypatch, client):
+    """GET /projects/{project_id}/members forwards role/status/search query params."""
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_list_members(
+        _self,
+        *,
+        project_id: str,
+        role=None,
+        status=None,
+        search=None,
+    ):
+        del _self
+        captured["project_id"] = project_id
+        captured["role"] = role
+        captured["status"] = status
+        captured["search"] = search
+        return [ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_members_service.ProjectMembersService.list_members",
+        fake_list_members,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/members",
+        params={"role": "security", "status": "active", "search": "john"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"][0]["user_id"] == ADMIN_USER_ID
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["role"].value == "security"
+    assert captured["status"].value == "active"
+    assert captured["search"] == "john"
 
 
 @pytest.mark.asyncio

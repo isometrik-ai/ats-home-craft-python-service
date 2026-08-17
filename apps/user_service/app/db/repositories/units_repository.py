@@ -249,6 +249,30 @@ class UnitsRepository(BaseRepository):
         )
         return dict(row)
 
+    async def bulk_insert_units(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Insert many unit rows in one statement."""
+        if not rows:
+            return []
+
+        columns = list(_UNIT_INSERT_COLUMNS)
+        ncols = len(columns)
+        value_groups: list[str] = []
+        values: list[Any] = []
+        for row_index, row in enumerate(rows):
+            placeholders: list[str] = []
+            for col_index, col in enumerate(columns):
+                param = row_index * ncols + col_index + 1
+                cast = _UNIT_COLUMN_CASTS.get(col, "")
+                placeholders.append(f"${param}{cast}")
+                values.append(row.get(col))
+            value_groups.append(f"({', '.join(placeholders)})")
+
+        query = (
+            f"INSERT INTO units ({', '.join(columns)}) VALUES {', '.join(value_groups)} RETURNING *"
+        )
+        records = await self.db_connection.fetch(query, *values)
+        return [dict(record) for record in records]
+
     async def get_unit(
         self, *, organization_id: str, project_id: str, unit_id: str
     ) -> dict[str, Any] | None:
@@ -812,6 +836,50 @@ class UnitsRepository(BaseRepository):
             elif role == "Tenant":
                 result[unit_id]["tenant"] = payload
         return result
+
+    async def count_units_by_property_type_for_projects(
+        self,
+        *,
+        organization_id: str,
+        project_ids: list[str],
+    ) -> dict[str, dict[str, int]]:
+        """Return non-parking unit counts grouped by project and resolved property type."""
+        if not project_ids:
+            return {}
+
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              u.project_id::text AS project_id,
+              ({_RESOLVED_PROPERTY_TYPE_SQL}) AS property_type,
+              COUNT(*)::int AS unit_count
+            FROM units u
+            LEFT JOIN towers t
+              ON t.id = u.tower_id
+             AND t.organization_id = u.organization_id
+            LEFT JOIN unit_configs uc
+              ON uc.id = u.config_id
+             AND uc.organization_id = u.organization_id
+            WHERE u.organization_id = $1::uuid
+              AND u.project_id = ANY($2::uuid[])
+              AND NOT u.is_parking
+              AND ({_RESOLVED_PROPERTY_TYPE_SQL}) IS NOT NULL
+            GROUP BY u.project_id, ({_RESOLVED_PROPERTY_TYPE_SQL})
+            """,
+            organization_id,
+            project_ids,
+        )
+        counts_by_project: dict[str, dict[str, int]] = {
+            project_id: {"residential": 0, "commercial": 0, "plots": 0}
+            for project_id in project_ids
+        }
+        for row in rows:
+            project_id = str(row["project_id"])
+            property_type = str(row["property_type"])
+            bucket = counts_by_project.get(project_id)
+            if bucket is not None and property_type in bucket:
+                bucket[property_type] = int(row["unit_count"])
+        return counts_by_project
 
     async def count_unit_vehicles(
         self,

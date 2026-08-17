@@ -181,3 +181,43 @@ async def test_parking_zone_operations():
     assert await repo.delete_parking_zone(
         organization_id=ORG_ID, project_id=PROJECT_ID, zone_id=ZONE_ID
     )
+
+
+@pytest.mark.asyncio
+async def test_count_units_by_property_type_for_projects():
+    """Batch unit counts are grouped by project and resolved property type."""
+    conn = _FakeConn(
+        rows=[
+            {"project_id": PROJECT_ID, "property_type": "residential", "unit_count": 12},
+            {"project_id": PROJECT_ID, "property_type": "commercial", "unit_count": 3},
+        ]
+    )
+    repo = UnitsRepository(db_connection=conn)
+
+    counts = await repo.count_units_by_property_type_for_projects(
+        organization_id=ORG_ID,
+        project_ids=[PROJECT_ID],
+    )
+
+    assert counts == {
+        PROJECT_ID: {"residential": 12, "commercial": 3, "plots": 0},
+    }
+    query, args = conn.fetch_calls[0]
+    assert "GROUP BY u.project_id" in query
+    assert "NOT u.is_parking" in query
+    assert args == (ORG_ID, [PROJECT_ID])
+
+
+@pytest.mark.asyncio
+async def test_count_units_by_property_type_for_projects_empty():
+    """Empty project id list skips the database query."""
+    conn = _FakeConn()
+    repo = UnitsRepository(db_connection=conn)
+
+    counts = await repo.count_units_by_property_type_for_projects(
+        organization_id=ORG_ID,
+        project_ids=[],
+    )
+
+    assert counts == {}
+    assert conn.fetch_calls == []

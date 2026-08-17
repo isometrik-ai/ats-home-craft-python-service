@@ -154,6 +154,29 @@ async def test_update_member_role():
 
 
 @pytest.mark.asyncio
+async def test_list_members_passes_filters_to_repository():
+    """List members forwards role/status/search filters to the repository."""
+    repo = MagicMock()
+    repo.list_members_with_profiles = AsyncMock(return_value=[])
+    svc = _service(projects_repo=repo)
+
+    await svc.list_members(
+        project_id=PROJECT_ID,
+        role=ProjectMemberRole.SECURITY,
+        status=ProjectMemberStatus.ACTIVE,
+        search="guard",
+    )
+
+    repo.list_members_with_profiles.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        role=ProjectMemberRole.SECURITY.value,
+        status=ProjectMemberStatus.ACTIVE.value,
+        search="guard",
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_members_formats_joined_at_datetime():
     joined = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
     repo = MagicMock()

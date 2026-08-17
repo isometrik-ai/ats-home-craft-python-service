@@ -42,3 +42,23 @@ class ProjectMemberResponse(BaseModel):
     last_name: str | None = None
     org_role_id: str | None = None
     member_role: str | None = None
+
+
+class ListProjectMembersQuery(BaseModel):
+    """Query params for listing project members."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    role: ProjectMemberRole | None = Field(
+        default=None,
+        description="Filter by project member role (community_admin, security, etc.).",
+    )
+    status: ProjectMemberStatus | None = Field(
+        default=None,
+        description=("Filter by assignment status. When omitted, suspended members are excluded."),
+    )
+    search: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Case-insensitive match on member email or name.",
+    )

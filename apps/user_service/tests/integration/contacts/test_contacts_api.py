@@ -342,8 +342,8 @@ async def test_get_contact_overview(monkeypatch, client):
     """GET /contacts/overview returns dashboard counts."""
     _patch_contacts_access(monkeypatch)
 
-    async def fake_get_overview(_self, *, status=None):
-        del _self, status
+    async def fake_get_overview(_self, *, status=None, project_id=None):
+        del _self, status, project_id
         return {"total": 10, "owners": 4, "tenants": 2, "vendors": 4}
 
     monkeypatch.setattr(
@@ -354,6 +354,32 @@ async def test_get_contact_overview(monkeypatch, client):
     res = await client.get("/v1/contacts/overview")
     body = assert_success(res, 200)
     assert body["data"]["total"] == 10
+
+
+@pytest.mark.asyncio
+async def test_get_contact_overview_with_project_filter(monkeypatch, client):
+    """GET /contacts/overview forwards project_id query param."""
+    _patch_contacts_access(monkeypatch)
+    captured: dict[str, str | None] = {}
+
+    async def fake_get_overview(_self, *, status=None, project_id=None):
+        del _self, status
+        captured["project_id"] = project_id
+        return {"total": 2, "owners": 1, "tenants": 1, "vendors": 0}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.ContactsService.get_contact_overview",
+        fake_get_overview,
+    )
+
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+    res = await client.get(
+        "/v1/contacts/overview",
+        params={"project_id": project_id},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["total"] == 2
+    assert captured["project_id"] == project_id
 
 
 @pytest.mark.asyncio

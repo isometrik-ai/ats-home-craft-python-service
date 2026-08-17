@@ -450,6 +450,7 @@
       "vehicle_request_reviewed": "Vehicle request reviewed successfully.",
       "vehicle_deleted": "Vehicle removed successfully.",
       "unit_created": "Unit created successfully.",
+      "units_created_bulk": "Units created successfully.",
       "unit_updated": "Unit updated successfully.",
       "unit_deleted": "Unit deleted successfully.",
       "unit_owner_unassigned": "Owner unassigned from unit successfully.",

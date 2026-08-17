@@ -25,6 +25,7 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.schemas.passes import AdminUnitPassListQuery
 from apps.user_service.app.schemas.project_inventory import (
+    BulkCreateUnitsRequest,
     ConfigMediaRequest,
     CreateFacilityRequest,
     CreateParkingZoneRequest,
@@ -50,6 +51,7 @@ from apps.user_service.app.schemas.project_inventory import (
 )
 from apps.user_service.app.schemas.project_members import (
     AssignProjectMemberRequest,
+    ListProjectMembersQuery,
     UpdateProjectMemberRequest,
 )
 from apps.user_service.app.schemas.project_setup import (
@@ -2427,6 +2429,63 @@ async def create_unit(
     )
 
 
+@handle_api_exceptions("bulk create units")
+@router.post(
+    "/{project_id}/units/bulk",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Bulk create units",
+    description=(
+        "Create up to 200 units in a single request. All rows are inserted in one "
+        "transaction; if any unit code conflicts with an existing project unit, the "
+        "entire request fails."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("20/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="units",
+    category="PROJECT_SETUP",
+)
+async def bulk_create_units(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: BulkCreateUnitsRequest = Body(...),
+):
+    """Create many units for a project in one call."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+    )
+    service = UnitsService(db_connection=db_connection, user_context=user_context)
+    data = await service.create_units_bulk(project_id=project_id, body=body)
+    _set_audit(
+        request,
+        user_context,
+        table="units",
+        requested_id=project_id,
+        description=f"Bulk created {data.get('created_count', 0)} units in project: {project_id}",
+        new_data={
+            "created_count": data.get("created_count"),
+            "unit_ids": [item.get("id") for item in data.get("items", [])],
+        },
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.units_created_bulk",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=data,
+    )
+
+
 @handle_api_exceptions("list units")
 @router.get(
     "/{project_id}/units",
@@ -3330,12 +3389,17 @@ async def delete_site_map_overlay(
     "/{project_id}/members",
     status_code=http_status.HTTP_200_OK,
     summary="List staff assigned to a project",
+    description=(
+        "Returns project member rows joined with organization member profiles. "
+        "Filter by role, status, or search by name/email."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_project_members(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
+    query: ListProjectMembersQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -3354,7 +3418,12 @@ async def list_project_members(
         db_connection=db_connection,
         user_context=user_context,
     )
-    items = await service.list_members(project_id=project_id)
+    items = await service.list_members(
+        project_id=project_id,
+        role=query.role,
+        status=query.status,
+        search=query.search,
+    )
     payload = [item.model_dump() for item in items]
     return list_response(
         request=request,
