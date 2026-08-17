@@ -1272,16 +1272,38 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         *,
         organization_id: str,
         status: str | None,
+        project_id: str | None = None,
     ) -> dict[str, int]:
         """Return overview card counts from active contact_roles for an organization."""
         args: list[Any] = [organization_id]
         where = ["ct.organization_id = $1::uuid"]
+        next_param_index = 2
         if status:
-            where.append("ct.status = $2")
+            where.append(f"ct.status = ${next_param_index}")
             args.append(status)
+            next_param_index += 1
         else:
-            where.append("ct.status <> $2")
+            where.append(f"ct.status <> ${next_param_index}")
             args.append(ClientStatus.DELETED.value)
+            next_param_index += 1
+
+        if project_id:
+            where.append(
+                f"""EXISTS (
+                  SELECT 1
+                  FROM contact_units cu
+                  WHERE cu.contact_id = ct.id
+                    AND cu.organization_id = ct.organization_id
+                    AND cu.project_id = ${next_param_index}::uuid
+                    AND cu.status IN ('active', 'pending')
+                )"""
+            )
+            args.append(project_id)
+            next_param_index += 1
+
+        owner_param = next_param_index
+        tenant_param = next_param_index + 1
+        vendor_param = next_param_index + 2
 
         where_sql = " AND ".join(where)
         row = await self.db_connection.fetchrow(
@@ -1293,7 +1315,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                   SELECT 1 FROM contact_roles cr
                   WHERE cr.contact_id = ct.id
                     AND cr.organization_id = ct.organization_id
-                    AND cr.role_type = ${len(args) + 1}::public.contact_role_type
+                    AND cr.role_type = ${owner_param}::public.contact_role_type
                     AND cr.status = 'active'::public.contact_role_status
                     AND cr.ended_at IS NULL
                 )
@@ -1303,7 +1325,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                   SELECT 1 FROM contact_roles cr
                   WHERE cr.contact_id = ct.id
                     AND cr.organization_id = ct.organization_id
-                    AND cr.role_type = ${len(args) + 2}::public.contact_role_type
+                    AND cr.role_type = ${tenant_param}::public.contact_role_type
                     AND cr.status = 'active'::public.contact_role_status
                     AND cr.ended_at IS NULL
                 )
@@ -1313,7 +1335,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                   SELECT 1 FROM contact_roles cr
                   WHERE cr.contact_id = ct.id
                     AND cr.organization_id = ct.organization_id
-                    AND cr.role_type = ${len(args) + 3}::public.contact_role_type
+                    AND cr.role_type = ${vendor_param}::public.contact_role_type
                     AND cr.status = 'active'::public.contact_role_status
                     AND cr.ended_at IS NULL
                 )

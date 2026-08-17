@@ -482,7 +482,8 @@ async def search_contacts(
     summary="Get contact overview",
     description=(
         "Returns overview card counts (total, owners, tenants, vendors) for the Contacts registry. "
-        "Optional `status` aligns with the All / Active / Deleted tabs."
+        "Optional `status` aligns with the All / Active / Deleted tabs. "
+        "Optional `project_id` limits counts to contacts linked via active/pending contact_units."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -495,6 +496,10 @@ async def get_contact_overview(
         None,
         description="Optional contact status filter (active, inactive, prospect, deleted).",
     ),
+    project_id: str | None = Query(
+        None,
+        description="Optional project filter — contacts linked via active/pending contact_units.",
+    ),
 ):
     """Return overview card counts for the Contacts registry dashboard."""
     user_context = await check_permissions(
@@ -503,7 +508,10 @@ async def get_contact_overview(
         permission_codes=CONTACTS_MANAGEMENT_VIEW,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_contact_overview(status=status.value if status else None)
+    data = await service.get_contact_overview(
+        status=status.value if status else None,
+        project_id=project_id,
+    )
     payload = ContactOverviewResponse.model_validate(data).model_dump(exclude_none=True)
     return success_response(
         request=request,

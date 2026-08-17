@@ -2458,12 +2458,18 @@ class ContactsService:
             self._normalize_contact_list_row(list_row)
         return {"items": rows, "total": total}
 
-    async def get_contact_overview(self, *, status: str | None) -> dict[str, int]:
+    async def get_contact_overview(
+        self,
+        *,
+        status: str | None,
+        project_id: str | None = None,
+    ) -> dict[str, int]:
         """Return overview card counts for the Contacts registry dashboard."""
         org_id = self.user_context.organization_id
         return await self.contacts_repo.get_contact_overview(
             organization_id=org_id,
             status=status,
+            project_id=project_id,
         )
 
     @staticmethod

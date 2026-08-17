@@ -616,6 +616,26 @@ async def test_get_contact_overview():
 
 
 @pytest.mark.asyncio
+async def test_get_contact_overview_project_filter():
+    """Overview adds contact_units EXISTS filter when project_id is set."""
+    conn = _async_mock_conn(row={"total": 3, "owners": 1, "tenants": 1, "vendors": 1})
+    repo = ContactsRepository(db_connection=conn)
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+
+    overview = await repo.get_contact_overview(
+        organization_id=ORG_ID,
+        status=ClientStatus.ACTIVE.value,
+        project_id=project_id,
+    )
+
+    assert overview["total"] == 3
+    query, args = _sql_args(conn.fetchrow)
+    assert "contact_units cu" in query
+    assert "cu.project_id = $3::uuid" in query
+    assert project_id in args
+
+
+@pytest.mark.asyncio
 async def test_get_contacts_by_ids():
     """get_contacts_by_ids returns minimal rows for id list."""
     conn = _FakeConn(rows=[{"id": "c1"}, {"id": "c2"}])
