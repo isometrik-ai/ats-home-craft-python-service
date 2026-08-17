@@ -606,10 +606,45 @@ class ProjectsRepository(BaseRepository):
         *,
         organization_id: str,
         project_id: str,
+        role: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
     ) -> list[dict[str, Any]]:
         """List project members joined with organization member profile fields."""
+        conditions = [
+            "pm.organization_id = $1::uuid",
+            "pm.project_id = $2::uuid",
+        ]
+        args: list[Any] = [organization_id, project_id]
+        next_param = 3
+
+        if status is not None:
+            conditions.append(f"pm.status = ${next_param}")
+            args.append(status)
+            next_param += 1
+        else:
+            conditions.append("pm.status != 'suspended'")
+
+        if role is not None:
+            conditions.append(f"pm.role = ${next_param}::project_member_role")
+            args.append(role)
+            next_param += 1
+
+        if search:
+            pattern = f"%{search.strip()}%"
+            conditions.append(
+                f"""(
+                  om.email ILIKE ${next_param}
+                  OR om.first_name ILIKE ${next_param}
+                  OR om.last_name ILIKE ${next_param}
+                )"""
+            )
+            args.append(pattern)
+            next_param += 1
+
+        where_sql = " AND ".join(conditions)
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               pm.id::text AS id,
               pm.organization_id::text AS organization_id,
@@ -630,13 +665,10 @@ class ProjectsRepository(BaseRepository):
               ON om.user_id = pm.user_id
              AND om.organization_id = pm.organization_id
              AND om.status = 'active'
-            WHERE pm.organization_id = $1::uuid
-              AND pm.project_id = $2::uuid
-              AND pm.status != 'suspended'
+            WHERE {where_sql}
             ORDER BY pm.joined_at NULLS LAST, pm.created_at
             """,
-            organization_id,
-            project_id,
+            *args,
         )
         return [dict(row) for row in rows]
 

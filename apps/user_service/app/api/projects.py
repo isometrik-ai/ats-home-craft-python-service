@@ -51,6 +51,7 @@ from apps.user_service.app.schemas.project_inventory import (
 )
 from apps.user_service.app.schemas.project_members import (
     AssignProjectMemberRequest,
+    ListProjectMembersQuery,
     UpdateProjectMemberRequest,
 )
 from apps.user_service.app.schemas.project_setup import (
@@ -3388,12 +3389,17 @@ async def delete_site_map_overlay(
     "/{project_id}/members",
     status_code=http_status.HTTP_200_OK,
     summary="List staff assigned to a project",
+    description=(
+        "Returns project member rows joined with organization member profiles. "
+        "Filter by role, status, or search by name/email."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_project_members(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
+    query: ListProjectMembersQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -3412,7 +3418,12 @@ async def list_project_members(
         db_connection=db_connection,
         user_context=user_context,
     )
-    items = await service.list_members(project_id=project_id)
+    items = await service.list_members(
+        project_id=project_id,
+        role=query.role,
+        status=query.status,
+        search=query.search,
+    )
     payload = [item.model_dump() for item in items]
     return list_response(
         request=request,

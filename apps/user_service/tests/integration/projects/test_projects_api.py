@@ -1955,8 +1955,15 @@ async def test_list_project_members(monkeypatch, client):
     """GET /projects/{project_id}/members returns assigned staff."""
     _patch_projects_access(monkeypatch)
 
-    async def fake_list_members(_self, *, project_id: str):
-        del _self
+    async def fake_list_members(
+        _self,
+        *,
+        project_id: str,
+        role=None,
+        status=None,
+        search=None,
+    ):
+        del _self, role, status, search
         assert project_id == PROJECT_ID
         return [ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)]
 
@@ -1969,6 +1976,44 @@ async def test_list_project_members(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"][0]["user_id"] == ADMIN_USER_ID
     assert body["data"][0]["role"] == "community_admin"
+
+
+@pytest.mark.asyncio
+async def test_list_project_members_with_filters(monkeypatch, client):
+    """GET /projects/{project_id}/members forwards role/status/search query params."""
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_list_members(
+        _self,
+        *,
+        project_id: str,
+        role=None,
+        status=None,
+        search=None,
+    ):
+        del _self
+        captured["project_id"] = project_id
+        captured["role"] = role
+        captured["status"] = status
+        captured["search"] = search
+        return [ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_members_service.ProjectMembersService.list_members",
+        fake_list_members,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/members",
+        params={"role": "security", "status": "active", "search": "john"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"][0]["user_id"] == ADMIN_USER_ID
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["role"].value == "security"
+    assert captured["status"].value == "active"
+    assert captured["search"] == "john"
 
 
 @pytest.mark.asyncio
