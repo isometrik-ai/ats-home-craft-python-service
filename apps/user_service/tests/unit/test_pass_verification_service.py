@@ -202,12 +202,12 @@ async def test_verify_denied_when_used():
 
 @pytest.mark.asyncio
 async def test_verify_too_early():
-    """Verify flags a pass that has not started yet."""
+    """Verify flags a pass whose validity has not started yet (future calendar day)."""
     now = datetime.now(timezone.utc)
     passes_repo = _FakePassesRepo(
         row=_pass_row(
-            valid_from=now + timedelta(hours=2),
-            valid_until=now + timedelta(hours=8),
+            valid_from=now + timedelta(days=1),
+            valid_until=now + timedelta(days=2),
         )
     )
     svc = _service(passes_repo=passes_repo)
@@ -215,6 +215,44 @@ async def test_verify_too_early():
     assert result["access_status"] == PassAccessStatus.APPROVED.value
     assert result["can_check_in"] is False
     assert result["too_early"] is True
+
+
+@pytest.mark.asyncio
+async def test_verify_same_day_before_start_time():
+    """Verify allows check-in on the valid day even before valid_from time."""
+    now = datetime.now(timezone.utc)
+    passes_repo = _FakePassesRepo(
+        row=_pass_row(
+            valid_from=now + timedelta(minutes=3),
+            valid_until=now + timedelta(hours=8),
+        )
+    )
+    svc = _service(passes_repo=passes_repo)
+    result = await svc.verify(code="4821")
+    assert result["access_status"] == PassAccessStatus.APPROVED.value
+    assert result["can_check_in"] is True
+    assert result["too_early"] is False
+
+
+@pytest.mark.asyncio
+async def test_check_in_same_day_before_start_time():
+    """Check-in succeeds on the valid day even before valid_from time."""
+    now = datetime.now(timezone.utc)
+    passes_repo = _FakePassesRepo(
+        row=_pass_row(
+            valid_from=now + timedelta(minutes=3),
+            valid_until=now + timedelta(hours=8),
+        )
+    )
+    events_repo = _FakeEventsRepo()
+    svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+    body = CheckInRequest(
+        gate_id="gate-1",
+        entry_method=PassEntryMethod.QR,
+        access_status=PassAccessStatus.APPROVED,
+    )
+    result = await svc.check_in(pass_id="pass-1", body=body)
+    assert result["entry_count"] == 1
 
 
 @pytest.mark.asyncio

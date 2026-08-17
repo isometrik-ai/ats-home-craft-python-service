@@ -28,6 +28,10 @@ from apps.user_service.app.schemas.passes import (
     UpdatePassRequest,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.pass_validity import (
+    is_pass_expired_by_day,
+    is_pass_too_early_by_day,
+)
 from libs.shared_utils.http_exceptions import (
     InternalServerErrorException,
     NotFoundException,
@@ -87,11 +91,11 @@ class PassesService:
             return PassDisplayStatus.USED.value
         valid_from = cls._parse_dt(row.get("valid_from"))
         valid_until = cls._parse_dt(row.get("valid_until"))
-        if valid_until and now > valid_until:
+        if is_pass_expired_by_day(valid_until, now=now):
             return PassDisplayStatus.EXPIRED.value
         if status == PassStatus.EXPIRED.value:
             return PassDisplayStatus.EXPIRED.value
-        if valid_from and now < valid_from:
+        if is_pass_too_early_by_day(valid_from, now=now):
             return PassDisplayStatus.UPCOMING.value
         return PassDisplayStatus.ACTIVE.value
 
