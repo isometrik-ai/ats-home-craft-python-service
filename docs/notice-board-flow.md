@@ -516,7 +516,7 @@ For scheduled notice: change `publish_mode` to `now` → sets `live`, `published
 | Scope          | `scope_label` from `scope_type` + tower names         |
 | Date line      | See below                                             |
 | Pinned ribbon  | `pinned = true` when active pin exists                |
-| Views / likes  | `view_count`, `like_count`                            |
+| Views / likes  | `view_count` (eye), `like_count` (heart) — see §4.11  |
 | Edit icon      | Hidden when `status = live`                           |
 | Duplicate      | Live → Create Notice; draft/scheduled → duplicate API |
 | Restore        | Shown only on Deleted tab                             |
@@ -549,6 +549,106 @@ Returns approximate recipient count for the create form ("**N** people will rece
 
 Staff and Security counts ignore tower scope in Phase 1 (org/project scoped). Owner/Tenant scale
 by tower selection.
+
+### 4.11 Engagement metrics — views & likes
+
+Admins see two independent counters on every notice **card** and in the **detail drawer** (eye =
+views, heart = likes / acknowledgements). They measure different resident behaviour.
+
+```text
+Admin notice card (Live tab)
+┌──────────────────────────────────────┐
+│ NTC-1037                        Live │
+│ Maintenance                          │
+│ Water supply shut-off…               │
+│ …                                    │
+│ 👁 441    ♥ 18                       │  ← view_count / like_count from notices row
+└──────────────────────────────────────┘
+
+Scheduled / draft notices show 0 / 0 until residents interact after go-live.
+```
+
+#### What each counter means
+
+| Metric           | Admin UI   | Meaning                                              | Who increments it                     |
+| ---------------- | ---------- | ---------------------------------------------------- | ------------------------------------- |
+| **`view_count`** | Eye icon   | Times residents **opened** the notice detail         | Resident `GET /v1/notices/{id}`       |
+| **`like_count`** | Heart icon | Residents who **explicitly acknowledged** the notice | Resident `POST /v1/notices/{id}/like` |
+
+**View without like:** A resident opens the notice → `view_count` increases, `like_count` unchanged
+(e.g. 441 views, 18 likes).
+
+**View with like:** Opening still increments views; tapping like additionally increments likes (once
+per contact).
+
+**Unlike:** `DELETE /v1/notices/{id}/like` decrements `like_count`; views are never decremented.
+
+#### Data model
+
+| Store                | Role                                                                 |
+| -------------------- | -------------------------------------------------------------------- |
+| `notices.view_count` | Denormalized total; default `0`; shown on admin list + detail        |
+| `notices.like_count` | Denormalized total; default `0`; shown on admin list + detail        |
+| `notice_likes`       | One row per `(notice_id, contact_id)`; source of truth for who liked |
+
+Admin APIs are **read-only** for both counters — staff never POST views or likes.
+
+#### Resident flow (write path)
+
+```mermaid
+sequenceDiagram
+  participant ResidentApp
+  participant ResidentAPI as GET/POST /v1/notices
+  participant DB as Postgres
+
+  ResidentApp->>ResidentAPI: GET /notices/{id}
+  ResidentAPI->>DB: view_count += 1
+  ResidentAPI-->>ResidentApp: detail + view_count + like_count + liked_by_me
+
+  ResidentApp->>ResidentAPI: POST /notices/{id}/like
+  ResidentAPI->>DB: INSERT notice_likes; like_count += 1
+  ResidentAPI-->>ResidentApp: updated counts + liked_by_me true
+```
+
+1. **Open notice** — `GET /v1/notices/{notice_id}` after visibility check →
+   `notices_repository.increment_view_count`.
+1. **Like** — `POST /v1/notices/{notice_id}/like` → insert `notice_likes` (idempotent per contact)
+   → bump `like_count`.
+1. **Unlike** — `DELETE .../like` → remove row → decrement `like_count` (floor at 0).
+
+Feed and banner list endpoints return current counts but **do not** increment views; only detail
+GET does.
+
+#### Admin read path
+
+| Surface                            | Fields                     | API                                  |
+| ---------------------------------- | -------------------------- | ------------------------------------ |
+| Notice cards (All / Live / … tabs) | `view_count`, `like_count` | `GET .../notices?status=` list items |
+| Detail drawer — Stats section      | same                       | `GET .../notices/{id}`               |
+
+Counts update on next list/detail fetch after resident activity (no realtime push to admin in
+Phase 1).
+
+#### Product rules
+
+| Rule                                              | Behaviour                                                         |
+| ------------------------------------------------- | ----------------------------------------------------------------- |
+| Only **live** notices accept resident views/likes | Draft / scheduled / deleted → resident detail returns 404         |
+| Views ≠ likes                                     | High views with low likes is expected (read but not acknowledged) |
+| Scheduled cards                                   | Show `0` / `0` until published and opened                         |
+| Duplicate / restore                               | New notice row starts at `0` / `0`                                |
+| Admin actions                                     | Create, edit, pin, delete do not change engagement counts         |
+
+#### Phase 1 vs future dedupe
+
+**Phase 1 (current):** Every resident detail GET increments `view_count` (repeat opens by the
+same contact each add +1). Likes remain one-per-contact via `notice_likes` unique constraint.
+
+**Optional later:** `notice_views` junction table to count **unique** viewers or dedupe views per
+contact per notice; admin would still read `view_count` from `notices`.
+
+Implementation: `notices_resident_service.get_notice`, `notices_repository.increment_view_count`,
+`upsert_like` / `delete_like`.
 
 ______________________________________________________________________
 
@@ -720,9 +820,10 @@ DELETE /v1/notices/{notice_id}/like
 ```
 
 - **Banner:** up to 6 pinned live notices for project (from `notice_pins`), filtered by resident
-  visibility rule.
-- **Detail GET:** increment `view_count` (optional dedupe table later).
-- **Like:** upsert/delete `notice_likes`; update denormalized `like_count`.
+  visibility rule. Returns `view_count`, `like_count`, `liked_by_me`; does **not** increment views.
+- **Feed list:** same count fields; does **not** increment views.
+- **Detail GET:** increments `view_count` by 1 when resident opens notice — see §4.11.
+- **Like / unlike:** upsert/delete `notice_likes`; update denormalized `like_count` — see §4.11.
 
 Auth: `extract_notice_viewer_context()` — resolves **residents** via `contacts`, or **staff/security** via active `project_members` on the requested `project_id` (list/banner) or the notice's project (detail/like).
 
@@ -791,6 +892,7 @@ Route: `/projects/:projectId/community/notices` ([frontend-membership-flow.md](.
 | Live card Duplicate      | Opens Create Notice prefilled                           |
 | Scheduled card           | Shows "Publishes {date}"; pin toggle disabled in create |
 | Deleted card             | Restore button; no edit/duplicate                       |
+| Card engagement row      | Eye = `view_count`, heart = `like_count` (§4.11)        |
 | Applied filters          | Chips + "Clear all"                                     |
 | Create drawer validation | Footer note lists missing required fields               |
 
@@ -836,3 +938,4 @@ ______________________________________________________________________
 | Project access               | `ensure_staff_project_access` in router or service          |
 | Resident visibility          | `notices_resident_service._is_visible_to_contact` (Phase 2) |
 | Tab counts                   | `notices_repository.get_summary_counts`                     |
+| View / like counters         | §4.11; `notices_resident_service` + `notices_repository`    |
