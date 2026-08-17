@@ -49,6 +49,11 @@ _FAKE_PROJECT_SUMMARY = {
     "property_types": ["residential"],
     "primary_measurement_unit": "sq_ft",
     "units_count": 0,
+    "unit_counts_by_property_type": {
+        "residential": 0,
+        "commercial": 0,
+        "plots": 0,
+    },
     "setup_current_step": "project_basics",
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-01-01T00:00:00Z",

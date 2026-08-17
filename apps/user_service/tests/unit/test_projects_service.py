@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from asyncpg import UniqueViolationError
 
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import (
     MeasurementUnit,
     ProjectMediaKind,
@@ -34,6 +35,17 @@ PROJECT_ID = "880e8400-e29b-41d4-a716-446655440003"
 def _ctx() -> UserContext:
     """Build user context for project tests."""
     return UserContext(user_id=USER_ID, email="admin@example.com", organization_id=ORG_ID)
+
+
+def _patch_unit_counts_by_property_type(
+    counts: dict[str, dict[str, int]] | None = None,
+):
+    """Patch batch unit-count lookup used by project list endpoints."""
+    return patch.object(
+        UnitsRepository,
+        "count_units_by_property_type_for_projects",
+        new=AsyncMock(return_value=counts or {}),
+    )
 
 
 class _FakeProjectsRepo:
@@ -305,11 +317,18 @@ async def test_get_project_details_not_found():
 
 @pytest.mark.asyncio
 async def test_list_projects_returns_summaries():
-    """List projects serializes summary rows."""
+    """List projects serializes summary rows and property-type unit counts."""
     service = _service(projects_repo=_FakeProjectsRepo(projects=[_project_row()]))
-    with patch(
-        "libs.shared_middleware.jwt_auth.check_user_access_async",
-        new=AsyncMock(return_value=True),
+    with (
+        patch(
+            "libs.shared_middleware.jwt_auth.check_user_access_async",
+            new=AsyncMock(return_value=True),
+        ),
+        _patch_unit_counts_by_property_type(
+            {
+                PROJECT_ID: {"residential": 8, "commercial": 2, "plots": 0},
+            }
+        ),
     ):
         result = await service.list_projects(
             search=None,
@@ -320,6 +339,11 @@ async def test_list_projects_returns_summaries():
         )
     assert result["total"] == 1
     assert result["items"][0]["code"] == "sunrise-towers"
+    assert result["items"][0]["unit_counts_by_property_type"] == {
+        "residential": 8,
+        "commercial": 2,
+        "plots": 0,
+    }
 
 
 @pytest.mark.asyncio
@@ -331,9 +355,12 @@ async def test_list_projects_assigned_only_uses_member_query():
     async def _access(**kwargs):
         return kwargs["permission_code"] == ["projects_management.view_assigned"]
 
-    with patch(
-        "libs.shared_middleware.jwt_auth.check_user_access_async",
-        new=AsyncMock(side_effect=_access),
+    with (
+        patch(
+            "libs.shared_middleware.jwt_auth.check_user_access_async",
+            new=AsyncMock(side_effect=_access),
+        ),
+        _patch_unit_counts_by_property_type(),
     ):
         result = await service.list_projects(
             search=None,
@@ -365,13 +392,14 @@ async def test_list_my_projects_includes_role():
     """My projects adds role from member row."""
     row = _project_row(role="community_admin")
     service = _service(projects_repo=_FakeProjectsRepo(projects=[row]))
-    result = await service.list_my_projects(
-        search=None,
-        status=None,
-        property_type=None,
-        page=1,
-        page_size=20,
-    )
+    with _patch_unit_counts_by_property_type():
+        result = await service.list_my_projects(
+            search=None,
+            status=None,
+            property_type=None,
+            page=1,
+            page_size=20,
+        )
     assert result["items"][0]["role"] == "community_admin"
 
 

@@ -102,6 +102,16 @@ class ListProjectsRequest(BaseModel):
     page_size: int = Field(default=20, ge=1, le=100)
 
 
+class PropertyTypeUnitCounts(BaseModel):
+    """Non-parking unit counts grouped by resolved property type."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    residential: int = 0
+    commercial: int = 0
+    plots: int = 0
+
+
 class ProjectSummaryResponse(BaseModel):
     """List row for a project."""
 
@@ -118,6 +128,9 @@ class ProjectSummaryResponse(BaseModel):
     property_types: list[str] = Field(default_factory=list)
     primary_measurement_unit: str
     units_count: int = 0
+    unit_counts_by_property_type: PropertyTypeUnitCounts = Field(
+        default_factory=PropertyTypeUnitCounts
+    )
     setup_current_step: str
     created_at: str
     updated_at: str

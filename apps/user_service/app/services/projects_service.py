@@ -14,7 +14,8 @@ from apps.user_service.app.db.repositories.organization_member_repository import
     OrganizationMemberRepository,
 )
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
-from apps.user_service.app.schemas.enums import ProjectMediaKind
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
+from apps.user_service.app.schemas.enums import ProjectMediaKind, PropertyType
 from apps.user_service.app.schemas.project_setup import (
     CreateProjectRequest,
     ProjectMediaRequest,
@@ -126,6 +127,45 @@ class ProjectsService:
         for key in _COMMUNITY_ADMIN_ROW_KEYS:
             out.pop(key, None)
         return out
+
+    @staticmethod
+    def _empty_unit_counts_by_property_type() -> dict[str, int]:
+        """Default zero counts for each property type bucket."""
+        return {
+            PropertyType.RESIDENTIAL.value: 0,
+            PropertyType.COMMERCIAL.value: 0,
+            PropertyType.PLOTS.value: 0,
+        }
+
+    async def _build_project_list_items(
+        self,
+        *,
+        rows: list[dict[str, Any]],
+        include_role: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Serialize list rows and attach per-property-type unit counts."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        project_ids = [str(row["id"]) for row in rows]
+        counts_by_project = await UnitsRepository(
+            self.db_connection
+        ).count_units_by_property_type_for_projects(
+            organization_id=org_id,
+            project_ids=project_ids,
+        )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            summary = (
+                self._my_project_summary_from_row(row)
+                if include_role
+                else self._summary_from_row(row)
+            )
+            summary["unit_counts_by_property_type"] = counts_by_project.get(
+                summary["id"],
+                self._empty_unit_counts_by_property_type(),
+            )
+            items.append(summary)
+        return items
 
     @staticmethod
     def _summary_from_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -430,7 +470,7 @@ class ProjectsService:
                 page_size=page_size,
             )
         return {
-            "items": [self._summary_from_row(row) for row in rows],
+            "items": await self._build_project_list_items(rows=rows),
             "total": total,
         }
 
@@ -461,7 +501,7 @@ class ProjectsService:
             page_size=page_size,
         )
         return {
-            "items": [self._my_project_summary_from_row(row) for row in rows],
+            "items": await self._build_project_list_items(rows=rows, include_role=True),
             "total": total,
         }
 
