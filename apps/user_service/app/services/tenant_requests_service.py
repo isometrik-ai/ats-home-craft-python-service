@@ -24,6 +24,7 @@ from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import (
     ContactType,
     TenantRequestDocumentStatus,
+    TenantRequestDocumentType,
     TenantRequestEventType,
     TenantRequestListBucket,
     TenantRequestStatus,
@@ -73,6 +74,12 @@ _INFLIGHT_STATUSES = {
     TenantRequestStatus.PENDING_REVIEW.value,
     TenantRequestStatus.AWAITING_RESUBMISSION.value,
     TenantRequestStatus.READY_TO_APPROVE.value,
+}
+
+_TENANT_REQUEST_DOCUMENT_LABELS: dict[str, str] = {
+    TenantRequestDocumentType.ID_PROOF.value: "ID proof",
+    TenantRequestDocumentType.RENTAL_AGREEMENT.value: "Rental agreement",
+    TenantRequestDocumentType.POLICE_VERIFICATION.value: "Police verification",
 }
 
 
@@ -142,6 +149,57 @@ class TenantRequestsService:
         if isinstance(value, Decimal):
             return format(value, "f")
         return str(value)
+
+    @staticmethod
+    def _document_display_name(document: dict[str, Any]) -> str:
+        """Prefer uploaded file name; fall back to a readable document type label."""
+        file_name = str(document.get("file_name") or "").strip()
+        if file_name:
+            return file_name
+        document_type = str(document.get("document_type") or "").strip()
+        if document_type in _TENANT_REQUEST_DOCUMENT_LABELS:
+            return _TENANT_REQUEST_DOCUMENT_LABELS[document_type]
+        if document_type:
+            return document_type.replace("_", " ").title()
+        return "Document"
+
+    async def _notify_document_review(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        tenant_request_id: str,
+        document_id: str,
+        contact_id: str,
+        document: dict[str, Any],
+        message_key: str,
+        idempotency_suffix: str,
+    ) -> None:
+        """Push document verify/reject updates to the request submitter."""
+        if not contact_id:
+            return
+        document_name = self._document_display_name(document)
+        await self._push().send_to_contact(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            message_key=message_key,
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            params={"document_name": document_name},
+            data={
+                "tenant_request_id": tenant_request_id,
+                "document_id": document_id,
+                "project_id": project_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": tenant_request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": (
+                    f"tenant_request:{tenant_request_id}:{idempotency_suffix}:{document_id}"
+                ),
+            },
+        )
 
     @staticmethod
     def _derive_header_status(documents: list[dict[str, Any]]) -> str:
@@ -835,22 +893,15 @@ class TenantRequestsService:
             project_id=project_id,
             tenant_request_id=tenant_request_id,
         )
-        await self._push().send_to_contact(
+        await self._notify_document_review(
             organization_id=org_id,
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+            document_id=document_id,
             contact_id=str(row.get("submitted_by_contact_id") or ""),
+            document=updated,
             message_key="notifications.push.tenant_request.document_verified",
-            notification_type="NOTIFICATION_TYPE_TENANT",
-            feed_type="tenant",
-            data={
-                "tenant_request_id": tenant_request_id,
-                "project_id": project_id,
-                "screen": "tenant_request_detail",
-            },
-            entity={"kind": "tenant_request", "id": tenant_request_id},
-            options={
-                "click_action": "OPEN_TENANT_REQUEST",
-                "idempotency_key": f"tenant_request:{tenant_request_id}:document_verified:{document_id}",
-            },
+            idempotency_suffix="document_verified",
         )
         return await self._serialize_detail(row)
 
@@ -899,6 +950,16 @@ class TenantRequestsService:
         row = await self._get_admin_request_or_raise(
             project_id=project_id,
             tenant_request_id=tenant_request_id,
+        )
+        await self._notify_document_review(
+            organization_id=org_id,
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+            document_id=document_id,
+            contact_id=str(row.get("submitted_by_contact_id") or ""),
+            document=updated,
+            message_key="notifications.push.tenant_request.document_rejected",
+            idempotency_suffix="document_rejected",
         )
         return await self._serialize_detail(row)
 

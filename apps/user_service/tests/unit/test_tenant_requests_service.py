@@ -170,8 +170,14 @@ class _FakeTenantRequestsRepo:
         self.list_rows = [_request_row()]
         self.list_total = 1
         self.insert_raises_unique = False
-        self.verify_returns: dict[str, Any] | None = {"document_type": "id_proof"}
-        self.reject_returns: dict[str, Any] | None = {"document_type": "id_proof"}
+        self.verify_returns: dict[str, Any] | None = {
+            "document_type": "id_proof",
+            "file_name": "passport.pdf",
+        }
+        self.reject_returns: dict[str, Any] | None = {
+            "document_type": "id_proof",
+            "file_name": "passport.pdf",
+        }
         self.reupload_returns: dict[str, Any] | None = {"document_type": "id_proof"}
         self.active_approved: dict[str, Any] | None = None
 
@@ -318,12 +324,15 @@ class _FakeContactUnitsRepo:
 
 
 class _FakePushDispatcher:
+    def __init__(self) -> None:
+        self.contact_calls: list[dict[str, Any]] = []
+
     async def send_to_org_members(self, **kwargs):
         del kwargs
         return 1
 
     async def send_to_contact(self, **kwargs):
-        del kwargs
+        self.contact_calls.append(kwargs)
         return None
 
 
@@ -346,6 +355,20 @@ def _service(
     service.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
     service.contact_roles_repo.insert_tenant_role = AsyncMock(return_value={"id": "role-1"})
     return service
+
+
+def test_document_display_name_prefers_file_name() -> None:
+    """Uploaded file name should appear in push copy when available."""
+    name = TenantRequestsService._document_display_name(
+        {"document_type": "id_proof", "file_name": "passport.pdf"}
+    )
+    assert name == "passport.pdf"
+
+
+def test_document_display_name_falls_back_to_type_label() -> None:
+    """Document type maps to a readable label when file name is missing."""
+    name = TenantRequestsService._document_display_name({"document_type": "rental_agreement"})
+    assert name == "Rental agreement"
 
 
 def test_derive_header_status_ready_when_all_verified() -> None:
@@ -678,6 +701,11 @@ async def test_verify_document_success() -> None:
         TenantRequestStatus.READY_TO_APPROVE.value,
         TenantRequestStatus.PENDING_REVIEW.value,
     }
+    push = svc._push_dispatcher
+    assert len(push.contact_calls) == 1
+    call = push.contact_calls[0]
+    assert call["message_key"] == "notifications.push.tenant_request.document_verified"
+    assert call["params"]["document_name"] == "passport.pdf"
 
 
 @pytest.mark.asyncio
@@ -709,6 +737,11 @@ async def test_reject_document_success() -> None:
     )
 
     assert response.status == TenantRequestStatus.AWAITING_RESUBMISSION.value
+    push = svc._push_dispatcher
+    assert len(push.contact_calls) == 1
+    call = push.contact_calls[0]
+    assert call["message_key"] == "notifications.push.tenant_request.document_rejected"
+    assert call["params"]["document_name"] == "passport.pdf"
 
 
 @pytest.mark.asyncio

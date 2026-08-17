@@ -397,7 +397,10 @@ class TenantRequestsRepository(BaseRepository):
             WHERE organization_id = $1::uuid
               AND tenant_request_id = $2::uuid
               AND id = $3::uuid
-            RETURNING id::text AS id, document_type::text AS document_type, status::text AS status
+            RETURNING id::text AS id,
+                      document_type::text AS document_type,
+                      file_name,
+                      status::text AS status
             """,
             organization_id,
             tenant_request_id,
@@ -427,7 +430,10 @@ class TenantRequestsRepository(BaseRepository):
             WHERE organization_id = $1::uuid
               AND tenant_request_id = $2::uuid
               AND id = $3::uuid
-            RETURNING id::text AS id, document_type::text AS document_type, status::text AS status
+            RETURNING id::text AS id,
+                      document_type::text AS document_type,
+                      file_name,
+                      status::text AS status
             """,
             organization_id,
             tenant_request_id,
