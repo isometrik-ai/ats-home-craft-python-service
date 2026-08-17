@@ -1746,6 +1746,28 @@ async def test_update_contact_can_clear_gender(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_contact_sync_auth_phone_requires_supabase(monkeypatch):
+    """Update contact fails when auth phone sync is needed but Supabase is unavailable."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        user_id=USER_ID,
+        phones=[{"phone_number": "111", "phone_isd_code": "+1", "is_primary": True}],
+    )
+    repo = _FakeContactsRepo(contact_for_update=current, echo_update=True)
+    svc = _service(contacts_repo=repo)
+    svc.supabase_client = None
+    svc._validate_contact_auth_identity_update = AsyncMock()  # type: ignore[method-assign]
+
+    with pytest.raises(ServiceUnavailableException):
+        await svc.update_contact(
+            contact_id=CONTACT_ID,
+            body=UpdateContactRequest(
+                phones=[Phone(phone_number="222", phone_isd_code="+1", is_primary=True)]
+            ),
+        )
+
+
+@pytest.mark.asyncio
 async def test_update_contact_sync_auth_phone(monkeypatch):
     """Update contact syncs auth phone when primary phone changes."""
     _patch_custom_fields(monkeypatch)

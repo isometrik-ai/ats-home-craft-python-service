@@ -594,6 +594,7 @@ async def update_contact(
     ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: UpdateContactRequest = Body(
         ...,
         description="Partial update payload. Only provided fields are updated.",
@@ -625,7 +626,11 @@ async def update_contact(
             db_connection=db_connection,
             permission_codes=CONTACTS_MANAGEMENT_EDIT,
         )
-        service = ContactsService(db_connection=db_connection, user_context=user_context)
+        service = ContactsService(
+            db_connection=db_connection,
+            user_context=user_context,
+            supabase_client=sb_client,
+        )
         event_service = EventService(db_connection=db_connection)
         result = await service.update_contact(contact_id=contact_id, body=body)
         set_audit_context(
