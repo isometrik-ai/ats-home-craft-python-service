@@ -2,7 +2,7 @@
 
 |                  |                                                                                                                                                                                          |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                                                                 |
+| **Status**       | Accepted                                                                                                                                                                                 |
 | **Date**         | 2026-07-29                                                                                                                                                                               |
 | **Authors**      | Home Craft platform team                                                                                                                                                                 |
 | **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`communication_preferences`), [ADR 0008](./0008-walk-in-entries.md), existing `user_push_tokens` migration                                    |
@@ -15,19 +15,21 @@ ______________________________________________________________________
 
 Several Home Craft features need **mobile push** and an **in-app notification feed**:
 
-| Feature area    | Example event                                  | ADR / flow reference                            |
-| --------------- | ---------------------------------------------- | ----------------------------------------------- |
-| Walk-in visits  | Resident must approve a flat on a new walk-in  | [ADR 0008](./0008-walk-in-entries.md)           |
-| Visitor passes  | Household member checked in at gate            | [ADR 0004](./0004-pass-validation-gate.md)      |
-| Tenant requests | Admin verified a document; owner action needed | [ADR 0007](./0007-tenant-requests.md)           |
-| Move events     | Move-in / move-out recorded                    | [ADR 0005](./0005-move-events.md)               |
-| Fee billing     | Invoice issued, payment overdue                | [ADR 0006](./0006-project-fee-configuration.md) |
+| Feature area    | Example event                                 | ADR / flow reference                            |
+| --------------- | --------------------------------------------- | ----------------------------------------------- |
+| Walk-in visits  | Resident must approve a flat on a new walk-in | [ADR 0008](./0008-walk-in-entries.md)           |
+| Visitor passes  | Household member checked in at gate           | [ADR 0004](./0004-pass-validation-gate.md)      |
+| Daily help      | Helper checked in/out at gate                 | [ADR 0013](./0013-daily-help.md)                |
+| Tenant requests | Document verified/rejected; request approved  | [ADR 0007](./0007-tenant-requests.md)           |
+| Move events     | Move-in / move-out recorded                   | [ADR 0005](./0005-move-events.md)               |
+| Fee billing     | Invoice issued, payment overdue               | [ADR 0006](./0006-project-fee-configuration.md) |
+| Vehicles        | Vehicle submitted / approved / rejected       | Contact onboarding / vehicles flow              |
+| Notices         | Community notice published                    | Notices module                                  |
 
 Today:
 
 - **Device registration** is implemented in `user_service` (`POST /users/me/push-devices`) and persisted in `public.user_push_tokens` (Supabase migration `20260728153000_user_push_tokens.sql`).
-- **No outbound push sender** exists in `ats-home-craft-python-service`. Walk-in and fee flows explicitly list push as a follow-up.
-- A shared **notification-service** microservice already accepts gRPC `Greeter/SendNotification` with a JSON `body_data` payload, persists optional feed rows, and delivers via FCM asynchronously (see notification-service ADR-0001).
+- **Outbound push sender** is implemented: `PushNotificationService`, `PushNotificationDispatcher`, `NotificationGrpcClient`, and domain wiring for walk-in, passes, daily help, tenant requests, fees, move events, vehicles, and notices (see [push-notifications-flow.md](../push-notifications-flow.md) §6).
 
 ### Constraints
 
@@ -189,7 +191,7 @@ Add parallel files (`hi.json`, …) with the same key tree when new languages sh
 
 ### Preference gate
 
-Before sending, load the recipient contact's `communication_preferences.push` (default `false` per [ADR 0001](./0001-resident-onboarding.md)). Skip push when `push` is not `true`. In-app feed rows (`save_to_db: true`) may still be written when product requires visibility regardless of push opt-in — default Phase 1: **skip entire send** (no push, no feed) when push preference is off unless a feature explicitly overrides.
+Before sending, load the recipient contact's `communication_preferences.push`. Skip push when `push` is **explicitly** `false`. When the field is missing or `push` is not set, send proceeds (subject to token availability). Org-member / staff sends (`send_to_org_members`, security walk-in updates) bypass the preference check.
 
 ### In-app feed (notification-service HTTP)
 
@@ -208,18 +210,21 @@ Required headers (gateway):
 
 Feed rows are keyed by the same `tenant_id`, `project_id`, and `user_id` we send in gRPC.
 
-### Home Craft notification types (initial)
+### Home Craft notification types (integrated)
 
-| `type`                      | `feed_type` | First integration target      |
-| --------------------------- | ----------- | ----------------------------- |
-| `NOTIFICATION_TYPE_WALK_IN` | `walk_in`   | Walk-in visit unit `awaiting` |
-| `NOTIFICATION_TYPE_PASS`    | `pass`      | Pass check-in (household)     |
-| `NOTIFICATION_TYPE_TENANT`  | `tenant`    | Tenant request status change  |
-| `NOTIFICATION_TYPE_FEE`     | `fee`       | Invoice / reminder            |
-| `NOTIFICATION_TYPE_MOVE`    | `move`      | Move-in / move-out recorded   |
-| `NOTIFICATION_TYPE_SYSTEM`  | `system`    | Platform-wide alerts          |
+| `type`                      | `feed_type`  | Events (message key prefix)                                       |
+| --------------------------- | ------------ | ----------------------------------------------------------------- |
+| `NOTIFICATION_TYPE_WALK_IN` | `walk_in`    | `awaiting`, `approved`, `rejected`, `entered`                     |
+| `NOTIFICATION_TYPE_PASS`    | `pass`       | `checked_in`, `checked_out`                                       |
+| `NOTIFICATION_TYPE_PASS`    | `daily_help` | `checked_in`, `checked_out` (daily help pass)                     |
+| `NOTIFICATION_TYPE_TENANT`  | `tenant`     | `submitted`, `document_verified`, `document_rejected`, `approved` |
+| `NOTIFICATION_TYPE_FEE`     | `fee`        | `invoice_issued`, `payment_reminder`                              |
+| `NOTIFICATION_TYPE_MOVE`    | `move`       | `recorded`                                                        |
+| `NOTIFICATION_TYPE_VEHICLE` | `vehicle`    | `submitted`, `approved`, `rejected`                               |
+| `notice_published`          | `notices`    | `published`                                                       |
+| `NOTIFICATION_TYPE_SYSTEM`  | `system`     | *(not wired)*                                                     |
 
-Exact `click_action` and `data.screen` values are defined per feature in [push-notifications-flow.md](../push-notifications-flow.md).
+Full trigger/recipient/API matrix: [push-notifications-flow.md §6](../push-notifications-flow.md#6-integrated-push-notifications-catalog).
 
 ### Repository extension
 
@@ -287,12 +292,13 @@ ______________________________________________________________________
 
 ### Follow-ups
 
-1. Implement `NotificationGrpcClient`, `PushNotificationService`, repository `list_push_tokens_for_user`, and settings (Phase 1 code).
-1. Wire walk-in `awaiting` notification as first production caller ([ADR 0008 follow-up](./0008-walk-in-entries.md)).
-1. Prune invalid tokens when notification-service reports permanent FCM token errors (webhook or polling — TBD).
-1. Phase 2: optional `topics[]` using `user_push_topic()` if mobile adopts Firebase topic subscription.
-1. Metrics: `push_sent_total`, `push_skipped_total{reason}`, gRPC error rate.
-1. Enforce `idempotency_key` deduplication upstream for high-churn events (collapse_key mitigates UI noise only).
+1. ~~Implement `NotificationGrpcClient`, `PushNotificationService`, repository `list_push_tokens_for_user`, and settings~~ **Done**
+1. ~~Wire domain notifications (walk-in, pass, tenant, fee, move, vehicle, daily help, notices)~~ **Done** — see flow doc §6
+1. Walk-in **exit** push (optional product decision)
+1. Prune invalid tokens when notification-service reports permanent FCM token errors (webhook or polling — TBD)
+1. Phase 2: optional `topics[]` using `user_push_topic()` if mobile adopts Firebase topic subscription
+1. Metrics: `push_sent_total`, `push_skipped_total{reason}`, gRPC error rate
+1. `NOTIFICATION_TYPE_SYSTEM` for platform-wide alerts
 
 ______________________________________________________________________
 

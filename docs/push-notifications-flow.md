@@ -1,6 +1,6 @@
 # Push Notifications Flow — Context & Integration Guide
 
-> **Status: Proposed (ADR + integration plan).** Device registration is implemented; gRPC sender and feature wiring are follow-ups.
+> **Status: Implemented (Phase 1).** Device registration, gRPC sender, `PushNotificationDispatcher`, and feature wiring are live in `user_service`. Topic-based delivery and token pruning remain follow-ups.
 >
 > Architecture rationale: [ADR 0009](./adr/0009-push-notifications-grpc.md).
 >
@@ -8,9 +8,10 @@
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Registration API:** `POST /v1/users/me/push-devices`, `DELETE /v1/users/me/push-devices/{device_id}`
-- **Sender (planned):** `PushNotificationService` → gRPC `notification-service:50051`
+- **Sender:** `PushNotificationService` → `PushNotificationDispatcher` → gRPC `notification-service:50051`
 - **Token storage:** `public.user_push_tokens` (`ats-home-craft-supabase`)
 - **In-app feed (read):** notification-service HTTP `GET /api/v1/notifications/logs` (mobile / gateway)
+- **Copy:** `apps/user_service/app/locales/en.json` → `notifications.push.*`
 
 ______________________________________________________________________
 
@@ -115,7 +116,7 @@ Migration: `20260728153000_user_push_tokens.sql`.
 
 ______________________________________________________________________
 
-## 4. Send flow (planned)
+## 4. Send flow (implemented)
 
 ### 4.1 End-to-end sequence
 
@@ -222,29 +223,29 @@ sequenceDiagram
 
 ### 4.4 Skip conditions (no gRPC call)
 
-| Condition                                          | Log reason       | Business tx |
-| -------------------------------------------------- | ---------------- | ----------- |
-| `NOTIFICATION_ENABLED=false`                       | `disabled`       | Unaffected  |
-| Recipient `communication_preferences.push != true` | `preference_off` | Unaffected  |
-| No rows in `user_push_tokens`                      | `no_tokens`      | Unaffected  |
-| gRPC error (default)                               | `grpc_failed`    | Unaffected  |
+| Condition                                           | Log reason       | Business tx |
+| --------------------------------------------------- | ---------------- | ----------- |
+| `NOTIFICATION_ENABLED=false`                        | `disabled`       | Unaffected  |
+| Recipient `communication_preferences.push == false` | `preference_off` | Unaffected  |
+| No rows in `user_push_tokens`                       | `no_tokens`      | Unaffected  |
+| gRPC error (default)                                | `grpc_failed`    | Unaffected  |
 
 When `NOTIFICATION_RAISE_ON_FAILURE=true`, gRPC errors propagate to the caller (use only in tests or strict batch jobs).
 
 ______________________________________________________________________
 
-## 5. Planned code layout
+## 5. Code layout
 
-| Path                                                                   | Role                                             |
-| ---------------------------------------------------------------------- | ------------------------------------------------ |
-| `libs/shared_config/app_settings.py`                                   | `NotificationSettings`                           |
-| `libs/shared_utils/notification_grpc_client.py`                        | Async gRPC client, JSON encode, channel cache    |
-| `libs/grpc_stubs/notification/`                                        | Generated `notification_service_pb2*` from proto |
-| `apps/user_service/app/services/push_notification_service.py`          | Payload builder + token lookup + preference gate |
-| `apps/user_service/app/db/repositories/user_push_tokens_repository.py` | `list_push_tokens_for_user`                      |
-| `apps/user_service/app/schemas/push_notifications.py`                  | Pydantic models for send params (optional)       |
+| Path                                                                   | Role                                               |
+| ---------------------------------------------------------------------- | -------------------------------------------------- |
+| `libs/shared_config/app_settings.py`                                   | `NotificationSettings`                             |
+| `libs/shared_utils/notification_grpc_client.py`                        | Async gRPC client, JSON encode, channel cache      |
+| `libs/grpc_stubs/notification/`                                        | Generated `notification_service_pb2*` from proto   |
+| `apps/user_service/app/services/push_notification_service.py`          | Payload builder + token lookup + preference gate   |
+| `apps/user_service/app/services/push_notification_dispatch.py`         | `PushNotificationDispatcher` (shared send helpers) |
+| `apps/user_service/app/db/repositories/user_push_tokens_repository.py` | `list_push_tokens_for_user`                        |
 
-Domain services (walk-in, passes, etc.) depend on `PushNotificationService` only — not on gRPC directly.
+Domain services depend on `PushNotificationDispatcher` (or `PushNotificationService` directly) — not on gRPC.
 
 ### 5.1 Localized title and body
 
@@ -254,7 +255,7 @@ Use the existing **`Translator`** and `apps/user_service/app/locales/*.json` —
 | ------------------ | --------------------------------------------------------------------------------------------------------- |
 | Where strings live | `en.json` (and future `hi.json`, …) under `notifications.push.*`                                          |
 | How to resolve     | `translator.get("notifications.push.walk_in.awaiting.title", language, **params)`                         |
-| Dynamic values     | `{unit_label}`, `{visitor_name}`, `{actor_name}`, etc. in JSON strings                                    |
+| Dynamic values     | `{unit_label}`, `{visitor_name}`, `{actor_name}`, `{document_name}`, `{helper_name}`, etc.                |
 | When to resolve    | At send time inside `PushNotificationService`, before gRPC                                                |
 | Language           | Recipient `preferred_language` when available, else `en` (not the triggering HTTP request's `lan` header) |
 
@@ -281,21 +282,161 @@ await push_notification_service.send(
 
 ______________________________________________________________________
 
-## 6. Feature integration map
+## 6. Integrated push notifications (catalog)
 
-| Trigger                                | Caller (planned)             | Recipient                       | `type` / `feed_type`                    | `click_action`        |
-| -------------------------------------- | ---------------------------- | ------------------------------- | --------------------------------------- | --------------------- |
-| Walk-in created; visit unit `awaiting` | `WalkInService` after create | Residents on visit unit flat    | `NOTIFICATION_TYPE_WALK_IN` / `walk_in` | `OPEN_WALK_IN`        |
-| Pass checked in (notify household)     | Pass validation service      | Household contacts with push on | `NOTIFICATION_TYPE_PASS` / `pass`       | `OPEN_PASS`           |
-| Tenant request status change           | Tenant request service       | Owner / admin                   | `NOTIFICATION_TYPE_TENANT` / `tenant`   | `OPEN_TENANT_REQUEST` |
-| Fee invoice / reminder                 | Fee worker                   | Owner                           | `NOTIFICATION_TYPE_FEE` / `fee`         | `OPEN_FEE`            |
-| Move event recorded                    | Move events service          | Relevant contacts               | `NOTIFICATION_TYPE_MOVE` / `move`       | `OPEN_MOVE`           |
+**22 events** across **8 feature areas** are wired in production code. All copy lives under `notifications.push.*` in `apps/user_service/app/locales/en.json`.
 
-Each integration passes:
+### 6.1 Summary
 
-- `organization_id` → `project_id`
-- Resolved recipient **Supabase user id** (via `contacts.supabase_user_id` or membership lookup — per feature)
-- `actor` from triggering user when applicable
+| Feature          | Events | gRPC `type` / `feed_type`               | Primary API / trigger                     |
+| ---------------- | ------ | --------------------------------------- | ----------------------------------------- |
+| Walk-in          | 4      | `NOTIFICATION_TYPE_WALK_IN` / `walk_in` | `walk_ins.py`, `walk_ins_owner.py`        |
+| Visitor pass     | 2      | `NOTIFICATION_TYPE_PASS` / `pass`       | `gate_passes.py`                          |
+| Daily help       | 2      | `NOTIFICATION_TYPE_PASS` / `daily_help` | `gate_passes.py` (pass linked to profile) |
+| Tenant request   | 4      | `NOTIFICATION_TYPE_TENANT` / `tenant`   | `tenant_requests.py`, owner create API    |
+| Fee invoice      | 2      | `NOTIFICATION_TYPE_FEE` / `fee`         | `fee_invoices.py`, reminder job           |
+| Move event       | 1      | `NOTIFICATION_TYPE_MOVE` / `move`       | `move_events.py`                          |
+| Vehicle          | 3      | `NOTIFICATION_TYPE_VEHICLE` / `vehicle` | contact onboarding / admin review APIs    |
+| Community notice | 1      | `notice_published` / `notices`          | `notices.py`, scheduled publish job       |
+
+### 6.2 Dispatch helpers (`PushNotificationDispatcher`)
+
+| Method                         | Used for                                                | Preference check                       |
+| ------------------------------ | ------------------------------------------------------- | -------------------------------------- |
+| `send_to_unit_residents`       | Walk-in awaiting/entered; guest pass check-in/out       | Yes (`communication_preferences.push`) |
+| `send_to_user`                 | Walk-in approve/reject → security; notices              | Per call (security: **off**)           |
+| `send_to_contact`              | Tenant docs/approve; vehicle approve/reject; move event | Yes                                    |
+| `send_to_org_members`          | Tenant submitted; vehicle submitted/resubmitted         | **No** (staff/admin)                   |
+| `send_to_contact_unit_primary` | Fee invoice issued / payment reminder                   | Yes                                    |
+
+`DailyHelpNotificationService` calls `send_to_user` directly for Owner/Tenant on linked household units.
+
+### 6.3 Walk-in (`WalkInService`)
+
+| Event                  | Message key                           | Trigger                      | Recipient                                                  | API                                            |
+| ---------------------- | ------------------------------------- | ---------------------------- | ---------------------------------------------------------- | ---------------------------------------------- |
+| Flat awaiting approval | `notifications.push.walk_in.awaiting` | Security creates walk-in     | Unit residents (per flat)                                  | `POST /projects/{id}/walk-ins`                 |
+| Resident approved      | `notifications.push.walk_in.approved` | Resident approves visit unit | Security user who created walk-in (`requested_by_user_id`) | `POST /walk-ins/{id}/visit-units/{id}/approve` |
+| Resident rejected      | `notifications.push.walk_in.rejected` | Resident rejects visit unit  | Security user who created walk-in                          | `POST /walk-ins/{id}/visit-units/{id}/reject`  |
+| Visitor entered        | `notifications.push.walk_in.entered`  | Security marks entered       | Unit residents on **approved** flats only                  | `POST /projects/{id}/walk-ins/{id}/enter`      |
+
+**Params:** `{unit_label}`, `{actor_name}` (approve/reject).
+
+**Click action:** `OPEN_WALK_IN`.
+
+**Not wired:** `POST .../walk-ins/{id}/exit` (no push on exit).
+
+### 6.4 Visitor passes (`PassVerificationService` — `gate_passes.py`)
+
+| Event       | Message key                           | Trigger                   | Recipient                           | API                           |
+| ----------- | ------------------------------------- | ------------------------- | ----------------------------------- | ----------------------------- |
+| Checked in  | `notifications.push.pass.checked_in`  | Successful gate check-in  | Unit household (excludes pass host) | `POST /passes/{id}/check-in`  |
+| Checked out | `notifications.push.pass.checked_out` | Successful gate check-out | Unit household (excludes pass host) | `POST /passes/{id}/check-out` |
+
+**Params:** `{visitor_name}` (guest name on pass).
+
+**Click action:** `OPEN_PASS`.
+
+**Skipped when:** pass `is_private == true`, failed check-in validation, or `/passes/verify` (lookup only — no push).
+
+### 6.5 Daily help (`DailyHelpNotificationService` — via `gate_passes.py`)
+
+When the pass row has `daily_help_id`, check-in/out uses daily-help recipients instead of household pass flow.
+
+| Event       | Message key                                 | Trigger                   | Recipient                                             |
+| ----------- | ------------------------------------------- | ------------------------- | ----------------------------------------------------- |
+| Checked in  | `notifications.push.daily_help.checked_in`  | Daily help pass check-in  | Owner + Tenant on active `daily_help_household_links` |
+| Checked out | `notifications.push.daily_help.checked_out` | Daily help pass check-out | Same                                                  |
+
+**Params:** `{helper_name}`.
+
+**Click action:** `OPEN_DAILY_HELP`.
+
+### 6.6 Tenant requests (`TenantRequestsService`)
+
+| Event             | Message key                                           | Trigger                      | Recipient                         | API                              |
+| ----------------- | ----------------------------------------------------- | ---------------------------- | --------------------------------- | -------------------------------- |
+| Submitted         | `notifications.push.tenant_request.submitted`         | Owner submits request        | Active org members (admins)       | Owner create API                 |
+| Document verified | `notifications.push.tenant_request.document_verified` | Admin verifies document      | Request submitter (owner contact) | `POST .../documents/{id}/verify` |
+| Document rejected | `notifications.push.tenant_request.document_rejected` | Admin rejects document       | Request submitter (owner contact) | `POST .../documents/{id}/reject` |
+| Request approved  | `notifications.push.tenant_request.approved`          | Admin approves ready request | Request submitter (owner contact) | `POST .../{id}/approve`          |
+
+**Params:** `{unit_label}`, `{document_name}` (verify/reject — file name or readable type label).
+
+**Click action:** `OPEN_TENANT_REQUEST`.
+
+### 6.7 Fee invoices (`FeeInvoiceService`)
+
+| Event            | Message key                               | Trigger                       | Recipient                            |
+| ---------------- | ----------------------------------------- | ----------------------------- | ------------------------------------ |
+| Invoice issued   | `notifications.push.fee.invoice_issued`   | Invoice generated for project | Primary contact on `contact_unit_id` |
+| Payment reminder | `notifications.push.fee.payment_reminder` | Overdue reminder batch        | Primary contact on `contact_unit_id` |
+
+**Params:** `{invoice_number}`, `{amount}`, `{due_date}` (issued); `{invoice_number}` (reminder).
+
+**Click action:** `OPEN_FEE`.
+
+### 6.8 Move events (`MoveEventsService`)
+
+| Event         | Message key                        | Trigger                      | Recipient                 | API                 |
+| ------------- | ---------------------------------- | ---------------------------- | ------------------------- | ------------------- |
+| Move recorded | `notifications.push.move.recorded` | Move-in or move-out recorded | Contact on the move event | `POST /move-events` |
+
+**Params:** `{move_type}`, `{unit_label}`.
+
+**Click action:** `OPEN_MOVE`.
+
+### 6.9 Vehicles (`VehiclesService`)
+
+| Event       | Message key                            | Trigger                             | Recipient             |
+| ----------- | -------------------------------------- | ----------------------------------- | --------------------- |
+| Submitted   | `notifications.push.vehicle.submitted` | Resident creates vehicle            | Org members (admins)  |
+| Resubmitted | `notifications.push.vehicle.submitted` | Resident resubmits rejected vehicle | Org members (admins)  |
+| Approved    | `notifications.push.vehicle.approved`  | Admin approves vehicle              | Vehicle owner contact |
+| Rejected    | `notifications.push.vehicle.rejected`  | Admin rejects vehicle               | Vehicle owner contact |
+
+**Params:** `{registration_number}`, `{unit_label}` (submitted); `{registration_number}` (approve/reject).
+
+**Click actions:** `OPEN_VEHICLE_REQUEST` / `OPEN_VEHICLE`.
+
+### 6.10 Community notices (`NoticesService`)
+
+| Event     | Message key                            | Trigger                                    | Recipient                                               |
+| --------- | -------------------------------------- | ------------------------------------------ | ------------------------------------------------------- |
+| Published | `notifications.push.notices.published` | Notice published (manual or scheduled job) | Resolved notice audience (`send_to_user` per recipient) |
+
+**Params:** `{title}` (notice title).
+
+**Type:** `notice_published` / `feed_type: notices`.
+
+### 6.11 Locale keys (`en.json`)
+
+All keys follow `notifications.push.{feature}.{event}.title` / `.body`:
+
+```text
+walk_in.awaiting | approved | rejected | entered
+pass.checked_in | checked_out
+daily_help.checked_in | checked_out
+tenant_request.submitted | document_verified | document_rejected | approved
+fee.invoice_issued | payment_reminder
+move.recorded
+vehicle.submitted | approved | rejected
+notices.published
+```
+
+### 6.12 Not yet implemented
+
+| Planned event                | Notes                                                               |
+| ---------------------------- | ------------------------------------------------------------------- |
+| Walk-in exit                 | No `walk_in.exited` key or send on `exit_walk_in`                   |
+| `NOTIFICATION_TYPE_SYSTEM`   | Platform-wide alerts — no caller                                    |
+| Topic-based delivery         | Phase 2 — `user_push_topic()` exists but send path uses tokens only |
+| Token pruning on FCM failure | Follow-up                                                           |
+
+Each wired integration passes:
+
+- `organization_id` → gRPC `project_id`
+- Recipient **Supabase user id** (via contact, unit residents, or org members)
 - `entity.kind` + `entity.id` for deep links
 - Stable `options.idempotency_key` per event instance
 
@@ -408,6 +549,6 @@ ______________________________________________________________________
 ## Related
 
 - [ADR 0009 — Push notifications gRPC](./adr/0009-push-notifications-grpc.md)
-- [walk-in-flow.md](./walk-in-flow.md) — first planned push consumer
+- [walk-in-flow.md](./walk-in-flow.md) — walk-in domain flow (push wired)
 - [ADR 0001 — Resident onboarding](./adr/0001-resident-onboarding.md) — `communication_preferences`
 - notification-service: `docs/adr/0001-grpc-topic-push-notifications.md`, `docs/fcm-flow.md`
