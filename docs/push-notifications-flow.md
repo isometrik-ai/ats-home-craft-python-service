@@ -407,7 +407,11 @@ When the pass row has `daily_help_id`, check-in/out uses daily-help recipients i
 
 **Params:** `{title}` (notice title).
 
-**Type:** `notice_published` / `feed_type: notices`.
+**Data:** `notice_id`, `project_id`, `screen: notice_detail`.
+
+**Entity:** `{ kind: "notice", id: <notice_id> }`.
+
+**Click action:** `OPEN_NOTICE`.
 
 ### 6.11 Locale keys (`en.json`)
 

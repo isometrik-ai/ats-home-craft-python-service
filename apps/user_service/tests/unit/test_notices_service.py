@@ -154,3 +154,21 @@ async def test_list_notices_includes_attachments():
     assert total == 1
     assert len(items[0].attachments) == 1
     assert items[0].attachments[0].file_path == "org/project/notices/pool.jpg"
+
+
+def test_notice_publish_push_fields_include_deep_link_payload() -> None:
+    """Published notice push includes data, entity, and click options."""
+    fields = NoticesService._notice_publish_push_fields(
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        recipient_user_id="user-9",
+    )
+
+    assert fields["data"] == {
+        "notice_id": NOTICE_ID,
+        "project_id": PROJECT_ID,
+        "screen": "notice_detail",
+    }
+    assert fields["entity"] == {"kind": "notice", "id": NOTICE_ID}
+    assert fields["options"]["click_action"] == "OPEN_NOTICE"
+    assert fields["options"]["idempotency_key"] == f"notice:{NOTICE_ID}:published:user-9"

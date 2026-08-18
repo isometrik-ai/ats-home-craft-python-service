@@ -928,6 +928,27 @@ class NoticesService:
             return now + timedelta(hours=72)
         return None
 
+    @staticmethod
+    def _notice_publish_push_fields(
+        *,
+        project_id: str,
+        notice_id: str,
+        recipient_user_id: str,
+    ) -> dict[str, Any]:
+        """Deep-link payload fields for notice publish push notifications."""
+        return {
+            "data": {
+                "notice_id": notice_id,
+                "project_id": project_id,
+                "screen": "notice_detail",
+            },
+            "entity": {"kind": "notice", "id": notice_id},
+            "options": {
+                "click_action": "OPEN_NOTICE",
+                "idempotency_key": f"notice:{notice_id}:published:{recipient_user_id}",
+            },
+        }
+
     async def _dispatch_publish_push(
         self,
         *,
@@ -960,6 +981,11 @@ class NoticesService:
             tower_ids=[str(t["tower_id"]) for t in towers],
         )
         for user_id in user_ids:
+            push_fields = self._notice_publish_push_fields(
+                project_id=project_id,
+                notice_id=notice_id,
+                recipient_user_id=user_id,
+            )
             await self.push_dispatcher.send_to_user(
                 organization_id=self.organization_id,
                 recipient_user_id=user_id,
@@ -967,4 +993,7 @@ class NoticesService:
                 notification_type="notice_published",
                 feed_type="notices",
                 params={"title": title},
+                data=push_fields["data"],
+                entity=push_fields["entity"],
+                options=push_fields["options"],
             )
