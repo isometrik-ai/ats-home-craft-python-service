@@ -140,7 +140,7 @@ class VisitorLogQuery(VisitorLogDateRangeQuery):
     access_status: PassAccessStatus | None = None
     tower_id: str | None = None
     guard_user_id: str | None = None
-    project_id: str | None = None
+    project_id: str = Field(..., description="Project identifier (UUID string).")
     unit_id: str | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
@@ -149,7 +149,7 @@ class VisitorLogQuery(VisitorLogDateRangeQuery):
 class VisitorLogOverviewQuery(VisitorLogDateRangeQuery):
     """Query params for GET /visitor-logs/overview."""
 
-    project_id: str | None = None
+    project_id: str = Field(..., description="Project identifier (UUID string).")
     unit_id: str | None = None
 
 

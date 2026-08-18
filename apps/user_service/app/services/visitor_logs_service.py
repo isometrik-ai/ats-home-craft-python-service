@@ -144,6 +144,31 @@ class VisitorLogsService:
             return None, None
         return (str(guard_user_id) if guard_user_id else None, guard_name)
 
+    async def _enrich_timeline_actor_labels(
+        self,
+        *,
+        organization_id: str,
+        events: list[dict[str, Any]],
+        created_by: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Resolve missing actor_label values from actor_user_id at read time."""
+        enriched: list[dict[str, Any]] = []
+        for event in events:
+            item = dict(event)
+            if str(item.get("actor_label") or "").strip():
+                enriched.append(item)
+                continue
+            _, name = await self._resolve_guard_from_gate_event(
+                event=item,
+                organization_id=organization_id,
+            )
+            if name:
+                item["actor_label"] = name
+            elif item.get("event_type") == PassEventType.CREATED.value and created_by:
+                item["actor_label"] = created_by
+            enriched.append(item)
+        return enriched
+
     async def _guard_from_pass_events(
         self,
         *,
@@ -714,6 +739,11 @@ class VisitorLogsService:
                 pass_id=pass_id,
             )
             events = [self._passes_service._normalize_event(event_row) for event_row in event_rows]
+            events = await self._enrich_timeline_actor_labels(
+                organization_id=org_id,
+                events=events,
+                created_by=self._contact_created_by(row),
+            )
             detail = self._passes_service._normalize_pass(
                 row,
                 events=events,
@@ -752,6 +782,11 @@ class VisitorLogsService:
                 walk_in_entry_id=pass_id,
             )
             detail = await self._walk_in_service._serialize_detail(walk_in_row)
+            if detail.get("events"):
+                detail["events"] = await self._enrich_timeline_actor_labels(
+                    organization_id=org_id,
+                    events=[dict(event) for event in detail["events"]],
+                )
             guard_user_id, guard_name = await self._guard_from_walk_in_events(
                 events=[dict(event) for event in raw_events],
                 organization_id=org_id,
