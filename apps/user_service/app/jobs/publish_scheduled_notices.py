@@ -8,6 +8,7 @@ from apps.user_service.app.db.repositories.notices_repository import NoticesRepo
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
+from apps.user_service.app.services.notices_service import NoticesService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
@@ -62,6 +63,11 @@ async def publish_scheduled_notices(
             tower_ids=[str(t["tower_id"]) for t in towers],
         )
         for user_id in user_ids:
+            push_fields = NoticesService._notice_publish_push_fields(
+                project_id=proj_id,
+                notice_id=notice_id,
+                recipient_user_id=user_id,
+            )
             await push_dispatcher.send_to_user(
                 organization_id=org_id,
                 recipient_user_id=user_id,
@@ -69,6 +75,9 @@ async def publish_scheduled_notices(
                 notification_type="notice_published",
                 feed_type="notices",
                 params={"title": str(notice["title"])},
+                data=push_fields["data"],
+                entity=push_fields["entity"],
+                options=push_fields["options"],
             )
     return published_ids
 
