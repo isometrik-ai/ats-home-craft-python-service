@@ -361,7 +361,7 @@ When the pass row has `daily_help_id`, check-in/out uses daily-help recipients i
 | Document rejected | `notifications.push.tenant_request.document_rejected` | Admin rejects document       | Request submitter (owner contact) | `POST .../documents/{id}/reject` |
 | Request approved  | `notifications.push.tenant_request.approved`          | Admin approves ready request | Request submitter (owner contact) | `POST .../{id}/approve`          |
 
-**Params:** `{unit_label}`, `{document_name}` (verify/reject — file name or readable type label).
+**Params:** `{unit_label}`, `{document_name}` (verify/reject — readable document type label).
 
 **Click action:** `OPEN_TENANT_REQUEST`.
 

@@ -152,10 +152,7 @@ class TenantRequestsService:
 
     @staticmethod
     def _document_display_name(document: dict[str, Any]) -> str:
-        """Prefer uploaded file name; fall back to a readable document type label."""
-        file_name = str(document.get("file_name") or "").strip()
-        if file_name:
-            return file_name
+        """Return a readable label from the tenant request document type."""
         document_type = str(document.get("document_type") or "").strip()
         if document_type in _TENANT_REQUEST_DOCUMENT_LABELS:
             return _TENANT_REQUEST_DOCUMENT_LABELS[document_type]
