@@ -262,4 +262,5 @@ class TenantRequestSummaryResponse(BaseModel):
     pending_review: int = 0
     awaiting_resubmission: int = 0
     ready_to_approve: int = 0
-    approved_this_month: int = 0
+    approved: int = 0
+    cancelled: int = 0
