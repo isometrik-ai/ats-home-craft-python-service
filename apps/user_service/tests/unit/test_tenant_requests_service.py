@@ -357,15 +357,15 @@ def _service(
     return service
 
 
-def test_document_display_name_prefers_file_name() -> None:
-    """Uploaded file name should appear in push copy when available."""
+def test_document_display_name_ignores_file_name() -> None:
+    """Push copy uses document type, not the uploaded file name."""
     name = TenantRequestsService._document_display_name(
         {"document_type": "id_proof", "file_name": "passport.pdf"}
     )
-    assert name == "passport.pdf"
+    assert name == "ID proof"
 
 
-def test_document_display_name_falls_back_to_type_label() -> None:
+def test_document_display_name_uses_type_label() -> None:
     """Document type maps to a readable label when file name is missing."""
     name = TenantRequestsService._document_display_name({"document_type": "rental_agreement"})
     assert name == "Rental agreement"
@@ -705,7 +705,7 @@ async def test_verify_document_success() -> None:
     assert len(push.contact_calls) == 1
     call = push.contact_calls[0]
     assert call["message_key"] == "notifications.push.tenant_request.document_verified"
-    assert call["params"]["document_name"] == "passport.pdf"
+    assert call["params"]["document_name"] == "ID proof"
 
 
 @pytest.mark.asyncio
@@ -741,7 +741,7 @@ async def test_reject_document_success() -> None:
     assert len(push.contact_calls) == 1
     call = push.contact_calls[0]
     assert call["message_key"] == "notifications.push.tenant_request.document_rejected"
-    assert call["params"]["document_name"] == "passport.pdf"
+    assert call["params"]["document_name"] == "ID proof"
 
 
 @pytest.mark.asyncio
