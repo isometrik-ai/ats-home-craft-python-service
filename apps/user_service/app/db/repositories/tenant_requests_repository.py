@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
@@ -605,9 +605,6 @@ class TenantRequestsRepository(BaseRepository):
         project_id: str,
     ) -> dict[str, int]:
         """Dashboard summary card counts for one project."""
-        month_start = datetime.now(timezone.utc).replace(
-            day=1, hour=0, minute=0, second=0, microsecond=0
-        )
         row = await self.db_connection.fetchrow(
             """
             SELECT
@@ -622,23 +619,25 @@ class TenantRequestsRepository(BaseRepository):
               ) AS ready_to_approve,
               COUNT(*) FILTER (
                 WHERE status = 'approved'
-                  AND approved_at >= $3::timestamptz
                   AND superseded_at IS NULL
-              ) AS approved_this_month
+              ) AS approved,
+              COUNT(*) FILTER (
+                WHERE status = 'cancelled'
+              ) AS cancelled
             FROM tenant_requests
             WHERE organization_id = $1::uuid
               AND project_id = $2::uuid
             """,
             organization_id,
             project_id,
-            month_start,
         )
         if not row:
             return {
                 "pending_review": 0,
                 "awaiting_resubmission": 0,
                 "ready_to_approve": 0,
-                "approved_this_month": 0,
+                "approved": 0,
+                "cancelled": 0,
             }
         return {key: int(row[key] or 0) for key in row.keys()}
 

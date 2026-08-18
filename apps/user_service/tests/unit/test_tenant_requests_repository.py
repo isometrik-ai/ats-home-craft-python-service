@@ -323,7 +323,8 @@ async def test_get_summary_counts_with_and_without_row():
             "pending_review": 3,
             "awaiting_resubmission": 1,
             "ready_to_approve": 2,
-            "approved_this_month": 4,
+            "approved": 4,
+            "cancelled": 1,
         }
     )
     repo = TenantRequestsRepository(db_connection=conn)
@@ -336,12 +337,15 @@ async def test_get_summary_counts_with_and_without_row():
         "pending_review": 3,
         "awaiting_resubmission": 1,
         "ready_to_approve": 2,
-        "approved_this_month": 4,
+        "approved": 4,
+        "cancelled": 1,
     }
     query, args = conn.fetchrow_calls[0]
     assert "COUNT(*) FILTER" in query
-    assert args[0] == ORG_ID
-    assert args[1] == PROJECT_ID
+    assert "status = 'approved'" in query
+    assert "status = 'cancelled'" in query
+    assert "approved_at >=" not in query
+    assert args == (ORG_ID, PROJECT_ID)
 
     conn.row = None
     empty = await repo.get_summary_counts(
@@ -352,7 +356,8 @@ async def test_get_summary_counts_with_and_without_row():
         "pending_review": 0,
         "awaiting_resubmission": 0,
         "ready_to_approve": 0,
-        "approved_this_month": 0,
+        "approved": 0,
+        "cancelled": 0,
     }
 
 

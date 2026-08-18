@@ -254,12 +254,13 @@ Response rows match dashboard columns:
 
 Summary cards:
 
-| Card                  | Query                                              |
-| --------------------- | -------------------------------------------------- |
-| Pending review        | `status IN (submitted, pending_review)`            |
-| Awaiting resubmission | `status = awaiting_resubmission`                   |
-| Ready to approve      | `status = ready_to_approve`                        |
-| Approved this month   | `status = approved AND approved_at >= month_start` |
+| Card                  | Query                                         |
+| --------------------- | --------------------------------------------- |
+| Pending review        | `status IN (submitted, pending_review)`       |
+| Awaiting resubmission | `status = awaiting_resubmission`              |
+| Ready to approve      | `status = ready_to_approve`                   |
+| Approved              | `status = approved AND superseded_at IS NULL` |
+| Cancelled             | `status = cancelled`                          |
 
 ### 5.2 Per-document review
 

@@ -88,7 +88,9 @@ class _FakeMembersRepo:
         }
 
     async def get_user_profile_by_id(self, *, user_id: str, organization_id: str | None = None):
-        del user_id, organization_id
+        del organization_id
+        if user_id != "guard-1":
+            return None
         return self.profile
 
 
@@ -341,6 +343,12 @@ async def test_get_log_detail_returns_pass_timeline():
     }
     events = [
         {
+            "id": "evt-created",
+            "event_type": PassEventType.CREATED.value,
+            "actor_user_id": "resident-1",
+            "occurred_at": datetime(2026, 6, 9, 8, 49, tzinfo=timezone.utc),
+        },
+        {
             "id": "evt-1",
             "event_type": PassEventType.CHECKED_IN.value,
             "actor_user_id": "guard-1",
@@ -390,6 +398,9 @@ async def test_get_log_detail_returns_pass_timeline():
     assert detail["id"] == "pass-1"
     assert detail["include_events"] is True
     assert detail["events"][0]["normalized"] is True
+    assert detail["events"][0]["actor_label"] == "Radhi Sharma"
+    assert detail["events"][1]["actor_label"] == "Mr Ajay Guard"
+    assert detail["events"][2]["actor_label"] == "Mr Ajay Guard"
     assert detail["created_by"] == "Radhi Sharma"
     assert detail["guard_user_id"] == "guard-1"
     assert detail["guard_name"] == "Mr Ajay Guard"

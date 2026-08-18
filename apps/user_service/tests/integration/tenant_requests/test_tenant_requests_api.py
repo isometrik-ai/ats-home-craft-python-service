@@ -37,7 +37,8 @@ def _fake_summary(**overrides) -> TenantRequestSummaryResponse:
         "pending_review": 2,
         "awaiting_resubmission": 1,
         "ready_to_approve": 0,
-        "approved_this_month": 3,
+        "approved": 3,
+        "cancelled": 2,
     }
     data.update(overrides)
     return TenantRequestSummaryResponse(**data)
@@ -97,7 +98,7 @@ async def test_get_project_tenant_request_summary(monkeypatch, client):
     res = await client.get(f"/v1/projects/{PROJECT_ID}/tenant-requests/summary")
     body = assert_success(res, 200)
     assert body["data"]["pending_review"] == 2
-    assert body["data"]["approved_this_month"] == 3
+    assert body["data"]["approved"] == 3
 
 
 @pytest.mark.asyncio

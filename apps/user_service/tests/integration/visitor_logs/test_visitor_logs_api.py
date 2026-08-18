@@ -4,11 +4,12 @@ import pytest
 
 from apps.user_service.tests.integration.helpers import (
     patch_check_permissions,
-    patch_ensure_staff_project_access_optional,
+    patch_ensure_staff_project_access,
 )
 from apps.user_service.tests.utils.assertions import assert_success
 
 PASS_ID = "pass-1"
+PROJECT_ID = "880e8400-e29b-41d4-a716-446655440003"
 
 _FAKE_LOG_ITEM = {
     "source": "pass",
@@ -65,9 +66,7 @@ _FAKE_DETAIL = {
 async def test_list_visitor_logs(monkeypatch, client):
     """GET visitor-logs returns paginated visitor log rows."""
 
-    patch_ensure_staff_project_access_optional(
-        monkeypatch, "apps.user_service.app.api.visitor_logs"
-    )
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.visitor_logs")
 
     async def fake_list_logs(
         _self,
@@ -98,7 +97,10 @@ async def test_list_visitor_logs(monkeypatch, client):
         fake_list_logs,
     )
 
-    res = await client.get("/v1/visitor-logs", params={"page": 1, "page_size": 20})
+    res = await client.get(
+        "/v1/visitor-logs",
+        params={"project_id": PROJECT_ID, "page": 1, "page_size": 20},
+    )
     body = assert_success(res, 200)
     assert body["data"][0]["pass_id"] == PASS_ID
     assert body["total"] == 1
@@ -110,9 +112,7 @@ async def test_list_visitor_logs(monkeypatch, client):
 async def test_get_visitor_log_overview(monkeypatch, client):
     """GET visitor-logs/overview returns overview card metrics."""
 
-    patch_ensure_staff_project_access_optional(
-        monkeypatch, "apps.user_service.app.api.visitor_logs"
-    )
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.visitor_logs")
 
     async def fake_get_overview(
         _self,
@@ -130,7 +130,10 @@ async def test_get_visitor_log_overview(monkeypatch, client):
         fake_get_overview,
     )
 
-    res = await client.get("/v1/visitor-logs/overview")
+    res = await client.get(
+        "/v1/visitor-logs/overview",
+        params={"project_id": PROJECT_ID},
+    )
     body = assert_success(res, 200)
     assert body["data"]["total_entries"] == 28
     assert body["data"]["walk_ins"] == 6

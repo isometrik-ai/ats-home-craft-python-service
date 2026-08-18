@@ -18,7 +18,7 @@ from apps.user_service.app.schemas.visitor_logs import (
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
-    ensure_staff_project_access_optional,
+    ensure_staff_project_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -83,7 +83,7 @@ async def list_visitor_logs(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return paginated visitor logs for the organization."""
-    user_context = await ensure_staff_project_access_optional(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
         project_id=query.project_id,
@@ -137,7 +137,7 @@ async def get_visitor_log_overview(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return overview card metrics for visitor logs."""
-    user_context = await ensure_staff_project_access_optional(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
         project_id=query.project_id,
