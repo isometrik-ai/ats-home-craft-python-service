@@ -12,6 +12,7 @@ from asyncpg import UniqueViolationError
 
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.enums import (
+    MoveEventType,
     TenantRequestDocumentStatus,
     TenantRequestDocumentType,
     TenantRequestEventType,
@@ -293,6 +294,18 @@ class _FakeTenantRequestsRepo:
         return self.active_approved
 
 
+class _FakeMoveEventsRepo:
+    """Configurable fake move-events repository."""
+
+    def __init__(self) -> None:
+        self.insert_calls: list[dict[str, Any]] = []
+
+    async def insert(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Record move event insert."""
+        self.insert_calls.append(dict(data))
+        return {"id": f"move-{len(self.insert_calls)}"}
+
+
 class _FakeContactUnitsRepo:
     """Configurable fake contact-units repository."""
 
@@ -340,6 +353,7 @@ def _service(
     *,
     repo: _FakeTenantRequestsRepo | None = None,
     contact_units_repo: _FakeContactUnitsRepo | None = None,
+    move_events_repo: _FakeMoveEventsRepo | None = None,
 ) -> TenantRequestsService:
     """Build service with fake repositories."""
     service = TenantRequestsService(
@@ -348,6 +362,7 @@ def _service(
         supabase_client=MagicMock(),
         tenant_requests_repository=repo or _FakeTenantRequestsRepo(),
         contact_units_repository=contact_units_repo or _FakeContactUnitsRepo(),
+        move_events_repository=move_events_repo or _FakeMoveEventsRepo(),
     )
     service.setup_service = AsyncMock()
     service._push_dispatcher = _FakePushDispatcher()
@@ -887,6 +902,36 @@ async def test_approve_request_persists_move_in_fee(mock_contacts_cls: MagicMock
 
 @pytest.mark.asyncio
 @patch("apps.user_service.app.services.tenant_requests_service.ContactsService")
+async def test_approve_request_records_move_in_event(mock_contacts_cls: MagicMock) -> None:
+    """Admin approve inserts a move_in ledger row for the new tenant."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(status=TenantRequestStatus.READY_TO_APPROVE.value)
+    repo.documents = _documents(doc_status=TenantRequestDocumentStatus.VERIFIED.value)
+    move_events_repo = _FakeMoveEventsRepo()
+    mock_contacts_cls.return_value.create_contact = AsyncMock(
+        return_value={"contact_id": "tenant-contact-1"}
+    )
+    svc = _service(repo=repo, move_events_repo=move_events_repo)
+
+    await svc.approve_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        body=_approve_body(move_in_fee=Decimal("5000")),
+    )
+
+    assert len(move_events_repo.insert_calls) == 1
+    move_in = move_events_repo.insert_calls[0]
+    assert move_in["move_type"] == MoveEventType.MOVE_IN.value
+    assert move_in["contact_id"] == "tenant-contact-1"
+    assert move_in["contact_unit_id"] == "link-1"
+    assert move_in["unit_id"] == UNIT_ID
+    assert move_in["event_date"] == date(2026, 8, 1)
+    assert move_in["fee_amount"] == Decimal("5000")
+    assert REQUEST_ID in str(move_in.get("notes") or "")
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.tenant_requests_service.ContactsService")
 async def test_approve_request_parses_json_string_phones(mock_contacts_cls: MagicMock) -> None:
     """Approve parses tenant_phones/emails when JSONB columns arrive as strings."""
     repo = _FakeTenantRequestsRepo()
@@ -930,8 +975,12 @@ async def test_approve_request_not_ready() -> None:
 
 
 @pytest.mark.asyncio
+@patch("apps.user_service.app.services.tenant_requests_service.VehiclesService")
 @patch("apps.user_service.app.services.tenant_requests_service.ContactsService")
-async def test_approve_request_supersedes_existing(mock_contacts_cls: MagicMock) -> None:
+async def test_approve_request_supersedes_existing(
+    mock_contacts_cls: MagicMock,
+    mock_vehicles_cls: MagicMock,
+) -> None:
     """Approving supersedes an existing approved tenant on the same unit."""
     repo = _FakeTenantRequestsRepo()
     repo.row = _request_row(status=TenantRequestStatus.READY_TO_APPROVE.value)
@@ -939,11 +988,14 @@ async def test_approve_request_supersedes_existing(mock_contacts_cls: MagicMock)
     repo.active_approved = {
         "id": "old-request",
         "contact_unit_id": "old-link",
+        "tenant_contact_id": "old-tenant-contact",
     }
+    move_events_repo = _FakeMoveEventsRepo()
     mock_contacts_cls.return_value.create_contact = AsyncMock(
         return_value={"contact_id": "tenant-contact-1"}
     )
-    svc = _service(repo=repo)
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    svc = _service(repo=repo, move_events_repo=move_events_repo)
 
     response = await svc.approve_request(
         project_id=PROJECT_ID,
@@ -955,6 +1007,14 @@ async def test_approve_request_supersedes_existing(mock_contacts_cls: MagicMock)
     assert any(
         event.get("event_type") == TenantRequestEventType.SUPERSEDED.value for event in repo.events
     )
+    assert len(move_events_repo.insert_calls) == 2
+    move_out = move_events_repo.insert_calls[0]
+    move_in = move_events_repo.insert_calls[1]
+    assert move_out["move_type"] == MoveEventType.MOVE_OUT.value
+    assert move_out["contact_id"] == "old-tenant-contact"
+    assert move_out["contact_unit_id"] == "old-link"
+    assert move_in["move_type"] == MoveEventType.MOVE_IN.value
+    assert move_in["contact_id"] == "tenant-contact-1"
 
 
 @pytest.mark.asyncio

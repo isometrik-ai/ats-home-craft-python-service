@@ -16,6 +16,9 @@ from apps.user_service.app.db.repositories.contact_roles_repository import (
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.db.repositories.move_events_repository import (
+    MoveEventsRepository,
+)
 from apps.user_service.app.db.repositories.tenant_requests_repository import (
     TenantRequestsRepository,
 )
@@ -23,6 +26,7 @@ from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import (
     ContactType,
+    MoveEventType,
     TenantRequestDocumentStatus,
     TenantRequestDocumentType,
     TenantRequestEventType,
@@ -94,12 +98,14 @@ class TenantRequestsService:
         supabase_client: AsyncClient | None = None,
         tenant_requests_repository: TenantRequestsRepository | None = None,
         contact_units_repository: ContactUnitsRepository | None = None,
+        move_events_repository: MoveEventsRepository | None = None,
     ) -> None:
         self.db_connection = db_connection
         self.user_context = user_context
         self.supabase_client = supabase_client
         self.repo = tenant_requests_repository or TenantRequestsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self.move_events_repo = move_events_repository or MoveEventsRepository(db_connection)
         self.contact_roles_repo = ContactRolesRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
@@ -111,6 +117,37 @@ class TenantRequestsService:
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
+
+    async def _record_move_event_ledger(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        contact_id: str,
+        contact_unit_id: str | None,
+        move_type: str,
+        event_date: date,
+        fee_amount: Decimal | None = None,
+        notes: str | None = None,
+    ) -> None:
+        """Insert a move-in/out ledger row without re-syncing contact_units."""
+        user_id = self.user_context.user_id
+        await self.move_events_repo.insert(
+            {
+                "organization_id": organization_id,
+                "project_id": project_id,
+                "unit_id": unit_id,
+                "contact_id": contact_id,
+                "contact_unit_id": contact_unit_id,
+                "move_type": move_type,
+                "event_date": event_date,
+                "fee_amount": fee_amount,
+                "fee_currency": "INR",
+                "notes": notes,
+                "recorded_by_user_id": str(user_id) if user_id else None,
+            }
+        )
 
     async def _ensure_project(self, *, project_id: str) -> None:
         """Raise when the project is missing or outside the organization."""
@@ -994,12 +1031,25 @@ class TenantRequestsService:
             unit_id=unit_id,
         )
         if existing and existing.get("contact_unit_id"):
+            old_contact_unit_id = str(existing["contact_unit_id"])
+            old_tenant_contact_id = existing.get("tenant_contact_id")
             await self.contact_units_repo.sync_move_out(
                 organization_id=org_id,
-                contact_unit_id=str(existing["contact_unit_id"]),
+                contact_unit_id=old_contact_unit_id,
                 event_date=now.date(),
             )
-            tenant_contact_id = existing.get("tenant_contact_id")
+            if old_tenant_contact_id:
+                await self._record_move_event_ledger(
+                    organization_id=org_id,
+                    project_id=str(row["project_id"]),
+                    unit_id=unit_id,
+                    contact_id=str(old_tenant_contact_id),
+                    contact_unit_id=old_contact_unit_id,
+                    move_type=MoveEventType.MOVE_OUT.value,
+                    event_date=now.date(),
+                    notes=f"Superseded by tenant request {tenant_request_id}",
+                )
+            tenant_contact_id = old_tenant_contact_id
             if tenant_contact_id:
                 vehicles_service = VehiclesService(
                     db_connection=self.db_connection,
@@ -1069,6 +1119,17 @@ class TenantRequestsService:
             project_id=str(row["project_id"]),
             unit_id=unit_id,
             contact_unit_id=str(link["id"]),
+        )
+        await self._record_move_event_ledger(
+            organization_id=org_id,
+            project_id=str(row["project_id"]),
+            unit_id=unit_id,
+            contact_id=tenant_contact_id,
+            contact_unit_id=str(link["id"]),
+            move_type=MoveEventType.MOVE_IN.value,
+            event_date=body.move_in_date,
+            fee_amount=body.move_in_fee,
+            notes=f"Tenant request approved ({tenant_request_id})",
         )
         await self.repo.update_request_status(
             organization_id=org_id,
