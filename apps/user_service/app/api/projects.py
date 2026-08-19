@@ -3580,21 +3580,19 @@ async def remove_project_member(
         db_connection=db_connection,
         user_context=user_context,
     )
-    member = await service.remove_member(project_id=project_id, user_id=user_id)
-    data = member.model_dump()
+    await service.remove_member(project_id=project_id, user_id=user_id)
     _set_audit(
         request,
         user_context,
         table="project_members",
-        requested_id=data.get("id", user_id),
+        requested_id=user_id,
         description=f"Removed project member {user_id} from project {project_id}",
-        old_data=data,
+        old_data={"user_id": user_id, "project_id": project_id},
     )
     return success_response(
         request=request,
         message_key="project_members.success.removed",
         custom_code=CustomStatusCode.SUCCESS,
-        data=data,
     )
 
 

@@ -2043,3 +2043,23 @@ async def test_assign_project_member(monkeypatch, client):
     )
     body = assert_success(res, 201)
     assert body["data"]["user_id"] == ADMIN_USER_ID
+
+
+@pytest.mark.asyncio
+async def test_remove_project_member(monkeypatch, client):
+    """DELETE /projects/{project_id}/members/{user_id} suspends assignment."""
+    _patch_projects_access(monkeypatch)
+
+    async def fake_remove_member(_self, *, project_id: str, user_id: str):
+        del _self
+        assert project_id == PROJECT_ID
+        assert user_id == ADMIN_USER_ID
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_members_service.ProjectMembersService.remove_member",
+        fake_remove_member,
+    )
+
+    res = await client.delete(f"/v1/projects/{PROJECT_ID}/members/{ADMIN_USER_ID}")
+    body = assert_success(res, 200)
+    assert "data" not in body
