@@ -1,13 +1,13 @@
 # ADR 0013: Daily Help — project registry, household links, gate integration
 
-|                  |                                                                                                                                                                                                                                                                        |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted — implemented in `user_service` (Phases 1–3 core)                                                                                                                                                                                                             |
-| **Date**         | 2026-08-11                                                                                                                                                                                                                                                             |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                               |
-| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access) |
-| **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                               |
-| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql` (`ats-home-craft-supabase`)                |
+|                  |                                                                                                                                                                                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Status**       | Accepted — implemented in `user_service` (Phases 1–4 core)                                                                                                                                                                                                                                                   |
+| **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                   |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                     |
+| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access)                                       |
+| **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                                                                     |
+| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql` (`ats-home-craft-supabase`) |
 
 ______________________________________________________________________
 
@@ -27,9 +27,9 @@ delivery, and similar recurring service providers. Product UI spans:
 | #   | Decision                                                                                                                                                                                                                                  |
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **Daily help is not a `contacts` row and not an auth user.** Identity lives on dedicated registry tables only.                                                                                                                            |
-| 2   | **Admin / project staff** create and maintain records for a **project** — no resident submission or approval queue.                                                                                                                       |
-| 3   | **Documents on file only** — photo, ID proof, police verification, and ad-hoc uploads. No verify/reject step.                                                                                                                             |
-| 4   | **Status:** `active`, `inactive`, `deleted` (soft delete). Deleted rows remain for audit; list tabs show counts.                                                                                                                          |
+| 2   | **Two creation paths:** (a) admin direct create → `active` + pass immediately; (b) **security submit → admin approve** on the same `daily_help_profiles` table — no separate request table.                                               |
+| 3   | **Documents on file only** — photo, ID proof, police verification, and ad-hoc uploads. Admin approves/rejects the **whole profile** (not per-document verify like tenant requests).                                                       |
+| 4   | **Status:** `active`, `inactive`, `deleted`, **`pending_approval`**, **`rejected`**. Pending/rejected rows appear on the same admin list; filter by status tab. Soft-deleted rows retained for audit.                                     |
 | 5   | **Categories are admin-maintained per project** — not a global Postgres enum. Each project defines its own category list (Maid, Cook, …).                                                                                                 |
 | 6   | **Gate / Activities** reuse the existing **pass check-in/out + visitor logs** pipeline — not a third parallel entry system.                                                                                                               |
 | 7   | Each profile gets a **project-scoped gate passcode** (searchable in the app) backed by a **recurring pass** (`pass_type = daily_help`).                                                                                                   |
@@ -41,16 +41,17 @@ delivery, and similar recurring service providers. Product UI spans:
 
 **Admin dashboard — Daily Help list**
 
-| Element         | Capability                                                                 |
-| --------------- | -------------------------------------------------------------------------- |
-| Summary cards   | Total, Active, Inactive, Deleted                                           |
-| Status tabs     | All / Active / Inactive / Deleted                                          |
-| Category filter | Dropdown (All + **project categories**)                                    |
-| Search          | Name or contact number                                                     |
-| Table columns   | Name (+ gender), Category, Contact, Documents, Created on, Status, Actions |
-| Add             | Side drawer form                                                           |
-| Row actions     | View, Edit, Mark inactive, Delete record                                   |
-| Export          | CSV/XLS of filtered list                                                   |
+| Element         | Capability                                                                                  |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| Summary cards   | Total, **Pending**, **Rejected**, Active, Inactive, Deleted                                 |
+| Status tabs     | All / **Pending** / **Rejected** / Active / Inactive / Deleted                              |
+| Category filter | Dropdown (All + **project categories**)                                                     |
+| Search          | Name or contact number                                                                      |
+| Table columns   | Name (+ gender), Category, Contact, Documents, Created on, Status, Actions                  |
+| Add (admin)     | Side drawer → direct create (`active`)                                                      |
+| Security submit | Separate flow → `pending_approval` (no pass until approved)                                 |
+| Row actions     | View; **Approve / Reject** when pending; Edit/resubmit when rejected; Mark inactive; Delete |
+| Export          | CSV/XLS of filtered list                                                                    |
 
 **Admin — Add / Edit Daily Help**
 
@@ -132,9 +133,9 @@ and the existing **visitor logs** union ([ADR 0004](./0004-pass-validation-gate.
 
 ### 3. Link to recurring pass for gate + visitor logs
 
-On **create** (and on re-activate from inactive/deleted when product requires):
+On **admin direct create** or on **approve** (and on re-activate from inactive/deleted when product requires):
 
-1. Insert `daily_help_profiles` with generated **`gate_passcode`** (unique per `(organization_id, project_id)`).
+1. Insert or update `daily_help_profiles` with generated **`gate_passcode`** (unique per `(organization_id, project_id)` when not NULL).
 1. Insert **`passes`** row:
    - `pass_type = daily_help`
    - `validity_type = recurring`
@@ -155,21 +156,56 @@ already support pass rows; extend filters and overview cards for `daily_help`.
 
 #### Profile — `daily_help_status`
 
-| Status     | Meaning                                      |
-| ---------- | -------------------------------------------- |
-| `active`   | Visible in directory; recurring pass usable  |
-| `inactive` | Hidden from resident directory; pass blocked |
-| `deleted`  | Soft-deleted; audit retained; pass cancelled |
+| Status             | Meaning                                                            |
+| ------------------ | ------------------------------------------------------------------ |
+| `pending_approval` | Security-submitted; visible on admin list; **no pass / passcode**  |
+| `rejected`         | Admin rejected submission; security may edit and resubmit same row |
+| `active`           | Visible in directory; recurring pass usable                        |
+| `inactive`         | Hidden from resident directory; pass blocked                       |
+| `deleted`          | Soft-deleted; audit retained; pass cancelled                       |
 
 ```text
-admin create ──► active
+Admin direct create ──► active (+ pass)
+
+Security submit ──► pending_approval
+Admin reject      ──► rejected
+Security resubmit ──► pending_approval (same row)
+Admin approve     ──► active (+ pass issued)
+
 active ──admin mark inactive──► inactive ──admin reactivate──► active
 active|inactive ──admin delete──► deleted
 deleted ──admin restore (optional)──► inactive (default) or active
 ```
 
+**Security submission** uses the same `daily_help_profiles` row — no separate request table.
+`gate_passcode` is **NULL** until approve. Partial unique index applies only where passcode IS NOT NULL.
+
 When status → `inactive` or `deleted`, service sets linked pass `status = cancelled` (or equivalent).
-Re-activate may re-issue pass if missing.
+Re-activate may re-issue pass if missing. Registry mutations (deactivate, delete, admin PATCH) are
+blocked while `pending_approval` or `rejected`.
+
+### 4b. Security submission workflow (Phase 4)
+
+| Step      | Actor                                        | API                                    | Result                                             |
+| --------- | -------------------------------------------- | -------------------------------------- | -------------------------------------------------- |
+| Submit    | Security (`project_members.role = security`) | `POST .../daily-help/submissions`      | `pending_approval`, `submitted` event              |
+| List mine | Security                                     | `GET .../daily-help/submissions`       | Paginated rows for `submitted_by_user_id = caller` |
+| View mine | Security                                     | `GET .../daily-help/{id}/submission`   | Detail with documents + review fields              |
+| Reject    | Reviewer                                     | `POST .../daily-help/{id}/reject`      | `rejected`, optional `rejection_reason`            |
+| Resubmit  | Security                                     | `PATCH .../daily-help/{id}/submission` | `pending_approval`, `resubmitted` event            |
+| Approve   | Reviewer                                     | `POST .../daily-help/{id}/approve`     | `active`, passcode + recurring pass                |
+
+**Reviewer access:** org member with `projects_management.edit`, **or** active `community_admin` project member.
+
+**Security access:** staff with `visitor_management.verify` + active **security** project member assignment.
+List/detail are scoped to the caller's own submissions.
+
+Documents are stored at submit time; admin review is **profile-level** approve/reject — not per-document.
+
+New audit events: `submitted`, `approved`, `rejected`, `resubmitted`.
+
+New profile columns (migration `20260819160000_daily_help_security_submission.sql`):
+`submitted_by_user_id`, `reviewed_by_user_id`, `reviewed_at`, `rejection_reason`.
 
 ### 5. Household links (Phase 2)
 
@@ -240,15 +276,17 @@ linked to any flat yet).
 
 ### 8. RBAC and API split
 
-| Actor    | Prefix                                 | Auth                                       |
-| -------- | -------------------------------------- | ------------------------------------------ |
-| Admin    | `/v1/projects/{project_id}/daily-help` | Staff RBAC + `ensure_staff_project_access` |
-| Resident | `/v1/daily-help`                       | `extract_onboarding_contact_context()`     |
+| Actor    | Prefix / routes                                                | Auth                                                                                  |
+| -------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Admin    | `/v1/projects/{project_id}/daily-help`                         | Staff RBAC + `ensure_staff_project_access`                                            |
+| Reviewer | `.../daily-help/{id}/approve`, `/reject`                       | `ensure_daily_help_reviewer_access` — edit permission or `community_admin`            |
+| Security | `.../daily-help/submissions`, `.../daily-help/{id}/submission` | `ensure_security_project_member_access` — security project member + verify permission |
+| Resident | `/v1/daily-help`                                               | `extract_onboarding_contact_context()`                                                |
 
 Resident routes cover directory, profile, household links, **open-to-work**, **ratings** (create /
 view mine / update / summary), and **attendance** (monthly calendar + mark absent). Admin routes cover
-CRUD, category management, status changes, document upload metadata, export, summary, availability,
-and gate check-in attendance calendar.
+CRUD, category management, status changes, **security submission review**, document upload metadata,
+export, summary, availability, and gate check-in attendance calendar.
 
 ### 9. Visitor logs / Activities alignment
 
@@ -272,7 +310,9 @@ ______________________________________________________________________
 CREATE TYPE public.daily_help_status AS ENUM (
   'active',
   'inactive',
-  'deleted'
+  'deleted',
+  'pending_approval',
+  'rejected'
 );
 
 CREATE TYPE public.daily_help_category_status AS ENUM (
@@ -299,7 +339,11 @@ CREATE TYPE public.daily_help_event_type AS ENUM (
   'restored',
   'household_linked',
   'household_removed',
-  'attendance_marked_absent'
+  'attendance_marked_absent',
+  'submitted',
+  'approved',
+  'rejected',
+  'resubmitted'
 );
 
 CREATE TYPE public.daily_help_actor_type AS ENUM (
@@ -371,32 +415,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_passes_daily_help_id_active
 
 ### `daily_help_profiles`
 
-| Column                      | Type                                     | Notes                                          |
-| --------------------------- | ---------------------------------------- | ---------------------------------------------- |
-| `id`                        | uuid PK                                  |                                                |
-| `organization_id`           | uuid FK → organizations                  |                                                |
-| `project_id`                | uuid FK → projects                       |                                                |
-| `initials`                  | text                                     | Mr. / Mrs. / Ms.                               |
-| `first_name`                | text NOT NULL                            |                                                |
-| `middle_name`               | text                                     |                                                |
-| `last_name`                 | text NOT NULL                            |                                                |
-| `display_name`              | text NOT NULL                            | denormalized for search/list                   |
-| `phone_isd_code`            | text NOT NULL                            |                                                |
-| `phone_number`              | text NOT NULL                            |                                                |
-| `alternate_phone_isd_code`  | text                                     |                                                |
-| `alternate_phone_number`    | text                                     |                                                |
-| `category_id`               | uuid FK → daily_help_categories NOT NULL |                                                |
-| `gender`                    | text                                     | Male / Female / Other (or separate enum later) |
-| `date_of_birth`             | date                                     |                                                |
-| `photo_path`                | text                                     | primary face photo for gate/directory          |
-| `gate_passcode`             | text NOT NULL                            | 4-digit string; unique per project             |
-| `status`                    | daily_help_status NOT NULL               | default `active`                               |
-| `open_to_work`              | boolean NOT NULL                         | default false; Phase 2 resident/admin toggle   |
-| `linked_pass_id`            | uuid FK → passes                         | recurring gate pass                            |
-| `created_by_user_id`        | uuid FK → auth.users                     | admin staff                                    |
-| `updated_by_user_id`        | uuid FK → auth.users                     |                                                |
-| `deleted_at`                | timestamptz                              | set when status → deleted                      |
-| `created_at` / `updated_at` | timestamptz                              |                                                |
+| Column                      | Type                                     | Notes                                                                                       |
+| --------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `id`                        | uuid PK                                  |                                                                                             |
+| `organization_id`           | uuid FK → organizations                  |                                                                                             |
+| `project_id`                | uuid FK → projects                       |                                                                                             |
+| `initials`                  | text                                     | Mr. / Mrs. / Ms.                                                                            |
+| `first_name`                | text NOT NULL                            |                                                                                             |
+| `middle_name`               | text                                     |                                                                                             |
+| `last_name`                 | text NOT NULL                            |                                                                                             |
+| `display_name`              | text NOT NULL                            | denormalized for search/list                                                                |
+| `phone_isd_code`            | text NOT NULL                            |                                                                                             |
+| `phone_number`              | text NOT NULL                            |                                                                                             |
+| `alternate_phone_isd_code`  | text                                     |                                                                                             |
+| `alternate_phone_number`    | text                                     |                                                                                             |
+| `category_id`               | uuid FK → daily_help_categories NOT NULL |                                                                                             |
+| `gender`                    | text                                     | Male / Female / Other (or separate enum later)                                              |
+| `date_of_birth`             | date                                     |                                                                                             |
+| `photo_path`                | text                                     | primary face photo for gate/directory                                                       |
+| `gate_passcode`             | text                                     | 4-digit string; unique per project when set; **NULL** while `pending_approval` / `rejected` |
+| `status`                    | daily_help_status NOT NULL               | default `active`                                                                            |
+| `open_to_work`              | boolean NOT NULL                         | default false; Phase 2 resident/admin toggle                                                |
+| `linked_pass_id`            | uuid FK → passes                         | recurring gate pass (NULL until approved/active)                                            |
+| `submitted_by_user_id`      | uuid FK → auth.users                     | security submitter                                                                          |
+| `reviewed_by_user_id`       | uuid FK → auth.users                     | admin reviewer on approve/reject                                                            |
+| `reviewed_at`               | timestamptz                              | timestamp of last review action                                                             |
+| `rejection_reason`          | text                                     | optional admin note on reject                                                               |
+| `created_by_user_id`        | uuid FK → auth.users                     | admin staff or security submitter                                                           |
+| `updated_by_user_id`        | uuid FK → auth.users                     |                                                                                             |
+| `deleted_at`                | timestamptz                              | set when status → deleted                                                                   |
+| `created_at` / `updated_at` | timestamptz                              |                                                                                             |
 
 **Indexes:**
 
@@ -404,7 +452,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_passes_daily_help_id_active
 - `(organization_id, project_id, category_id)`
 - `(organization_id, project_id, lower(display_name))` — search
 - `(organization_id, project_id, phone_number)`
-- **Unique** `(organization_id, project_id, gate_passcode)`
+- **Unique partial** `(organization_id, project_id, gate_passcode) WHERE gate_passcode IS NOT NULL`
+
+Migration `20260819160000_daily_help_security_submission.sql` adds review columns and nullable passcode.
 
 ### `daily_help_documents`
 
@@ -529,11 +579,13 @@ ______________________________________________________________________
 - **Project-specific categories** without enum migrations when a community adds a new service type.
 - **Targeted notifications** — only Owner/Tenant holders on linked flats, not all household members.
 - **Extensible** — ratings, availability, open-to-work, and attendance absences delivered in Phase 3.
+- **Security submission without a second table** — pending/rejected on the same registry row keeps one admin list and simpler queries.
 
 ### Negative / trade-offs
 
 - **Two sources of truth for gate identity** — profile snapshot and pass guest snapshot must stay in sync
   on edit (service updates both in one transaction).
+- **Nullable passcode during review** — admin list and security UI must handle profiles without gate codes until approved.
 - **`passes.unit_id` NULL** for project-level recurring daily help — visitor log “flat” column may be
   blank unless enriched from latest check-in context or primary household link (service-layer display rule).
 - **Legacy `service` passes** — existing data may not link to `daily_help_profiles` until backfill.

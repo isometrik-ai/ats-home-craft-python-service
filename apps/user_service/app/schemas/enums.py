@@ -1570,6 +1570,8 @@ TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES: tuple[TenantRequestDocumentType, ...] = 
 class DailyHelpStatus(str, Enum):
     """Daily help profile lifecycle status."""
 
+    PENDING_APPROVAL = "pending_approval"
+    REJECTED = "rejected"
     ACTIVE = "active"
     INACTIVE = "inactive"
     DELETED = "deleted"
@@ -1594,6 +1596,10 @@ class DailyHelpDocumentType(str, Enum):
 class DailyHelpEventType(str, Enum):
     """Append-only daily help audit events."""
 
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    RESUBMITTED = "resubmitted"
     CREATED = "created"
     UPDATED = "updated"
     STATUS_CHANGED = "status_changed"

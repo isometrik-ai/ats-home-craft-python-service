@@ -35,6 +35,10 @@ _PROFILE_SELECT_COLUMNS = """
   p.open_to_work,
   p.linked_pass_id::text AS linked_pass_id,
   p.created_by_user_id::text AS created_by_user_id,
+  p.submitted_by_user_id::text AS submitted_by_user_id,
+  p.reviewed_by_user_id::text AS reviewed_by_user_id,
+  p.reviewed_at,
+  p.rejection_reason,
   p.updated_by_user_id::text AS updated_by_user_id,
   p.deleted_at,
   p.created_at,
@@ -145,10 +149,11 @@ class DailyHelpRepository(BaseRepository):
         gender: str | None,
         date_of_birth: date | None,
         photo_path: str | None,
-        gate_passcode: str,
+        gate_passcode: str | None,
         status: str,
         open_to_work: bool = False,
         created_by_user_id: str | None = None,
+        submitted_by_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Insert a daily_help_profiles row."""
         row = await self.db_connection.fetchrow(
@@ -173,12 +178,13 @@ class DailyHelpRepository(BaseRepository):
                 status,
                 open_to_work,
                 created_by_user_id,
+                submitted_by_user_id,
                 updated_by_user_id
             )
             VALUES (
                 $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11,
                 $12::uuid, $13, $14::date, $15, $16,
-                $17::daily_help_status, $18, $19::uuid, $19::uuid
+                $17::daily_help_status, $18, $19::uuid, $20::uuid, $19::uuid
             )
             RETURNING id::text AS id
             """,
@@ -200,6 +206,8 @@ class DailyHelpRepository(BaseRepository):
             gate_passcode,
             status,
             open_to_work,
+            created_by_user_id,
+            submitted_by_user_id,
             created_by_user_id,
         )
         return await self.get_profile(
@@ -234,6 +242,9 @@ class DailyHelpRepository(BaseRepository):
             "status": "::daily_help_status",
             "deleted_at": "::timestamptz",
             "linked_pass_id": "::uuid",
+            "reviewed_by_user_id": "::uuid",
+            "reviewed_at": "::timestamptz",
+            "submitted_by_user_id": "::uuid",
         }
         for key, value in fields.items():
             cast = casts.get(key, "")
@@ -299,10 +310,14 @@ class DailyHelpRepository(BaseRepository):
         status: str | None = None,
         category_id: str | None = None,
         search: str | None = None,
+        submitted_by_user_id: str | None = None,
     ) -> tuple[str, list[Any]]:
         """Build WHERE clause and args shared by profile list and link aggregates."""
         filters = ["p.organization_id = $1::uuid", "p.project_id = $2::uuid"]
         args: list[Any] = [organization_id, project_id]
+        if submitted_by_user_id:
+            args.append(submitted_by_user_id)
+            filters.append(f"p.submitted_by_user_id = ${len(args)}::uuid")
         if status:
             args.append(status)
             filters.append(f"p.status = ${len(args)}::daily_help_status")
@@ -326,6 +341,7 @@ class DailyHelpRepository(BaseRepository):
         status: str | None = None,
         category_id: str | None = None,
         search: str | None = None,
+        submitted_by_user_id: str | None = None,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -336,6 +352,7 @@ class DailyHelpRepository(BaseRepository):
             status=status,
             category_id=category_id,
             search=search,
+            submitted_by_user_id=submitted_by_user_id,
         )
 
         count = await self.db_connection.fetchval(
@@ -374,6 +391,8 @@ class DailyHelpRepository(BaseRepository):
             """
             SELECT
               COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE status = 'pending_approval') AS pending_approval,
+              COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
               COUNT(*) FILTER (WHERE status = 'active') AS active,
               COUNT(*) FILTER (WHERE status = 'inactive') AS inactive,
               COUNT(*) FILTER (WHERE status = 'deleted') AS deleted
@@ -385,7 +404,14 @@ class DailyHelpRepository(BaseRepository):
             project_id,
         )
         if not row:
-            return {"total": 0, "active": 0, "inactive": 0, "deleted": 0}
+            return {
+                "total": 0,
+                "pending_approval": 0,
+                "rejected": 0,
+                "active": 0,
+                "inactive": 0,
+                "deleted": 0,
+            }
         return {key: int(row[key] or 0) for key in row.keys()}
 
     async def insert_document(

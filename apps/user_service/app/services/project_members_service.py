@@ -89,6 +89,9 @@ class ProjectMembersService:
     @staticmethod
     def _to_response(row: dict[str, Any]) -> ProjectMemberResponse:
         payload = dict(row)
+        for key in ("id", "organization_id", "project_id", "user_id", "org_role_id"):
+            if payload.get(key) is not None:
+                payload[key] = str(payload[key])
         if payload.get("joined_at") is not None:
             payload["joined_at"] = format_iso_datetime(payload["joined_at"])
         return ProjectMemberResponse.model_validate(payload)
@@ -215,7 +218,7 @@ class ProjectMembersService:
         match = next((p for p in profiles if p["user_id"] == user_id), updated)
         return self._to_response(match)
 
-    async def remove_member(self, *, project_id: str, user_id: str) -> ProjectMemberResponse:
+    async def remove_member(self, *, project_id: str, user_id: str) -> None:
         """Suspend a user's project assignment."""
         await self._ensure_can_manage_members(project_id=project_id)
         await self.setup_service.ensure_project(project_id=project_id)
@@ -241,13 +244,16 @@ class ProjectMembersService:
             next_status=ProjectMemberStatus.SUSPENDED.value,
         )
 
-        updated = await self.projects_repo.remove_member(
+        removed = await self.projects_repo.remove_member(
             organization_id=org_id,
             project_id=project_id,
             user_id=user_id,
         )
-        assert updated
-        return self._to_response(updated)
+        if not removed:
+            raise NotFoundException(
+                message_key="project_members.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
 
     async def _ensure_not_last_community_admin(
         self,

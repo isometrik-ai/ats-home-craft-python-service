@@ -25,7 +25,9 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpListApiResponse,
     DailyHelpListQuery,
     DailyHelpMessageApiResponse,
+    DailyHelpSubmissionListQuery,
     DailyHelpSummaryApiResponse,
+    RejectDailyHelpRequest,
     ReplaceDailyHelpAvailabilityRequest,
     UpdateDailyHelpCategoryRequest,
     UpdateDailyHelpRequest,
@@ -33,6 +35,8 @@ from apps.user_service.app.schemas.daily_help import (
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
+    ensure_daily_help_reviewer_access,
+    ensure_security_project_member_access,
     ensure_staff_project_access,
     handle_api_exceptions,
 )
@@ -40,6 +44,7 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
+    VISITOR_MANAGEMENT_VERIFY,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -429,6 +434,94 @@ async def create_project_daily_help_profile(
     )
 
 
+@handle_api_exceptions("submit project daily help profile")
+@router.post(
+    "/{project_id}/daily-help/submissions",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Security submits a daily help profile for admin review",
+    response_model=None,
+    responses=PROFILE_CREATED_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_profiles",
+    category="DAILY_HELP",
+)
+async def submit_project_daily_help_profile(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    body: CreateDailyHelpRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Security registers a helper pending admin approval (no gate pass issued)."""
+    user_context = await ensure_security_project_member_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.submit_profile(project_id=project_id, body=body)
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_profiles",
+        requested_id=data.id,
+        description=f"Submitted daily help profile for review: {data.id}",
+        risk_level="medium",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.submitted",
+        custom_code=CustomStatusCode.CREATED,
+        data=data.model_dump(),
+        status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("list security daily help submissions")
+@router.get(
+    "/{project_id}/daily-help/submissions",
+    status_code=http_status.HTTP_200_OK,
+    summary="List daily help profiles submitted by the current security user",
+    response_model=None,
+    responses=LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_security_daily_help_submissions(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    query: DailyHelpSubmissionListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return paginated submissions created by the caller (pending, rejected, or approved)."""
+    user_context = await ensure_security_project_member_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items, total = await service.list_my_submissions(project_id=project_id, query=query)
+    return list_response(
+        request=request,
+        items=[item.model_dump() for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="daily_help.success.submissions_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
 @handle_api_exceptions("get project daily help profile")
 @router.get(
     "/{project_id}/daily-help/{profile_id}",
@@ -547,6 +640,198 @@ async def update_project_daily_help_profile(
     return success_response(
         request=request,
         message_key="daily_help.success.updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("get security daily help submission")
+@router.get(
+    "/{project_id}/daily-help/{profile_id}/submission",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get a daily help profile submitted by the current security user",
+    response_model=None,
+    responses=DETAIL_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_security_daily_help_submission(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return one submission with documents, review fields, and audit events."""
+    user_context = await ensure_security_project_member_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_my_submission(project_id=project_id, profile_id=profile_id)
+    return success_response(
+        request=request,
+        message_key="daily_help.success.submission_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("resubmit project daily help profile")
+@router.patch(
+    "/{project_id}/daily-help/{profile_id}/submission",
+    status_code=http_status.HTTP_200_OK,
+    summary="Security resubmits a rejected daily help profile",
+    response_model=None,
+    responses=DETAIL_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_profiles",
+    category="DAILY_HELP",
+)
+async def resubmit_project_daily_help_profile(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    body: CreateDailyHelpRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Security edits and resubmits a rejected profile for admin review."""
+    user_context = await ensure_security_project_member_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.resubmit_profile(
+        project_id=project_id,
+        profile_id=profile_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_profiles",
+        requested_id=profile_id,
+        description=f"Resubmitted daily help profile: {profile_id}",
+        risk_level="medium",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.resubmitted",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("approve project daily help profile")
+@router.post(
+    "/{project_id}/daily-help/{profile_id}/approve",
+    status_code=http_status.HTTP_200_OK,
+    summary="Approve a security-submitted daily help profile",
+    response_model=None,
+    responses=DETAIL_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_profiles",
+    category="DAILY_HELP",
+)
+async def approve_project_daily_help_profile(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Approve a pending profile and issue its gate pass."""
+    user_context = await ensure_daily_help_reviewer_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.approve_profile(project_id=project_id, profile_id=profile_id)
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_profiles",
+        requested_id=profile_id,
+        description=f"Approved daily help profile: {profile_id}",
+        risk_level="medium",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.approved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("reject project daily help profile")
+@router.post(
+    "/{project_id}/daily-help/{profile_id}/reject",
+    status_code=http_status.HTTP_200_OK,
+    summary="Reject a security-submitted daily help profile",
+    response_model=None,
+    responses=DETAIL_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_profiles",
+    category="DAILY_HELP",
+)
+async def reject_project_daily_help_profile(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    body: RejectDailyHelpRequest = Body(default_factory=RejectDailyHelpRequest),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Reject a pending security submission."""
+    user_context = await ensure_daily_help_reviewer_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.reject_profile(
+        project_id=project_id,
+        profile_id=profile_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_profiles",
+        requested_id=profile_id,
+        description=f"Rejected daily help profile: {profile_id}",
+        risk_level="medium",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.rejected",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
     )

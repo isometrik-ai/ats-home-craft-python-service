@@ -109,6 +109,28 @@ async def test_remove_member_blocks_last_community_admin():
 
 
 @pytest.mark.asyncio
+async def test_remove_member_success():
+    repo = MagicMock()
+    repo.get_member = AsyncMock(
+        return_value={
+            "id": MEMBER_ID,
+            "organization_id": ORG_ID,
+            "project_id": PROJECT_ID,
+            "user_id": "u2",
+            "role": ProjectMemberRole.SECURITY.value,
+            "status": ProjectMemberStatus.ACTIVE.value,
+        }
+    )
+    repo.remove_member = AsyncMock(return_value={"id": MEMBER_ID})
+    svc = _service(projects_repo=repo)
+
+    result = await svc.remove_member(project_id=PROJECT_ID, user_id="u2")
+
+    assert result is None
+    repo.remove_member.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_update_member_role():
     repo = MagicMock()
     repo.get_member = AsyncMock(
