@@ -59,6 +59,7 @@ class NoticesResidentService:
             organization_id=self.organization_id,
             project_id=query.project_id,
             notice_ids=visible_ids,
+            search=query.search,
             limit=query.page_size,
             offset=offset,
         )
