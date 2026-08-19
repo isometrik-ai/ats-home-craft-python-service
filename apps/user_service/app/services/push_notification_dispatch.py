@@ -48,8 +48,8 @@ def contact_display_name(contact: dict[str, Any]) -> str | None:
 
 
 def unit_label_from_row(unit_row: dict[str, Any]) -> str:
-    """Prefer unit_label, then unit_code, then unit id."""
-    for key in ("unit_label", "unit_code"):
+    """Prefer unit_label, then unit code, then unit id."""
+    for key in ("unit_label", "unit_code", "code"):
         value = str(unit_row.get(key) or "").strip()
         if value:
             return value

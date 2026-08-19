@@ -40,6 +40,16 @@ def _service(*, push: _FakePushDispatcher | None = None) -> VehiclesService:
     svc.units_repo = AsyncMock()
     svc.units_repo.get_parking_entitlement_by_unit = AsyncMock(return_value=2)
     svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=0)
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(
+        return_value={
+            "project_id": "p1",
+            "unit_id": "u1",
+            "unit_code": "T4102",
+            "unit_label": "T4102",
+        }
+    )
     svc._push_dispatcher = push or _FakePushDispatcher()
     return svc
 
@@ -123,6 +133,7 @@ async def test_resubmit_rejected_sets_pending_and_notifies():
     push = svc._push_dispatcher
     assert len(push.org_calls) == 1
     assert push.org_calls[0]["message_key"] == "notifications.push.vehicle.submitted"
+    assert push.org_calls[0]["params"]["unit_label"] == "T4102"
     assert push.org_calls[0]["options"]["idempotency_key"] == "vehicle:v1:resubmitted"
 
 

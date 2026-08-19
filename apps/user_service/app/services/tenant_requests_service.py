@@ -644,7 +644,7 @@ class TenantRequestsService:
             message_key="notifications.push.tenant_request.submitted",
             notification_type="NOTIFICATION_TYPE_TENANT",
             feed_type="tenant",
-            params={"unit_label": unit_label_from_row({"unit_id": body.unit_id})},
+            params={"unit_label": unit_label_from_row(unit)},
             data={
                 "tenant_request_id": request_id,
                 "project_id": str(unit["project_id"]),

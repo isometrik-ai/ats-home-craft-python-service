@@ -298,8 +298,8 @@ class VehiclesService:
             out.pop(key, None)
         return out
 
-    async def _validate_unit_for_contact(self, *, contact_id: str, unit_id: str) -> str:
-        """Ensure the unit is actively assigned to the contact; return project_id."""
+    async def _validate_unit_for_contact(self, *, contact_id: str, unit_id: str) -> dict[str, Any]:
+        """Ensure the unit is actively assigned to the contact; return unit metadata."""
         org_id = self.user_context.organization_id
         assert org_id
         has_unit = await self.contact_units_repo.contact_has_active_unit(
@@ -321,7 +321,7 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.unit_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return unit["project_id"]
+        return unit
 
     async def _assert_parking_entitlement_available(
         self,
@@ -450,10 +450,11 @@ class VehiclesService:
         """Create a vehicle linked to an assigned unit."""
         org_id = self.user_context.organization_id
         assert org_id
-        project_id = await self._validate_unit_for_contact(
+        unit = await self._validate_unit_for_contact(
             contact_id=contact_id,
             unit_id=body.unit_id,
         )
+        project_id = str(unit["project_id"])
         await self._assert_parking_entitlement_available(unit_id=body.unit_id)
         try:
             row = await self.repo.create(
@@ -483,7 +484,7 @@ class VehiclesService:
             params={
                 "registration_number": normalized.get("registration_number")
                 or body.registration_number,
-                "unit_label": unit_label_from_row({"unit_id": body.unit_id}),
+                "unit_label": unit_label_from_row(unit),
             },
             data={
                 "vehicle_id": normalized.get("id"),
@@ -517,11 +518,11 @@ class VehiclesService:
         if "registration_number" in patch and patch["registration_number"]:
             patch["registration_number"] = patch["registration_number"].strip().upper()
         if "unit_id" in patch and patch["unit_id"]:
-            project_id = await self._validate_unit_for_contact(
+            unit = await self._validate_unit_for_contact(
                 contact_id=contact_id,
                 unit_id=patch["unit_id"],
             )
-            patch["project_id"] = project_id
+            patch["project_id"] = unit["project_id"]
         try:
             row = await self.repo.update(
                 organization_id=org_id,
@@ -598,6 +599,10 @@ class VehiclesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         normalized = self._normalize_vehicle(row)
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
         await self._push().send_to_org_members(
             organization_id=org_id,
             message_key="notifications.push.vehicle.submitted",
@@ -606,7 +611,7 @@ class VehiclesService:
             params={
                 "registration_number": normalized.get("registration_number")
                 or existing.get("registration_number"),
-                "unit_label": unit_label_from_row({"unit_id": unit_id}),
+                "unit_label": unit_label_from_row(unit or {"unit_id": unit_id}),
             },
             data={
                 "vehicle_id": normalized.get("id"),
