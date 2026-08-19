@@ -813,7 +813,7 @@ A notice is **visible** to a resident when **all** of:
 
 ```http
 GET /v1/notices/banner?project_id=
-GET /v1/notices?project_id=&page=1
+GET /v1/notices?project_id=&search=&page=1&page_size=20
 GET /v1/notices/{notice_id}
 POST /v1/notices/{notice_id}/like
 DELETE /v1/notices/{notice_id}/like
@@ -821,7 +821,7 @@ DELETE /v1/notices/{notice_id}/like
 
 - **Banner:** up to 6 pinned live notices for project (from `notice_pins`), filtered by resident
   visibility rule. Returns `view_count`, `like_count`, `liked_by_me`; does **not** increment views.
-- **Feed list:** same count fields; does **not** increment views.
+- **Feed list:** same count fields; does **not** increment views. Optional `search` filters by notice title (case-insensitive substring match, max 200 chars), applied after visibility filtering.
 - **Detail GET:** increments `view_count` by 1 when resident opens notice — see §4.11.
 - **Like / unlike:** upsert/delete `notice_likes`; update denormalized `like_count` — see §4.11.
 
