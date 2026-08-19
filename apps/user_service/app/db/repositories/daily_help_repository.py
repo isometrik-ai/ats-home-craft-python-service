@@ -208,7 +208,6 @@ class DailyHelpRepository(BaseRepository):
             open_to_work,
             created_by_user_id,
             submitted_by_user_id,
-            created_by_user_id,
         )
         return await self.get_profile(
             organization_id=organization_id,
