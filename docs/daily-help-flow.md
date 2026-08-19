@@ -8,53 +8,62 @@
 - **Admin API prefix:** `/v1/projects/{project_id}/daily-help`
 - **Resident API prefix:** `/v1/daily-help`
 - **Gate / Activities:** existing `/v1/passes/*` + `/v1/visitor-logs/*` ([passes-validation-flow.md](./passes-validation-flow.md))
-- **DB schema:** `ats-home-craft-supabase` (migrations `20260811120000_*`, `20260811121000_*`, `20260811121500_*`, `20260811122000_*`, `20260814160000_daily_help_attendance_absences.sql`)
+- **DB schema:** `ats-home-craft-supabase` (migrations `20260811120000_*`, `20260811121000_*`, `20260811121500_*`, `20260811122000_*`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`)
 
 ______________________________________________________________________
 
 ## 1. What this flow does
 
 **Daily Help** is a **project-scoped registry** of recurring household service providers (maids, cooks,
-drivers, milk/newspaper delivery, etc.). Admins create and maintain records; residents browse the
-directory and optionally link helpers to their unit. **Gate movement and the Activities feed reuse
-visitor passes and visitor logs** — we do **not** create `contacts` rows or auth users for helpers.
+drivers, milk/newspaper delivery, etc.). Admins create and maintain records directly, or **security staff
+submit profiles for admin review** on the same registry table. Residents browse the directory and
+optionally link helpers to their unit. **Gate movement and the Activities feed reuse visitor passes and
+visitor logs** — we do **not** create `contacts` rows or auth users for helpers.
 
 ### Product rules (must enforce)
 
-| Rule                                    | Enforcement                                                                            |
-| --------------------------------------- | -------------------------------------------------------------------------------------- |
-| **No contact / auth user for helper**   | Only `daily_help_profiles` + child tables; never call `ContactsService.create_contact` |
-| **Project-scoped registry**             | All queries filter `organization_id` + `project_id`                                    |
-| **Admin-maintained only (Phase 1)**     | Create/update/status routes are staff-only                                             |
-| **Documents on file — no verification** | Store paths; no verify/reject workflow (unlike tenant requests)                        |
-| **Soft delete**                         | `status = deleted`; row retained; pass cancelled                                       |
-| **One recurring gate pass per profile** | `linked_pass_id` + unique partial index on `passes.daily_help_id`                      |
-| **Gate passcode searchable**            | Unique `(organization_id, project_id, gate_passcode)`                                  |
-| **Categories per project**              | Admin-maintained `daily_help_categories` — not a global enum                           |
-| **Check-in/out notifications**          | Push to Owner + Tenant on each active `daily_help_household_links` unit                |
-| **Activities = visitor logs**           | Daily help check-ins appear as `pass_type = daily_help` pass rows                      |
+| Rule                                      | Enforcement                                                                                     |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **No contact / auth user for helper**     | Only `daily_help_profiles` + child tables; never call `ContactsService.create_contact`          |
+| **Project-scoped registry**               | All queries filter `organization_id` + `project_id`                                             |
+| **Admin direct create**                   | `POST .../daily-help` → `status = active` + pass issued immediately                             |
+| **Security submit → admin review**        | `POST .../submissions` → `pending_approval`; **no pass** until approve                          |
+| **Single admin list page**                | All statuses on `daily_help_profiles`; filter by `?status=` tab                                 |
+| **Documents on file — no per-doc verify** | Store paths; admin approves/rejects the **whole profile** (not tenant-request-style doc review) |
+| **Soft delete**                           | `status = deleted`; row retained; pass cancelled                                                |
+| **One recurring gate pass per profile**   | `linked_pass_id` + unique partial index on `passes.daily_help_id`                               |
+| **Gate passcode searchable**              | Unique `(organization_id, project_id, gate_passcode)` when set (NULL while pending)             |
+| **Categories per project**                | Admin-maintained `daily_help_categories` — not a global enum                                    |
+| **Check-in/out notifications**            | Push to Owner + Tenant on each active `daily_help_household_links` unit                         |
+| **Activities = visitor logs**             | Daily help check-ins appear as `pass_type = daily_help` pass rows                               |
 
 ### Screen → capability map
 
 **Admin dashboard — Requests → Daily Help**
 
-| Screen / element                                    | Capability                                                           |
-| --------------------------------------------------- | -------------------------------------------------------------------- |
-| Summary cards (Total / Active / Inactive / Deleted) | `GET /projects/{project_id}/daily-help/summary`                      |
-| Status tabs + category filter + search              | `GET /projects/{project_id}/daily-help?status=&category_id=&search=` |
-| Manage categories                                   | `GET/POST/PATCH /projects/{project_id}/daily-help/categories`        |
-| Table list                                          | Same list endpoint (paginated)                                       |
-| Add Daily Help drawer                               | `POST /projects/{project_id}/daily-help`                             |
-| View detail drawer                                  | `GET /projects/{project_id}/daily-help/{id}`                         |
-| Edit details                                        | `PATCH /projects/{project_id}/daily-help/{id}`                       |
-| Mark inactive                                       | `POST /projects/{project_id}/daily-help/{id}/deactivate`             |
-| Reactivate inactive                                 | `POST /projects/{project_id}/daily-help/{id}/reactivate`             |
-| Delete record                                       | `POST /projects/{project_id}/daily-help/{id}/delete`                 |
-| Restore (optional)                                  | `POST /projects/{project_id}/daily-help/{id}/restore`                |
-| Add / remove document                               | `POST/PATCH/DELETE .../documents`                                    |
-| Export                                              | `GET /projects/{project_id}/daily-help/export`                       |
-| Availability slots                                  | `PUT /projects/{project_id}/daily-help/{id}/availability`            |
-| Attendance calendar (gate check-ins)                | `GET /projects/{project_id}/daily-help/{id}/attendance?year=&month=` |
+| Screen / element                                                         | Capability                                                           |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| Summary cards (Total / Pending / Rejected / Active / Inactive / Deleted) | `GET /projects/{project_id}/daily-help/summary`                      |
+| Status tabs + category filter + search                                   | `GET /projects/{project_id}/daily-help?status=&category_id=&search=` |
+| Manage categories                                                        | `GET/POST/PATCH /projects/{project_id}/daily-help/categories`        |
+| Table list (all statuses on one page)                                    | Same list endpoint (paginated)                                       |
+| Add Daily Help drawer (admin direct)                                     | `POST /projects/{project_id}/daily-help`                             |
+| Security submit for review                                               | `POST /projects/{project_id}/daily-help/submissions`                 |
+| Security list my submissions                                             | `GET /projects/{project_id}/daily-help/submissions?status=`          |
+| Security view one submission                                             | `GET /projects/{project_id}/daily-help/{id}/submission`              |
+| Security edit + resubmit (rejected rows)                                 | `PATCH /projects/{project_id}/daily-help/{id}/submission`            |
+| Approve pending submission                                               | `POST /projects/{project_id}/daily-help/{id}/approve`                |
+| Reject pending submission                                                | `POST /projects/{project_id}/daily-help/{id}/reject`                 |
+| View detail drawer                                                       | `GET /projects/{project_id}/daily-help/{id}`                         |
+| Edit details (active/inactive only)                                      | `PATCH /projects/{project_id}/daily-help/{id}`                       |
+| Mark inactive                                                            | `POST /projects/{project_id}/daily-help/{id}/deactivate`             |
+| Reactivate inactive                                                      | `POST /projects/{project_id}/daily-help/{id}/reactivate`             |
+| Delete record                                                            | `POST /projects/{project_id}/daily-help/{id}/delete`                 |
+| Restore (optional)                                                       | `POST /projects/{project_id}/daily-help/{id}/restore`                |
+| Add / remove document                                                    | `POST/PATCH/DELETE .../documents`                                    |
+| Export                                                                   | `GET /projects/{project_id}/daily-help/export`                       |
+| Availability slots                                                       | `PUT /projects/{project_id}/daily-help/{id}/availability`            |
+| Attendance calendar (gate check-ins)                                     | `GET /projects/{project_id}/daily-help/{id}/attendance?year=&month=` |
 
 **Resident mobile — Daily Help**
 
@@ -151,12 +160,22 @@ See [ADR 0013 § Schema](./adr/0013-daily-help.md#schema-proposed) for full DDL.
 
 ### Status lifecycle
 
+All statuses live on **`daily_help_profiles`** — one admin list page, filter by `status`.
+
 ```text
-admin POST create ──► active (+ pass issued)
+Admin direct create ──► active (+ pass + passcode issued immediately)
+
+Security submit ──► pending_approval (NO pass, gate_passcode = NULL)
+Admin reject      ──► rejected (still no pass)
+Security resubmit ──► pending_approval (same row; clears rejection_reason)
+Admin approve     ──► active (+ pass + passcode issued)
+
 active ──deactivate──► inactive (+ pass cancelled)
 inactive ──reactivate──► active (+ pass re-issued if needed)
 active|inactive ──delete──► deleted (+ pass cancelled, deleted_at set)
 ```
+
+**Resident directory and gate verify** only include `status = active` profiles with a linked pass.
 
 ### Categories (`daily_help_categories`)
 
@@ -249,17 +268,96 @@ POST /v1/projects/{project_id}/daily-help
   "status": "active",
   "gate_passcode": "4821",
   "document_count": 3,
+  "linked_pass_id": "pass-uuid",
   "created_at": "2026-06-20T10:00:00Z",
   "created_by_name": "Nitin Jangir"
 }
 ```
 
+### 4.1b Security submit for review
+
+Security staff with an active **`project_members.role = security`** assignment submit new profiles
+for admin approval. **No gate pass or passcode** is issued until approve.
+
+```http
+POST /v1/projects/{project_id}/daily-help/submissions
+```
+
+Request body matches admin create (`CreateDailyHelpRequest`). **Access:** `ensure_security_project_member_access`
+— staff project access + `visitor_management.verify` + active security project member.
+
+**Service steps:**
+
+1. Validate project + active `category_id`.
+1. Insert `daily_help_profiles` with `status = pending_approval`, `gate_passcode = NULL`, `submitted_by_user_id` set.
+1. Insert documents (same as admin create).
+1. Append `daily_help_events`: `submitted` — **no** `pass_issued`.
+
+**Response:** same shape as create; `status = pending_approval`, `gate_passcode = null`, `linked_pass_id = null`.
+
+### 4.1c Security list / view submissions
+
+Security staff list and read **only profiles they submitted** (`submitted_by_user_id = caller`).
+
+```http
+GET /v1/projects/{project_id}/daily-help/submissions?status=pending_approval&search=lakshmi&page=1&limit=20
+GET /v1/projects/{project_id}/daily-help/{id}/submission
+```
+
+**Access:** `ensure_security_project_member_access` — active `security` project member + `visitor_management.verify`.
+
+List rows include `rejection_reason` and `reviewed_at` when applicable. Optional `?status=` filter:
+`pending_approval`, `rejected`, `active`, `inactive`, `deleted`.
+
+Detail returns the same payload as admin detail (documents, events, review fields) but returns `404` if the
+profile was not submitted by the caller.
+
+### 4.1d Admin approve / reject
+
+Reviewers: org members with **`projects_management.edit`**, or active **`project_members.role = community_admin`**.
+
+```http
+POST /v1/projects/{project_id}/daily-help/{id}/approve
+POST /v1/projects/{project_id}/daily-help/{id}/reject
+{ "rejection_reason": "ID proof unreadable" }   // optional on reject
+```
+
+**Approve steps:**
+
+1. Require `status = pending_approval`.
+1. Generate unique 4-digit `gate_passcode`.
+1. Set `status = active`, `reviewed_by_user_id`, `reviewed_at`; clear `rejection_reason`.
+1. Issue recurring pass (`pass_issued` event) and set `linked_pass_id`.
+1. Append events: `approved`, `status_changed`.
+
+**Reject steps:**
+
+1. Require `status = pending_approval`.
+1. Set `status = rejected`, optional `rejection_reason`, review audit fields.
+1. Append events: `rejected`, `status_changed`. **No pass.**
+
+### 4.1e Security resubmit (rejected rows)
+
+Security edits the **same row** and moves it back to review:
+
+```http
+PATCH /v1/projects/{project_id}/daily-help/{id}/submission
+```
+
+Requires `status = rejected`. Clears `rejection_reason` / review fields, sets `pending_approval`, appends `resubmitted`.
+
+**Registry guard:** deactivate, delete, PATCH identity, and document upload routes call
+`_ensure_operational_profile` — blocked while `pending_approval` or `rejected` (use approve/reject or
+`/submission` instead).
+
 ### 4.2 List + summary
 
 ```http
 GET /v1/projects/{project_id}/daily-help/summary
-GET /v1/projects/{project_id}/daily-help?status=active&category_id={uuid}&search=lakshmi&page=1&limit=20
+GET /v1/projects/{project_id}/daily-help?status=pending_approval&category_id={uuid}&search=lakshmi&page=1&limit=20
 ```
+
+Summary includes **`pending_approval`** and **`rejected`** counts alongside total / active / inactive / deleted.
 
 List row shape (matches admin table):
 
@@ -279,7 +377,8 @@ GET /v1/projects/{project_id}/daily-help/{id}
 ```
 
 Returns full name breakdown, contacts, category, gender, DOB, status, documents with download paths,
-`gate_passcode`, `linked_pass_id`, audit (`created_by`, `events[]`).
+`gate_passcode` (null while pending), `linked_pass_id`, review fields (`submitted_by_*`, `rejection_reason`,
+`reviewed_by_*`, `reviewed_at`), audit (`created_by`, `events[]`).
 
 ### 4.4 Update / status changes
 
@@ -312,7 +411,8 @@ POST /v1/passes/{pass_id}/check-in
 POST /v1/passes/{pass_id}/check-out
 ```
 
-Verify response should include `pass_type: "daily_help"` and optional `daily_help_profile` summary
+Verify resolves **active profiles only** — `pending_approval` and `rejected` rows have no linked pass and
+cannot check in. Verify response should include `pass_type: "daily_help"` and optional `daily_help_profile` summary
 (photo, category) for guard UI.
 
 **Visitor logs / Activities:**
@@ -544,18 +644,29 @@ ______________________________________________________________________
 
 ## 7. Business rules & gating
 
-| Rule                                 | Where                                                              |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| Staff project access                 | `ensure_staff_project_access(project_id)` on admin routes          |
-| Resident unit access                 | `_assert_contact_on_unit(contact_id, unit_id)` for household links |
-| Unique passcode per project          | DB unique index + retry on conflict in service                     |
-| Pass cancelled when inactive/deleted | `DailyHelpService._sync_pass_status`                               |
-| Edit blocked when deleted            | PATCH → `409` unless restoring first                               |
-| Document limits                      | Recommend max 10 `other` docs; photo 1 primary on profile          |
-| Notification targets                 | Owner + Tenant on linked units only; via `contact_roles`           |
-| No links → no push                   | Skip notification when profile has zero active household links     |
+| Rule                                 | Where                                                                                                    |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| Staff project access                 | `ensure_staff_project_access(project_id)` on admin routes                                                |
+| Security submit / resubmit           | `ensure_security_project_member_access` — active `security` project member + `visitor_management.verify` |
+| Approve / reject submissions         | `ensure_daily_help_reviewer_access` — `projects_management.edit` **or** `community_admin` project member |
+| Resident unit access                 | `_assert_contact_on_unit(contact_id, unit_id)` for household links                                       |
+| Unique passcode per project          | Partial unique index where `gate_passcode IS NOT NULL` + retry on conflict                               |
+| No pass until approved               | `submit_profile` inserts with `gate_passcode = NULL`; approve issues pass                                |
+| Registry ops blocked on review rows  | `_ensure_operational_profile` on deactivate/delete/PATCH (pending/rejected)                              |
+| Pass cancelled when inactive/deleted | `DailyHelpService._sync_pass_status`                                                                     |
+| Edit blocked when deleted            | PATCH → `409` unless restoring first                                                                     |
+| Document limits                      | Recommend max 10 `other` docs; photo 1 primary on profile                                                |
+| Notification targets                 | Owner + Tenant on linked units only; via `contact_roles`                                                 |
+| No links → no push                   | Skip notification when profile has zero active household links                                           |
 
 ### RBAC (proposed)
+
+| Actor        | Routes / capability                                                                                         |
+| ------------ | ----------------------------------------------------------------------------------------------------------- |
+| Admin (edit) | Direct create, PATCH, deactivate, delete, categories — `projects_management.edit`                           |
+| Reviewer     | Approve / reject — edit permission **or** `community_admin` project member                                  |
+| Security     | Submit, list/view/resubmit own submissions — `visitor_management.verify` + active `security` project member |
+| Admin (view) | List, detail, export, summary — `projects_management.view`                                                  |
 
 | Code                           | Use                                                  |
 | ------------------------------ | ---------------------------------------------------- |
@@ -586,6 +697,9 @@ ______________________________________________________________________
 | Change passcode length           | `DailyHelpService._generate_passcode` + passes validation                       |
 | Change notification recipients   | `daily_help_notification_service.py` + `ContactsRepository` role query          |
 | Show flat on visitor log row     | Join latest household link or check-in metadata in `visitor_logs_repository`    |
+| Add security submit flow         | `submit_profile` / `POST .../submissions` in `daily_help_service.py`            |
+| Approve / reject pending rows    | `approve_profile` / `reject_profile` + reviewer access helper                   |
+| Security resubmit rejected row   | `resubmit_profile` / `PATCH .../submission`                                     |
 | Add overview card                | `visitor_logs_repository.get_overview` + schema                                 |
 | Add rating / traits              | `POST/GET/PUT .../ratings` — see §6.5                                           |
 | Add attendance / mark absent     | `GET/POST .../attendance` — see §6.6                                            |
@@ -616,6 +730,13 @@ ______________________________________________________________________
 | `daily_help.errors.duplicate_rating`                   | POST rating when one already exists        |
 | `daily_help.errors.rating_not_found`                   | PUT rating before first POST               |
 | `daily_help.errors.invalid_attendance_month`           | Month query param outside 1–12             |
+| `daily_help.errors.security_role_required`             | Non-security user calls submit/resubmit    |
+| `daily_help.errors.reviewer_access_denied`             | User lacks approve/reject permission       |
+| `daily_help.errors.not_pending_approval`               | Approve/reject on non-pending row          |
+| `daily_help.errors.not_rejected`                       | Resubmit on non-rejected row               |
+| `daily_help.errors.pending_review_profile`             | Registry action on pending/rejected row    |
+
+**Success keys:** `daily_help.success.submitted`, `resubmitted`, `approved`, `rejected`.
 
 ______________________________________________________________________
 
@@ -655,6 +776,14 @@ ______________________________________________________________________
 - [x] `open_to_work` toggle (resident, requires household link)
 - [x] `daily_help_attendance_absences` table + mark-absence API
 
+### Phase 4 — Security submission workflow ✅
+
+- [x] Migration `20260819160000_daily_help_security_submission.sql` — `pending_approval` / `rejected` statuses, nullable passcode, review columns
+- [x] Security submit / resubmit; admin approve / reject on same `daily_help_profiles` table
+- [x] Summary counts for pending + rejected; single admin list with status filter
+- [x] Gate verify and resident directory exclude non-active profiles
+- [x] Unit tests for submit / approve / reject / resubmit
+
 ______________________________________________________________________
 
 ## 12. Tests
@@ -662,7 +791,7 @@ ______________________________________________________________________
 **Unit**
 
 - `tests/unit/test_daily_help_service.py` — create issues pass, category validation, deactivate cancels pass,
-  soft delete, passcode uniqueness, household link rules (Phase 2).
+  soft delete, passcode uniqueness, household link rules (Phase 2), **submit/approve/reject/resubmit (Phase 4)**.
 - `tests/unit/test_daily_help_notification_service.py` — Owner/Tenant recipient resolution, dedupe, no-op when no links.
 - `tests/unit/test_daily_help_repository.py` — summary counts, list query.
 

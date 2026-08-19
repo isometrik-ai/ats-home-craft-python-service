@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -808,3 +809,299 @@ async def test_update_rating_requires_existing_rating():
             profile_id="profile-1",
             body=UpdateDailyHelpRatingRequest(stars=Decimal("5.0")),
         )
+
+
+def _detail_row(**overrides: object) -> dict[str, object]:
+    row = {
+        "id": "profile-1",
+        "organization_id": "org-1",
+        "project_id": "project-1",
+        "initials": "Mrs.",
+        "first_name": "Lakshmi",
+        "middle_name": None,
+        "last_name": "Devi",
+        "display_name": "Mrs. Lakshmi Devi",
+        "phone_isd_code": "+91",
+        "phone_number": "9655011223",
+        "alternate_phone_isd_code": None,
+        "alternate_phone_number": None,
+        "category_id": "cat-1",
+        "category_name": "Maid",
+        "gender": None,
+        "date_of_birth": None,
+        "photo_path": None,
+        "gate_passcode": None,
+        "status": DailyHelpStatus.PENDING_APPROVAL.value,
+        "open_to_work": True,
+        "linked_pass_id": None,
+        "created_by_user_id": "staff-1",
+        "submitted_by_user_id": "staff-1",
+        "reviewed_by_user_id": None,
+        "reviewed_at": None,
+        "rejection_reason": None,
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "deleted_at": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def _create_body() -> CreateDailyHelpRequest:
+    return CreateDailyHelpRequest(
+        initials="Mrs.",
+        first_name="Lakshmi",
+        last_name="Devi",
+        phone_isd_code="+91",
+        phone_number="9655011223",
+        category_id="cat-1",
+    )
+
+
+def _stub_category_lookup(svc: DailyHelpService) -> None:
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.categories_repo = MagicMock()
+    svc.categories_repo.get_by_id = AsyncMock(
+        return_value={"id": "cat-1", "name": "Maid", "status": "active"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_submit_profile_does_not_issue_pass():
+    """Security submit creates pending profile without pass or passcode."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.insert_profile = AsyncMock(
+        return_value={
+            "id": "profile-pending",
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
+    svc.repo.insert_document = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.insert_daily_help = AsyncMock()
+    svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
+
+    result = await svc.submit_profile(project_id="project-1", body=_create_body())
+
+    assert result.status == DailyHelpStatus.PENDING_APPROVAL.value
+    assert result.gate_passcode is None
+    assert result.linked_pass_id is None
+    svc.passes_repo.insert_daily_help.assert_not_awaited()
+    insert_kwargs = svc.repo.insert_profile.await_args.kwargs
+    assert insert_kwargs["status"] == DailyHelpStatus.PENDING_APPROVAL.value
+    assert insert_kwargs["gate_passcode"] is None
+
+
+@pytest.mark.asyncio
+async def test_approve_profile_issues_pass_for_pending_submission():
+    """Admin approve activates pending profile and issues gate pass."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        side_effect=[
+            _detail_row(id="profile-pending", status=DailyHelpStatus.PENDING_APPROVAL.value),
+            _detail_row(
+                id="profile-pending",
+                status=DailyHelpStatus.ACTIVE.value,
+                gate_passcode="4821",
+                linked_pass_id="pass-1",
+            ),
+        ]
+    )
+    svc.repo.generate_unique_passcode = AsyncMock(return_value="4821")
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-pending",
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="4821",
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.link_pass_id = AsyncMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
+    svc._resolve_created_by_name = AsyncMock(return_value="Admin User")
+
+    result = await svc.approve_profile(project_id="project-1", profile_id="profile-pending")
+
+    assert result.status == DailyHelpStatus.ACTIVE.value
+    svc.passes_repo.insert_daily_help.assert_awaited_once()
+    svc.repo.link_pass_id.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_reject_profile_sets_rejected_status():
+    """Admin reject marks pending profile as rejected."""
+    from apps.user_service.app.schemas.daily_help import RejectDailyHelpRequest
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-pending",
+            status=DailyHelpStatus.PENDING_APPROVAL.value,
+        )
+    )
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-pending",
+            status=DailyHelpStatus.REJECTED.value,
+            rejection_reason="Incomplete documents",
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc._resolve_created_by_name = AsyncMock(return_value=None)
+
+    result = await svc.reject_profile(
+        project_id="project-1",
+        profile_id="profile-pending",
+        body=RejectDailyHelpRequest(rejection_reason="Incomplete documents"),
+    )
+
+    assert result.status == DailyHelpStatus.REJECTED.value
+    assert result.rejection_reason == "Incomplete documents"
+
+
+@pytest.mark.asyncio
+async def test_resubmit_profile_moves_rejected_back_to_pending():
+    """Security resubmit clears rejection and returns profile to pending review."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-rejected",
+            status=DailyHelpStatus.REJECTED.value,
+        )
+    )
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-rejected",
+            status=DailyHelpStatus.PENDING_APPROVAL.value,
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
+
+    result = await svc.resubmit_profile(
+        project_id="project-1",
+        profile_id="profile-rejected",
+        body=_create_body(),
+    )
+
+    assert result.status == DailyHelpStatus.PENDING_APPROVAL.value
+    update_fields = svc.repo.update_profile.await_args.kwargs["fields"]
+    assert update_fields["status"] == DailyHelpStatus.PENDING_APPROVAL.value
+    assert update_fields["rejection_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_my_submissions_filters_by_submitted_by_user():
+    """Security list scopes rows to the current submitter."""
+    from apps.user_service.app.schemas.daily_help import DailyHelpSubmissionListQuery
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_profiles = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "profile-pending",
+                    "organization_id": "org-1",
+                    "project_id": "project-1",
+                    "display_name": "Mrs. Lakshmi Devi",
+                    "gender": None,
+                    "category_id": "cat-1",
+                    "category_name": "Maid",
+                    "phone_isd_code": "+91",
+                    "phone_number": "9655011223",
+                    "document_count": 1,
+                    "household_link_count": 0,
+                    "status": DailyHelpStatus.PENDING_APPROVAL.value,
+                    "gate_passcode": None,
+                    "open_to_work": True,
+                    "created_at": datetime.now(timezone.utc),
+                    "rejection_reason": None,
+                    "reviewed_at": None,
+                }
+            ],
+            1,
+        )
+    )
+
+    items, total = await svc.list_my_submissions(
+        project_id="project-1",
+        query=DailyHelpSubmissionListQuery(status=DailyHelpStatus.PENDING_APPROVAL),
+    )
+
+    assert total == 1
+    assert items[0].status == DailyHelpStatus.PENDING_APPROVAL.value
+    assert items[0].rejection_reason is None
+    svc.repo.list_profiles.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="project-1",
+        status=DailyHelpStatus.PENDING_APPROVAL.value,
+        search=None,
+        submitted_by_user_id="staff-1",
+        limit=20,
+        offset=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_my_submission_returns_owned_profile():
+    """Security detail returns submission owned by the caller."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(return_value=_detail_row(id="profile-pending"))
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
+
+    result = await svc.get_my_submission(project_id="project-1", profile_id="profile-pending")
+
+    assert result.id == "profile-pending"
+    assert result.submitted_by_user_id == "staff-1"
+
+
+@pytest.mark.asyncio
+async def test_get_my_submission_not_found_for_other_submitter():
+    """Security cannot read another guard's submission."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value=_detail_row(id="profile-pending", submitted_by_user_id="other-guard")
+    )
+
+    with pytest.raises(NotFoundException):
+        await svc.get_my_submission(project_id="project-1", profile_id="profile-pending")

@@ -47,7 +47,10 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpOpenToWorkResponse,
     DailyHelpRatingResponse,
     DailyHelpRatingSummaryResponse,
+    DailyHelpSubmissionListItemResponse,
+    DailyHelpSubmissionListQuery,
     DailyHelpSummaryResponse,
+    RejectDailyHelpRequest,
     ReplaceDailyHelpAvailabilityRequest,
     ResidentDailyHelpCategoryStatsResponse,
     ResidentDailyHelpDetailResponse,
@@ -258,6 +261,22 @@ class DailyHelpService:
             )
         return row
 
+    async def _get_submission_or_raise(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Load a profile submitted by the current security user."""
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        user_id = self.user_context.user_id
+        if not user_id or str(row.get("submitted_by_user_id") or "") != str(user_id):
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return row
+
     def _ensure_not_deleted(self, row: dict[str, Any]) -> None:
         """Block mutations on soft-deleted profiles."""
         if str(row.get("status")) == DailyHelpStatus.DELETED.value:
@@ -265,6 +284,122 @@ class DailyHelpService:
                 message_key="daily_help.errors.already_deleted",
                 custom_code=CustomStatusCode.CONFLICT,
             )
+
+    def _ensure_operational_profile(self, row: dict[str, Any]) -> None:
+        """Block lifecycle mutations on profiles awaiting or denied review."""
+        status = str(row.get("status") or "")
+        if status in {
+            DailyHelpStatus.PENDING_APPROVAL.value,
+            DailyHelpStatus.REJECTED.value,
+        }:
+            raise ValidationException(
+                message_key="daily_help.errors.pending_review_profile",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    def _ensure_pending_approval(self, row: dict[str, Any]) -> None:
+        """Require a profile awaiting admin review."""
+        if str(row.get("status")) != DailyHelpStatus.PENDING_APPROVAL.value:
+            raise ValidationException(
+                message_key="daily_help.errors.not_pending_approval",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    def _ensure_rejected_for_resubmit(self, row: dict[str, Any]) -> None:
+        """Require a rejected profile before security resubmits."""
+        if str(row.get("status")) != DailyHelpStatus.REJECTED.value:
+            raise ValidationException(
+                message_key="daily_help.errors.not_rejected",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _insert_profile_documents(
+        self,
+        *,
+        profile_id: str,
+        documents: list[Any],
+        uploaded_by_user_id: str | None,
+    ) -> None:
+        """Insert document rows for a profile."""
+        for doc in documents:
+            await self.repo.insert_document(
+                organization_id=self.organization_id,
+                profile_id=profile_id,
+                document_type=doc.document_type.value,
+                label=doc.label,
+                file_path=doc.file_path,
+                file_name=doc.file_name,
+                mime_type=doc.mime_type,
+                file_size_bytes=doc.file_size_bytes,
+                sort_order=doc.sort_order,
+                uploaded_by_user_id=uploaded_by_user_id,
+            )
+
+    async def _activate_profile_with_pass(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        display_name: str,
+        phone_isd_code: str,
+        phone_number: str,
+        photo_path: str | None,
+        gate_passcode: str,
+        actor_user_id: str | None,
+    ) -> str:
+        """Issue recurring pass, link profile, and append pass audit events."""
+        pass_row = await self._issue_recurring_pass(
+            project_id=project_id,
+            profile_id=profile_id,
+            display_name=display_name,
+            phone_isd_code=phone_isd_code,
+            phone_number=phone_number,
+            gate_passcode=gate_passcode,
+            photo_path=photo_path,
+        )
+        pass_id = str(pass_row["id"])
+        await self.repo.link_pass_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            pass_id=pass_id,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.PASS_ISSUED.value,
+            actor_user_id=actor_user_id,
+            payload={"pass_id": pass_id},
+        )
+        return pass_id
+
+    def _profile_identity_from_create_body(
+        self,
+        body: CreateDailyHelpRequest,
+    ) -> tuple[str, dict[str, Any]]:
+        """Build display name and insert kwargs shared by create/submit/resubmit."""
+        display_name = self._build_display_name(
+            initials=body.initials,
+            first_name=body.first_name,
+            middle_name=body.middle_name,
+            last_name=body.last_name,
+        )
+        fields = {
+            "initials": body.initials,
+            "first_name": body.first_name,
+            "middle_name": body.middle_name,
+            "last_name": body.last_name,
+            "display_name": display_name,
+            "phone_isd_code": body.phone_isd_code,
+            "phone_number": body.phone_number,
+            "alternate_phone_isd_code": body.alternate_phone_isd_code,
+            "alternate_phone_number": body.alternate_phone_number,
+            "category_id": body.category_id,
+            "gender": body.gender,
+            "date_of_birth": body.date_of_birth,
+            "photo_path": body.photo_path,
+            "open_to_work": body.open_to_work,
+        }
+        return display_name, fields
 
     async def _issue_recurring_pass(
         self,
@@ -577,6 +712,18 @@ class DailyHelpService:
             created_on=created_at,
         )
 
+    def _serialize_submission_list_item(
+        self,
+        row: dict[str, Any],
+    ) -> DailyHelpSubmissionListItemResponse:
+        """Map a profile row to security submission list shape."""
+        item = self._serialize_admin_list_item(row)
+        return DailyHelpSubmissionListItemResponse(
+            **item.model_dump(),
+            rejection_reason=row.get("rejection_reason"),
+            reviewed_at=format_iso_datetime(row.get("reviewed_at")),
+        )
+
     async def _serialize_resident_list_item(
         self,
         *,
@@ -705,7 +852,7 @@ class DailyHelpService:
             gender=row.get("gender"),
             date_of_birth=self._format_date(row.get("date_of_birth")),
             photo_path=row.get("photo_path"),
-            gate_passcode=str(row["gate_passcode"]),
+            gate_passcode=str(row["gate_passcode"]) if row.get("gate_passcode") else None,
             status=str(row["status"]),
             open_to_work=bool(row.get("open_to_work")),
             linked_pass_id=row.get("linked_pass_id"),
@@ -718,6 +865,12 @@ class DailyHelpService:
             rating_summary=rating_summary,
             created_by_user_id=row.get("created_by_user_id"),
             created_by_name=created_by_name,
+            submitted_by_user_id=row.get("submitted_by_user_id"),
+            submitted_by_name=await self._resolve_created_by_name(row.get("submitted_by_user_id")),
+            reviewed_by_user_id=row.get("reviewed_by_user_id"),
+            reviewed_by_name=await self._resolve_created_by_name(row.get("reviewed_by_user_id")),
+            reviewed_at=format_iso_datetime(row.get("reviewed_at")),
+            rejection_reason=row.get("rejection_reason"),
             created_at=format_iso_datetime(row.get("created_at")),
             updated_at=format_iso_datetime(row.get("updated_at")),
             deleted_at=format_iso_datetime(row.get("deleted_at")),
@@ -898,6 +1051,41 @@ class DailyHelpService:
         items = [self._serialize_admin_list_item(row) for row in rows]
         return items, total
 
+    async def list_my_submissions(
+        self,
+        *,
+        project_id: str,
+        query: DailyHelpSubmissionListQuery,
+    ) -> tuple[list[DailyHelpSubmissionListItemResponse], int]:
+        """Paginated list of daily help profiles submitted by the current security user."""
+        await self._ensure_project(project_id=project_id)
+        user_id = self.user_context.user_id
+        if not user_id:
+            return [], 0
+        offset = (query.page - 1) * query.page_size
+        status = query.status.value if query.status else None
+        rows, total = await self.repo.list_profiles(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            status=status,
+            search=query.search,
+            submitted_by_user_id=str(user_id),
+            limit=query.page_size,
+            offset=offset,
+        )
+        items = [self._serialize_submission_list_item(row) for row in rows]
+        return items, total
+
+    async def get_my_submission(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+    ) -> DailyHelpDetailResponse:
+        """Return one security submission with documents and review metadata."""
+        row = await self._get_submission_or_raise(project_id=project_id, profile_id=profile_id)
+        return await self._serialize_detail(row=row)
+
     async def list_household_links(
         self,
         *,
@@ -959,47 +1147,27 @@ class DailyHelpService:
         )
         profile_id = str(profile["id"])
 
-        for doc in body.documents:
-            await self.repo.insert_document(
-                organization_id=self.organization_id,
-                profile_id=profile_id,
-                document_type=doc.document_type.value,
-                label=doc.label,
-                file_path=doc.file_path,
-                file_name=doc.file_name,
-                mime_type=doc.mime_type,
-                file_size_bytes=doc.file_size_bytes,
-                sort_order=doc.sort_order,
-                uploaded_by_user_id=str(user_id) if user_id else None,
-            )
+        await self._insert_profile_documents(
+            profile_id=profile_id,
+            documents=body.documents,
+            uploaded_by_user_id=str(user_id) if user_id else None,
+        )
 
-        pass_row = await self._issue_recurring_pass(
+        pass_id = await self._activate_profile_with_pass(
             project_id=project_id,
             profile_id=profile_id,
             display_name=display_name,
             phone_isd_code=body.phone_isd_code,
             phone_number=body.phone_number,
-            gate_passcode=gate_passcode,
             photo_path=body.photo_path,
-        )
-        pass_id = str(pass_row["id"])
-        await self.repo.link_pass_id(
-            organization_id=self.organization_id,
-            project_id=project_id,
-            profile_id=profile_id,
-            pass_id=pass_id,
+            gate_passcode=gate_passcode,
+            actor_user_id=str(user_id) if user_id else None,
         )
 
         await self._append_event(
             profile_id=profile_id,
             event_type=DailyHelpEventType.CREATED.value,
             actor_user_id=str(user_id) if user_id else None,
-        )
-        await self._append_event(
-            profile_id=profile_id,
-            event_type=DailyHelpEventType.PASS_ISSUED.value,
-            actor_user_id=str(user_id) if user_id else None,
-            payload={"pass_id": pass_id},
         )
 
         created_by_name = await self._resolve_created_by_name(user_id)
@@ -1015,6 +1183,203 @@ class DailyHelpService:
             created_at=format_iso_datetime(profile.get("created_at")),
             created_by_name=created_by_name,
         )
+
+    async def submit_profile(
+        self,
+        *,
+        project_id: str,
+        body: CreateDailyHelpRequest,
+    ) -> CreateDailyHelpResponse:
+        """Security submits a daily help profile for admin review (no gate pass)."""
+        await self._ensure_project(project_id=project_id)
+        category = await self._get_active_category_or_raise(
+            project_id=project_id,
+            category_id=body.category_id,
+        )
+        display_name, identity = self._profile_identity_from_create_body(body)
+        user_id = self.user_context.user_id
+
+        profile = await self.repo.insert_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            gate_passcode=None,
+            status=DailyHelpStatus.PENDING_APPROVAL.value,
+            created_by_user_id=str(user_id) if user_id else None,
+            submitted_by_user_id=str(user_id) if user_id else None,
+            **identity,
+        )
+        profile_id = str(profile["id"])
+
+        await self._insert_profile_documents(
+            profile_id=profile_id,
+            documents=body.documents,
+            uploaded_by_user_id=str(user_id) if user_id else None,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.SUBMITTED.value,
+            actor_user_id=str(user_id) if user_id else None,
+        )
+
+        submitted_by_name = await self._resolve_created_by_name(user_id)
+        return CreateDailyHelpResponse(
+            id=profile_id,
+            display_name=display_name,
+            category_id=body.category_id,
+            category_name=category.get("name"),
+            status=DailyHelpStatus.PENDING_APPROVAL.value,
+            gate_passcode=None,
+            document_count=len(body.documents),
+            linked_pass_id=None,
+            created_at=format_iso_datetime(profile.get("created_at")),
+            created_by_name=submitted_by_name,
+        )
+
+    async def resubmit_profile(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        body: CreateDailyHelpRequest,
+    ) -> DailyHelpDetailResponse:
+        """Security edits and resubmits a rejected profile for review."""
+        row = await self._get_submission_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_rejected_for_resubmit(row)
+        await self._get_active_category_or_raise(
+            project_id=project_id,
+            category_id=body.category_id,
+        )
+        display_name, identity = self._profile_identity_from_create_body(body)
+        user_id = self.user_context.user_id
+
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={
+                **identity,
+                "status": DailyHelpStatus.PENDING_APPROVAL.value,
+                "rejection_reason": None,
+                "reviewed_by_user_id": None,
+                "reviewed_at": None,
+            },
+            updated_by_user_id=str(user_id) if user_id else None,
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.RESUBMITTED.value,
+            actor_user_id=str(user_id) if user_id else None,
+        )
+        return await self._serialize_detail(row=updated)
+
+    async def approve_profile(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+    ) -> DailyHelpDetailResponse:
+        """Admin approves a pending profile and issues the gate pass."""
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_pending_approval(row)
+        user_id = self.user_context.user_id
+        now = datetime.now(timezone.utc)
+        gate_passcode = await self.repo.generate_unique_passcode(
+            organization_id=self.organization_id,
+            project_id=project_id,
+        )
+
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={
+                "status": DailyHelpStatus.ACTIVE.value,
+                "gate_passcode": gate_passcode,
+                "reviewed_by_user_id": str(user_id) if user_id else None,
+                "reviewed_at": now,
+                "rejection_reason": None,
+            },
+            updated_by_user_id=str(user_id) if user_id else None,
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        await self._activate_profile_with_pass(
+            project_id=project_id,
+            profile_id=profile_id,
+            display_name=str(updated.get("display_name") or ""),
+            phone_isd_code=str(updated.get("phone_isd_code") or ""),
+            phone_number=str(updated.get("phone_number") or ""),
+            photo_path=updated.get("photo_path"),
+            gate_passcode=gate_passcode,
+            actor_user_id=str(user_id) if user_id else None,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.APPROVED.value,
+            actor_user_id=str(user_id) if user_id else None,
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.STATUS_CHANGED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={"status": DailyHelpStatus.ACTIVE.value},
+        )
+
+        refreshed = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        return await self._serialize_detail(row=refreshed)
+
+    async def reject_profile(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        body: RejectDailyHelpRequest,
+    ) -> DailyHelpDetailResponse:
+        """Admin rejects a pending security submission."""
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_pending_approval(row)
+        user_id = self.user_context.user_id
+        now = datetime.now(timezone.utc)
+
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={
+                "status": DailyHelpStatus.REJECTED.value,
+                "rejection_reason": body.rejection_reason,
+                "reviewed_by_user_id": str(user_id) if user_id else None,
+                "reviewed_at": now,
+            },
+            updated_by_user_id=str(user_id) if user_id else None,
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.REJECTED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={"rejection_reason": body.rejection_reason},
+        )
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.STATUS_CHANGED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={"status": DailyHelpStatus.REJECTED.value},
+        )
+        return await self._serialize_detail(row=updated)
 
     async def get_detail(
         self,
@@ -1036,6 +1401,7 @@ class DailyHelpService:
         """Patch profile identity fields and sync linked pass snapshot."""
         row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
         self._ensure_not_deleted(row)
+        self._ensure_operational_profile(row)
 
         patch = body.model_dump(exclude_unset=True)
         if "category_id" in patch and patch["category_id"]:
@@ -1089,6 +1455,7 @@ class DailyHelpService:
         """Mark profile inactive and cancel linked pass."""
         row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
         self._ensure_not_deleted(row)
+        self._ensure_operational_profile(row)
         if str(row.get("status")) == DailyHelpStatus.INACTIVE.value:
             return DailyHelpMessageResponse(id=profile_id, status=DailyHelpStatus.INACTIVE.value)
 
@@ -1172,6 +1539,7 @@ class DailyHelpService:
     ) -> DailyHelpMessageResponse:
         """Soft-delete profile and cancel linked pass."""
         row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_operational_profile(row)
         if str(row.get("status")) == DailyHelpStatus.DELETED.value:
             return DailyHelpMessageResponse(id=profile_id, status=DailyHelpStatus.DELETED.value)
 
@@ -2113,6 +2481,10 @@ class DailyHelpService:
             profile_id=profile_id,
         )
         if not row:
+            return {}
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            return {}
+        if not row.get("gate_passcode"):
             return {}
         return {
             "id": str(row["id"]),

@@ -32,6 +32,14 @@ class DailyHelpDocumentInput(BaseModel):
     sort_order: int = Field(0, ge=0)
 
 
+class RejectDailyHelpRequest(BaseModel):
+    """Admin rejects a security-submitted daily help profile."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rejection_reason: str | None = Field(None, max_length=2000)
+
+
 class CreateDailyHelpRequest(BaseModel):
     """Admin creates a daily help profile with optional documents."""
 
@@ -177,6 +185,17 @@ class DailyHelpListQuery(BaseModel):
 
     status: DailyHelpStatus | None = None
     category_id: str | None = None
+    search: str | None = Field(None, max_length=200)
+    page: int = Field(1, ge=1)
+    page_size: int = Field(20, ge=1, le=100)
+
+
+class DailyHelpSubmissionListQuery(BaseModel):
+    """Security list filters for GET /projects/{project_id}/daily-help/submissions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: DailyHelpStatus | None = None
     search: str | None = Field(None, max_length=200)
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
@@ -369,6 +388,8 @@ class DailyHelpSummaryResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     total: int = 0
+    pending_approval: int = 0
+    rejected: int = 0
     active: int = 0
     inactive: int = 0
     deleted: int = 0
@@ -398,6 +419,13 @@ class DailyHelpListItemResponse(BaseModel):
     created_on: str | None = None
 
 
+class DailyHelpSubmissionListItemResponse(DailyHelpListItemResponse):
+    """Security submission row — includes review metadata for pending/rejected states."""
+
+    rejection_reason: str | None = None
+    reviewed_at: str | None = None
+
+
 class CreateDailyHelpResponse(BaseModel):
     """Response after admin creates a daily help profile."""
 
@@ -408,7 +436,7 @@ class CreateDailyHelpResponse(BaseModel):
     category_id: str
     category_name: str | None = None
     status: str
-    gate_passcode: str
+    gate_passcode: str | None = None
     document_count: int = 0
     linked_pass_id: str | None = None
     created_at: str | None = None
@@ -438,7 +466,7 @@ class DailyHelpDetailResponse(BaseModel):
     gender: str | None = None
     date_of_birth: str | None = None
     photo_path: str | None = None
-    gate_passcode: str
+    gate_passcode: str | None = None
     status: str
     open_to_work: bool = False
     linked_pass_id: str | None = None
@@ -451,6 +479,12 @@ class DailyHelpDetailResponse(BaseModel):
     rating_summary: DailyHelpRatingSummaryResponse | None = None
     created_by_user_id: str | None = None
     created_by_name: str | None = None
+    submitted_by_user_id: str | None = None
+    submitted_by_name: str | None = None
+    reviewed_by_user_id: str | None = None
+    reviewed_by_name: str | None = None
+    reviewed_at: str | None = None
+    rejection_reason: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
     deleted_at: str | None = None
