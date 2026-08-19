@@ -976,6 +976,7 @@ class NoticesRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         notice_ids: list[str] | None,
+        search: str | None = None,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -993,6 +994,10 @@ class NoticesRepository(BaseRepository):
         if notice_ids is not None:
             conditions.append(f"n.id = ANY(${idx}::uuid[])")
             values.append(notice_ids)
+            idx += 1
+        if search:
+            conditions.append(f"n.title ILIKE ${idx}")
+            values.append(f"%{search}%")
             idx += 1
 
         where_sql = " AND ".join(conditions)

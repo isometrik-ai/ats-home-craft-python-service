@@ -1141,11 +1141,14 @@ class ContactUnitsRepository(BaseRepository):
         organization_id: str,
         unit_id: str,
     ) -> dict[str, Any] | None:
-        """Load unit org/project for allotment validation."""
+        """Load unit org/project and display fields for validation and notifications."""
         row = await self.db_connection.fetchrow(
             """
-            SELECT id::text AS id, organization_id::text AS organization_id,
-                   project_id::text AS project_id
+            SELECT id::text AS id,
+                   organization_id::text AS organization_id,
+                   project_id::text AS project_id,
+                   code AS unit_code,
+                   unit_label
             FROM units
             WHERE id = $1::uuid
               AND organization_id = $2::uuid
