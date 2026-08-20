@@ -4,6 +4,8 @@ This module provides CRUD operations for audit logs management.
 All endpoints include proper authentication, validation, and database operations.
 """
 
+from datetime import date
+
 import asyncpg
 from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi import status as http_status
@@ -11,6 +13,7 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.schemas.audit_logs import AuditLogFilter
+from apps.user_service.app.schemas.enums import AuditLogActionType, AuditLogRiskLevel
 from apps.user_service.app.services.audit_log_service import AuditLogService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
@@ -59,6 +62,26 @@ async def get_audit_logs(
         None,
         description="Filter audit logs by user ID",
     ),
+    action_type: AuditLogActionType | None = Query(
+        None,
+        description="Filter by action type (CREATE, UPDATE, DELETE)",
+    ),
+    category: str | None = Query(
+        None,
+        description="Filter by audit category (e.g. CONTACT, PROJECT_SETUP, DAILY_HELP)",
+    ),
+    risk_level: AuditLogRiskLevel | None = Query(
+        None,
+        description="Filter by risk level (low, medium, high)",
+    ),
+    start_date: date | None = Query(
+        None,
+        description="Inclusive start date for timestamp filter (YYYY-MM-DD)",
+    ),
+    end_date: date | None = Query(
+        None,
+        description="Inclusive end date for timestamp filter (YYYY-MM-DD)",
+    ),
     page: int = Query(1, ge=1, description="The page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
 ):
@@ -82,6 +105,11 @@ async def get_audit_logs(
     filters = AuditLogFilter(
         search=search,
         user_id=effective_user_id,
+        action_type=action_type,
+        category=category,
+        risk_level=risk_level,
+        start_date=start_date,
+        end_date=end_date,
         limit=page_size,
         offset=(page - 1) * page_size,
         organization_id=user_context.organization_id,

@@ -4,10 +4,14 @@ This module contains all Pydantic models and schemas related to audit logs.
 These schemas are used for request/response validation and API documentation.
 """
 
-from datetime import datetime
-from typing import Any
+from datetime import date
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from apps.user_service.app.schemas.enums import AuditLogActionType, AuditLogRiskLevel
+from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 
 class AuditLogFilter(BaseModel):
@@ -16,24 +20,42 @@ class AuditLogFilter(BaseModel):
     Attributes:
         organization_id: Organization ID (required)
         search: Search term to filter by description, action_type, or table_name
-        action_type: Filter by action type
+        action_type: Filter by action type (CREATE, UPDATE, DELETE)
         table_name: Filter by table name
         user_id: Filter by user ID
-        start_date: Filter by start date
-        end_date: Filter by end date
+        category: Filter by audit category
+        risk_level: Filter by risk level (low, medium, high)
+        start_date: Inclusive start date filter on timestamp
+        end_date: Inclusive end date filter on timestamp
         limit: Maximum number of results to return
         offset: Number of results to skip for pagination
     """
 
     organization_id: str = Field(..., description="Organization ID")
     search: str | None = Field(None, description="Search term")
-    action_type: str | None = Field(None, description="Action type filter")
+    action_type: AuditLogActionType | None = Field(None, description="Action type filter")
     table_name: str | None = Field(None, description="Table name filter")
     user_id: str | None = Field(None, description="User ID filter")
-    start_date: datetime | None = Field(None, description="Start date filter")
-    end_date: datetime | None = Field(None, description="End date filter")
+    category: str | None = Field(None, description="Category filter")
+    risk_level: AuditLogRiskLevel | None = Field(None, description="Risk level filter")
+    start_date: date | None = Field(None, description="Inclusive start date filter")
+    end_date: date | None = Field(None, description="Inclusive end date filter")
     limit: int = Field(20, ge=1, description="Maximum number of results")
     offset: int = Field(0, ge=0, description="Number of results to skip")
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> Self:
+        """Reject inverted date range."""
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.end_date < self.start_date
+        ):
+            raise ValidationException(
+                message_key="audit_logs.errors.invalid_date_range",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class AuditLogBase(BaseModel):

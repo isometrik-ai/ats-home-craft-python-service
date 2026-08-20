@@ -1857,3 +1857,24 @@ NOTICE_MAX_ATTACHMENTS = 4
 NOTICE_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 NOTICE_ALLOWED_ATTACHMENT_MIMES = frozenset({"image/jpeg", "image/png"})
 NOTICE_SCHEDULE_MAX_DAYS = 62
+
+
+# ============================================================================
+# AUDIT LOG ENUMS
+# ============================================================================
+
+
+class AuditLogActionType(str, Enum):
+    """Audit log action filter values."""
+
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+
+
+class AuditLogRiskLevel(str, Enum):
+    """Audit log risk level filter values."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"

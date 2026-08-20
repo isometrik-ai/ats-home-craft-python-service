@@ -117,7 +117,7 @@ class AuditLogRepository:
         # Apply action_type filter
         if filter_params.action_type:
             conditions.append(f"al.action_type = ${param_index}")
-            params.append(filter_params.action_type)
+            params.append(filter_params.action_type.value)
             param_index += 1
 
         # Apply table_name filter
@@ -126,15 +126,27 @@ class AuditLogRepository:
             params.append(filter_params.table_name)
             param_index += 1
 
-        # Apply start_date filter
+        # Apply category filter
+        if filter_params.category:
+            conditions.append(f"al.category = ${param_index}")
+            params.append(filter_params.category)
+            param_index += 1
+
+        # Apply risk_level filter
+        if filter_params.risk_level:
+            conditions.append(f"al.risk_level = ${param_index}")
+            params.append(filter_params.risk_level.value)
+            param_index += 1
+
+        # Apply start_date filter (inclusive, date portion of timestamp)
         if filter_params.start_date:
-            conditions.append(f"al.timestamp >= ${param_index}")
+            conditions.append(f"al.timestamp::date >= ${param_index}::date")
             params.append(filter_params.start_date)
             param_index += 1
 
-        # Apply end_date filter
+        # Apply end_date filter (inclusive, date portion of timestamp)
         if filter_params.end_date:
-            conditions.append(f"al.timestamp <= ${param_index}")
+            conditions.append(f"al.timestamp::date <= ${param_index}::date")
             params.append(filter_params.end_date)
             param_index += 1
 
