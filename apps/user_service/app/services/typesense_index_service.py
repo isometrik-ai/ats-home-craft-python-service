@@ -10,7 +10,6 @@ but reads from the split tables:
 from __future__ import annotations
 
 import ast
-import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -109,14 +108,7 @@ def _extract_phone_numbers_and_display(
         isd_code = (normalized.get("phone_isd_code") or "").strip()
         if not number:
             continue
-        combined = f"{isd_code}{number}" if isd_code else number
-        for candidate in (
-            combined,
-            re.sub(r"\D", "", number),
-            re.sub(r"\D", "", combined),
-        ):
-            if candidate and candidate not in phone_numbers:
-                phone_numbers.append(candidate)
+        phone_numbers.append(f"{isd_code}{number}" if isd_code else number)
     return phone_numbers, phones_display
 
 

@@ -237,7 +237,7 @@ async def create_contact(
     description=(
         "Returns paginated contacts from PostgreSQL.\n\n"
         "Notes:\n"
-        "- Use `search` for a lightweight name/email/phone search.\n"
+        "- Use `search` for a lightweight name/email search.\n"
         "- Use `/contacts/search` for Typesense-backed full-text search."
     ),
     responses=COMMON_ERROR_RESPONSES,

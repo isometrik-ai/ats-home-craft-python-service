@@ -92,5 +92,5 @@ CONTACT_EMAIL_SEARCH_PARAMS: dict[str, Any] = {
 CONTACT_PHONE_SEARCH_PARAMS: dict[str, Any] = {
     "query_by": "phone_numbers",
     "num_typos": 0,
-    "prefix": True,
+    "prefix": False,
 }

@@ -138,23 +138,14 @@ class AuditLogRepository:
             params.append(filter_params.end_date)
             param_index += 1
 
-        # Apply search filter (description, action_type, table_name, user email)
+        # Apply search filter (searches in description, action_type, and table_name)
         if filter_params.search:
-            search_raw = filter_params.search.strip()
-            search_term = f"%{search_raw}%"
-            if "@" in search_raw:
-                conditions.append(
-                    f"(al.user_email ILIKE ${param_index} OR "
-                    f"COALESCE(au.email::text, '') ILIKE ${param_index})"
-                )
-            else:
-                conditions.append(
-                    f"(al.description ILIKE ${param_index} OR "
-                    f"al.action_type ILIKE ${param_index} OR "
-                    f"al.table_name ILIKE ${param_index} OR "
-                    f"al.user_email ILIKE ${param_index} OR "
-                    f"COALESCE(au.email::text, '') ILIKE ${param_index})"
-                )
+            search_term = f"%{filter_params.search}%"
+            conditions.append(
+                f"(al.description ILIKE ${param_index} OR "
+                f"al.action_type ILIKE ${param_index} OR "
+                f"al.table_name ILIKE ${param_index})"
+            )
             params.append(search_term)
             param_index += 1
 
@@ -220,8 +211,6 @@ class AuditLogRepository:
         query = f"""
             SELECT COUNT(*)
             FROM audit_logs al
-            LEFT JOIN auth.users au
-                ON au.id = al.user_id
             WHERE {where_clause}
         """
 

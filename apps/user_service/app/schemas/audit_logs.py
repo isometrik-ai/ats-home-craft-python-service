@@ -15,7 +15,7 @@ class AuditLogFilter(BaseModel):
 
     Attributes:
         organization_id: Organization ID (required)
-        search: Search term to filter by description, action_type, table_name, or user email
+        search: Search term to filter by description, action_type, or table_name
         action_type: Filter by action type
         table_name: Filter by table name
         user_id: Filter by user ID

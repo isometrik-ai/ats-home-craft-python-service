@@ -53,10 +53,7 @@ async def get_audit_logs(
     db_connection: asyncpg.Connection = Depends(db_conn),
     search: str | None = Query(
         None,
-        description=(
-            "Search term to filter audit logs by description, action type, "
-            "table name, or user email"
-        ),
+        description="Search term to filter audit logs by description",
     ),
     user_id: str | None = Query(
         None,

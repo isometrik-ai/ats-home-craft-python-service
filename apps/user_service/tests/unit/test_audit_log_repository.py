@@ -107,22 +107,7 @@ def test_build_filters_with_search_and_dates():
     assert "al.table_name = $4" in where
     assert "al.timestamp >=" in where
     assert "ILIKE" in where
-    assert "al.user_email ILIKE" in where
-    assert "au.email" in where
     assert params[-1] == "%alpha%"
-
-
-def test_build_filters_search_email_only():
-    """Email-shaped search matches stored and auth user emails."""
-    repo = AuditLogRepository(db_connection=None)
-    where, params = repo._build_audit_log_filters(  # pylint: disable=protected-access
-        _filter(search="jane@example.com")
-    )
-
-    assert "al.user_email ILIKE" in where
-    assert "au.email" in where
-    assert "al.description ILIKE" not in where
-    assert params[-1] == "%jane@example.com%"
 
 
 @pytest.mark.asyncio
@@ -152,7 +137,6 @@ async def test_get_audit_logs_count():
     assert count == 42
     query, args = conn.fetchval_calls[0]
     assert "SELECT COUNT(*)" in query
-    assert "LEFT JOIN auth.users au" in query
     assert "al.table_name = $2" in query
     assert args[0] == "org-1"
 
