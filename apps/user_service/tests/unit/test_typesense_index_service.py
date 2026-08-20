@@ -50,6 +50,8 @@ def test_extract_phone_numbers_and_display():
         }
     )
     assert "+919876543210" in numbers
+    assert "9876543210" in numbers
+    assert "919876543210" in numbers
     assert "+15551234" in numbers
     assert len(display) == 2
 
@@ -377,7 +379,7 @@ def test_extract_phone_numbers_skips_blank_numbers():
     numbers, display = tis._extract_phone_numbers_and_display(
         {"phones": [{"phone_number": ""}, {"phone_number": "555", "phone_isd_code": "+1"}]}
     )
-    assert numbers == ["+1555"]
+    assert numbers == ["+1555", "555", "1555"]
     assert len(display) == 2
 
 
@@ -709,7 +711,7 @@ def test_extract_contact_phone_skips_unparseable_string_entry():
     numbers, display = tis._extract_phone_numbers_and_display(
         {"phones": ["not-a-phone-dict", {"phone_number": "555", "phone_isd_code": "+1"}]}
     )
-    assert numbers == ["+1555"]
+    assert numbers == ["+1555", "555", "1555"]
     assert len(display) == 1
 
 

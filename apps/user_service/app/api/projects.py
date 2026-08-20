@@ -2207,6 +2207,8 @@ async def create_facility(
 async def list_facilities(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
+    facility_types: str | None = None,
+    status: str | None = None,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -2218,8 +2220,17 @@ async def list_facilities(
         project_id=project_id,
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
+    parsed_types = (
+        [part.strip() for part in facility_types.split(",") if part.strip()]
+        if facility_types
+        else None
+    )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
-    items = await service.list_facilities(project_id=project_id)
+    items = await service.list_facilities(
+        project_id=project_id,
+        facility_types=parsed_types,
+        status=status,
+    )
     return list_response(
         request=request,
         items=items,
