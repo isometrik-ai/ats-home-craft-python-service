@@ -35,7 +35,7 @@ def _service() -> ContactDeleteCascadeService:
     svc.contact_units_repo.release_all_open_links_for_unit = AsyncMock(return_value=[])
     svc.contact_units_repo.sync_move_out = AsyncMock()
     svc.units_repo = MagicMock()
-    svc.units_repo.mark_unit_vacant = AsyncMock()
+    svc.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="vacant")
     svc.tenant_requests_repo = MagicMock()
     svc.tenant_requests_repo.list_inflight_ids_for_submitter = AsyncMock(return_value=[])
     svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(return_value=None)
@@ -89,7 +89,7 @@ async def test_primary_occupant_delete_vacates_units_and_cancels_open_requests(
         organization_id="org-1",
         unit_id="unit-1",
     )
-    svc.units_repo.mark_unit_vacant.assert_awaited_once_with(
+    svc.units_repo.reconcile_unit_inventory_status.assert_awaited_once_with(
         organization_id="org-1",
         project_id="project-1",
         unit_id="unit-1",
@@ -279,7 +279,7 @@ async def test_household_delete_releases_link_without_vehicle_or_pass_cleanup(
     mock_vehicles.release_for_move_out.assert_not_awaited()
     svc.passes_repo.list_active_ids_for_host.assert_not_awaited()
     svc.passes_repo.list_active_for_unit.assert_not_awaited()
-    svc.units_repo.mark_unit_vacant.assert_not_awaited()
+    svc.units_repo.reconcile_unit_inventory_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -319,7 +319,7 @@ async def test_tenant_delete_releases_links_and_vehicles(mock_vehicles_cls):
 
     svc.contact_units_repo.release_open_links_for_contact.assert_awaited_once()
     mock_vehicles.release_for_move_out.assert_awaited_once_with(contact_id="tenant-1")
-    svc.units_repo.mark_unit_vacant.assert_not_awaited()
+    svc.units_repo.reconcile_unit_inventory_status.assert_not_awaited()
 
 
 @pytest.mark.asyncio

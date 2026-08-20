@@ -14,6 +14,7 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.db.repositories.move_events_repository import (
     MoveEventsRepository,
 )
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import ContactUnitStatus, MoveEventType
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
@@ -46,6 +47,7 @@ class MoveEventsService:
         self.user_context = user_context
         self.move_events_repo = move_events_repository or MoveEventsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
@@ -132,6 +134,16 @@ class MoveEventsService:
             contact_id=contact_id,
             unit_id=unit_id,
         )
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if unit:
+            await self.units_repo.reconcile_unit_inventory_status(
+                organization_id=organization_id,
+                project_id=str(unit["project_id"]),
+                unit_id=unit_id,
+            )
 
     async def _resolve_contact_unit(
         self,

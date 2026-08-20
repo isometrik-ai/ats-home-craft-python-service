@@ -75,6 +75,24 @@ _UNIT_OWNER_SELECT_COLUMNS = """
               owner_row.owner_emails
 """
 
+_HAS_ACTIVE_OWNER_EXISTS_SQL = f"""
+EXISTS (
+    SELECT 1
+    FROM contact_units cu
+    JOIN contacts c
+      ON c.id = cu.contact_id
+     AND c.organization_id = cu.organization_id
+    {_UNIT_OWNER_ROLE_JOIN}
+    WHERE cu.organization_id = u.organization_id
+      AND cu.unit_id = u.id
+      AND cu.status IN (
+          'active'::contact_unit_status,
+          'pending'::contact_unit_status
+      )
+      AND c.status = 'active'
+)
+"""
+
 _LIST_UNITS_FROM_SQL = f"""
 FROM units u
 LEFT JOIN towers t
@@ -360,6 +378,50 @@ class UnitsRepository(BaseRepository):
             *(args + [offset, page_size]),
         )
         return [dict(row) for row in rows], int(total or 0)
+
+    async def has_active_owner(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> bool:
+        """True when the unit has a resolvable active Owner (same rules as unit list)."""
+        value = await self.db_connection.fetchval(
+            f"""
+            SELECT {_HAS_ACTIVE_OWNER_EXISTS_SQL}
+            FROM units u
+            WHERE u.organization_id = $1::uuid
+              AND u.id = $2::uuid
+            """,
+            organization_id,
+            unit_id,
+        )
+        return bool(value)
+
+    async def reconcile_unit_inventory_status(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> str:
+        """Sync units.status with active Owner presence: occupied when owned, else vacant."""
+        if await self.has_active_owner(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        ):
+            await self.mark_unit_occupied(
+                organization_id=organization_id,
+                project_id=project_id,
+                unit_id=unit_id,
+            )
+            return "occupied"
+        await self.mark_unit_vacant(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        return "vacant"
 
     async def mark_unit_occupied(
         self,

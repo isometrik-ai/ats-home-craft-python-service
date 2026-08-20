@@ -22,6 +22,7 @@ from apps.user_service.app.db.repositories.move_events_repository import (
 from apps.user_service.app.db.repositories.tenant_requests_repository import (
     TenantRequestsRepository,
 )
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import (
@@ -107,6 +108,7 @@ class TenantRequestsService:
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
         self.move_events_repo = move_events_repository or MoveEventsRepository(db_connection)
         self.contact_roles_repo = ContactRolesRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
             user_context=user_context,
@@ -1155,6 +1157,12 @@ class TenantRequestsService:
             organization_id=org_id,
             unit_id=unit_id,
         )
+        if unit:
+            await self.units_repo.reconcile_unit_inventory_status(
+                organization_id=org_id,
+                project_id=str(unit["project_id"]),
+                unit_id=unit_id,
+            )
         unit_label = unit_label_from_row(unit or {"unit_id": unit_id})
         await self._push().send_to_contact(
             organization_id=org_id,

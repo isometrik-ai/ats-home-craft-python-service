@@ -173,6 +173,8 @@ def _service(
         move_events_repository=move_repo or _FakeMoveEventsRepo(),
         contact_units_repository=contact_units_repo or _FakeContactUnitsRepo(),
     )
+    service.units_repo = MagicMock()
+    service.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="vacant")
     service._push_dispatcher = _FakePushDispatcher()
     return service
 

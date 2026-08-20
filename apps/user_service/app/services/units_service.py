@@ -49,7 +49,11 @@ from apps.user_service.app.utils.unit_list_serialization import (
     format_primary_contact_email,
     format_primary_contact_phone,
 )
-from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -510,6 +514,14 @@ class UnitsService:
         patch = body.model_dump(exclude_unset=True, exclude_none=True)
         if "status" in patch and body.status:
             patch["status"] = body.status.value
+            if body.status == UnitStatus.OCCUPIED and not await self.units_repo.has_active_owner(
+                organization_id=self._org_id,
+                unit_id=unit_id,
+            ):
+                raise ValidationException(
+                    message_key="project_setup.errors.unit_occupied_requires_owner",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
         try:
             updated = await self.units_repo.update_unit(
                 organization_id=self._org_id,
