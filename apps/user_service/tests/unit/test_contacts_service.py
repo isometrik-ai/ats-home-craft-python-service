@@ -966,7 +966,7 @@ async def test_search_contacts_phone_params():
     """Search contacts uses phone params for digit-heavy query."""
     svc = _service()
     fake_typesense = MagicMock()
-    fake_typesense.embed_query_text = AsyncMock(return_value=None)
+    fake_typesense.embed_query_text = AsyncMock(return_value=[0.1, 0.2])
     fake_typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
     svc._typesense = fake_typesense
 
@@ -980,6 +980,29 @@ async def test_search_contacts_phone_params():
     params = fake_typesense.search.await_args.args[0]
     assert "query_by" in params
     assert "1234567890" in params["q"]
+    fake_typesense.embed_query_text.assert_not_awaited()
+    assert "vector_query" not in params
+
+
+@pytest.mark.asyncio
+async def test_search_contacts_email_skips_vector_query():
+    """Search contacts skips vector query for email-shaped input."""
+    svc = _service()
+    fake_typesense = MagicMock()
+    fake_typesense.embed_query_text = AsyncMock(return_value=[0.1, 0.2])
+    fake_typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
+    svc._typesense = fake_typesense
+
+    await svc.search_contacts(
+        query="jane@example.com",
+        page=1,
+        page_size=10,
+        status=ClientStatus.ACTIVE.value,
+    )
+
+    params = fake_typesense.search.await_args.args[0]
+    fake_typesense.embed_query_text.assert_not_awaited()
+    assert "vector_query" not in params
 
 
 @pytest.mark.asyncio

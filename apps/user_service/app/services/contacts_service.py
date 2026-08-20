@@ -2573,14 +2573,18 @@ class ContactsService:
             "filter_by": filter_by,
             "exclude_fields": "embedding",
         }
-        if "@" in query:
+        is_email_query = "@" in query
+        is_phone_query = not is_email_query and sum(c.isdigit() for c in query) >= 5
+        if is_email_query:
             params.update(CONTACT_EMAIL_SEARCH_PARAMS)
-        elif sum(c.isdigit() for c in query) >= 5:
+        elif is_phone_query:
             params.update(CONTACT_PHONE_SEARCH_PARAMS)
         else:
             params.update(CONTACT_SEARCH_PARAMS)
 
-        embedding = await self.typesense.embed_query_text(query)
+        embedding = None
+        if not is_email_query and not is_phone_query:
+            embedding = await self.typesense.embed_query_text(query)
         if embedding is not None:
             vector = ",".join(map(str, embedding))
             distance_threshold = getattr(
