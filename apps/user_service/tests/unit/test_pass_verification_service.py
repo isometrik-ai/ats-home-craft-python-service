@@ -138,7 +138,65 @@ class _FakeEventsRepo:
         return self._has_open_check_in
 
 
+class _FakeContactsRepo:
+    """Map contact ids to push recipients for notification tests."""
+
+    def __init__(self, contacts: dict[str, dict[str, Any]] | None = None) -> None:
+        self.contacts = contacts or {
+            "contact-1": {"user_id": "user-host", "additional_data": {}},
+            "owner-1": {"user_id": "user-owner", "additional_data": {}},
+            "tenant-1": {"user_id": "user-tenant", "additional_data": {}},
+        }
+
+    async def get_contact_for_update(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+    ) -> dict[str, Any] | None:
+        del organization_id
+        return self.contacts.get(contact_id)
+
+
+class _FakeUnitsRepo:
+    """Return Owner/Tenant occupants for pass notification tests."""
+
+    def __init__(
+        self, occupants: dict[str, dict[str, dict[str, Any] | None]] | None = None
+    ) -> None:
+        self.occupants = occupants or {
+            "unit-1": {
+                "owner": {"contact_id": "owner-1"},
+                "tenant": {"contact_id": "tenant-1"},
+            }
+        }
+
+    async def get_unit_role_occupants_batch(
+        self,
+        *,
+        organization_id: str,
+        unit_ids: list[str],
+    ) -> dict[str, dict[str, dict[str, Any] | None]]:
+        del organization_id
+        return {
+            unit_id: self.occupants.get(unit_id, {"owner": None, "tenant": None})
+            for unit_id in unit_ids
+        }
+
+
 class _FakePushDispatcher:
+    def __init__(self, contacts_repo: _FakeContactsRepo | None = None) -> None:
+        self.send_to_user_calls: list[dict[str, object]] = []
+        self.contacts_repo = contacts_repo or _FakeContactsRepo()
+
+    async def send_to_user(self, **kwargs):
+        self.send_to_user_calls.append(kwargs)
+        return None
+
+    async def send_to_contact(self, **kwargs):
+        del kwargs
+        return None
+
     async def send_to_unit_residents(self, **kwargs):
         del kwargs
         return 1
@@ -149,6 +207,8 @@ def _service(
     passes_repo: _FakePassesRepo | None = None,
     events_repo: _FakeEventsRepo | None = None,
     towers_repo: _FakeTowersRepo | None = None,
+    units_repo: _FakeUnitsRepo | None = None,
+    push_dispatcher: _FakePushDispatcher | None = None,
 ) -> PassVerificationService:
     """Build PassVerificationService with fake repositories."""
     svc = PassVerificationService(
@@ -158,7 +218,8 @@ def _service(
     svc.passes_repo = passes_repo or _FakePassesRepo()
     svc.events_repo = events_repo or _FakeEventsRepo()
     svc.towers_repo = towers_repo or _FakeTowersRepo()
-    svc._push_dispatcher = _FakePushDispatcher()
+    svc.units_repo = units_repo or _FakeUnitsRepo()
+    svc._push_dispatcher = push_dispatcher or _FakePushDispatcher()
     return svc
 
 
@@ -412,3 +473,67 @@ async def test_check_out_completes_one_time_pass():
     assert result["pass_status"] == PassStatus.COMPLETED.value
     assert passes_repo.complete_calls
     assert events_repo.insert_calls[-1]["event_type"] == PassEventType.CHECKED_OUT.value
+
+
+@pytest.mark.asyncio
+async def test_check_in_notifies_pass_host_and_unit_occupants():
+    """Check-in push goes to pass host plus Owner/Tenant on the unit."""
+    push = _FakePushDispatcher()
+    svc = _service(events_repo=_FakeEventsRepo(), push_dispatcher=push)
+    body = CheckInRequest(
+        entry_method=PassEntryMethod.QR,
+        access_status=PassAccessStatus.APPROVED,
+    )
+    await svc.check_in(pass_id="pass-1", body=body)
+    assert len(push.send_to_user_calls) == 3
+    recipient_user_ids = {call["recipient_user_id"] for call in push.send_to_user_calls}
+    assert recipient_user_ids == {"user-host", "user-owner", "user-tenant"}
+    assert push.send_to_user_calls[0]["message_key"] == "notifications.push.pass.checked_in"
+
+
+@pytest.mark.asyncio
+async def test_check_in_dedupes_host_when_also_owner():
+    """Host is not notified twice when they are also the unit Owner."""
+    contacts = {
+        "contact-1": {"user_id": "user-owner", "additional_data": {}},
+        "owner-1": {"user_id": "user-owner", "additional_data": {}},
+        "tenant-1": {"user_id": "user-tenant", "additional_data": {}},
+    }
+    push = _FakePushDispatcher(contacts_repo=_FakeContactsRepo(contacts))
+    units = _FakeUnitsRepo(
+        occupants={
+            "unit-1": {
+                "owner": {"contact_id": "owner-1"},
+                "tenant": {"contact_id": "tenant-1"},
+            }
+        }
+    )
+    passes_repo = _FakePassesRepo(row=_pass_row(host_contact_id="contact-1"))
+    svc = _service(
+        passes_repo=passes_repo,
+        events_repo=_FakeEventsRepo(),
+        units_repo=units,
+        push_dispatcher=push,
+    )
+    body = CheckInRequest(
+        entry_method=PassEntryMethod.QR,
+        access_status=PassAccessStatus.APPROVED,
+    )
+    await svc.check_in(pass_id="pass-1", body=body)
+    recipient_user_ids = {call["recipient_user_id"] for call in push.send_to_user_calls}
+    assert recipient_user_ids == {"user-owner", "user-tenant"}
+    assert len(push.send_to_user_calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_check_in_skips_push_when_private():
+    """Private passes do not notify anyone on check-in."""
+    push = _FakePushDispatcher()
+    passes_repo = _FakePassesRepo(row=_pass_row(is_private=True))
+    svc = _service(passes_repo=passes_repo, events_repo=_FakeEventsRepo(), push_dispatcher=push)
+    body = CheckInRequest(
+        entry_method=PassEntryMethod.QR,
+        access_status=PassAccessStatus.APPROVED,
+    )
+    await svc.check_in(pass_id="pass-1", body=body)
+    assert push.send_to_user_calls == []

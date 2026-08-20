@@ -13,6 +13,7 @@ from apps.user_service.app.db.repositories.pass_events_repository import (
 )
 from apps.user_service.app.db.repositories.passes_repository import PassesRepository
 from apps.user_service.app.db.repositories.towers_repository import TowersRepository
+from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import (
     PassAccessStatus,
     PassActorType,
@@ -27,6 +28,7 @@ from apps.user_service.app.services.daily_help_notification_service import (
 from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
+    recipient_language_from_contact,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.pass_validity import (
@@ -59,6 +61,7 @@ class PassVerificationService:
         self.passes_repo = PassesRepository(db_connection)
         self.events_repo = PassEventsRepository(db_connection)
         self.towers_repo = TowersRepository(db_connection)
+        self.units_repo = UnitsRepository(db_connection)
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
@@ -73,7 +76,7 @@ class PassVerificationService:
         message_key: str,
         idempotency_suffix: str,
     ) -> None:
-        """Notify household members on the pass unit when entry is not private."""
+        """Notify pass host plus Owner/Tenant on the unit when entry is not private."""
         if bool(pass_row.get("is_private")):
             return
         org_id = self.user_context.organization_id
@@ -81,28 +84,66 @@ class PassVerificationService:
         unit_id = str(pass_row.get("unit_id") or "")
         pass_id = str(pass_row.get("id") or "")
         host_contact_id = str(pass_row.get("host_contact_id") or "")
-        if not unit_id or not pass_id:
+        if not pass_id:
             return
-        visitor_name = str(pass_row.get("guest_name") or "Visitor").strip() or "Visitor"
-        await self._push().send_to_unit_residents(
-            organization_id=org_id,
-            unit_id=unit_id,
-            exclude_contact_ids={host_contact_id} if host_contact_id else None,
-            message_key=message_key,
-            notification_type="NOTIFICATION_TYPE_PASS",
-            feed_type="pass",
-            params={"visitor_name": visitor_name},
-            data={
-                "pass_id": pass_id,
-                "unit_id": unit_id,
-                "screen": "pass_detail",
-            },
-            entity={"kind": "pass", "id": pass_id},
-            options={
-                "click_action": "OPEN_PASS",
-                "idempotency_key": f"pass:{pass_id}:{idempotency_suffix}",
-            },
+
+        contact_ids: list[str] = []
+        if host_contact_id:
+            contact_ids.append(host_contact_id)
+        if unit_id:
+            occupants_by_unit = await self.units_repo.get_unit_role_occupants_batch(
+                organization_id=org_id,
+                unit_ids=[unit_id],
+            )
+            occupants = occupants_by_unit.get(unit_id) or {}
+            for role_key in ("owner", "tenant"):
+                occupant = occupants.get(role_key)
+                if occupant and occupant.get("contact_id"):
+                    contact_ids.append(str(occupant["contact_id"]))
+
+        unique_contact_ids = list(
+            dict.fromkeys(contact_id for contact_id in contact_ids if contact_id)
         )
+        if not unique_contact_ids:
+            return
+
+        visitor_name = str(pass_row.get("guest_name") or "Visitor").strip() or "Visitor"
+        data: dict[str, Any] = {
+            "pass_id": pass_id,
+            "screen": "pass_detail",
+        }
+        if unit_id:
+            data["unit_id"] = unit_id
+
+        contacts_repo = self._push().contacts_repo
+        user_ids_seen: set[str] = set()
+        for contact_id in unique_contact_ids:
+            contact = await contacts_repo.get_contact_for_update(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            if not contact:
+                continue
+            recipient_user_id = str(contact.get("user_id") or "").strip()
+            if not recipient_user_id or recipient_user_id in user_ids_seen:
+                continue
+            user_ids_seen.add(recipient_user_id)
+            await self._push().send_to_user(
+                organization_id=org_id,
+                recipient_user_id=recipient_user_id,
+                message_key=message_key,
+                notification_type="NOTIFICATION_TYPE_PASS",
+                feed_type="pass",
+                language=recipient_language_from_contact(contact.get("additional_data")),
+                params={"visitor_name": visitor_name},
+                data=data,
+                entity={"kind": "pass", "id": pass_id},
+                options={
+                    "click_action": "OPEN_PASS",
+                    "idempotency_key": f"pass:{pass_id}:{idempotency_suffix}",
+                },
+                check_push_preference=True,
+            )
 
     @staticmethod
     def _now() -> datetime:
