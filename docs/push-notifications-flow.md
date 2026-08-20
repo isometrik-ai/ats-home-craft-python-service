@@ -328,10 +328,10 @@ ______________________________________________________________________
 
 ### 6.4 Visitor passes (`PassVerificationService` — `gate_passes.py`)
 
-| Event       | Message key                           | Trigger                   | Recipient                           | API                           |
-| ----------- | ------------------------------------- | ------------------------- | ----------------------------------- | ----------------------------- |
-| Checked in  | `notifications.push.pass.checked_in`  | Successful gate check-in  | Unit household (excludes pass host) | `POST /passes/{id}/check-in`  |
-| Checked out | `notifications.push.pass.checked_out` | Successful gate check-out | Unit household (excludes pass host) | `POST /passes/{id}/check-out` |
+| Event       | Message key                           | Trigger                   | Recipient                                          | API                           |
+| ----------- | ------------------------------------- | ------------------------- | -------------------------------------------------- | ----------------------------- |
+| Checked in  | `notifications.push.pass.checked_in`  | Successful gate check-in  | Pass host + Owner/Tenant on unit (deduped by user) | `POST /passes/{id}/check-in`  |
+| Checked out | `notifications.push.pass.checked_out` | Successful gate check-out | Pass host + Owner/Tenant on unit (deduped by user) | `POST /passes/{id}/check-out` |
 
 **Params:** `{visitor_name}` (guest name on pass).
 

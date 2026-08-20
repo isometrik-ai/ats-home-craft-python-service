@@ -344,7 +344,7 @@ class ContactDeleteCascadeService:
                 organization_id=organization_id,
                 contact_unit_ids=[row["id"] for row in released],
             )
-            await self.units_repo.mark_unit_vacant(
+            await self.units_repo.reconcile_unit_inventory_status(
                 organization_id=organization_id,
                 project_id=project_id,
                 unit_id=unit_id,

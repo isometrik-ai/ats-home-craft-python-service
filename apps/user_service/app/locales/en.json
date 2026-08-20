@@ -388,6 +388,7 @@
       "facility_not_found": "Facility not found.",
       "unit_not_found": "Unit not found.",
       "unit_owner_not_assigned": "This unit does not have an assigned owner to remove.",
+      "unit_occupied_requires_owner": "A unit cannot be marked occupied until an active owner is assigned.",
       "unit_document_not_found": "The document could not be found on this unit.",
       "parking_zone_not_found": "Parking zone not found.",
       "overlay_not_found": "Site map overlay not found.",

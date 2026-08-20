@@ -221,3 +221,37 @@ async def test_count_units_by_property_type_for_projects_empty():
 
     assert counts == {}
     assert conn.fetch_calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_unit_inventory_status_marks_vacant_without_owner():
+    """Reconcile clears occupied inventory when no active Owner exists."""
+    conn = _FakeConn(rows=[])
+    repo = UnitsRepository(db_connection=conn)
+
+    status = await repo.reconcile_unit_inventory_status(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+    )
+
+    assert status == "vacant"
+    assert len(conn.execute_calls) == 1
+    assert "vacant" in conn.execute_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_unit_inventory_status_marks_occupied_with_owner():
+    """Reconcile keeps inventory occupied when an active Owner exists."""
+    conn = _FakeConn(rows=[{"exists": True}])
+    repo = UnitsRepository(db_connection=conn)
+
+    status = await repo.reconcile_unit_inventory_status(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+    )
+
+    assert status == "occupied"
+    assert len(conn.execute_calls) == 1
+    assert "occupied" in conn.execute_calls[0][0]

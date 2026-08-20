@@ -369,6 +369,8 @@ def _service(
     service.contact_roles_repo = AsyncMock()
     service.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
     service.contact_roles_repo.insert_tenant_role = AsyncMock(return_value={"id": "role-1"})
+    service.units_repo = AsyncMock()
+    service.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="occupied")
     return service
 
 

@@ -56,7 +56,8 @@ def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService
     svc = ContactUnitsService(db_connection=MagicMock(), user_context=_user_context())
     svc.repo = AsyncMock()
     svc.units_repo = AsyncMock()
-    svc.units_repo.mark_unit_occupied = AsyncMock()
+    svc.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="occupied")
+    svc.units_repo.has_active_owner = AsyncMock(return_value=True)
     svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
     svc.onboarding_repo = onboarding_repo or AsyncMock()
     svc.onboarding_repo.list_steps = AsyncMock(return_value=_completed_profile_steps())
@@ -371,7 +372,7 @@ async def test_admin_assign_unit_creates_pending_allotment():
         organization_id="org-1",
         contact_unit_id="cu-1",
     )
-    svc.units_repo.mark_unit_occupied.assert_awaited_once_with(
+    svc.units_repo.reconcile_unit_inventory_status.assert_awaited_once_with(
         organization_id="org-1",
         project_id="proj-1",
         unit_id="unit-1",
@@ -398,13 +399,13 @@ async def test_unassign_unit_owner_marks_vacant(monkeypatch):
     svc.repo.release_unit_owner_links = AsyncMock(
         return_value=[{"id": "cu-1", "contact_id": "contact-1", "status": "moved_out"}]
     )
-    svc.units_repo.mark_unit_vacant = AsyncMock()
+    svc.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="vacant")
 
     result = await svc.unassign_unit_owner(project_id="proj-1", unit_id="unit-1")
 
     assert release_calls == [{"unit_id": "unit-1"}]
     svc.repo.release_unit_owner_links.assert_awaited_once()
-    svc.units_repo.mark_unit_vacant.assert_awaited_once_with(
+    svc.units_repo.reconcile_unit_inventory_status.assert_awaited_once_with(
         organization_id="org-1",
         project_id="proj-1",
         unit_id="unit-1",
@@ -481,7 +482,7 @@ async def test_reassign_unit_owner_replaces_owner(monkeypatch):
         relationship="self",
         assigned_at=ASSIGNED_AT,
     )
-    svc.units_repo.mark_unit_occupied.assert_awaited_once()
+    svc.units_repo.reconcile_unit_inventory_status.assert_awaited_once()
     assert result["contact_id"] == "contact-new"
     assert result["previous_contact_id"] == "contact-old"
     assert result["unit_status"] == "occupied"

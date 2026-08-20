@@ -24,7 +24,7 @@ from apps.user_service.app.utils.unit_list_serialization import (
     format_primary_contact_email,
     format_primary_contact_phone,
 )
-from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 
 
 def test_format_contact_display_name_with_prefix():
@@ -652,6 +652,24 @@ async def test_update_unit_not_found():
             project_id="proj-1",
             unit_id="missing",
             body=UpdateUnitRequest(code="B-202"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_unit_rejects_occupied_without_active_owner():
+    """PATCH status=occupied requires an active Owner role on the unit."""
+    from apps.user_service.app.schemas.enums import UnitStatus
+    from apps.user_service.app.schemas.project_inventory import UpdateUnitRequest
+
+    service = _units_service()
+    service.units_repo.get_unit = AsyncMock(return_value={"id": "unit-1", "project_id": "proj-1"})
+    service.units_repo.has_active_owner = AsyncMock(return_value=False)
+
+    with pytest.raises(ValidationException):
+        await service.update_unit(
+            project_id="proj-1",
+            unit_id="unit-1",
+            body=UpdateUnitRequest(status=UnitStatus.OCCUPIED),
         )
 
 

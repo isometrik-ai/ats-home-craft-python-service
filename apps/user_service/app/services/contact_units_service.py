@@ -444,11 +444,6 @@ class ContactUnitsService:
                 assigned_at=assigned_at,
             )
 
-        await self.units_repo.mark_unit_occupied(
-            organization_id=org_id,
-            project_id=str(unit["project_id"]),
-            unit_id=unit_id,
-        )
         if relationship == ContactUnitRelationship.SELF.value:
             await self.contact_roles_repo.end_active_roles_for_unit(
                 organization_id=org_id,
@@ -462,6 +457,11 @@ class ContactUnitsService:
                 unit_id=unit_id,
                 contact_unit_id=str(row["id"]),
             )
+        await self.units_repo.reconcile_unit_inventory_status(
+            organization_id=org_id,
+            project_id=str(unit["project_id"]),
+            unit_id=unit_id,
+        )
         return row
 
     async def unassign_unit_owner(
@@ -496,7 +496,7 @@ class ContactUnitsService:
                 role_types=[ContactType.OWNER.value, ContactType.TENANT.value],
             )
 
-            await self.units_repo.mark_unit_vacant(
+            await self.units_repo.reconcile_unit_inventory_status(
                 organization_id=org_id,
                 project_id=str(unit["project_id"]),
                 unit_id=unit_id,
@@ -547,13 +547,21 @@ class ContactUnitsService:
             contact_unit_id=str(row["id"]),
         )
         normalized = self._normalize_unit_row(full or row)
+        unit_status = (
+            "occupied"
+            if await self.units_repo.has_active_owner(
+                organization_id=org_id,
+                unit_id=unit_id,
+            )
+            else "vacant"
+        )
         return {
             "id": row["id"],
             "status": row["status"],
             "contact_id": contact_id,
             "previous_contact_id": released[0]["contact_id"] if released else None,
             "released_contact_unit_ids": [item["id"] for item in released],
-            "unit_status": "occupied",
+            "unit_status": unit_status,
             "assign_date": normalized.get("assign_date"),
         }
 
