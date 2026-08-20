@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import asyncpg
@@ -1144,7 +1145,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
-        """List contacts with simple search (first/last/email) and pagination."""
+        """List contacts with simple search (first/last/email/phone) and pagination."""
         offset = (page - 1) * page_size
         args: list[Any] = [organization_id]
         where = ["organization_id = $1::uuid"]
@@ -1185,14 +1186,34 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             args.append(project_id)
             next_param_index += 1
         if search:
-            name_email_match = (
-                f"(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'') "
-                f"ILIKE ${next_param_index} OR "
-                f"COALESCE(au.email::text,'') ILIKE ${next_param_index})"
-            )
-            where.append(name_email_match)
-            args.append(f"%{search.strip()}%")
+            search_stripped = search.strip()
+            search_parts = [
+                f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.last_name,'') "
+                f"ILIKE ${next_param_index}",
+                f"COALESCE(au.email::text,'') ILIKE ${next_param_index}",
+            ]
+            args.append(f"%{search_stripped}%")
             next_param_index += 1
+
+            digits_only = re.sub(r"\D", "", search_stripped)
+            if digits_only:
+                search_parts.append(
+                    f"""EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(COALESCE(ct.phones, '[]'::jsonb)) AS p(phone)
+                  WHERE regexp_replace(COALESCE(p.phone->>'phone_number',''), '\\D', '', 'g')
+                          LIKE '%' || ${next_param_index}::text || '%'
+                     OR regexp_replace(
+                          COALESCE(p.phone->>'phone_isd_code','')
+                            || COALESCE(p.phone->>'phone_number',''),
+                          '\\D', '', 'g'
+                        ) LIKE '%' || ${next_param_index}::text || '%'
+                )"""
+                )
+                args.append(digits_only)
+                next_param_index += 1
+
+            where.append("(" + " OR ".join(search_parts) + ")")
 
         if dropdown_filters:
             dropdown_where, dropdown_args, next_param_index = build_dropdown_jsonb_where(
