@@ -4,6 +4,13 @@ from fastapi import APIRouter
 
 from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
+from apps.user_service.app.api.community_events import router as community_events_router
+from apps.user_service.app.api.community_events_internal import (
+    router as community_events_internal_router,
+)
+from apps.user_service.app.api.community_events_resident import (
+    router as community_events_resident_router,
+)
 from apps.user_service.app.api.companies import router as companies_router
 from apps.user_service.app.api.contact_onboarding import (
     router as contact_onboarding_router,
@@ -92,6 +99,9 @@ router.include_router(daily_help_resident_router)
 router.include_router(notices_router)
 router.include_router(notices_resident_router)
 router.include_router(notices_internal_router)
+router.include_router(community_events_router)
+router.include_router(community_events_resident_router)
+router.include_router(community_events_internal_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
 router.include_router(walk_ins_router)

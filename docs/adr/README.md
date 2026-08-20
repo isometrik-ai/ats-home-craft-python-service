@@ -19,8 +19,9 @@ ADRs capture significant design choices, the context behind them, and their cons
 | [0011](./0011-project-membership.md)                 | Project membership — org layer + project layer        | Proposed           |
 | [0012](./0012-notice-board.md)                       | Notice board — admin publish, resident feed           | Proposed           |
 | [0013](./0013-daily-help.md)                         | Daily Help — project registry, gate pass linkage      | Proposed           |
+| [0014](./0014-community-events.md)                   | Community events — admin create, resident book        | Accepted           |
 
-See also: [membership-architecture.md](../membership-architecture.md) (full guide) and [membership-schema.md](../../../ats-home-craft-supabase/docs/membership-schema.md) (DB reference). Notice board: [notice-board-flow.md](../notice-board-flow.md), [notice-board-schema.md](../../../ats-home-craft-supabase/docs/notice-board-schema.md). Daily help: [daily-help-flow.md](../daily-help-flow.md).
+See also: [membership-architecture.md](../membership-architecture.md) (full guide) and [membership-schema.md](../../../ats-home-craft-supabase/docs/membership-schema.md) (DB reference). Notice board: [notice-board-flow.md](../notice-board-flow.md), [notice-board-schema.md](../../../ats-home-craft-supabase/docs/notice-board-schema.md). Daily help: [daily-help-flow.md](../daily-help-flow.md). Community events: [events-flow.md](../events-flow.md), [community-events-schema.md](../../../ats-home-craft-supabase/docs/community-events-schema.md).
 
 ## Format
 

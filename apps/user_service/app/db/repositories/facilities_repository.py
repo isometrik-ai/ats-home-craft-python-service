@@ -80,17 +80,37 @@ class FacilitiesRepository(BaseRepository):
         return dict(row) if row else None
 
     async def list_facilities(
-        self, *, organization_id: str, project_id: str
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        facility_types: list[str] | None = None,
+        status: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List facilities for a project."""
+        """List facilities for a project with optional filters."""
+        conditions = [
+            "organization_id = $1::uuid",
+            "project_id = $2::uuid",
+        ]
+        values: list[Any] = [organization_id, project_id]
+        idx = 3
+        if facility_types:
+            lowered = [t.strip().lower() for t in facility_types if t.strip()]
+            conditions.append(f"LOWER(facility_type) = ANY(${idx}::text[])")
+            values.append(lowered)
+            idx += 1
+        if status:
+            conditions.append(f"status = ${idx}::facility_status")
+            values.append(status)
+            idx += 1
+        where_sql = " AND ".join(conditions)
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT * FROM facilities
-            WHERE organization_id = $1::uuid AND project_id = $2::uuid
+            WHERE {where_sql}
             ORDER BY sort_order, created_at
             """,
-            organization_id,
-            project_id,
+            *values,
         )
         return [dict(row) for row in rows]
 

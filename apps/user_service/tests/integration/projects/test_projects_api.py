@@ -1403,8 +1403,8 @@ async def test_list_facilities(monkeypatch, client):
 
     _patch_projects_access(monkeypatch)
 
-    async def fake_list_facilities(_self, *, project_id: str):
-        del _self
+    async def fake_list_facilities(_self, *, project_id: str, facility_types=None, status=None):
+        del _self, facility_types, status
         return [_FAKE_FACILITY]
 
     monkeypatch.setattr(

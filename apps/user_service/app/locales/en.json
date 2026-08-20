@@ -939,6 +939,32 @@
           "title": "New community notice",
           "body": "{title}"
         }
+      },
+      "community_events": {
+        "published": {
+          "title": "New community event",
+          "body": "{title} — book your tickets now"
+        },
+        "booking_confirmed": {
+          "title": "Event booking confirmed",
+          "body": "Your tickets for {title} are confirmed"
+        },
+        "booking_waitlisted": {
+          "title": "Added to waitlist",
+          "body": "You are on the waitlist for {title}"
+        },
+        "waitlist_promoted": {
+          "title": "Waitlist spot confirmed",
+          "body": "A spot opened up for {title}. Your tickets are confirmed"
+        },
+        "payment_received": {
+          "title": "Payment received",
+          "body": "Payment recorded for {title}"
+        },
+        "reminder": {
+          "title": "Event tomorrow",
+          "body": "Reminder: {title} is coming up soon"
+        }
       }
     }
   },
@@ -1045,6 +1071,53 @@
       "feed_retrieved": "Notice feed retrieved successfully.",
       "liked": "Notice liked successfully.",
       "unliked": "Notice like removed successfully."
+    }
+  },
+  "community_events": {
+    "errors": {
+      "event_not_found": "The event could not be found.",
+      "event_not_editable": "This event cannot be edited because tickets have already been booked.",
+      "event_not_publishable": "The event is missing required fields to publish.",
+      "event_deleted": "This event has been deleted.",
+      "booking_closed": "Booking is closed for this event.",
+      "booking_not_found": "The booking could not be found.",
+      "booking_not_pending": "Only pending payments can be marked paid.",
+      "booking_already_cancelled": "This booking has already been cancelled.",
+      "booking_not_valid_for_gate": "This booking is not valid for gate entry.",
+      "booking_not_valid_for_payment": "This booking is not eligible for online payment.",
+      "child_tickets_not_allowed": "Child tickets are not available for this event.",
+      "ticket_limit_exceeded": "You have exceeded the maximum tickets allowed per resident.",
+      "facility_not_eligible": "The selected facility is not eligible for events.",
+      "facility_required": "A venue facility is required to publish this event.",
+      "booking_closes_required": "Booking close date and time are required to publish.",
+      "invalid_date_range": "End date must be on or after the start date.",
+      "gallery_limit_exceeded": "Too many gallery images.",
+      "invalid_media_type": "Only JPG and PNG images are allowed.",
+      "adult_price_required": "Adult ticket price is required for paid events.",
+      "invalid_unit_context": "You do not have access to book for the selected unit.",
+      "zero_amount_booking": "This booking has no payable amount.",
+      "organization_required": "Organization context is required."
+    },
+    "success": {
+      "summary_retrieved": "Community events summary retrieved successfully.",
+      "list_retrieved": "Community events retrieved successfully.",
+      "detail_retrieved": "Community event retrieved successfully.",
+      "created": "Community event created successfully.",
+      "updated": "Community event updated successfully.",
+      "published": "Community event published successfully.",
+      "cancelled": "Community event cancelled successfully.",
+      "completed": "Community event marked as completed.",
+      "deleted": "Community event deleted successfully.",
+      "restored": "Community event restored successfully.",
+      "bookings_retrieved": "Event bookings retrieved successfully.",
+      "booking_created": "Event booking created successfully.",
+      "booking_retrieved": "Event booking retrieved successfully.",
+      "booking_cancelled": "Event booking cancelled successfully.",
+      "booking_marked_paid": "Booking marked as paid successfully.",
+      "booking_marked_waived": "Booking payment waived successfully.",
+      "booking_verified": "Booking verified successfully.",
+      "complete_past_completed": "Past events marked as completed.",
+      "reminders_sent": "Event reminders sent successfully."
     }
   }
 }
