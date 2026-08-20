@@ -166,7 +166,7 @@ async def test_list_contacts_deleted_status_filter():
 
 @pytest.mark.asyncio
 async def test_list_contacts_search_predicate():
-    """List adds name/email ILIKE when search is set."""
+    """List adds name/email/phone ILIKE when search is set."""
     conn = _FakeConn(rows=[], val=0)
     repo = ContactsRepository(db_connection=conn)
 
@@ -186,6 +186,26 @@ async def test_list_contacts_search_predicate():
     _, list_args = conn.fetch_calls[0]
     assert list_args[-2] == 10
     assert list_args[-1] == 10
+
+
+@pytest.mark.asyncio
+async def test_list_contacts_search_by_phone_digits():
+    """List matches phone numbers using digits-only comparison."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = ContactsRepository(db_connection=conn)
+
+    await repo.list_contacts(
+        organization_id=ORG_ID,
+        search="+91 98765-43210",
+        status=None,
+        contact_type=None,
+        page=1,
+        page_size=10,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "jsonb_array_elements" in count_query
+    assert "919876543210" in count_args
 
 
 @pytest.mark.asyncio

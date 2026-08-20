@@ -50,6 +50,8 @@ def test_extract_phone_numbers_and_display():
         }
     )
     assert "+919876543210" in numbers
+    assert "9876543210" in numbers
+    assert "919876543210" in numbers
     assert "+15551234" in numbers
     assert len(display) == 2
 
