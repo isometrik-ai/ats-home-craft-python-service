@@ -1,6 +1,6 @@
 """Unit tests for AuditLogRepository with fake asyncpg connection."""
 
-from datetime import datetime, timezone
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,6 +9,7 @@ from apps.user_service.app.db.repositories.audit_log_repository import (
     AuditLogRepository,
 )
 from apps.user_service.app.schemas.audit_logs import AuditLogFilter
+from apps.user_service.app.schemas.enums import AuditLogActionType, AuditLogRiskLevel
 
 
 def _async_mock_conn(*, rows=None, row=None, val=None):
@@ -68,6 +69,8 @@ def _filter(**overrides):
         "action_type": None,
         "table_name": None,
         "user_id": None,
+        "category": None,
+        "risk_level": None,
         "start_date": None,
         "end_date": None,
         "limit": 20,
@@ -89,13 +92,15 @@ def test_build_filters_org_only():
 def test_build_filters_with_search_and_dates():
     """Optional filters append predicates and params."""
     repo = AuditLogRepository(db_connection=None)
-    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    end = datetime(2026, 1, 31, tzinfo=timezone.utc)
+    start = date(2026, 1, 1)
+    end = date(2026, 1, 31)
     where, params = repo._build_audit_log_filters(  # pylint: disable=protected-access
         _filter(
             user_id="u1",
-            action_type="UPDATE",
+            action_type=AuditLogActionType.UPDATE,
             table_name="leads",
+            category="CONTACT",
+            risk_level=AuditLogRiskLevel.MEDIUM,
             start_date=start,
             end_date=end,
             search="alpha",
@@ -105,11 +110,61 @@ def test_build_filters_with_search_and_dates():
     assert "al.user_id = $2" in where
     assert "al.action_type = $3" in where
     assert "al.table_name = $4" in where
-    assert "al.timestamp >=" in where
+    assert "al.category = $5" in where
+    assert "al.risk_level = $6" in where
+    assert "al.timestamp::date >=" in where
+    assert "al.timestamp::date <=" in where
     assert "ILIKE" in where
     assert "al.user_email ILIKE" in where
     assert "au.email" in where
+    assert params[2] == "UPDATE"
+    assert params[4] == "CONTACT"
+    assert params[5] == "medium"
     assert params[-1] == "%alpha%"
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "sql_fragment", "expected_param"),
+    [
+        ("action_type", AuditLogActionType.CREATE, "al.action_type = $2", "CREATE"),
+        ("action_type", AuditLogActionType.DELETE, "al.action_type = $2", "DELETE"),
+        ("category", "DAILY_HELP", "al.category = $2", "DAILY_HELP"),
+        ("risk_level", AuditLogRiskLevel.HIGH, "al.risk_level = $2", "high"),
+        ("start_date", date(2026, 8, 1), "al.timestamp::date >= $2::date", date(2026, 8, 1)),
+        ("end_date", date(2026, 8, 20), "al.timestamp::date <= $2::date", date(2026, 8, 20)),
+    ],
+)
+def test_build_filters_individual_fields(field, value, sql_fragment, expected_param):
+    """Each optional filter adds the expected SQL predicate and bound value."""
+    repo = AuditLogRepository(db_connection=None)
+    where, params = repo._build_audit_log_filters(_filter(**{field: value}))  # pylint: disable=protected-access
+
+    assert sql_fragment in where
+    assert params[1] == expected_param
+
+
+@pytest.mark.asyncio
+async def test_list_and_count_queries_share_filters():
+    """List and count queries apply identical filter predicates."""
+    conn = _FakeConn(rows=[{"id": "a1"}], val=3)
+    repo = AuditLogRepository(db_connection=conn)
+    filt = _filter(
+        action_type=AuditLogActionType.UPDATE,
+        category="PROJECT_SETUP",
+        risk_level=AuditLogRiskLevel.LOW,
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 20),
+    )
+
+    await repo.get_audit_logs_list(filt)
+    await repo.get_audit_logs_count(filt)
+
+    list_query = conn.fetch_calls[0][0]
+    count_query = conn.fetchval_calls[0][0]
+    list_where = list_query.split("WHERE", 1)[1].split("ORDER BY", 1)[0].strip()
+    count_where = count_query.split("WHERE", 1)[1].strip()
+    assert list_where == count_where
+    assert conn.fetch_calls[0][1][:6] == conn.fetchval_calls[0][1]
 
 
 def test_build_filters_search_email_only():

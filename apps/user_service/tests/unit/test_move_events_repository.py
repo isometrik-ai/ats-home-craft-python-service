@@ -58,7 +58,7 @@ async def test_insert_move_event_casts_enum():
             "fee_amount": 5000,
             "fee_currency": "INR",
             "notes": "Handover",
-            "document_paths": [],
+            "documents": [],
             "recorded_by_user_id": "user-1",
         }
     )
@@ -161,7 +161,7 @@ async def test_update_move_event_and_noop_paths():
         move_event_id="move-1",
         update_data={
             "event_date": "2026-06-01",
-            "document_paths": ["/docs/a.pdf"],
+            "documents": [{"document_type": "id_proof", "file_path": "/docs/a.pdf"}],
             "fee_amount": 1000,
             "move_type": "ignored",
         },
@@ -169,7 +169,7 @@ async def test_update_move_event_and_noop_paths():
     assert updated["unit_code"] == "A-101"
     update_query, _ = conn.fetchrow_calls[0]
     assert "event_date = $1::date" in update_query
-    assert "document_paths = $2::text[]" in update_query
+    assert "documents = $2::jsonb" in update_query
     assert "move_type" not in update_query
 
     conn.fetchrow_calls.clear()

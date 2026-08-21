@@ -1982,3 +1982,23 @@ COMMUNITY_EVENT_MAX_GALLERY = 10
 COMMUNITY_EVENT_MAX_MEDIA_BYTES = 5 * 1024 * 1024
 COMMUNITY_EVENT_ALLOWED_MEDIA_MIMES = frozenset({"image/jpeg", "image/png"})
 COMMUNITY_EVENT_EXPORT_MAX_ROWS = 10_000
+
+# ============================================================================
+# AUDIT LOG ENUMS
+# ============================================================================
+
+
+class AuditLogActionType(str, Enum):
+    """Audit log action filter values."""
+
+    CREATE = "CREATE"
+    UPDATE = "UPDATE"
+    DELETE = "DELETE"
+
+
+class AuditLogRiskLevel(str, Enum):
+    """Audit log risk level filter values."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"

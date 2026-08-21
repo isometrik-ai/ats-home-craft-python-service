@@ -19,7 +19,7 @@ SELECT
   me.fee_amount,
   me.fee_currency,
   me.notes,
-  me.document_paths,
+  me.documents,
   me.recorded_by_user_id::text AS recorded_by_user_id,
   me.deleted_at,
   me.created_at,
@@ -68,7 +68,7 @@ class MoveEventsRepository(BaseRepository):
             "fee_amount",
             "fee_currency",
             "notes",
-            "document_paths",
+            "documents",
         }
     )
 
@@ -87,7 +87,7 @@ class MoveEventsRepository(BaseRepository):
                 fee_amount,
                 fee_currency,
                 notes,
-                document_paths,
+                documents,
                 recorded_by_user_id
             )
             VALUES (
@@ -101,7 +101,7 @@ class MoveEventsRepository(BaseRepository):
                 $8,
                 $9,
                 $10,
-                $11::text[],
+                $11::jsonb,
                 $12::uuid
             )
             RETURNING id::text AS id
@@ -116,7 +116,7 @@ class MoveEventsRepository(BaseRepository):
             data.get("fee_amount"),
             data.get("fee_currency", "INR"),
             data.get("notes"),
-            data.get("document_paths") or [],
+            data.get("documents") or [],
             data.get("recorded_by_user_id"),
         )
         return dict(row)
@@ -228,8 +228,8 @@ class MoveEventsRepository(BaseRepository):
                 continue
             if col == "event_date":
                 set_parts.append(f"{col} = ${idx}::date")
-            elif col == "document_paths":
-                set_parts.append(f"{col} = ${idx}::text[]")
+            elif col == "documents":
+                set_parts.append(f"{col} = ${idx}::jsonb")
             else:
                 set_parts.append(f"{col} = ${idx}")
             values.append(val)

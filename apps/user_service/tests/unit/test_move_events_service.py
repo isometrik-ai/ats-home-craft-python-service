@@ -8,15 +8,51 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
-from apps.user_service.app.schemas.enums import MoveEventType
+from apps.user_service.app.schemas.enums import MoveEventType, TenantRequestDocumentType
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
     UpdateMoveEventRequest,
 )
+from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
 from apps.user_service.app.services.move_events_service import MoveEventsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+
+def _required_move_in_documents() -> list[TenantRequestDocumentInput]:
+    """Build the three required move-in document slots."""
+    return [
+        TenantRequestDocumentInput(
+            document_type=TenantRequestDocumentType.ID_PROOF,
+            file_path="moves/id-proof.pdf",
+            file_name="id-proof.pdf",
+        ),
+        TenantRequestDocumentInput(
+            document_type=TenantRequestDocumentType.RENTAL_AGREEMENT,
+            file_path="moves/rental.pdf",
+            file_name="rental.pdf",
+        ),
+        TenantRequestDocumentInput(
+            document_type=TenantRequestDocumentType.POLICE_VERIFICATION,
+            file_path="moves/police.pdf",
+            file_name="police.pdf",
+        ),
+    ]
+
+
+def _move_in_request(**overrides: Any) -> CreateMoveEventRequest:
+    """Build a valid move-in create request."""
+    payload = {
+        "unit_id": "unit-1",
+        "contact_id": "contact-1",
+        "move_type": MoveEventType.MOVE_IN,
+        "event_date": date(2026, 5, 25),
+        "documents": _required_move_in_documents(),
+    }
+    payload.update(overrides)
+    return CreateMoveEventRequest(**payload)
 
 
 def _user_context() -> UserContext:
@@ -42,7 +78,7 @@ def _move_row(**overrides: Any) -> dict[str, Any]:
         "fee_amount": Decimal("5000.00"),
         "fee_currency": "INR",
         "notes": None,
-        "document_paths": [],
+        "documents": [],
         "recorded_by_user_id": "admin-1",
         "created_at": None,
         "updated_at": None,
@@ -186,18 +222,11 @@ async def test_create_move_in_syncs_active_link():
     contact_units_repo = _FakeContactUnitsRepo()
     service = _service(move_repo, contact_units_repo)
 
-    result = await service.create_move_event(
-        CreateMoveEventRequest(
-            unit_id="unit-1",
-            contact_id="contact-1",
-            move_type=MoveEventType.MOVE_IN,
-            event_date=date(2026, 5, 25),
-            fee_amount=Decimal("5000"),
-        )
-    )
+    result = await service.create_move_event(_move_in_request(fee_amount=Decimal("5000")))
 
     assert result.move_type == MoveEventType.MOVE_IN.value
     assert len(move_repo.insert_calls) == 1
+    assert len(move_repo.insert_calls[0]["documents"]) == 3
     assert len(contact_units_repo.sync_move_in_calls) == 1
 
 
@@ -209,14 +238,7 @@ async def test_create_move_in_without_link_creates_allotment():
     contact_units_repo.link = None
     service = _service(move_repo, contact_units_repo)
 
-    await service.create_move_event(
-        CreateMoveEventRequest(
-            unit_id="unit-1",
-            contact_id="contact-1",
-            move_type=MoveEventType.MOVE_IN,
-            event_date=date(2026, 5, 25),
-        )
-    )
+    await service.create_move_event(_move_in_request())
 
     assert len(contact_units_repo.insert_allotment_calls) == 1
     assert len(contact_units_repo.sync_move_in_calls) == 1
@@ -267,14 +289,7 @@ async def test_create_rejects_missing_unit():
     service = _service(_FakeMoveEventsRepo(), contact_units_repo)
 
     with pytest.raises(NotFoundException) as exc_info:
-        await service.create_move_event(
-            CreateMoveEventRequest(
-                unit_id="missing-unit",
-                contact_id="contact-1",
-                move_type=MoveEventType.MOVE_IN,
-                event_date=date(2026, 5, 25),
-            )
-        )
+        await service.create_move_event(_move_in_request(unit_id="missing-unit"))
     assert exc_info.value.message_key == "move_events.errors.unit_not_found"
 
 
@@ -360,14 +375,7 @@ async def test_create_rejects_missing_contact():
     service = _service(move_repo, _FakeContactUnitsRepo())
 
     with pytest.raises(NotFoundException) as exc_info:
-        await service.create_move_event(
-            CreateMoveEventRequest(
-                unit_id="unit-1",
-                contact_id="missing-contact",
-                move_type=MoveEventType.MOVE_IN,
-                event_date=date(2026, 5, 25),
-            )
-        )
+        await service.create_move_event(_move_in_request(contact_id="missing-contact"))
     assert exc_info.value.message_key == "move_events.errors.contact_not_found"
 
 
@@ -384,15 +392,37 @@ async def test_create_raises_when_inserted_row_missing():
     service = _service(move_repo, _FakeContactUnitsRepo())
 
     with pytest.raises(NotFoundException) as exc_info:
-        await service.create_move_event(
-            CreateMoveEventRequest(
-                unit_id="unit-1",
-                contact_id="contact-1",
-                move_type=MoveEventType.MOVE_IN,
-                event_date=date(2026, 5, 25),
-            )
-        )
+        await service.create_move_event(_move_in_request())
     assert exc_info.value.message_key == "move_events.errors.move_event_not_found"
+
+
+def test_create_move_in_requires_documents():
+    """Move-in without typed documents fails schema validation."""
+    with pytest.raises(ValidationError):
+        CreateMoveEventRequest(
+            unit_id="unit-1",
+            contact_id="contact-1",
+            move_type=MoveEventType.MOVE_IN,
+            event_date=date(2026, 5, 25),
+        )
+
+
+def test_documents_from_row_parses_jsonb_list():
+    """Stored documents jsonb is parsed into response models."""
+    row = _move_row(
+        documents=[
+            {
+                "document_type": "id_proof",
+                "file_path": "moves/id.pdf",
+                "file_name": "id.pdf",
+                "status": "verified",
+            }
+        ]
+    )
+    result = MoveEventsService._documents_from_row(row["documents"])
+    assert len(result) == 1
+    assert result[0].document_type == "id_proof"
+    assert result[0].status == "verified"
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from apps.user_service.app.schemas.audit_logs import AuditLogFilter
+from apps.user_service.app.schemas.enums import AuditLogActionType, AuditLogRiskLevel
 from apps.user_service.app.services.audit_log_service import AuditLogService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException
@@ -227,6 +228,29 @@ async def test_get_audit_logs_paginated():
     assert len(result["audit_logs"]) == 1
     assert result["audit_logs"][0].id == LOG_ID
     assert repo.last_filter is not None
+
+
+@pytest.mark.asyncio
+async def test_get_audit_logs_forwards_filter_params():
+    """get_audit_logs passes all filter fields to the repository."""
+    repo = _FakeAuditLogRepo(list_rows=[_db_row()], total=1)
+    svc = _service(repo=repo)
+    filt = AuditLogFilter(
+        organization_id=ORG_ID,
+        action_type=AuditLogActionType.CREATE,
+        category="CONTACT",
+        risk_level=AuditLogRiskLevel.HIGH,
+        start_date=date(2026, 8, 1),
+        end_date=date(2026, 8, 20),
+        user_id=USER_ID,
+        search="contact",
+        limit=10,
+        offset=5,
+    )
+
+    await svc.get_audit_logs(filt)
+
+    assert repo.last_filter == filt
 
 
 @pytest.mark.asyncio
