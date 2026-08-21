@@ -688,6 +688,7 @@ class UnitsRepository(BaseRepository):
                 c.last_name,
                 c.phones,
                 c.emails,
+                c.profile_photo_url,
                 {_OWNER_PRIMARY_PHONE_SQL} AS primary_phone,
                 {_OWNER_PRIMARY_EMAIL_SQL} AS primary_email
             FROM contact_units cu

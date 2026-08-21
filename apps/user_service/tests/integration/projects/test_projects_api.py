@@ -170,6 +170,19 @@ _FAKE_UNIT_DETAIL = {
     "vehicles_count": 0,
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-01-01T00:00:00Z",
+    "owner": {
+        "contact_id": "contact-1",
+        "contact_unit_id": "cu-1",
+        "display_name": "Nilesh B",
+        "contact_type": "Owner",
+        "relationship": "self",
+        "phone": "+447911123456",
+        "email": "nilesh02@yopmail.com",
+        "profile_photo_url": "https://ats-assets.houseofapps.ai/contacts/org-1/c-1/profile.jpg",
+        "assign_date": "2026-08-20",
+        "assigned_at": "2026-08-20T00:00:00+00:00",
+        "contact_unit_status": "pending",
+    },
 }
 
 _FAKE_PARKING_ZONE = {
@@ -1622,6 +1635,10 @@ async def test_get_unit_detail(monkeypatch, client):
     res = await client.get(f"/v1/projects/{PROJECT_ID}/units/{UNIT_ID}/detail")
     body = assert_success(res, 200)
     assert body["data"]["occupancy_label"] == "Vacant"
+    assert (
+        body["data"]["owner"]["profile_photo_url"]
+        == "https://ats-assets.houseofapps.ai/contacts/org-1/c-1/profile.jpg"
+    )
 
 
 @pytest.mark.asyncio
