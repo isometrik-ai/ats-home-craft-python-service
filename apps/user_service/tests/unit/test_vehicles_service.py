@@ -564,6 +564,22 @@ async def test_remove_not_found():
 
 
 @pytest.mark.asyncio
+async def test_list_vehicles_for_unit():
+    """Resident list returns every vehicle on the requested unit."""
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
+    svc.repo.list_details_by_unit = AsyncMock(return_value=[])
+
+    await svc.list_vehicles_for_unit(contact_id="family-1", unit_id="u1")
+
+    svc.repo.list_details_by_unit.assert_awaited_once_with(
+        organization_id="org-1",
+        unit_id="u1",
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_vehicles_for_contact():
     """List vehicles includes parking allotment without unit summary."""
     svc = _service()

@@ -260,6 +260,30 @@ class VehiclesRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def list_details_by_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """List all active vehicles on a unit (any registrant) with parking joins."""
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              {self._VEHICLE_SELECT_COLUMNS},
+              {_VEHICLE_PARKING_SELECT_COLUMNS}
+            FROM vehicles v
+            {_VEHICLE_PARKING_JOINS}
+            WHERE v.organization_id = $1::uuid
+              AND v.unit_id = $2::uuid
+              AND {_ACTIVE_VEHICLE_FILTER}
+            ORDER BY v.sort_order, v.created_at
+            """,
+            organization_id,
+            unit_id,
+        )
+        return [dict(row) for row in rows]
+
     async def list_by_unit(
         self,
         *,
@@ -336,6 +360,34 @@ class VehiclesRepository(BaseRepository):
             """,
             organization_id,
             contact_id,
+            vehicle_id,
+        )
+        return dict(row) if row else None
+
+    async def get_detail_by_id(
+        self,
+        *,
+        organization_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one active vehicle with unit and parking joins (org scope)."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+              {self._VEHICLE_SELECT_COLUMNS},
+              {_VEHICLE_UNIT_SELECT_COLUMNS},
+              {_VEHICLE_PARKING_SELECT_COLUMNS},
+              {_VEHICLE_REVIEWER_SELECT_COLUMNS}
+            FROM vehicles v
+            {_VEHICLE_UNIT_JOINS}
+            {_VEHICLE_PARKING_JOINS}
+            {_VEHICLE_REVIEWER_JOINS}
+            WHERE v.organization_id = $1::uuid
+              AND v.id = $2::uuid
+              AND {_ACTIVE_VEHICLE_FILTER}
+            LIMIT 1
+            """,
+            organization_id,
             vehicle_id,
         )
         return dict(row) if row else None

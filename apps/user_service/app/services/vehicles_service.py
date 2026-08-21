@@ -448,6 +448,22 @@ class VehiclesService:
         )
         return [self._serialize_contact_vehicle(row) for row in rows]
 
+    async def list_vehicles_for_unit(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """List all vehicles on a unit when the contact is actively linked to it."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
+        rows = await self.repo.list_details_by_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        return [self._serialize_contact_vehicle(row) for row in rows]
+
     async def get_vehicle_detail(
         self,
         *,
@@ -467,6 +483,30 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.vehicle_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        return self._serialize_admin_vehicle(row)
+
+    async def get_vehicle_detail_for_unit(
+        self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+    ) -> dict[str, Any]:
+        """Return one vehicle on a unit the contact is actively linked to."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        row = await self.repo.get_detail_by_id(
+            organization_id=org_id,
+            vehicle_id=vehicle_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._validate_unit_for_contact(
+            contact_id=contact_id,
+            unit_id=str(row["unit_id"]),
+        )
         return self._serialize_admin_vehicle(row)
 
     async def create_vehicle(

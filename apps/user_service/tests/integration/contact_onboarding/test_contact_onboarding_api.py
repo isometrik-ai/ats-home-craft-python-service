@@ -389,18 +389,18 @@ async def test_list_vehicles(monkeypatch, client):
 
     _patch_contact_context(monkeypatch)
 
-    async def fake_list(_self, *, contact_id: str, unit_id=None):
+    async def fake_list(_self, *, contact_id: str, unit_id: str):
         del _self
         assert contact_id == CONTACT_ID
-        assert unit_id is None
+        assert unit_id == "unit-1"
         return [_FAKE_VEHICLE]
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.vehicles_service.VehiclesService.list_vehicles",
+        "apps.user_service.app.services.vehicles_service.VehiclesService.list_vehicles_for_unit",
         fake_list,
     )
 
-    res = await client.get("/v1/contact-onboarding/vehicles")
+    res = await client.get("/v1/contact-onboarding/vehicles", params={"unit_id": "unit-1"})
     body = assert_success(res, 200)
     assert body["data"][0]["registration_number"] == "MH12AB1234"
     assert "unit" not in body["data"][0]
@@ -420,7 +420,7 @@ async def test_get_vehicle_detail(monkeypatch, client):
         return _FAKE_VEHICLE_DETAIL
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.vehicles_service.VehiclesService.get_vehicle_detail",
+        "apps.user_service.app.services.vehicles_service.VehiclesService.get_vehicle_detail_for_unit",
         fake_get_detail,
     )
 
