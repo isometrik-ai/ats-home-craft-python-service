@@ -8,6 +8,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.community_events import (
+    AdminCreateEventBookingRequest,
     CancelCommunityEventRequest,
     CommunityEventBookingListQuery,
     CommunityEventExportQuery,
@@ -437,6 +438,58 @@ async def restore_community_event(
         message_key="community_events.success.restored",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(mode="json"),
+    )
+
+
+@handle_api_exceptions("create community event booking on behalf")
+@router.post(
+    "/{project_id}/community-events/{event_id}/bookings",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Create booking on behalf of a resident (walk-in)",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="CREATE",
+    table_name="community_event_bookings",
+    category="COMMUNITY_EVENTS",
+)
+async def create_community_event_booking_on_behalf(
+    request: Request,
+    project_id: str = Path(...),
+    event_id: str = Path(...),
+    body: AdminCreateEventBookingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Admin walk-in booking; optionally mark paid after offline collection."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
+    data = await service.create_booking_on_behalf(
+        project_id=project_id,
+        event_id=event_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="community_event_bookings",
+        requested_id=data.id,
+        description=f"Admin created booking: {data.display_code}",
+        new_data=data.model_dump(mode="json"),
+    )
+    return success_response(
+        request=request,
+        message_key="community_events.success.booking_created",
+        custom_code=CustomStatusCode.CREATED,
+        data=data.model_dump(mode="json"),
+        status_code=http_status.HTTP_201_CREATED,
     )
 
 

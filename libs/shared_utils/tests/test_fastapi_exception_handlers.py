@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
@@ -160,3 +161,103 @@ def test_register_exception_handlers_attaches_handlers() -> None:
     assert ValidationError in registered_types
     assert ValueError in registered_types
     assert Exception in registered_types
+
+
+async def _invoke_registered_handler(app: MagicMock, exc_type: type, exc: Exception):
+    """Return response from a handler registered via register_exception_handlers."""
+    handlers: dict[type, object] = {}
+
+    def capture_handler(exc_cls: type):
+        def decorator(fn):
+            handlers[exc_cls] = fn
+            return fn
+
+        return decorator
+
+    app.exception_handler = capture_handler
+    register_exception_handlers(app)
+    handler = handlers[exc_type]
+    return await handler(_mock_request(), exc)
+
+
+@pytest.mark.asyncio
+async def test_registered_custom_exception_handlers() -> None:
+    """Custom exception handlers should return uniform error envelopes."""
+    from libs.shared_utils.http_exceptions import (
+        BadRequestException,
+        DuplicateValueException,
+        ForbiddenException,
+        NotFoundException,
+        RateLimitExceededException,
+        UnauthorizedException,
+        ValidationException,
+    )
+
+    app = MagicMock()
+
+    not_found = await _invoke_registered_handler(
+        app,
+        NotFoundException,
+        NotFoundException(message_key="errors.not_found", custom_code=CustomStatusCode.NOT_FOUND),
+    )
+    assert not_found.status_code == 404
+
+    duplicate = await _invoke_registered_handler(
+        app,
+        DuplicateValueException,
+        DuplicateValueException(message_key="errors.duplicate_value"),
+    )
+    assert duplicate.status_code == 409
+
+    rate_limit = await _invoke_registered_handler(
+        app,
+        RateLimitExceededException,
+        RateLimitExceededException(retry_after=30),
+    )
+    assert rate_limit.status_code == 429
+
+    validation = await _invoke_registered_handler(
+        app,
+        ValidationException,
+        ValidationException(
+            message_key="errors.validation", custom_code=CustomStatusCode.VALIDATION_ERROR
+        ),
+    )
+    assert validation.status_code == 422
+
+    unauthorized = await _invoke_registered_handler(
+        app,
+        UnauthorizedException,
+        UnauthorizedException(
+            message_key="errors.unauthorized", custom_code=CustomStatusCode.UNAUTHORIZED
+        ),
+    )
+    assert unauthorized.status_code == 401
+
+    forbidden = await _invoke_registered_handler(
+        app,
+        ForbiddenException,
+        ForbiddenException(message_key="errors.forbidden", custom_code=CustomStatusCode.FORBIDDEN),
+    )
+    assert forbidden.status_code == 403
+
+    bad_request = await _invoke_registered_handler(
+        app,
+        BadRequestException,
+        BadRequestException(
+            message_key="errors.bad_request", custom_code=CustomStatusCode.BAD_REQUEST
+        ),
+    )
+    assert bad_request.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_registered_value_error_and_unhandled_handlers() -> None:
+    """ValueError and generic Exception handlers should map to 400/500."""
+    app = MagicMock()
+
+    value_error = await _invoke_registered_handler(app, ValueError, ValueError("bad input"))
+    assert value_error.status_code == 400
+
+    unhandled = await _invoke_registered_handler(app, Exception, RuntimeError("boom"))
+    assert unhandled.status_code == 500

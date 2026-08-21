@@ -19,6 +19,7 @@ from apps.user_service.app.db.repositories.facilities_repository import (
     FacilitiesRepository,
 )
 from apps.user_service.app.schemas.community_events import (
+    AdminCreateEventBookingRequest,
     BookEventResponse,
     CreateEventBookingRequest,
     MarkBookingPaidRequest,
@@ -111,14 +112,23 @@ class CommunityEventBookingService:
     def _is_booking_open(event: dict[str, Any]) -> bool:
         """True when residents may still book."""
         now = datetime.now(timezone.utc)
-        if str(event.get("publish_status")) != CommunityEventPublishStatus.PUBLISHED.value:
-            return False
-        if str(event.get("record_status")) != CommunityEventRecordStatus.ACTIVE.value:
+        if not CommunityEventBookingService._is_admin_bookable(event):
             return False
         closes_at = event.get("booking_closes_at")
         if closes_at and closes_at <= now:
             return False
         if CommunityEventBookingService._event_end_at(event) <= now:
+            return False
+        return True
+
+    @staticmethod
+    def _is_admin_bookable(event: dict[str, Any]) -> bool:
+        """True when staff may create an on-behalf booking."""
+        if str(event.get("publish_status")) != CommunityEventPublishStatus.PUBLISHED.value:
+            return False
+        if str(event.get("record_status")) != CommunityEventRecordStatus.ACTIVE.value:
+            return False
+        if CommunityEventBookingService._event_end_at(event) <= datetime.now(timezone.utc):
             return False
         return True
 
@@ -327,6 +337,150 @@ class CommunityEventBookingService:
             gate_qr_token=gate_token,
             payment_instruction=instruction,
         )
+
+    async def create_admin_booking(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        body: AdminCreateEventBookingRequest,
+    ) -> dict[str, Any]:
+        """Create a booking on behalf of a resident (walk-in / clubhouse)."""
+        resident_project_id = await self._ensure_resident_unit(
+            contact_id=body.contact_id,
+            unit_id=body.unit_id,
+        )
+        if resident_project_id != project_id:
+            raise ValidationException(
+                message_key="community_events.errors.invalid_unit_context",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+        await self._ensure_owner_or_tenant(contact_id=body.contact_id, unit_id=body.unit_id)
+
+        event = await self.repo.fetch_event_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
+        if not event:
+            raise NotFoundException(
+                message_key="community_events.errors.event_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if not self._is_admin_bookable(event):
+            raise ValidationException(
+                message_key="community_events.errors.event_not_bookable",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        is_free = str(event.get("event_type")) == CommunityEventType.FREE.value
+        if body.mark_paid and is_free:
+            raise ValidationException(
+                message_key="community_events.errors.mark_paid_not_applicable",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        child_mode = str(
+            event.get("child_ticket_mode") or CommunityEventChildTicketMode.NOT_APPLICABLE.value
+        )
+        if (
+            body.child_tickets > 0
+            and child_mode == CommunityEventChildTicketMode.NOT_APPLICABLE.value
+        ):
+            raise ValidationException(
+                message_key="community_events.errors.child_tickets_not_allowed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        total_requested = body.adult_tickets + body.child_tickets
+        max_per = int(event.get("max_tickets_per_resident") or 4)
+        existing = await self.repo.count_active_tickets_for_contact(
+            organization_id=self.organization_id,
+            event_id=event_id,
+            contact_id=body.contact_id,
+        )
+        if existing + total_requested > max_per:
+            raise ValidationException(
+                message_key="community_events.errors.ticket_limit_exceeded",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        subtotal, tax_minor, total_minor = self.compute_booking_amounts(
+            adult_tickets=body.adult_tickets,
+            child_tickets=body.child_tickets,
+            event=event,
+        )
+        payment_status = (
+            CommunityEventPaymentStatus.NOT_APPLICABLE.value
+            if is_free
+            else CommunityEventPaymentStatus.PENDING.value
+        )
+
+        seq = await self.repo.allocate_booking_sequence(
+            organization_id=self.organization_id,
+            project_id=project_id,
+        )
+        gate_token = uuid.uuid4().hex
+
+        booking = await self.repo.insert_booking(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            data={
+                "event_id": event_id,
+                "display_code": f"BKG-{seq}",
+                "sequence_number": seq,
+                "contact_id": body.contact_id,
+                "unit_id": body.unit_id,
+                "adult_tickets": body.adult_tickets,
+                "child_tickets": body.child_tickets,
+                "total_tickets": total_requested,
+                "subtotal_minor": subtotal,
+                "tax_minor": tax_minor,
+                "total_amount_minor": total_minor,
+                "booking_status": CommunityEventBookingStatus.CONFIRMED.value,
+                "payment_status": payment_status,
+                "gate_qr_token": gate_token,
+            },
+        )
+        booking_id = str(booking["id"])
+
+        await self.repo.adjust_event_aggregates_on_booking(
+            organization_id=self.organization_id,
+            event_id=event_id,
+            tickets_delta=total_requested,
+            bookings_delta=1,
+        )
+        await self.repo.insert_audit_log(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+            booking_id=booking_id,
+            action=CommunityEventAuditAction.BOOKING_CREATED.value,
+            actor_user_id=self.user_context.user_id,
+            actor_contact_id=body.contact_id,
+            payload={
+                "admin_created": True,
+                "total_tickets": total_requested,
+                "mark_paid": body.mark_paid,
+            },
+        )
+
+        await self.notifications.notify_booking_confirmed(
+            organization_id=self.organization_id,
+            contact_id=body.contact_id,
+            event=event,
+            booking=booking,
+        )
+
+        if body.mark_paid:
+            booking = await self.mark_paid(
+                project_id=project_id,
+                event_id=event_id,
+                booking_id=booking_id,
+                body=MarkBookingPaidRequest(payment_notes=body.payment_notes),
+            )
+
+        return booking
 
     async def cancel_booking(
         self,

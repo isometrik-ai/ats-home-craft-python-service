@@ -526,14 +526,11 @@ async def get_vehicle_catalog(
 @limiter.limit("100/minute")
 async def list_vehicles(
     request: Request,
-    unit_id: str | None = Query(
-        default=None,
-        description="Optional unit filter; returns vehicles for that unit only.",
-    ),
+    unit_id: str = Query(..., description="Unit to list vehicles for."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """List vehicles registered by the authenticated contact."""
+    """List all vehicles on a unit the authenticated contact is linked to."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -541,7 +538,7 @@ async def list_vehicles(
         db_connection=db_connection,
         user_context=user_context,
     )
-    items = await vehicles_service.list_vehicles(
+    items = await vehicles_service.list_vehicles_for_unit(
         contact_id=str(contact["id"]),
         unit_id=unit_id,
     )
@@ -630,7 +627,7 @@ async def get_vehicle_detail(
         db_connection=db_connection,
         user_context=user_context,
     )
-    data = await vehicles_service.get_vehicle_detail(
+    data = await vehicles_service.get_vehicle_detail_for_unit(
         contact_id=str(contact["id"]),
         vehicle_id=vehicle_id,
     )

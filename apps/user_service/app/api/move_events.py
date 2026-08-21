@@ -62,7 +62,6 @@ async def _staff_move_event_access(
     org_id = user_context.organization_id
     if not org_id:
         from apps.user_service.app.utils.common_utils import ValidationException
-        from libs.shared_utils.status_codes import CustomStatusCode
 
         raise ValidationException(
             message_key="auth.errors.session_not_found",

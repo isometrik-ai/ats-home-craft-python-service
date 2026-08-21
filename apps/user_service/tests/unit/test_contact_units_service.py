@@ -541,3 +541,51 @@ async def test_confirm_activates_immediately():
     svc.repo.activate_units_by_ids.assert_awaited_once()
     assert result["items"] == [{"id": CONTACT_UNIT_ID, "status": "active"}]
     assert result["requires_default_unit"] is False
+
+
+@pytest.mark.asyncio
+async def test_set_default_unit_completes_onboarding_step():
+    """set_default_unit updates default login and completes choose-unit step."""
+    svc = _service()
+    svc.repo.set_default_login = AsyncMock(
+        return_value={"id": CONTACT_UNIT_ID, "is_default_login": True}
+    )
+    svc.onboarding_repo.complete_step = AsyncMock()
+
+    row = await svc.set_default_unit(
+        contact_id="contact-1",
+        contact_unit_id=CONTACT_UNIT_ID,
+    )
+
+    assert row["is_default_login"] is True
+    svc.onboarding_repo.complete_step.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_set_default_unit_not_found():
+    """set_default_unit raises when contact unit is missing."""
+    svc = _service()
+    svc.repo.set_default_login = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.set_default_unit(
+            contact_id="contact-1",
+            contact_unit_id=CONTACT_UNIT_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_unit_allotment_contact_not_found():
+    """_create_unit_allotment fails when contact does not exist."""
+    svc = _service()
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.contact_exists = AsyncMock(return_value=False)
+
+    with pytest.raises(NotFoundException):
+        await svc._create_unit_allotment(
+            unit_id="unit-1",
+            contact_id="contact-1",
+            is_primary=True,
+            relationship="self",
+            project_id="proj-1",
+        )

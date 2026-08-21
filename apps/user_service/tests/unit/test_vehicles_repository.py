@@ -496,3 +496,17 @@ async def test_update_skips_protected_columns():
     assert "contact_id = $" not in set_clause
     assert "created_at = $" not in set_clause
     assert "color = $1" in set_clause
+
+
+@pytest.mark.asyncio
+async def test_list_details_by_unit_returns_all_unit_vehicles():
+    """Unit-scoped list is not filtered by contact_id."""
+    conn = _mock_conn(rows=[_vehicle_row()])
+    repo = VehiclesRepository(db_connection=conn)
+
+    await repo.list_details_by_unit(organization_id=ORG_ID, unit_id=UNIT_ID)
+
+    query, args = _sql_args(conn.fetch)
+    assert "v.unit_id = $2::uuid" in query
+    assert "v.contact_id" not in query.split("WHERE", 1)[1]
+    assert args == (ORG_ID, UNIT_ID)

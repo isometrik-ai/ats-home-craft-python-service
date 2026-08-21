@@ -332,6 +332,24 @@ class ListContactsRequest(BaseModel):
     dropdown_filters: list[DropdownCustomFieldFilter] = Field(default_factory=list)
 
 
+class ContactsExportQuery(BaseModel):
+    """Export filters aligned with the contacts list (Community registry)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search: str | None = Field(default=None, min_length=2, max_length=200)
+    status: ClientStatus | None = None
+    contact_type: ContactType | None = Field(
+        default=None,
+        description="Filter contacts that have an active contact_roles row of this type.",
+    )
+    project_id: str | None = Field(
+        default=None,
+        description="Optional project filter — contacts linked via active/pending contact_units.",
+    )
+    format: str = Field("csv", pattern="^(csv)$")
+
+
 class GetContactsByIdsRequest(BaseModel):
     """Request body for bulk contact lookup by id."""
 

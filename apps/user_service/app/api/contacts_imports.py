@@ -2,16 +2,20 @@
 
 Implements:
 - POST /contacts/imports
+- GET /contacts/imports/template
+- GET /contacts/imports/logs
 - GET /contacts/imports/{job_id}
+- GET /contacts/imports/{job_id}/errors
 - POST /contacts/imports/{job_id}/retry
 """
 
 from __future__ import annotations
 
+from pathlib import Path as FilePath
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -57,6 +61,9 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 }
 
 JOB_NOT_FOUND = "contacts_imports.errors.job_not_found"
+IMPORT_TEMPLATE_PATH = (
+    FilePath(__file__).resolve().parents[2] / "samples" / "community_contacts_import_template.csv"
+)
 
 
 @handle_api_exceptions("create contacts import job")
@@ -179,6 +186,43 @@ async def list_contacts_import_logs(
     )
 
 
+@handle_api_exceptions("get contacts import template")
+@router.get(
+    "/template",
+    status_code=http_status.HTTP_200_OK,
+    summary="Download contacts import CSV template",
+    response_model=None,
+    responses={
+        http_status.HTTP_200_OK: {
+            "content": {"text/csv": {}},
+            "description": "Community contacts bulk import template.",
+        },
+        **COMMON_ERROR_RESPONSES,
+    },
+)
+@limiter.limit("60/minute")
+async def get_contacts_import_template(
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+):
+    """Return a CSV template for community contact bulk import."""
+    del request
+    await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    if not IMPORT_TEMPLATE_PATH.is_file():
+        raise NotFoundException(message_key="contacts_imports.errors.template_not_found")
+    csv_text = IMPORT_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="contacts-import-template.csv"'},
+    )
+
+
 @handle_api_exceptions("get contacts import job")
 @router.get(
     "/{job_id}",
@@ -226,6 +270,54 @@ async def get_contacts_import_job(
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=data,
+    )
+
+
+@handle_api_exceptions("get contacts import errors")
+@router.get(
+    "/{job_id}/errors",
+    status_code=http_status.HTTP_200_OK,
+    summary="List contacts import row errors",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("200/minute")
+async def get_contacts_import_errors(
+    request: Request,
+    job_id: str = Path(..., min_length=5, max_length=128),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(50, ge=1, le=200, description="Page size"),
+):
+    """List row-level import errors for a contacts import job."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    service = ContactsImportService(db_connection=db_connection)
+    job = await service.get_job(job_id=job_id, organization_id=user_context.organization_id)
+    if job is None:
+        raise NotFoundException(message_key=JOB_NOT_FOUND)
+
+    items, total = await service.list_job_error_rows(
+        job_id=job_id,
+        organization_id=user_context.organization_id,
+        page=page,
+        page_size=page_size,
+    )
+    if not items:
+        raise NotFoundException(message_key="contacts_imports.errors.errors_not_found")
+
+    return list_response(
+        request=request,
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        message_key="contacts_imports.success.errors_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
     )
 
 

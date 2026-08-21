@@ -16,6 +16,8 @@ Design goals:
 # pylint: disable=too-many-lines
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 import uuid
@@ -51,11 +53,13 @@ from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.schemas.common import NoteItem, Phone
 from apps.user_service.app.schemas.contacts import (
     ContactCompanyUpdate,
+    ContactsExportQuery,
     ContactSummaryResponse,
     CreateContactRequest,
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import (
+    CONTACTS_EXPORT_MAX_ROWS,
     ClientStatus,
     CompanyEventType,
     ContactEventType,
@@ -2471,6 +2475,79 @@ class ContactsService:
             status=status,
             project_id=project_id,
         )
+
+    @staticmethod
+    def _format_export_phone(phones: list[Any]) -> tuple[str, str]:
+        """Return (phone_number, phone_isd_code) for CSV export."""
+        identity = _get_primary_phone_identity(phones)
+        if identity is not None:
+            phone_isd_code, phone_number = identity
+            return phone_number, phone_isd_code or ""
+
+        if phones and isinstance(phones[0], dict):
+            first_phone = phones[0]
+            return (
+                str(first_phone.get("phone_number") or ""),
+                str(first_phone.get("phone_isd_code") or ""),
+            )
+        return "", ""
+
+    @staticmethod
+    def _join_export_list(values: Any) -> str:
+        """Join list values for CSV export using semicolons."""
+        if not values:
+            return ""
+        if isinstance(values, list):
+            return ";".join(str(value) for value in values if value is not None)
+        return str(values)
+
+    async def export_contacts_csv(self, *, query: ContactsExportQuery) -> str:
+        """Export filtered contacts as CSV text."""
+        if query.format != "csv":
+            raise ValidationException(
+                message_key="contacts.errors.unsupported_export_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        result = await self.list_contacts(
+            search=query.search,
+            status=query.status.value if query.status else None,
+            contact_type=query.contact_type.value if query.contact_type else None,
+            dropdown_filters=[],
+            project_id=str(query.project_id) if query.project_id else None,
+            page=1,
+            page_size=CONTACTS_EXPORT_MAX_ROWS,
+        )
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "first_name",
+                "last_name",
+                "email",
+                "phone_number",
+                "phone_isd_code",
+                "status",
+                "role_types",
+                "company_names",
+            ]
+        )
+        for row in result["items"]:
+            phone_number, phone_isd_code = self._format_export_phone(row.get("phones") or [])
+            writer.writerow(
+                [
+                    row.get("first_name") or "",
+                    row.get("last_name") or "",
+                    row.get("email") or "",
+                    phone_number,
+                    phone_isd_code,
+                    row.get("status") or "",
+                    self._join_export_list(row.get("role_types")),
+                    self._join_export_list(row.get("company_names")),
+                ]
+            )
+        return buffer.getvalue()
 
     @staticmethod
     def _format_contact_display_name(
