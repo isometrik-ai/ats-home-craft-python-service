@@ -226,20 +226,30 @@ class TestContactOnboardingSchemaValidators:
 class TestMoveEventsSchemaValidators:
     """Move event schema validation."""
 
-    def test_create_move_event_document_path_limit(self) -> None:
+    def test_create_move_in_rejects_documents_on_move_out(self) -> None:
         with pytest.raises(ValidationError):
             CreateMoveEventRequest(
                 unit_id="unit-1",
                 contact_id="contact-1",
-                move_type=MoveEventType.MOVE_IN,
+                move_type=MoveEventType.MOVE_OUT,
                 event_date=date(2026, 1, 1),
-                document_paths=[f"path-{idx}" for idx in range(21)],
+                documents=[
+                    {
+                        "document_type": "id_proof",
+                        "file_path": "moves/id.pdf",
+                    }
+                ],
             )
 
-    def test_update_move_event_document_path_limit(self) -> None:
+    def test_update_move_event_documents_requires_full_set(self) -> None:
         with pytest.raises(ValidationError):
             UpdateMoveEventRequest(
-                document_paths=[f"path-{idx}" for idx in range(21)],
+                documents=[
+                    {
+                        "document_type": "id_proof",
+                        "file_path": "moves/id.pdf",
+                    }
+                ],
             )
 
 

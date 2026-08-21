@@ -132,6 +132,7 @@ class TenantRequestsService:
         event_date: date,
         fee_amount: Decimal | None = None,
         notes: str | None = None,
+        documents: list[dict[str, Any]] | None = None,
     ) -> None:
         """Insert a move-in/out ledger row without re-syncing contact_units."""
         user_id = self.user_context.user_id
@@ -147,9 +148,26 @@ class TenantRequestsService:
                 "fee_amount": fee_amount,
                 "fee_currency": "INR",
                 "notes": notes,
+                "documents": documents or [],
                 "recorded_by_user_id": str(user_id) if user_id else None,
             }
         )
+
+    @staticmethod
+    def _snapshot_tenant_request_documents(
+        documents: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Copy tenant request document metadata into move_events.documents jsonb."""
+        return [
+            {
+                "document_type": str(doc.get("document_type") or ""),
+                "file_path": str(doc.get("file_path") or ""),
+                "file_name": doc.get("file_name"),
+                "status": doc.get("status"),
+            }
+            for doc in documents
+            if doc.get("document_type") and doc.get("file_path")
+        ]
 
     async def _ensure_project(self, *, project_id: str) -> None:
         """Raise when the project is missing or outside the organization."""
@@ -1132,6 +1150,7 @@ class TenantRequestsService:
             event_date=body.move_in_date,
             fee_amount=body.move_in_fee,
             notes=f"Tenant request approved ({tenant_request_id})",
+            documents=self._snapshot_tenant_request_documents(documents),
         )
         await self.repo.update_request_status(
             organization_id=org_id,

@@ -18,6 +18,19 @@ _CREATE_PAYLOAD = {
     "contact_id": "contact-1",
     "move_type": "move_in",
     "event_date": "2026-07-01",
+    "documents": [
+        {"document_type": "id_proof", "file_path": "moves/id.pdf", "file_name": "id.pdf"},
+        {
+            "document_type": "rental_agreement",
+            "file_path": "moves/rental.pdf",
+            "file_name": "rental.pdf",
+        },
+        {
+            "document_type": "police_verification",
+            "file_path": "moves/police.pdf",
+            "file_name": "police.pdf",
+        },
+    ],
 }
 
 _UPDATE_PAYLOAD = {
@@ -40,7 +53,7 @@ def _fake_move_event(**overrides) -> MoveEventResponse:
         "fee_amount": None,
         "fee_currency": "INR",
         "notes": None,
-        "document_paths": [],
+        "documents": [],
         "recorded_by_user_id": "test-user-id",
         "created_at": "2026-07-01T10:00:00Z",
         "updated_at": "2026-07-01T10:00:00Z",

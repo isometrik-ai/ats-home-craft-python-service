@@ -18,16 +18,22 @@ from apps.user_service.app.db.repositories.units_repository import UnitsReposito
 from apps.user_service.app.schemas.enums import ContactUnitStatus, MoveEventType
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
+    MoveEventDocumentResponse,
     MoveEventResponse,
     UpdateMoveEventRequest,
 )
+from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
     unit_label_from_row,
 )
 from apps.user_service.app.services.units_service import format_contact_display_name
 from apps.user_service.app.services.vehicles_service import VehiclesService
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_any,
+)
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -73,6 +79,44 @@ class MoveEventsService:
             return format(value, "f")
         return str(value)
 
+    @staticmethod
+    def _documents_to_json(
+        documents: list[TenantRequestDocumentInput] | None,
+    ) -> list[dict[str, str | None]]:
+        """Serialize typed document inputs for jsonb storage."""
+        if not documents:
+            return []
+        return [
+            {
+                "document_type": item.document_type.value,
+                "file_path": item.file_path,
+                "file_name": item.file_name,
+            }
+            for item in documents
+        ]
+
+    @staticmethod
+    def _documents_from_row(value: Any) -> list[MoveEventDocumentResponse]:
+        """Parse documents jsonb into API response models."""
+        raw_items = parse_json_any(value, default=[]) or []
+        documents: list[MoveEventDocumentResponse] = []
+        for item in raw_items:
+            if not isinstance(item, dict):
+                continue
+            document_type = str(item.get("document_type") or "").strip()
+            file_path = str(item.get("file_path") or "").strip()
+            if not document_type or not file_path:
+                continue
+            documents.append(
+                MoveEventDocumentResponse(
+                    document_type=document_type,
+                    file_path=file_path,
+                    file_name=item.get("file_name"),
+                    status=item.get("status"),
+                )
+            )
+        return documents
+
     def _serialize_row(self, row: dict[str, Any]) -> MoveEventResponse:
         """Map a DB row to the API response model."""
         return MoveEventResponse(
@@ -87,7 +131,7 @@ class MoveEventsService:
             fee_amount=self._format_decimal(row.get("fee_amount")),
             fee_currency=row.get("fee_currency") or "INR",
             notes=row.get("notes"),
-            document_paths=list(row.get("document_paths") or []),
+            documents=self._documents_from_row(row.get("documents")),
             recorded_by_user_id=row.get("recorded_by_user_id"),
             created_at=format_iso_datetime(row.get("created_at")),
             updated_at=format_iso_datetime(row.get("updated_at")),
@@ -236,7 +280,7 @@ class MoveEventsService:
                 "fee_amount": body.fee_amount,
                 "fee_currency": body.fee_currency,
                 "notes": body.notes,
-                "document_paths": body.document_paths,
+                "documents": self._documents_to_json(body.documents),
                 "recorded_by_user_id": self.user_context.user_id,
             }
         )
@@ -342,6 +386,10 @@ class MoveEventsService:
             )
 
         update_data = body.model_dump(exclude_unset=True)
+        if "documents" in update_data:
+            update_data["documents"] = self._documents_to_json(
+                body.documents,
+            )
         if not update_data:
             return self._serialize_row(existing)
 

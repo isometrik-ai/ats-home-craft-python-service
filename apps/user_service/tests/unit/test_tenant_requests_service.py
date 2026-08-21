@@ -929,6 +929,7 @@ async def test_approve_request_records_move_in_event(mock_contacts_cls: MagicMoc
     assert move_in["unit_id"] == UNIT_ID
     assert move_in["event_date"] == date(2026, 8, 1)
     assert move_in["fee_amount"] == Decimal("5000")
+    assert len(move_in["documents"]) == 3
     assert REQUEST_ID in str(move_in.get("notes") or "")
 
 
