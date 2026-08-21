@@ -45,7 +45,9 @@ async def test_export_contacts_csv_writes_rows(monkeypatch) -> None:
                 "first_name": "Jane",
                 "last_name": "Doe",
                 "email": "jane@example.com",
-                "phones": [{"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}],
+                "phones": [
+                    {"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}
+                ],
                 "status": ClientStatus.ACTIVE.value,
                 "role_types": ["Owner", "Family"],
                 "company_names": ["Acme"],
@@ -66,5 +68,8 @@ async def test_export_contacts_csv_writes_rows(monkeypatch) -> None:
             project_id="project-1",
         )
     )
-    assert "first_name,last_name,email,phone_number,phone_isd_code,status,role_types,company_names" in csv_text
+    assert (
+        "first_name,last_name,email,phone_number,phone_isd_code,status,role_types,company_names"
+        in csv_text
+    )
     assert "Jane,Doe,jane@example.com,9876543210,+91,active,Owner;Family,Acme" in csv_text
