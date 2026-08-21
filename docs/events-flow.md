@@ -9,8 +9,8 @@
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/community-events`
-- **Resident API prefix:** `/v1/community-events`
-- **DB schema:** `ats-home-craft-supabase` (migrations `20260820120000`–`20260820130000`)
+- **Resident API prefix:** `/v1/projects/{project_id}/resident/community-events` (mandatory `project_id` in path)
+- **DB schema:** `ats-home-craft-supabase` (migrations `20260820120000`–`20260821180000`)
 - **Venue source:** existing `facilities` from [project-setup-flow.md](./project-setup-flow.md) (`facility_type IN events, sports, recreation, services`)
 
 ______________________________________________________________________
@@ -53,7 +53,7 @@ Each event has:
 | **Soft delete**                    | `record_status = deleted`; retain bookings and audit                                                                        |
 | **Display codes**                  | `EVT-{n}` events, `BKG-{n}` bookings — monotonic per project                                                                |
 | **Staff project access**           | `ensure_staff_project_access(project_id)` on admin routes                                                                   |
-| **Resident unit context**          | `unit_id` required on book; active Owner/Tenant on unit                                                                     |
+| **Resident project access**        | Active `contact_units` membership in the project (no `unit_id` on bookings or APIs)                                         |
 
 ### Screen → capability map
 
@@ -76,6 +76,7 @@ Each event has:
 | Soft delete                                                             | `POST /projects/{project_id}/community-events/{id}/delete`                                                                       |
 | Restore                                                                 | `POST /projects/{project_id}/community-events/{id}/restore`                                                                      |
 | Event bookings list                                                     | `GET /projects/{project_id}/community-events/{id}/bookings`                                                                      |
+| Book on behalf (walk-in / clubhouse)                                    | `POST /projects/{project_id}/community-events/{id}/bookings`                                                                     |
 | Mark booking paid                                                       | `POST .../bookings/{booking_id}/mark-paid`                                                                                       |
 | Mark waived (optional)                                                  | `POST .../bookings/{booking_id}/mark-waived`                                                                                     |
 | Facility picker                                                         | `GET /projects/{project_id}/facilities?facility_types=events,sports,recreation,services&status=active` (existing, extend filter) |
@@ -84,18 +85,19 @@ Each event has:
 
 **Resident mobile (Events tab)**
 
-| Screen / action               | Capability                                                                 |
-| ----------------------------- | -------------------------------------------------------------------------- |
-| Events home (Upcoming / Past) | `GET /community-events?project_id=&timeframe=upcoming\|past`               |
-| Category chips                | `GET /community-events?project_id=&category=`                              |
-| Search                        | `GET /community-events?project_id=&search=`                                |
-| My ticket badge count         | `GET /community-events/my-bookings/summary?unit_id=`                       |
-| Event card list               | List item: title, category, price label, date, venue, booked/capacity, CTA |
-| Event detail                  | `GET /community-events/{id}?unit_id=`                                      |
-| Book tickets                  | `POST /community-events/{id}/bookings?unit_id=`                            |
-| View my tickets               | `GET /community-events/{id}/my-booking?unit_id=`                           |
-| Cancel booking                | `POST /community-events/bookings/{booking_id}/cancel?unit_id=`             |
-| All my bookings               | `GET /community-events/my-bookings?unit_id=`                               |
+| Screen / action               | Capability                                                                           |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| Events home (Upcoming / Past) | `GET /projects/{project_id}/resident/community-events?timeframe=upcoming\|past`      |
+| Category chips                | `GET /projects/{project_id}/resident/community-events?category=`                     |
+| Search                        | `GET /projects/{project_id}/resident/community-events?search=`                       |
+| My ticket badge count         | `GET /projects/{project_id}/resident/community-events/my-bookings/summary`           |
+| Event card list               | List item: title, category, price label, date, venue, booked/capacity, CTA           |
+| Event detail                  | `GET /projects/{project_id}/resident/community-events/{id}`                          |
+| Book tickets                  | `POST /projects/{project_id}/resident/community-events/{id}/bookings`                |
+| View my tickets               | `GET /projects/{project_id}/resident/community-events/{id}/my-booking`               |
+| Cancel booking                | `POST /projects/{project_id}/resident/community-events/bookings/{booking_id}/cancel` |
+| All my bookings               | `GET /projects/{project_id}/resident/community-events/my-bookings`                   |
+| Gate QR verify (security)     | `POST /projects/{project_id}/resident/community-events/verify-booking`               |
 
 ______________________________________________________________________
 
@@ -138,12 +140,12 @@ ______________________________________________________________________
 
 ### New tables (4)
 
-| Table                           | Purpose                                                                                         |
-| ------------------------------- | ----------------------------------------------------------------------------------------------- |
-| **`community_events`**          | Event header: schedule, category, venue FK, ticketing, pricing, dual status, denormalized stats |
-| **`community_event_media`**     | Gallery image rows (`file_path`, metadata, `sort_order`)                                        |
-| **`community_event_bookings`**  | Resident booking: unit, contact, adult/child counts, amounts, payment + booking status          |
-| **`community_event_audit_log`** | Append-only audit trail                                                                         |
+| Table                           | Purpose                                                                                           |
+| ------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **`community_events`**          | Event header: schedule, category, venue FK, ticketing, pricing, dual status, denormalized stats   |
+| **`community_event_media`**     | Gallery image rows (`file_path`, metadata, `sort_order`)                                          |
+| **`community_event_bookings`**  | Resident booking: contact, adult/child counts, amounts, payment + booking status (project-scoped) |
+| **`community_event_audit_log`** | Append-only audit trail                                                                           |
 
 Full column reference: [community-events-schema.md](../../ats-home-craft-supabase/docs/community-events-schema.md).
 
@@ -154,10 +156,8 @@ Full column reference: [community-events-schema.md](../../ats-home-craft-supabas
 | `projects`             | Community scope                                                       |
 | `facilities`           | Event venue (`facility_type IN events, sports, recreation, services`) |
 | `towers`               | Venue location label (join via facility)                              |
-| `units`                | Resident booking context                                              |
 | `contacts`             | Booker; admin `created_by` via user linkage                           |
-| `contact_units`        | Active residency validation                                           |
-| `contact_roles`        | Owner/Tenant eligibility on `unit_id`                                 |
+| `contact_units`        | Active project membership validation (any unit in project)            |
 | `organization_members` | Staff admin access gate                                               |
 
 ### Status lifecycles
@@ -264,7 +264,7 @@ ______________________________________________________________________
 }
 ```
 
-3. Default tab **All** → `GET /community-events?publish_status=all&page=1&page_size=20`.
+3. Default tab **All** → `GET /v1/projects/{project_id}/community-events?publish_status=all&page=1&page_size=20`.
 
 **List item shape (example row — Pottery Workshop):**
 
@@ -433,6 +433,25 @@ Service transaction:
 Admin list **Paid** column = `paid_bookings_count / bookings_count` (non-cancelled).
 **Revenue** column = `revenue_collected_minor` for the event.
 
+**Book on behalf (walk-in / clubhouse):**
+
+When a resident has not booked in the app, staff can create a booking for them:
+
+```http
+POST /v1/projects/{project_id}/community-events/{event_id}/bookings
+{
+  "contact_id": "contact-uuid",
+  "adult_tickets": 2,
+  "child_tickets": 0,
+  "mark_paid": true,
+  "payment_notes": "Cash at desk"
+}
+```
+
+- Validates `contact_id` has active project membership (via `contact_units`).
+- Bypasses resident booking window rules; always creates `confirmed` (no waitlist).
+- Optional `mark_paid: true` chains to the existing mark-paid flow for paid events.
+
 ### 4.5 Cancel / complete / delete
 
 | Action       | Endpoint            | Effect                                          |
@@ -451,13 +470,13 @@ ______________________________________________________________________
 ### 5.1 Preconditions
 
 - Resident logged in via onboarding contact context.
-- Client passes `unit_id` for an active unit in the project.
-- Contact has active Owner or Tenant role on the unit ([ADR 0010](./adr/0010-contact-roles.md)).
+- Client uses the **project-scoped** resident API prefix (`/v1/projects/{project_id}/resident/community-events`).
+- Contact has at least one **active** `contact_units` row in that project (no `unit_id` required on requests).
 
 ### 5.2 Events home
 
 ```http
-GET /v1/community-events?project_id={project_id}&unit_id={unit_id}&timeframe=upcoming&category=social&search=
+GET /v1/projects/{project_id}/resident/community-events?timeframe=upcoming&category=social&search=
 ```
 
 **List item (example — Independence Day):**
@@ -495,7 +514,7 @@ GET /v1/community-events?project_id={project_id}&unit_id={unit_id}&timeframe=upc
 ### 5.3 Event detail
 
 ```http
-GET /v1/community-events/{event_id}?unit_id={unit_id}
+GET /v1/projects/{project_id}/resident/community-events/{event_id}
 ```
 
 Response sections matching mobile UI:
@@ -509,7 +528,7 @@ Response sections matching mobile UI:
 ### 5.4 Book tickets
 
 ```http
-POST /v1/community-events/{event_id}/bookings?unit_id={unit_id}
+POST /v1/projects/{project_id}/resident/community-events/{event_id}/bookings
 {
   "adult_tickets": 2,
   "child_tickets": 1
@@ -549,8 +568,8 @@ paid status via admin mark-paid after offline collection.
 ### 5.5 View / cancel my booking
 
 ```http
-GET /v1/community-events/{event_id}/my-booking?unit_id={unit_id}
-POST /v1/community-events/bookings/{booking_id}/cancel?unit_id={unit_id}
+GET /v1/projects/{project_id}/resident/community-events/{event_id}/my-booking
+POST /v1/projects/{project_id}/resident/community-events/bookings/{booking_id}/cancel
 ```
 
 Cancel decrements event aggregates when booking was `confirmed`; audit log written.
@@ -629,7 +648,7 @@ ______________________________________________________________________
 | `child_tickets_not_allowed` | 422  | Child count when mode = not_applicable                    |
 | `facility_not_eligible`     | 422  | Facility type not in events, sports, recreation, services |
 | `booking_not_pending`       | 409  | mark-paid on non-pending row                              |
-| `invalid_unit_context`      | 403  | Resident unit not in project                              |
+| `invalid_project_context`   | 403  | Resident not an active member of the project              |
 
 ______________________________________________________________________
 

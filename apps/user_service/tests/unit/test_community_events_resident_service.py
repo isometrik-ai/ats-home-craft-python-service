@@ -26,7 +26,6 @@ from libs.shared_utils.http_exceptions import NotFoundException
 PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 EVENT_ID = "22222222-2222-2222-2222-222222222222"
 CONTACT_ID = "33333333-3333-3333-3333-333333333333"
-UNIT_ID = "44444444-4444-4444-4444-444444444444"
 BOOKING_ID = "55555555-5555-5555-5555-555555555555"
 
 
@@ -41,7 +40,7 @@ def _service() -> CommunityEventsResidentService:
     )
     svc.repo = MagicMock()
     svc.booking_service = MagicMock()
-    svc.booking_service._ensure_resident_unit = AsyncMock(return_value=PROJECT_ID)
+    svc.booking_service._ensure_resident_project = AsyncMock()
     return svc
 
 
@@ -111,10 +110,9 @@ async def test_list_events_and_serialize():
         )
     )
     items, total = await svc.list_events(
+        project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
         query=ResidentEventListQuery(
-            project_id=PROJECT_ID,
-            unit_id=UNIT_ID,
             timeframe=ResidentEventTimeframe.UPCOMING,
         ),
     )
@@ -142,8 +140,8 @@ async def test_get_event_detail_success():
     svc.repo.get_my_booking_for_event = AsyncMock(return_value=None)
 
     detail = await svc.get_event_detail(
+        project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         event_id=EVENT_ID,
     )
     assert detail.title == "Test Event"
@@ -156,8 +154,8 @@ async def test_get_event_detail_not_found():
     svc.repo.fetch_resident_event_by_id = AsyncMock(return_value=None)
     with pytest.raises(NotFoundException):
         await svc.get_event_detail(
+            project_id=PROJECT_ID,
             contact_id=CONTACT_ID,
-            unit_id=UNIT_ID,
             event_id=EVENT_ID,
         )
 
@@ -169,8 +167,8 @@ async def test_book_event_delegates():
         return_value=MagicMock(id=BOOKING_ID, booking_status="confirmed")
     )
     result = await svc.book_event(
+        project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         event_id=EVENT_ID,
         body=CreateEventBookingRequest(adult_tickets=1),
     )
@@ -201,16 +199,14 @@ async def test_my_bookings_summary_and_list():
     )
 
     summary = await svc.get_my_booking_summary(
-        contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         project_id=PROJECT_ID,
+        contact_id=CONTACT_ID,
     )
     assert summary.active_ticket_count == 3
 
     bookings = await svc.list_my_bookings(
-        contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         project_id=PROJECT_ID,
+        contact_id=CONTACT_ID,
     )
     assert bookings[0].display_code == "BKG-1"
 
@@ -222,6 +218,7 @@ async def test_cancel_and_get_my_booking_for_event():
     svc.repo.get_my_booking_for_event = AsyncMock(
         return_value={
             "id": BOOKING_ID,
+            "project_id": PROJECT_ID,
             "display_code": "BKG-1",
             "total_tickets": 2,
             "total_amount_minor": 0,
@@ -236,15 +233,15 @@ async def test_cancel_and_get_my_booking_for_event():
     )
 
     await svc.cancel_booking(
+        project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         booking_id=BOOKING_ID,
     )
     svc.booking_service.cancel_booking.assert_awaited_once()
 
     booking = await svc.get_my_booking_for_event(
+        project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         event_id=EVENT_ID,
     )
     assert booking is not None
@@ -253,8 +250,8 @@ async def test_cancel_and_get_my_booking_for_event():
     svc.repo.get_my_booking_for_event = AsyncMock(return_value=None)
     assert (
         await svc.get_my_booking_for_event(
+            project_id=PROJECT_ID,
             contact_id=CONTACT_ID,
-            unit_id=UNIT_ID,
             event_id=EVENT_ID,
         )
         is None

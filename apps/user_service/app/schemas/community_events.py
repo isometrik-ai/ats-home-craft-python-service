@@ -265,8 +265,6 @@ class CommunityEventBookingListItemResponse(BaseModel):
     display_code: str
     contact_id: str
     contact_name: str | None = None
-    unit_id: str
-    unit_code: str | None = None
     adult_tickets: int
     child_tickets: int
     total_tickets: int
@@ -283,8 +281,6 @@ class ResidentEventListQuery(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    project_id: str
-    unit_id: str
     timeframe: ResidentEventTimeframe = ResidentEventTimeframe.UPCOMING
     category: CommunityEventCategory | None = None
     search: str | None = Field(None, max_length=200)
@@ -316,7 +312,6 @@ class AdminCreateEventBookingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     contact_id: str = Field(..., min_length=1)
-    unit_id: str = Field(..., min_length=1)
     adult_tickets: int = Field(..., ge=0, le=50)
     child_tickets: int = Field(0, ge=0, le=50)
     mark_paid: bool = False
@@ -448,7 +443,6 @@ class VerifyBookingResponse(BaseModel):
     event_title: str
     event_start_date: date
     contact_name: str | None = None
-    unit_code: str | None = None
     adult_tickets: int
     child_tickets: int
     total_tickets: int

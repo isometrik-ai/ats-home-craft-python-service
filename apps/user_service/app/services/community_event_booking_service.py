@@ -132,63 +132,34 @@ class CommunityEventBookingService:
             return False
         return True
 
-    async def _ensure_resident_unit(
+    async def _ensure_resident_project(
         self,
         *,
         contact_id: str,
-        unit_id: str,
-    ) -> str:
-        """Validate resident unit access; return project_id."""
-        has_unit = await self.contact_units_repo.contact_has_active_unit(
-            organization_id=self.organization_id,
-            contact_id=contact_id,
-            unit_id=unit_id,
-        )
-        if not has_unit:
-            raise ValidationException(
-                message_key="community_events.errors.invalid_unit_context",
-                custom_code=CustomStatusCode.FORBIDDEN,
-            )
-        unit_row = await self.contact_units_repo.get_unit_project(
-            organization_id=self.organization_id,
-            unit_id=unit_id,
-        )
-        if not unit_row:
-            raise ValidationException(
-                message_key="community_events.errors.invalid_unit_context",
-                custom_code=CustomStatusCode.FORBIDDEN,
-            )
-        return str(unit_row["project_id"])
-
-    async def _ensure_owner_or_tenant(
-        self,
-        *,
-        contact_id: str,
-        unit_id: str,
+        project_id: str,
     ) -> None:
-        """Require Owner or Tenant role on unit."""
-        allowed = await self.repo.contact_has_owner_or_tenant_on_unit(
+        """Validate resident has active membership in the project."""
+        has_membership = await self.contact_units_repo.contact_has_active_project_membership(
             organization_id=self.organization_id,
             contact_id=contact_id,
-            unit_id=unit_id,
+            project_id=project_id,
         )
-        if not allowed:
+        if not has_membership:
             raise ValidationException(
-                message_key="community_events.errors.invalid_unit_context",
+                message_key="community_events.errors.invalid_project_context",
                 custom_code=CustomStatusCode.FORBIDDEN,
             )
 
     async def create_booking(
         self,
         *,
+        project_id: str,
         contact_id: str,
-        unit_id: str,
         event_id: str,
         body: CreateEventBookingRequest,
     ) -> BookEventResponse:
         """Create resident booking with capacity/waitlist handling."""
-        project_id = await self._ensure_resident_unit(contact_id=contact_id, unit_id=unit_id)
-        await self._ensure_owner_or_tenant(contact_id=contact_id, unit_id=unit_id)
+        await self._ensure_resident_project(contact_id=contact_id, project_id=project_id)
 
         event = await self.repo.fetch_resident_event_by_id(
             organization_id=self.organization_id,
@@ -265,7 +236,6 @@ class CommunityEventBookingService:
                 "display_code": f"BKG-{seq}",
                 "sequence_number": seq,
                 "contact_id": contact_id,
-                "unit_id": unit_id,
                 "adult_tickets": body.adult_tickets,
                 "child_tickets": body.child_tickets,
                 "total_tickets": total_requested,
@@ -346,16 +316,10 @@ class CommunityEventBookingService:
         body: AdminCreateEventBookingRequest,
     ) -> dict[str, Any]:
         """Create a booking on behalf of a resident (walk-in / clubhouse)."""
-        resident_project_id = await self._ensure_resident_unit(
+        await self._ensure_resident_project(
             contact_id=body.contact_id,
-            unit_id=body.unit_id,
+            project_id=project_id,
         )
-        if resident_project_id != project_id:
-            raise ValidationException(
-                message_key="community_events.errors.invalid_unit_context",
-                custom_code=CustomStatusCode.FORBIDDEN,
-            )
-        await self._ensure_owner_or_tenant(contact_id=body.contact_id, unit_id=body.unit_id)
 
         event = await self.repo.fetch_event_by_id(
             organization_id=self.organization_id,
@@ -430,7 +394,6 @@ class CommunityEventBookingService:
                 "display_code": f"BKG-{seq}",
                 "sequence_number": seq,
                 "contact_id": body.contact_id,
-                "unit_id": body.unit_id,
                 "adult_tickets": body.adult_tickets,
                 "child_tickets": body.child_tickets,
                 "total_tickets": total_requested,
@@ -486,7 +449,7 @@ class CommunityEventBookingService:
         self,
         *,
         contact_id: str | None,
-        unit_id: str | None,
+        project_id: str | None,
         booking_id: str,
         admin_user_id: str | None = None,
     ) -> None:
@@ -500,6 +463,11 @@ class CommunityEventBookingService:
                 message_key="community_events.errors.booking_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        if project_id and str(booking.get("project_id")) != project_id:
+            raise NotFoundException(
+                message_key="community_events.errors.booking_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
         if str(booking.get("booking_status")) == CommunityEventBookingStatus.CANCELLED.value:
             raise ConflictException(
                 message_key="community_events.errors.booking_already_cancelled",
@@ -509,12 +477,7 @@ class CommunityEventBookingService:
         if contact_id:
             if str(booking.get("contact_id")) != contact_id:
                 raise ValidationException(
-                    message_key="community_events.errors.invalid_unit_context",
-                    custom_code=CustomStatusCode.FORBIDDEN,
-                )
-            if unit_id and str(booking.get("unit_id")) != unit_id:
-                raise ValidationException(
-                    message_key="community_events.errors.invalid_unit_context",
+                    message_key="community_events.errors.invalid_project_context",
                     custom_code=CustomStatusCode.FORBIDDEN,
                 )
 
@@ -727,6 +690,7 @@ class CommunityEventBookingService:
     async def verify_booking_at_gate(
         self,
         *,
+        project_id: str,
         gate_qr_token: str,
     ) -> VerifyBookingResponse:
         """Security gate QR verification."""
@@ -734,7 +698,7 @@ class CommunityEventBookingService:
             organization_id=self.organization_id,
             gate_qr_token=gate_qr_token,
         )
-        if not booking:
+        if not booking or str(booking.get("project_id")) != project_id:
             raise NotFoundException(
                 message_key="community_events.errors.booking_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
@@ -761,7 +725,6 @@ class CommunityEventBookingService:
             event_title=str(booking.get("event_title") or ""),
             event_start_date=booking["event_start_date"],
             contact_name=booking.get("contact_name"),
-            unit_code=booking.get("unit_code"),
             adult_tickets=int(booking.get("adult_tickets") or 0),
             child_tickets=int(booking.get("child_tickets") or 0),
             total_tickets=int(booking.get("total_tickets") or 0),

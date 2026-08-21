@@ -59,7 +59,7 @@ async def test_list_resident_community_events(client, monkeypatch) -> None:
         AsyncMock(return_value=([item], 1)),
     )
     response = await client.get(
-        f"/v1/community-events?project_id={PROJECT_ID}&unit_id=660e8400-e29b-41d4-a716-446655440002&timeframe=upcoming"
+        f"/v1/projects/{PROJECT_ID}/resident/community-events?timeframe=upcoming"
     )
     assert response.status_code == 200
     body = response.json()

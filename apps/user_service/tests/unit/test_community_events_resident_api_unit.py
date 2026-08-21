@@ -27,7 +27,6 @@ from apps.user_service.app.utils.common_utils import UserContext
 PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 EVENT_ID = "22222222-2222-2222-2222-222222222222"
 BOOKING_ID = "33333333-3333-3333-3333-333333333333"
-UNIT_ID = "44444444-4444-4444-4444-444444444444"
 
 
 def _request() -> Request:
@@ -77,7 +76,8 @@ async def test_resident_event_read_endpoints(mock_service_cls, mock_contact_ctx)
     assert (
         await list_resident_community_events(
             request=_request(),
-            query=ResidentEventListQuery(project_id=PROJECT_ID, unit_id=UNIT_ID),
+            project_id=PROJECT_ID,
+            query=ResidentEventListQuery(),
             db_connection=db,
             current_user=user,
         )
@@ -86,7 +86,6 @@ async def test_resident_event_read_endpoints(mock_service_cls, mock_contact_ctx)
         await list_my_community_event_bookings(
             request=_request(),
             project_id=PROJECT_ID,
-            unit_id=UNIT_ID,
             db_connection=db,
             current_user=user,
         )
@@ -95,7 +94,6 @@ async def test_resident_event_read_endpoints(mock_service_cls, mock_contact_ctx)
         await get_my_community_event_bookings_summary(
             request=_request(),
             project_id=PROJECT_ID,
-            unit_id=UNIT_ID,
             db_connection=db,
             current_user=user,
         )
@@ -103,8 +101,8 @@ async def test_resident_event_read_endpoints(mock_service_cls, mock_contact_ctx)
     assert (
         await get_resident_community_event(
             request=_request(),
+            project_id=PROJECT_ID,
             event_id=EVENT_ID,
-            unit_id=UNIT_ID,
             db_connection=db,
             current_user=user,
         )
@@ -112,8 +110,8 @@ async def test_resident_event_read_endpoints(mock_service_cls, mock_contact_ctx)
     assert (
         await get_my_community_event_booking(
             request=_request(),
+            project_id=PROJECT_ID,
             event_id=EVENT_ID,
-            unit_id=UNIT_ID,
             db_connection=db,
             current_user=user,
         )
@@ -139,8 +137,8 @@ async def test_resident_book_and_cancel(mock_service_cls, mock_contact_ctx):
     assert (
         await book_community_event(
             request=_request(),
+            project_id=PROJECT_ID,
             event_id=EVENT_ID,
-            unit_id=UNIT_ID,
             body=CreateEventBookingRequest(adult_tickets=1),
             db_connection=db,
             current_user=user,
@@ -149,8 +147,8 @@ async def test_resident_book_and_cancel(mock_service_cls, mock_contact_ctx):
     assert (
         await cancel_community_event_booking(
             request=_request(),
+            project_id=PROJECT_ID,
             booking_id=BOOKING_ID,
-            unit_id=UNIT_ID,
             db_connection=db,
             current_user=user,
         )
@@ -171,6 +169,7 @@ async def test_verify_booking_at_gate(mock_booking_cls, mock_contact_ctx):
 
     response = await verify_community_event_booking(
         request=_request(),
+        project_id=PROJECT_ID,
         body=VerifyBookingRequest(gate_qr_token="token-123"),
         db_connection=MagicMock(),
         current_user={"sub": "user-1"},

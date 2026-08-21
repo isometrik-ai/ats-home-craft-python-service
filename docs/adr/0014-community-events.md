@@ -1,13 +1,13 @@
 # ADR 0014: Community events — admin create, resident book, manual payment
 
-|                  |                                                                                                                                                                                                                                                                        |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted                                                                                                                                                                                                                                                               |
-| **Date**         | 2026-08-20                                                                                                                                                                                                                                                             |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                               |
-| **Depends on**   | [ADR 0011](./0011-project-membership.md) (project scoping), [ADR 0010](./0010-contact-roles.md) (resident unit context), [ADR 0009](./0009-push-notifications-grpc.md) (push, Phase 2), project setup `facilities` ([project-setup-flow.md](../project-setup-flow.md)) |
-| **Related docs** | [events-flow.md](../events-flow.md), [community-events-schema.md](../../../ats-home-craft-supabase/docs/community-events-schema.md)                                                                                                                                    |
-| **Migrations**   | `20260820120000_community_events_enums.sql`, `20260820121000_community_events_tables.sql`, `20260820130000_community_events_phase2.sql` (`ats-home-craft-supabase`)                                                                                                    |
+|                  |                                                                                                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted                                                                                                                                                                                                                        |
+| **Date**         | 2026-08-20                                                                                                                                                                                                                      |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                        |
+| **Depends on**   | [ADR 0011](./0011-project-membership.md) (project scoping), [ADR 0009](./0009-push-notifications-grpc.md) (push, Phase 2), project setup `facilities` ([project-setup-flow.md](../project-setup-flow.md))                       |
+| **Related docs** | [events-flow.md](../events-flow.md), [community-events-schema.md](../../../ats-home-craft-supabase/docs/community-events-schema.md)                                                                                             |
+| **Migrations**   | `20260820120000_community_events_enums.sql`, `20260820121000_community_events_tables.sql`, `20260820130000_community_events_phase2.sql`, `20260821180000_community_events_drop_booking_unit_id.sql` (`ats-home-craft-supabase`) |
 
 ______________________________________________________________________
 
@@ -45,8 +45,8 @@ Use table prefix **`community_events`** — not `events` — to avoid confusion 
 
 - Events are **project-scoped** (`organization_id` + `project_id`).
 - **Staff admin** routes: org RBAC + `ensure_staff_project_access(project_id)`.
-- **Resident** routes: `extract_onboarding_contact_context()` + active `contact_units` / `contact_roles`
-  on the booking `unit_id`.
+- **Resident** routes: `extract_onboarding_contact_context()` + active `contact_units` membership
+  in the project. Bookings are tied to **contact + project** only — no `unit_id` on booking rows or APIs.
 
 ______________________________________________________________________
 
@@ -54,12 +54,12 @@ ______________________________________________________________________
 
 ### 1. Four new tables (Phase 1)
 
-| Table                           | Purpose                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------- |
-| **`community_events`**          | Event header: schedule, category, venue, ticketing, pricing, publish + record status, stats  |
-| **`community_event_media`**     | Gallery images (cover stored on header; gallery rows here)                                   |
-| **`community_event_bookings`**  | Resident booking: unit, contact, adult/child ticket counts, amount, payment + booking status |
-| **`community_event_audit_log`** | Append-only admin/resident actions (created, published, cancelled, marked_paid, …)           |
+| Table                           | Purpose                                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **`community_events`**          | Event header: schedule, category, venue, ticketing, pricing, publish + record status, stats             |
+| **`community_event_media`**     | Gallery images (cover stored on header; gallery rows here)                                              |
+| **`community_event_bookings`**  | Resident booking: contact, adult/child ticket counts, amount, payment + booking status (project-scoped) |
+| **`community_event_audit_log`** | Append-only admin/resident actions (created, published, cancelled, marked_paid, …)                      |
 
 Aggregates on `community_events` (`tickets_booked`, `bookings_count`, `paid_bookings_count`,
 `revenue_collected_minor`) are **maintained by the service** on booking create/cancel/mark-paid for
@@ -151,9 +151,10 @@ Admin **mark-paid** / **mark-waived** after offline collection. No online paymen
 Key endpoints: summary, list, CRUD, publish, cancel, complete, delete/restore, bookings list,
 mark-paid, export.
 
-**Resident prefix:** `/v1/community-events`
+**Resident prefix:** `/v1/projects/{project_id}/resident/community-events`
 
-Key endpoints: list (upcoming/past), detail, book, my-bookings, cancel booking, ticket view.
+Key endpoints: list (upcoming/past), detail, book, my-bookings, cancel booking, ticket view,
+gate QR verify. **`project_id` is mandatory in the path** on every resident endpoint.
 
 Proposed RBAC: `community_events_management.*` or reuse `projects_management.*` (align with notices).
 
@@ -166,7 +167,7 @@ Resident may book when **all** hold:
 1. `now() < event end_at` (derived from dates + times)
 1. Requested ticket count ≤ remaining capacity (or → waitlist if enabled)
 1. Requested ticket count ≤ `max_tickets_per_resident` minus existing active tickets for same contact+event
-1. Contact has active Owner/Tenant (or permitted role) on `unit_id`
+1. Contact has active project membership (any active `contact_units` row in the project)
 
 ______________________________________________________________________
 
@@ -221,6 +222,6 @@ ______________________________________________________________________
 | Table name `events`               | Collides with move/pass/daily-help event tables               |
 | Snapshot venue on event row       | Facility updates should reflect on detail; join is sufficient |
 | Payment gateway in Phase 1        | Explicit product decision — admin mark paid first             |
-| Bookings without `unit_id`        | Other resident flows require unit context for scoping         |
+| `unit_id` on bookings             | Events are project-scoped; contact identity is sufficient     |
 | Single combined status enum       | UI shows Publish Status and Record Status separately          |
 | Child table for ticket line items | Only adult/child tiers in UI; counts on booking row enough    |
