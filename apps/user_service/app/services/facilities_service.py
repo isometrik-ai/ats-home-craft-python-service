@@ -13,14 +13,17 @@ from apps.user_service.app.db.repositories.parking_slots_repository import (
     ParkingSlotsRepository,
 )
 from apps.user_service.app.db.repositories.towers_repository import TowersRepository
-from apps.user_service.app.schemas.enums import FacilityLocationType, ProjectSetupStep
+from apps.user_service.app.schemas.enums import (
+    FacilityLocationType,
+    FacilityType,
+    ProjectSetupStep,
+)
 from apps.user_service.app.schemas.project_inventory import (
     CreateFacilityRequest,
     UpdateFacilityRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.services.project_setup_validation import (
-    normalize_facility_type,
     validate_facility_payload,
 )
 from apps.user_service.app.utils.common_utils import UserContext
@@ -56,6 +59,7 @@ class FacilitiesService:
         """Map create request to DB-ready dict."""
         data = body.model_dump()
         data["status"] = body.status.value
+        data["facility_type"] = body.facility_type.value
         data["location_type"] = body.location_type.value
         if body.parking_user_type:
             data["parking_user_type"] = body.parking_user_type.value
@@ -67,6 +71,8 @@ class FacilitiesService:
         data = body.model_dump(exclude_unset=True, exclude_none=True)
         if body.status:
             data["status"] = body.status.value
+        if body.facility_type:
+            data["facility_type"] = body.facility_type.value
         if body.location_type:
             data["location_type"] = body.location_type.value
         if body.parking_user_type:
@@ -143,7 +149,7 @@ class FacilitiesService:
         data["organization_id"] = self._org_id
         data["project_id"] = project_id
         inserted = await self.facilities_repo.insert_facility(data)
-        if normalize_facility_type(body.facility_type) == "parking" and body.parking_slots:
+        if body.facility_type == FacilityType.PARKING and body.parking_slots:
             await self._provision_parking_slots(
                 project_id=project_id,
                 facility_id=str(inserted["id"]),

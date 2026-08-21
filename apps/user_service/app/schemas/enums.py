@@ -1337,6 +1337,17 @@ class FacilityLocationType(str, Enum):
     OTHER = "other"
 
 
+class FacilityType(str, Enum):
+    """Facility category (stored as lowercase text on public.facilities.facility_type)."""
+
+    SPORTS = "sports"
+    RECREATION = "recreation"
+    EVENTS = "events"
+    SERVICES = "services"
+    UTILITY = "utility"
+    PARKING = "parking"
+
+
 class ParkingUserType(str, Enum):
     """Parking facility audience (Postgres parking_user_type enum)."""
 
@@ -1965,7 +1976,12 @@ class ResidentEventTimeframe(str, Enum):
 
 
 ALLOWED_EVENT_FACILITY_TYPES: frozenset[str] = frozenset(
-    {"events", "sports", "recreation", "services"}
+    {
+        FacilityType.EVENTS.value,
+        FacilityType.SPORTS.value,
+        FacilityType.RECREATION.value,
+        FacilityType.SERVICES.value,
+    }
 )
 
 COMMUNITY_EVENT_CATEGORY_LABELS: dict[str, str] = {

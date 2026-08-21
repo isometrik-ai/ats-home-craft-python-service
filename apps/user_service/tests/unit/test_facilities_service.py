@@ -9,6 +9,7 @@ import pytest
 from apps.user_service.app.schemas.enums import (
     FacilityLocationType,
     FacilityStatus,
+    FacilityType,
     ParkingUserType,
 )
 from apps.user_service.app.schemas.project_inventory import (
@@ -36,16 +37,16 @@ def _service() -> FacilitiesService:
     svc.setup_service.ensure_project = AsyncMock(return_value={"id": PROJECT_ID})
     svc.setup_service.complete_step = AsyncMock(return_value={"step_key": "facilities"})
     svc.facilities_repo.insert_facility = AsyncMock(
-        return_value={"id": FACILITY_ID, "name": "Pool", "facility_type": "amenity"}
+        return_value={"id": FACILITY_ID, "name": "Pool", "facility_type": "recreation"}
     )
     svc.facilities_repo.list_facilities = AsyncMock(
         return_value=[{"id": FACILITY_ID, "name": "Pool"}]
     )
     svc.facilities_repo.get_facility = AsyncMock(
-        return_value={"id": FACILITY_ID, "name": "Pool", "facility_type": "amenity"}
+        return_value={"id": FACILITY_ID, "name": "Pool", "facility_type": "recreation"}
     )
     svc.facilities_repo.update_facility = AsyncMock(
-        return_value={"id": FACILITY_ID, "name": "Pool Updated", "facility_type": "amenity"}
+        return_value={"id": FACILITY_ID, "name": "Pool Updated", "facility_type": "recreation"}
     )
     svc.facilities_repo.delete_facility = AsyncMock()
     svc.parking_slots_repo.bulk_insert_slots = AsyncMock()
@@ -59,7 +60,7 @@ def _service() -> FacilitiesService:
 def _create_body(**overrides) -> CreateFacilityRequest:
     base = {
         "name": "Visitor Parking",
-        "facility_type": "parking",
+        "facility_type": FacilityType.PARKING,
         "location_type": FacilityLocationType.OUTDOOR_STANDALONE,
         "parking_slots": 10,
         "parking_user_type": ParkingUserType.VISITORS,
@@ -86,7 +87,7 @@ async def test_create_facility_non_parking_skips_slots():
     svc = _service()
     body = CreateFacilityRequest(
         name="Gym",
-        facility_type="gym",
+        facility_type=FacilityType.SPORTS,
         location_type=FacilityLocationType.OUTDOOR_STANDALONE,
     )
 
@@ -155,7 +156,7 @@ async def test_update_facility_rejects_invalid_in_tower_without_wing():
         return_value={
             "id": FACILITY_ID,
             "name": "Club",
-            "facility_type": "club",
+            "facility_type": "recreation",
             "location_type": FacilityLocationType.IN_TOWER.value,
             "tower_id": TOWER_ID,
         }
@@ -176,7 +177,7 @@ async def test_create_facility_in_tower_without_wing_when_tower_has_no_wings():
     svc.towers_repo.get_tower = AsyncMock(return_value={"id": TOWER_ID, "has_wings": False})
     body = CreateFacilityRequest(
         name="Kids Play Area",
-        facility_type="Recreation",
+        facility_type=FacilityType.RECREATION,
         location_type=FacilityLocationType.IN_TOWER,
         tower_id=TOWER_ID,
         floor_level="G+1",
@@ -194,7 +195,7 @@ async def test_create_facility_in_tower_requires_wing_when_tower_has_wings():
     svc = _service()
     body = CreateFacilityRequest(
         name="Gym",
-        facility_type="Recreation",
+        facility_type=FacilityType.RECREATION,
         location_type=FacilityLocationType.IN_TOWER,
         tower_id=TOWER_ID,
         floor_level="G+1",

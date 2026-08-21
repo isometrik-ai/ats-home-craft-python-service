@@ -1,7 +1,7 @@
 """Project Setup API (project basics, media, wizard status/steps)."""
 # pylint: disable=too-many-lines
 
-from typing import Any
+from typing import Annotated, Any
 
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ReviewVehicleRequest,
 )
 from apps.user_service.app.schemas.enums import (
+    FacilityStatus,
     ParkingSlotStatus,
     PropertyProjectStatus,
     PropertyType,
@@ -34,6 +35,7 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateUnitConfigRequest,
     CreateUnitDocumentRequest,
     CreateUnitRequest,
+    FacilityListQuery,
     InventorySummaryResponse,
     ListProjectUnitsFilterQuery,
     ListProjectUnitsQuery,
@@ -48,6 +50,7 @@ from apps.user_service.app.schemas.project_inventory import (
     UpdateUnitConfigRequest,
     UpdateUnitRequest,
     UpsertFloorInventoryRequest,
+    build_facility_list_query,
 )
 from apps.user_service.app.schemas.project_members import (
     AssignProjectMemberRequest,
@@ -2196,6 +2199,22 @@ async def create_facility(
     )
 
 
+def get_facility_list_query(
+    facility_types: Annotated[
+        list[str] | None,
+        Query(
+            description=(
+                "Filter by one or more facility types. "
+                "Repeat facility_types or pass comma-separated values."
+            ),
+        ),
+    ] = None,
+    status: FacilityStatus | None = Query(default=None, description="Filter by status."),
+) -> FacilityListQuery:
+    """Parse facility list filters from query params."""
+    return build_facility_list_query(facility_types=facility_types, status=status)
+
+
 @handle_api_exceptions("list facilities")
 @router.get(
     "/{project_id}/facilities",
@@ -2207,8 +2226,7 @@ async def create_facility(
 async def list_facilities(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
-    facility_types: str | None = None,
-    status: str | None = None,
+    query: FacilityListQuery = Depends(get_facility_list_query),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -2221,15 +2239,15 @@ async def list_facilities(
         permission_codes=PROJECTS_MANAGEMENT_VIEW,
     )
     parsed_types = (
-        [part.strip() for part in facility_types.split(",") if part.strip()]
-        if facility_types
+        [facility_type.value for facility_type in query.facility_types]
+        if query.facility_types
         else None
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
     items = await service.list_facilities(
         project_id=project_id,
         facility_types=parsed_types,
-        status=status,
+        status=query.status.value if query.status else None,
     )
     return list_response(
         request=request,
