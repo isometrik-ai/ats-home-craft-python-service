@@ -10,7 +10,10 @@ import pytest
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
-from apps.user_service.app.schemas.enums import ContactUnitStatus
+from apps.user_service.app.schemas.enums import (
+    ContactUnitRelationship,
+    ContactUnitStatus,
+)
 
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 CONTACT_ID = "660e8400-e29b-41d4-a716-446655440001"
@@ -341,6 +344,28 @@ async def test_insert_allotment():
     assert "INSERT INTO contact_units" in query
     assert "assigned_at" in query
     assert args[-1] == datetime(2026, 7, 15, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_list_household_for_contact_includes_owner_for_family_member():
+    """Family callers can list primary occupants on shared units."""
+    conn = _FakeConn(
+        rows=[
+            {"contact_unit_id": CU_ID, "relationship": ContactUnitRelationship.SELF.value},
+        ]
+    )
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    rows = await repo.list_household_for_contact(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        unit_id=UNIT_ID,
+    )
+
+    assert rows[0]["relationship"] == ContactUnitRelationship.SELF.value
+    query, args = conn.fetch_calls[0]
+    assert "caller_cu.relationship <> $5::contact_unit_relationship" in query
+    assert UNIT_ID in args
 
 
 @pytest.mark.asyncio

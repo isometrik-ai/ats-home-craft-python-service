@@ -323,6 +323,34 @@ class VehiclesService:
             )
         return unit
 
+    async def _assert_primary_occupant_for_unit(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+    ) -> None:
+        """Ensure the contact is the primary occupant (relationship=self) on the unit."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        if not await self.contact_units_repo.contact_has_active_unit(
+            organization_id=org_id,
+            contact_id=contact_id,
+            unit_id=unit_id,
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_not_assigned",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if not await self.contact_units_repo.owner_has_active_unit(
+            organization_id=org_id,
+            owner_contact_id=contact_id,
+            unit_id=unit_id,
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.primary_occupant_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     async def _assert_parking_entitlement_available(
         self,
         *,
@@ -454,6 +482,10 @@ class VehiclesService:
             contact_id=contact_id,
             unit_id=body.unit_id,
         )
+        await self._assert_primary_occupant_for_unit(
+            contact_id=contact_id,
+            unit_id=body.unit_id,
+        )
         project_id = str(unit["project_id"])
         await self._assert_parking_entitlement_available(unit_id=body.unit_id)
         try:
@@ -510,6 +542,20 @@ class VehiclesService:
         """Patch a vehicle owned by the contact."""
         org_id = self.user_context.organization_id
         assert org_id
+        existing = await self.repo.get_by_id(
+            organization_id=org_id,
+            contact_id=contact_id,
+            vehicle_id=vehicle_id,
+        )
+        if not existing:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._assert_primary_occupant_for_unit(
+            contact_id=contact_id,
+            unit_id=str(existing["unit_id"]),
+        )
         patch = body.model_dump(exclude_unset=True, exclude_none=True)
         if "vehicle_type" in patch and isinstance(patch["vehicle_type"], VehicleType):
             patch["vehicle_type"] = patch["vehicle_type"].value
@@ -519,6 +565,10 @@ class VehiclesService:
             patch["registration_number"] = patch["registration_number"].strip().upper()
         if "unit_id" in patch and patch["unit_id"]:
             unit = await self._validate_unit_for_contact(
+                contact_id=contact_id,
+                unit_id=patch["unit_id"],
+            )
+            await self._assert_primary_occupant_for_unit(
                 contact_id=contact_id,
                 unit_id=patch["unit_id"],
             )
@@ -569,6 +619,7 @@ class VehiclesService:
             )
         unit_id = str(existing["unit_id"])
         project_id = str(existing["project_id"])
+        await self._assert_primary_occupant_for_unit(contact_id=contact_id, unit_id=unit_id)
         await self._assert_parking_entitlement_available(unit_id=unit_id)
         patch = body.model_dump(exclude_unset=True, exclude_none=True)
         if "vehicle_type" in patch and isinstance(patch["vehicle_type"], VehicleType):
@@ -647,6 +698,10 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.vehicle_withdraw_not_allowed",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        await self._assert_primary_occupant_for_unit(
+            contact_id=contact_id,
+            unit_id=str(existing["unit_id"]),
+        )
         await self.repo.delete(
             organization_id=org_id,
             contact_id=contact_id,
@@ -684,6 +739,10 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.vehicle_remove_not_allowed",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        await self._assert_primary_occupant_for_unit(
+            contact_id=contact_id,
+            unit_id=str(existing["unit_id"]),
+        )
         if existing.get("parking_slot_id"):
             await self.parking_slots_repo.release_slot(
                 organization_id=org_id,

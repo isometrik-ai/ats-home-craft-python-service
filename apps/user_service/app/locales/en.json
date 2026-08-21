@@ -645,6 +645,7 @@
       "contact_unit_not_found": "One or more selected properties could not be found.",
       "invalid_contact_unit_id": "Invalid contact unit id.",
       "unit_not_assigned": "The selected unit is not assigned to your account.",
+      "primary_occupant_required": "Only the primary occupant of this unit can perform this action.",
       "unit_not_found": "The unit you selected does not exist.",
       "unit_already_assigned": "This unit is already assigned to another contact.",
       "unit_already_assigned_to_contact": "This unit is already assigned to this contact.",

@@ -100,6 +100,14 @@ class _FakePassesRepo:
         """Return configured list result."""
         return self.list_result
 
+    async def list_visible_to_contact(self, **_kwargs):
+        """Return configured list result."""
+        return self.list_result
+
+    async def get_visible_to_contact(self, **_kwargs):
+        """Return configured visible pass row."""
+        return self.row
+
     async def code_exists_active(self, **_kwargs):
         """Return configured active-code collision flag."""
         return self.code_exists
@@ -388,6 +396,7 @@ async def test_list_passes_returns_normalized_items():
 
     items, total = await svc.list_passes(
         contact_id="contact-1",
+        unit_id="unit-1",
         bucket="active",
         page=1,
         page_size=20,
@@ -531,3 +540,30 @@ async def test_list_events_returns_normalized_timeline():
 
     assert len(events) == 1
     assert events[0]["event_type"] == "check_in"
+
+
+@pytest.mark.asyncio
+async def test_get_pass_uses_visible_lookup():
+    """Get pass resolves via visibility rules (own or shared non-private)."""
+    passes_repo = _FakePassesRepo()
+    passes_repo.row = _pass_row(host_contact_id="owner-1", is_private=False)
+    svc = _service(passes_repo=passes_repo)
+
+    result = await svc.get_pass(
+        contact_id="family-1",
+        pass_id="pass-1",
+        include_events=False,
+    )
+
+    assert result["id"] == "pass-1"
+
+
+@pytest.mark.asyncio
+async def test_get_pass_not_visible_when_private_and_not_host():
+    """Family cannot view another resident's private pass."""
+    passes_repo = _FakePassesRepo()
+    passes_repo.row = None
+    svc = _service(passes_repo=passes_repo)
+
+    with pytest.raises(NotFoundException):
+        await svc.get_pass(contact_id="family-1", pass_id="pass-1", include_events=False)

@@ -294,6 +294,22 @@ class PassesService:
             )
         return row
 
+    async def _get_visible_pass_row(self, *, contact_id: str, pass_id: str) -> dict[str, Any]:
+        """Load a pass visible to the contact or raise 404."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        row = await self.passes_repo.get_visible_to_contact(
+            organization_id=org_id,
+            viewer_contact_id=contact_id,
+            pass_id=pass_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="passes.errors.pass_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return row
+
     def _assert_editable(self, row: dict[str, Any]) -> None:
         """Reject edits/cancels on non-editable passes."""
         display_status = self.derive_display_status(row)
@@ -382,19 +398,20 @@ class PassesService:
         self,
         *,
         contact_id: str,
+        unit_id: str,
         bucket: str | None = None,
         display_status: str | None = None,
-        unit_id: str | None = None,
         pass_type: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
-        """List passes for the current host."""
+        """List passes visible to the resident for a unit (own + shared non-private)."""
         org_id = self.user_context.organization_id
         assert org_id
-        rows, total = await self.passes_repo.list_by_contact(
+        await self._assert_unit_owned(contact_id=contact_id, unit_id=unit_id)
+        rows, total = await self.passes_repo.list_visible_to_contact(
             organization_id=org_id,
-            host_contact_id=contact_id,
+            viewer_contact_id=contact_id,
             bucket=bucket,
             display_status=display_status,
             unit_id=unit_id,
@@ -411,8 +428,8 @@ class PassesService:
         pass_id: str,
         include_events: bool = True,
     ) -> dict[str, Any]:
-        """Return pass details for the host."""
-        row = await self._get_owned_pass_row(contact_id=contact_id, pass_id=pass_id)
+        """Return pass details when visible to the contact."""
+        row = await self._get_visible_pass_row(contact_id=contact_id, pass_id=pass_id)
         events: list[dict[str, Any]] | None = None
         if include_events:
             org_id = self.user_context.organization_id
@@ -490,8 +507,8 @@ class PassesService:
         return self._normalize_pass(updated)
 
     async def list_events(self, *, contact_id: str, pass_id: str) -> list[dict[str, Any]]:
-        """Return timeline events for a pass owned by the host."""
-        await self._get_owned_pass_row(contact_id=contact_id, pass_id=pass_id)
+        """Return timeline events for a pass visible to the contact."""
+        await self._get_visible_pass_row(contact_id=contact_id, pass_id=pass_id)
         org_id = self.user_context.organization_id
         assert org_id
         rows = await self.events_repo.list_by_pass(

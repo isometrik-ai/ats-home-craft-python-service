@@ -507,15 +507,43 @@ class ContactOnboardingService:
         contact_id: str,
         unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List family contacts linked to the primary contact's units."""
+        """List household-visible contacts on units the caller actively occupies."""
         org_id = self.user_context.organization_id
         assert org_id
-        rows = await self.contact_units_repo.list_household_by_primary(
+        rows = await self.contact_units_repo.list_household_for_contact(
             organization_id=org_id,
-            primary_contact_id=contact_id,
+            contact_id=contact_id,
             unit_id=unit_id,
         )
         return [self._format_household_member(row) for row in rows]
+
+    async def _assert_primary_occupant_for_unit(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+    ) -> None:
+        """Ensure the contact is the primary occupant (relationship=self) on the unit."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        if not await self.contact_units_repo.contact_has_active_unit(
+            organization_id=org_id,
+            contact_id=contact_id,
+            unit_id=unit_id,
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_not_assigned",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if not await self.contact_units_repo.owner_has_active_unit(
+            organization_id=org_id,
+            owner_contact_id=contact_id,
+            unit_id=unit_id,
+        ):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.primary_occupant_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
     async def get_household_summary(
         self,
@@ -764,16 +792,10 @@ class ContactOnboardingService:
         assert org_id
         await self._ensure_onboarding(primary_contact_id)
 
-        has_unit = await self.contact_units_repo.contact_has_active_unit(
-            organization_id=org_id,
+        await self._assert_primary_occupant_for_unit(
             contact_id=primary_contact_id,
             unit_id=body.unit_id,
         )
-        if not has_unit:
-            raise ValidationException(
-                message_key="contact_onboarding.errors.unit_not_assigned",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
         unit = await self.contact_units_repo.get_unit_project(
             organization_id=org_id,
             unit_id=body.unit_id,

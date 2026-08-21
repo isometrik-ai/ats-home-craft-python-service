@@ -165,7 +165,7 @@ notify other household members (silent entry). Stored on the pass; notification 
 1. Insert `passes` (`status='active'`, `entry_count=0`); insert `pass_events` `created`.
 1. Return the pass incl. the 4-digit `code` (the app renders the QR from it).
 
-### Example: `GET /v1/passes?bucket=active`
+### Example: `GET /v1/passes?unit_id={uuid}&bucket=active`
 
 **Response (shape):**
 

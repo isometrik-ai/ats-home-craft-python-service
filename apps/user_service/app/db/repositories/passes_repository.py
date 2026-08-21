@@ -6,6 +6,7 @@ from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import (
+    ContactUnitStatus,
     PassDisplayStatus,
     PassListBucket,
     PassStatus,
@@ -106,6 +107,25 @@ WHERE p.organization_id = $1::uuid
 
 class PassesRepository(BaseRepository):
     """Database operations for public.passes."""
+
+    @staticmethod
+    def _visible_to_contact_predicate(*, viewer_param: str) -> str:
+        """SQL fragment: pass is owned by viewer or shared on an active unit link."""
+        active_status = ContactUnitStatus.ACTIVE.value
+        return f"""(
+          p.host_contact_id = {viewer_param}::uuid
+          OR (
+            COALESCE(p.is_private, false) = false
+            AND EXISTS (
+              SELECT 1
+              FROM contact_units cu
+              WHERE cu.organization_id = p.organization_id
+                AND cu.contact_id = {viewer_param}::uuid
+                AND cu.unit_id = p.unit_id
+                AND cu.status = '{active_status}'::contact_unit_status
+            )
+          )
+        )"""
 
     @staticmethod
     def _bucket_predicate(bucket: str | None, *, param_index: int) -> tuple[str, list[Any]]:
@@ -384,6 +404,28 @@ class PassesRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def get_visible_to_contact(
+        self,
+        *,
+        organization_id: str,
+        viewer_contact_id: str,
+        pass_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch a pass the viewer may see (host or shared non-private on linked unit)."""
+        visibility = self._visible_to_contact_predicate(viewer_param="$2")
+        row = await self.db_connection.fetchrow(
+            f"""
+            {_PASS_SELECT_SQL}
+              AND p.id = $3::uuid
+              AND {visibility}
+            LIMIT 1
+            """,
+            organization_id,
+            viewer_contact_id,
+            pass_id,
+        )
+        return dict(row) if row else None
+
     async def get_by_code(
         self,
         *,
@@ -480,6 +522,73 @@ class PassesRepository(BaseRepository):
         """List passes for a host with optional filters."""
         args: list[Any] = [organization_id, host_contact_id]
         where = ["p.host_contact_id = $2::uuid"]
+        idx = 3
+
+        bucket_sql, bucket_args = self._bucket_predicate(bucket, param_index=idx)
+        if bucket_sql:
+            where.append(bucket_sql)
+        args.extend(bucket_args)
+        idx += len(bucket_args)
+
+        display_sql, display_args = self._display_status_predicate(
+            display_status,
+            param_index=idx,
+        )
+        if display_sql:
+            where.append(display_sql)
+        args.extend(display_args)
+        idx += len(display_args)
+
+        if unit_id:
+            where.append(f"p.unit_id = ${idx}::uuid")
+            args.append(unit_id)
+            idx += 1
+        if pass_type:
+            where.append(f"p.pass_type = ${idx}::pass_type")
+            args.append(pass_type)
+            idx += 1
+
+        where_sql = " AND ".join(part for part in where if part)
+        offset = (page - 1) * page_size
+
+        count = await self.db_connection.fetchval(
+            f"""
+            SELECT COUNT(*)
+            FROM passes p
+            WHERE p.organization_id = $1::uuid
+              AND {where_sql}
+            """,
+            *args,
+        )
+
+        rows = await self.db_connection.fetch(
+            f"""
+            {_PASS_SELECT_SQL}
+              AND {where_sql}
+            ORDER BY p.valid_from DESC, p.created_at DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+            """,
+            *args,
+            page_size,
+            offset,
+        )
+        return [dict(row) for row in rows], int(count or 0)
+
+    async def list_visible_to_contact(
+        self,
+        *,
+        organization_id: str,
+        viewer_contact_id: str,
+        bucket: str | None = None,
+        display_status: str | None = None,
+        unit_id: str | None = None,
+        pass_type: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List passes visible to a resident (own passes + shared non-private on linked units)."""
+        args: list[Any] = [organization_id, viewer_contact_id]
+        where = [self._visible_to_contact_predicate(viewer_param="$2")]
         idx = 3
 
         bucket_sql, bucket_args = self._bucket_predicate(bucket, param_index=idx)

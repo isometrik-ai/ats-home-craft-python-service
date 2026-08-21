@@ -885,6 +885,69 @@ class ContactUnitsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def list_household_for_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        unit_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """List household-visible contacts on units the caller actively occupies.
+
+        Primary occupants see other family members (relationship != self).
+        Family members also see primary occupants (relationship = self) on shared units.
+        """
+        args: list[Any] = [
+            organization_id,
+            contact_id,
+            ContactUnitStatus.ACTIVE.value,
+            [ContactUnitStatus.ACTIVE.value, ContactUnitStatus.PENDING.value],
+            ContactUnitRelationship.SELF.value,
+        ]
+        unit_filter = ""
+        if unit_id:
+            unit_filter = f" AND caller_cu.unit_id = ${len(args) + 1}::uuid"
+            args.append(unit_id)
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              cu.id::text AS contact_unit_id,
+              cu.unit_id::text AS unit_id,
+              cu.contact_id::text AS contact_id,
+              cu.relationship::text AS relationship,
+              cu.status::text AS unit_link_status,
+              c.first_name,
+              c.last_name,
+              c.portal_access,
+              c.phones,
+              c.emails,
+              c.user_id::text AS user_id,
+              hi.status::text AS invitation_status,
+              hi.token AS invitation_token,
+              hi.expires_at AS invitation_expires_at,
+              hi.updated_at AS invitation_sent_at
+            FROM contact_units caller_cu
+            JOIN contact_units cu
+              ON cu.unit_id = caller_cu.unit_id
+             AND cu.organization_id = caller_cu.organization_id
+            JOIN contacts c ON c.id = cu.contact_id
+            {_HOUSEHOLD_INVITATION_LATERAL_JOIN}
+            WHERE caller_cu.organization_id = $1::uuid
+              AND caller_cu.contact_id = $2::uuid
+              AND caller_cu.status = $3::contact_unit_status
+              AND cu.contact_id != $2::uuid
+              AND cu.status = ANY($4::contact_unit_status[])
+              AND (
+                cu.relationship <> $5::contact_unit_relationship
+                OR caller_cu.relationship <> $5::contact_unit_relationship
+              )
+              {unit_filter}
+            ORDER BY cu.created_at
+            """,
+            *args,
+        )
+        return [dict(row) for row in rows]
+
     async def list_household_by_primary(
         self,
         *,
@@ -969,6 +1032,7 @@ class ContactUnitsRepository(BaseRepository):
               AND cu.relationship <> $5::contact_unit_relationship
               AND primary_cu.contact_id = $3::uuid
               AND primary_cu.status = $4::contact_unit_status
+              AND primary_cu.relationship = $5::contact_unit_relationship
             LIMIT 1
             """,
             organization_id,
@@ -1014,6 +1078,7 @@ class ContactUnitsRepository(BaseRepository):
             WHERE primary_cu.organization_id = $1::uuid
               AND primary_cu.contact_id = $2::uuid
               AND primary_cu.status = $3::contact_unit_status
+              AND primary_cu.relationship = $7::contact_unit_relationship
               AND cu.id = $4::uuid
               AND cu.contact_id != $2::uuid
               AND cu.relationship <> $6::contact_unit_relationship
@@ -1025,6 +1090,7 @@ class ContactUnitsRepository(BaseRepository):
             ContactUnitStatus.ACTIVE.value,
             contact_unit_id,
             [ContactUnitStatus.ACTIVE.value, ContactUnitStatus.PENDING.value],
+            ContactUnitRelationship.SELF.value,
             ContactUnitRelationship.SELF.value,
         )
         return dict(row) if row else None
