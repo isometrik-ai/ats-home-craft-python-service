@@ -746,3 +746,25 @@ async def test_add_household_member(monkeypatch, client):
         },
     )
     assert_success(res, 201)
+
+
+@pytest.mark.asyncio
+async def test_export_contacts(monkeypatch, client):
+    """GET /contacts/export returns CSV attachment."""
+    _patch_contacts_access(monkeypatch)
+
+    async def fake_export_contacts_csv(_self, *, query):
+        del _self
+        assert query.project_id == "project-1"
+        return "first_name,last_name,email\nJane,Doe,jane@example.com\n"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.ContactsService.export_contacts_csv",
+        fake_export_contacts_csv,
+    )
+
+    res = await client.get("/v1/contacts/export?project_id=project-1&status=active")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment" in res.headers.get("content-disposition", "")
+    assert "Jane,Doe,jane@example.com" in res.text

@@ -144,3 +144,87 @@ async def test_retry_contacts_import_job(monkeypatch, client):
     res = await client.post(f"/v1/contacts/imports/{JOB_ID}/retry")
     body = assert_success(res, 202)
     assert body["data"]["job_id"] == JOB_ID
+
+
+@pytest.mark.asyncio
+async def test_get_contacts_import_template(monkeypatch, client):
+    """GET /contacts/imports/template returns CSV template."""
+    patch_check_permissions(monkeypatch, "apps.user_service.app.api.contacts_imports")
+
+    res = await client.get("/v1/contacts/imports/template")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "first_name,last_name,email,phone_number,phone_isd_code" in res.text
+
+
+@pytest.mark.asyncio
+async def test_get_contacts_import_errors(monkeypatch, client):
+    """GET /contacts/imports/{job_id}/errors returns row errors."""
+    patch_check_permissions(monkeypatch, "apps.user_service.app.api.contacts_imports")
+
+    async def fake_get_job(_self, *, job_id: str, organization_id: str):
+        del _self, organization_id
+        assert job_id == JOB_ID
+        return _FAKE_JOB
+
+    async def fake_list_job_error_rows(_self, **kwargs):
+        del _self, kwargs
+        return (
+            [
+                {
+                    "row_number": 2,
+                    "status": "error",
+                    "error": {"code": "validation_error", "message": "invalid email"},
+                }
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_imports_service.ContactsImportService.get_job",
+        fake_get_job,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_imports_service."
+        "ContactsImportService.list_job_error_rows",
+        fake_list_job_error_rows,
+    )
+
+    res = await client.get(f"/v1/contacts/imports/{JOB_ID}/errors")
+    body = assert_success(res, 200)
+    assert body["total"] == 1
+    assert body["data"][0]["row_number"] == 2
+
+
+@pytest.mark.asyncio
+async def test_create_contacts_import_job_without_schema_version(monkeypatch, client):
+    """POST /contacts/imports defaults schema_version to 1."""
+    patch_check_permissions(monkeypatch, "apps.user_service.app.api.contacts_imports")
+
+    captured: dict = {}
+
+    async def fake_create_job_and_enqueue(_self, **kwargs):
+        del _self
+        captured.update(kwargs)
+        return _FAKE_JOB, {"event_type": "contacts.import.requested"}
+
+    async def fake_publish_event_background(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_imports_service."
+        "ContactsImportService.create_job_and_enqueue",
+        fake_create_job_and_enqueue,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.event_service.EventService.publish_event_background",
+        fake_publish_event_background,
+    )
+
+    res = await client.post(
+        "/v1/contacts/imports",
+        json={"file_url": "https://example.com/contacts.csv"},
+    )
+    body = assert_success(res, 202)
+    assert body["data"]["job_id"] == JOB_ID
+    assert captured["schema_version"] == 1
