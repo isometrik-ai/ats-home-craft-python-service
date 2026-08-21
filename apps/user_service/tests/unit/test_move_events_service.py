@@ -211,6 +211,17 @@ def _service(
     )
     service.units_repo = MagicMock()
     service.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="vacant")
+    service.units_repo.get_unit_detail_base = AsyncMock(
+        return_value={"status": "vacant", "id": "unit-1"}
+    )
+    service.units_repo.get_unit_owner_contact = AsyncMock(
+        return_value={"contact_id": "owner-1", "contact_unit_id": "cu-owner"}
+    )
+    service.contact_roles_repo = MagicMock()
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(return_value=None)
+    service.contact_roles_repo.list_active_roles_for_contact = AsyncMock(return_value=[])
+    service.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
+    service.contact_roles_repo.insert_tenant_role = AsyncMock(return_value={"id": "role-1"})
     service._push_dispatcher = _FakePushDispatcher()
     return service
 
@@ -228,6 +239,27 @@ async def test_create_move_in_syncs_active_link():
     assert len(move_repo.insert_calls) == 1
     assert len(move_repo.insert_calls[0]["documents"]) == 3
     assert len(contact_units_repo.sync_move_in_calls) == 1
+    service.contact_roles_repo.insert_tenant_role.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_move_in_skips_tenant_role_when_owner():
+    """Move-in does not overwrite an active Owner role on the unit."""
+    move_repo = _FakeMoveEventsRepo()
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+    service.contact_roles_repo.list_active_roles_for_contact = AsyncMock(
+        return_value=[
+            {
+                "unit_id": "unit-1",
+                "role_type": "Owner",
+            }
+        ]
+    )
+
+    await service.create_move_event(_move_in_request())
+
+    service.contact_roles_repo.insert_tenant_role.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -365,6 +397,32 @@ async def test_create_move_out_success_syncs_move_out(monkeypatch):
     assert result.move_type == MoveEventType.MOVE_OUT.value
     assert len(contact_units_repo.sync_move_out_calls) == 1
     assert release_calls == [{"contact_id": "contact-1", "unit_id": "unit-1"}]
+
+
+@pytest.mark.asyncio
+async def test_create_move_in_rejects_unsold_unit():
+    """Move-in is blocked when the unit is vacant without an owner allotment."""
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo, _FakeContactUnitsRepo())
+    service.units_repo.get_unit_owner_contact = AsyncMock(return_value=None)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.create_move_event(_move_in_request())
+    assert exc_info.value.message_key == "move_events.errors.unit_not_sold"
+
+
+@pytest.mark.asyncio
+async def test_create_move_in_rejects_active_tenant():
+    """Move-in is blocked when the unit already has an active tenant."""
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo, _FakeContactUnitsRepo())
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-other"
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.create_move_event(_move_in_request())
+    assert exc_info.value.message_key == "move_events.errors.unit_occupied_by_other_tenant"
 
 
 @pytest.mark.asyncio

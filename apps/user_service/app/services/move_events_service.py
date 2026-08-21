@@ -8,6 +8,9 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.db.repositories.contact_roles_repository import (
+    ContactRolesRepository,
+)
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
@@ -15,7 +18,11 @@ from apps.user_service.app.db.repositories.move_events_repository import (
     MoveEventsRepository,
 )
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
-from apps.user_service.app.schemas.enums import ContactUnitStatus, MoveEventType
+from apps.user_service.app.schemas.enums import (
+    ContactType,
+    ContactUnitStatus,
+    MoveEventType,
+)
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
     MoveEventDocumentResponse,
@@ -23,6 +30,7 @@ from apps.user_service.app.schemas.move_events import (
     UpdateMoveEventRequest,
 )
 from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
+from apps.user_service.app.services.inventory_service import resolve_is_sold
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
     unit_label_from_row,
@@ -48,11 +56,13 @@ class MoveEventsService:
         user_context: UserContext,
         move_events_repository: MoveEventsRepository | None = None,
         contact_units_repository: ContactUnitsRepository | None = None,
+        contact_roles_repository: ContactRolesRepository | None = None,
     ) -> None:
         self.db_connection = db_connection
         self.user_context = user_context
         self.move_events_repo = move_events_repository or MoveEventsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self.contact_roles_repo = contact_roles_repository or ContactRolesRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
@@ -224,6 +234,83 @@ class MoveEventsService:
         )
         return created["id"]
 
+    async def _assert_move_in_allowed(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> None:
+        """Reject move-in when the unit is unsold or already has an active tenant."""
+        unit_row = await self.units_repo.get_unit_detail_base(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        if not unit_row:
+            raise NotFoundException(
+                message_key="move_events.errors.unit_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        owner = await self.units_repo.get_unit_owner_contact(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        owner_contact_id = str(owner["contact_id"]) if owner and owner.get("contact_id") else None
+        if not resolve_is_sold(
+            status=str(unit_row.get("status") or ""),
+            owner_contact_id=owner_contact_id,
+        ):
+            raise ValidationException(
+                message_key="move_events.errors.unit_not_sold",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        tenant_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if tenant_id:
+            raise ValidationException(
+                message_key="move_events.errors.unit_occupied_by_other_tenant",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _ensure_tenant_role_for_move_in(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        contact_id: str,
+        contact_unit_id: str,
+    ) -> None:
+        """Assign a Tenant role on move-in when the contact is not already Owner/Tenant."""
+        roles = await self.contact_roles_repo.list_active_roles_for_contact(
+            organization_id=organization_id,
+            contact_id=contact_id,
+        )
+        for role in roles:
+            if str(role.get("unit_id") or "") != unit_id:
+                continue
+            role_type = str(role.get("role_type") or "")
+            if role_type in {ContactType.OWNER.value, ContactType.TENANT.value}:
+                return
+
+        await self.contact_roles_repo.end_active_roles_for_unit(
+            organization_id=organization_id,
+            unit_id=unit_id,
+            role_types=[ContactType.TENANT.value],
+        )
+        await self.contact_roles_repo.insert_tenant_role(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            contact_unit_id=contact_unit_id,
+        )
+
     async def create_move_event(self, body: CreateMoveEventRequest) -> MoveEventResponse:
         """Record a move-in or move-out and sync occupancy."""
         organization_id = self.user_context.organization_id
@@ -248,6 +335,12 @@ class MoveEventsService:
             )
 
         move_type = body.move_type.value
+        if move_type == MoveEventType.MOVE_IN.value:
+            await self._assert_move_in_allowed(
+                organization_id=organization_id,
+                project_id=str(unit["project_id"]),
+                unit_id=body.unit_id,
+            )
         if move_type == MoveEventType.MOVE_OUT.value:
             has_active = await self.contact_units_repo.contact_has_active_unit(
                 organization_id=organization_id,
@@ -293,6 +386,14 @@ class MoveEventsService:
             move_type=move_type,
             event_date=body.event_date,
         )
+        if move_type == MoveEventType.MOVE_IN.value:
+            await self._ensure_tenant_role_for_move_in(
+                organization_id=organization_id,
+                project_id=str(unit["project_id"]),
+                unit_id=body.unit_id,
+                contact_id=body.contact_id,
+                contact_unit_id=contact_unit_id,
+            )
 
         row = await self.move_events_repo.get_by_id(
             organization_id=organization_id,

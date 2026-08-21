@@ -36,16 +36,24 @@ SELECT
     (
       SELECT cr.role_type::text
       FROM contact_roles cr
-      WHERE cr.contact_unit_id = me.contact_unit_id
-         OR (
-           cr.contact_id = me.contact_id
-           AND cr.unit_id = me.unit_id
-           AND cr.status = 'active'::public.contact_role_status
-         )
-      ORDER BY cr.started_at DESC
+      WHERE cr.organization_id = me.organization_id
+        AND (
+          cr.contact_unit_id = me.contact_unit_id
+          OR (
+            cr.contact_id = me.contact_id
+            AND cr.unit_id = me.unit_id
+          )
+        )
+        AND cr.ended_at IS NULL
+      ORDER BY
+        CASE WHEN cr.contact_unit_id = me.contact_unit_id THEN 0 ELSE 1 END,
+        cr.started_at DESC
       LIMIT 1
     ),
-    cu.relationship::text
+    CASE
+      WHEN me.move_type = 'move_in'::move_event_type THEN 'Tenant'
+      ELSE NULL
+    END
   ) AS contact_role
 FROM move_events me
 JOIN units u ON u.id = me.unit_id
