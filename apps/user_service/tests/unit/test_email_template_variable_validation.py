@@ -207,3 +207,93 @@ def test_validate_variable_tree_defaults_walks_nested_nodes():
 
     validator.validate_default_for_field_type.assert_called_once()
     validator.validate_list_default_value.assert_called_once()
+
+
+def test_resolve_runtime_required_key_missing():
+    """Required variables without runtime value or default raise."""
+    validator = EmailTemplateVariableValidator(db_connection=MagicMock())
+    variables = [
+        EmailTemplateVariableDefinition(
+            variable_key="brand",
+            field_name="Brand",
+            field_type=FieldType.TEXT,
+            is_required=True,
+            default_value=None,
+        )
+    ]
+
+    with pytest.raises(ValidationException) as exc_info:
+        validator.resolve_runtime_variable_values(variables, {})
+    assert exc_info.value.message_key == "email_templates.errors.runtime_value_required"
+
+
+def test_resolve_runtime_list_field():
+    """LIST runtime values go through validate_list_default_value."""
+    validator = EmailTemplateVariableValidator(db_connection=MagicMock())
+    validator.validate_list_default_value = MagicMock(return_value=["a", "b"])
+    variables = [
+        EmailTemplateVariableDefinition(
+            variable_key="tags",
+            field_name="Tags",
+            field_type=FieldType.LIST,
+            default_value=None,
+            sub_fields=[
+                EmailTemplateVariableDefinition(
+                    variable_key="tag",
+                    field_name="Tag",
+                    field_type=FieldType.TEXT,
+                    default_value=None,
+                )
+            ],
+        )
+    ]
+
+    resolved = validator.resolve_runtime_variable_values(variables, {"tags": ["a", "b"]})
+
+    assert resolved == {"tags": ["a", "b"]}
+    validator.validate_list_default_value.assert_called_once()
+
+
+def test_validate_variable_tree_object_branch():
+    """OBJECT nodes enqueue children without validating container defaults."""
+    validator = EmailTemplateVariableValidator(db_connection=MagicMock())
+    validator.validate_default_for_field_type = MagicMock(return_value="Ada")
+
+    validator.validate_variable_tree_defaults(
+        [
+            EmailTemplateVariableDefinition(
+                variable_key="profile",
+                field_name="Profile",
+                field_type=FieldType.OBJECT,
+                default_value=None,
+                sub_fields=[
+                    EmailTemplateVariableDefinition(
+                        variable_key="first_name",
+                        field_name="First Name",
+                        field_type=FieldType.TEXT,
+                        default_value="Ada",
+                    )
+                ],
+            )
+        ]
+    )
+
+    validator.validate_default_for_field_type.assert_called_once()
+
+
+def test_validate_default_address_field():
+    """ADDRESS defaults are normalized through address helper."""
+    validator = EmailTemplateVariableValidator(db_connection=MagicMock())
+    validator._custom_field_service._coerce_field_value = MagicMock(
+        return_value={"address_line1": "1 Main"}
+    )
+
+    result = validator.validate_default_for_field_type(
+        "office",
+        FieldType.ADDRESS,
+        {},
+        is_required=False,
+        default_value={"line1": "1 Main"},
+    )
+
+    assert result == {"address_line1": "1 Main"}
