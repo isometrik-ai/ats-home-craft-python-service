@@ -92,6 +92,20 @@ _BOOKING_SELECT = """
   b.updated_at
 """
 
+_CONTACT_NAME_SQL = """
+NULLIF(
+  TRIM(
+    CONCAT_WS(
+      ' ',
+      NULLIF(TRIM(COALESCE(c.prefix, '')), ''),
+      NULLIF(TRIM(COALESCE(c.first_name, '')), ''),
+      NULLIF(TRIM(COALESCE(c.last_name, '')), '')
+    )
+  ),
+  ''
+) AS contact_name
+"""
+
 
 class CommunityEventsRepository(BaseRepository):
     """Database operations for community events tables."""
@@ -541,7 +555,7 @@ class CommunityEventsRepository(BaseRepository):
         row = await self.db_connection.fetchrow(
             f"""
             SELECT {_BOOKING_SELECT},
-              c.display_name AS contact_name,
+              {_CONTACT_NAME_SQL.strip()},
               u.code AS unit_code
             FROM community_event_bookings b
             LEFT JOIN contacts c ON c.id = b.contact_id
@@ -562,7 +576,7 @@ class CommunityEventsRepository(BaseRepository):
         row = await self.db_connection.fetchrow(
             f"""
             SELECT {_BOOKING_SELECT},
-              c.display_name AS contact_name,
+              {_CONTACT_NAME_SQL.strip()},
               u.code AS unit_code,
               ev.title AS event_title,
               ev.start_date AS event_start_date
@@ -614,7 +628,7 @@ class CommunityEventsRepository(BaseRepository):
         rows = await self.db_connection.fetch(
             f"""
             SELECT {_BOOKING_SELECT},
-              c.display_name AS contact_name,
+              {_CONTACT_NAME_SQL.strip()},
               u.code AS unit_code
             FROM community_event_bookings b
             LEFT JOIN contacts c ON c.id = b.contact_id
