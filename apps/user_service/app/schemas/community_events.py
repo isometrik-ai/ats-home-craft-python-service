@@ -310,6 +310,28 @@ class CreateEventBookingRequest(BaseModel):
         return child_tickets
 
 
+class AdminCreateEventBookingRequest(BaseModel):
+    """Admin walk-in / on-behalf booking for a resident."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contact_id: str = Field(..., min_length=1)
+    unit_id: str = Field(..., min_length=1)
+    adult_tickets: int = Field(..., ge=0, le=50)
+    child_tickets: int = Field(0, ge=0, le=50)
+    mark_paid: bool = False
+    payment_notes: str | None = Field(None, max_length=500)
+
+    @field_validator("child_tickets")
+    @classmethod
+    def at_least_one_ticket(cls, child_tickets: int, info) -> int:
+        """Require at least one ticket total."""
+        adult = info.data.get("adult_tickets", 0)
+        if adult + child_tickets < 1:
+            raise ValueError("at least one ticket required")
+        return child_tickets
+
+
 class ResidentEventListItemResponse(BaseModel):
     """Resident event card."""
 

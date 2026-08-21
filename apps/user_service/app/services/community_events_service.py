@@ -17,6 +17,7 @@ from apps.user_service.app.db.repositories.facilities_repository import (
     FacilitiesRepository,
 )
 from apps.user_service.app.schemas.community_events import (
+    AdminCreateEventBookingRequest,
     CancelCommunityEventRequest,
     CommunityEventBookingListItemResponse,
     CommunityEventBookingListQuery,
@@ -721,21 +722,9 @@ class CommunityEventsService:
         ]
         return items, total
 
-    async def mark_booking_paid(
-        self,
-        *,
-        project_id: str,
-        event_id: str,
-        booking_id: str,
-        body: MarkBookingPaidRequest,
-    ) -> CommunityEventBookingListItemResponse:
-        """Delegate mark paid."""
-        row = await self.booking_service.mark_paid(
-            project_id=project_id,
-            event_id=event_id,
-            booking_id=booking_id,
-            body=body,
-        )
+    @staticmethod
+    def _booking_list_item(row: dict[str, Any]) -> CommunityEventBookingListItemResponse:
+        """Map a booking row to admin list item."""
         return CommunityEventBookingListItemResponse(
             id=str(row["id"]),
             display_code=str(row["display_code"]),
@@ -753,6 +742,38 @@ class CommunityEventsService:
             paid_at=row.get("paid_at"),
             booked_at=row["booked_at"],
         )
+
+    async def create_booking_on_behalf(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        body: AdminCreateEventBookingRequest,
+    ) -> CommunityEventBookingListItemResponse:
+        """Admin creates a resident booking (optional immediate mark-paid)."""
+        row = await self.booking_service.create_admin_booking(
+            project_id=project_id,
+            event_id=event_id,
+            body=body,
+        )
+        return self._booking_list_item(row)
+
+    async def mark_booking_paid(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        booking_id: str,
+        body: MarkBookingPaidRequest,
+    ) -> CommunityEventBookingListItemResponse:
+        """Delegate mark paid."""
+        row = await self.booking_service.mark_paid(
+            project_id=project_id,
+            event_id=event_id,
+            booking_id=booking_id,
+            body=body,
+        )
+        return self._booking_list_item(row)
 
     async def mark_booking_waived(
         self,

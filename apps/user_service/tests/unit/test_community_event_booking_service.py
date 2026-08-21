@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from apps.user_service.app.schemas.community_events import (
+    AdminCreateEventBookingRequest,
+    MarkBookingPaidRequest,
+)
 from apps.user_service.app.schemas.enums import (
+    CommunityEventBookingStatus,
     CommunityEventChildTicketMode,
+    CommunityEventPaymentStatus,
     CommunityEventPublishStatus,
     CommunityEventRecordStatus,
     CommunityEventType,
@@ -15,6 +22,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.community_event_booking_service import (
     CommunityEventBookingService,
 )
+from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import ValidationException
 
 
@@ -101,3 +109,118 @@ class TestFacilityValidation:
         CommunityEventBookingService.validate_facility_for_event(
             {"facility_type": "sports", "status": "active", "active": True}
         )
+
+
+class TestAdminBookable:
+    def test_admin_bookable_after_resident_window_closed(self) -> None:
+        event = _published_event(
+            booking_closes_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        )
+        assert CommunityEventBookingService._is_booking_open(event) is False
+        assert CommunityEventBookingService._is_admin_bookable(event) is True
+
+    def test_not_admin_bookable_when_draft(self) -> None:
+        event = _published_event(
+            publish_status=CommunityEventPublishStatus.DRAFT.value,
+        )
+        assert CommunityEventBookingService._is_admin_bookable(event) is False
+
+
+class TestCreateAdminBooking:
+    @pytest.mark.asyncio
+    async def test_creates_confirmed_booking_and_marks_paid(self) -> None:
+        service = CommunityEventBookingService(
+            db_connection=MagicMock(),
+            user_context=UserContext(
+                user_id="admin-1",
+                email="admin@test.com",
+                organization_id="org-1",
+                user_type="admin",
+            ),
+        )
+        service.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+        service.contact_units_repo.get_unit_project = AsyncMock(
+            return_value={"project_id": "project-1"}
+        )
+        service.repo.contact_has_owner_or_tenant_on_unit = AsyncMock(return_value=True)
+        service.repo.fetch_event_by_id = AsyncMock(return_value=_published_event())
+        service.repo.count_active_tickets_for_contact = AsyncMock(return_value=0)
+        service.repo.allocate_booking_sequence = AsyncMock(return_value=7)
+        service.repo.insert_booking = AsyncMock(
+            return_value={
+                "id": "booking-1",
+                "display_code": "BKG-7",
+                "currency": "INR",
+                "contact_id": "contact-1",
+            }
+        )
+        service.repo.adjust_event_aggregates_on_booking = AsyncMock()
+        service.repo.insert_audit_log = AsyncMock()
+        service.notifications.notify_booking_confirmed = AsyncMock()
+        service.mark_paid = AsyncMock(
+            return_value={
+                "id": "booking-1",
+                "display_code": "BKG-7",
+                "payment_status": CommunityEventPaymentStatus.PAID.value,
+                "contact_id": "contact-1",
+                "unit_id": "unit-1",
+                "booked_at": datetime.now(timezone.utc),
+            }
+        )
+
+        body = AdminCreateEventBookingRequest(
+            contact_id="contact-1",
+            unit_id="unit-1",
+            adult_tickets=2,
+            child_tickets=0,
+            mark_paid=True,
+            payment_notes="Walk-in cash",
+        )
+        result = await service.create_admin_booking(
+            project_id="project-1",
+            event_id="event-1",
+            body=body,
+        )
+
+        assert result["payment_status"] == CommunityEventPaymentStatus.PAID.value
+        insert_args = service.repo.insert_booking.await_args.kwargs["data"]
+        assert insert_args["booking_status"] == CommunityEventBookingStatus.CONFIRMED.value
+        assert insert_args["payment_status"] == CommunityEventPaymentStatus.PENDING.value
+        service.mark_paid.assert_awaited_once_with(
+            project_id="project-1",
+            event_id="event-1",
+            booking_id="booking-1",
+            body=MarkBookingPaidRequest(payment_notes="Walk-in cash"),
+        )
+
+    @pytest.mark.asyncio
+    async def test_rejects_mark_paid_for_free_event(self) -> None:
+        service = CommunityEventBookingService(
+            db_connection=MagicMock(),
+            user_context=UserContext(
+                user_id="admin-1",
+                email="admin@test.com",
+                organization_id="org-1",
+                user_type="admin",
+            ),
+        )
+        service.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+        service.contact_units_repo.get_unit_project = AsyncMock(
+            return_value={"project_id": "project-1"}
+        )
+        service.repo.contact_has_owner_or_tenant_on_unit = AsyncMock(return_value=True)
+        service.repo.fetch_event_by_id = AsyncMock(
+            return_value=_published_event(event_type=CommunityEventType.FREE.value)
+        )
+
+        with pytest.raises(ValidationException):
+            await service.create_admin_booking(
+                project_id="project-1",
+                event_id="event-1",
+                body=AdminCreateEventBookingRequest(
+                    contact_id="contact-1",
+                    unit_id="unit-1",
+                    adult_tickets=1,
+                    mark_paid=True,
+                ),
+            )

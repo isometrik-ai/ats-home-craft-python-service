@@ -1081,6 +1081,7 @@
       "event_not_found": "The event could not be found.",
       "event_not_editable": "This event cannot be edited because tickets have already been booked.",
       "event_not_publishable": "The event is missing required fields to publish.",
+      "event_not_bookable": "Bookings cannot be created for this event.",
       "event_deleted": "This event has been deleted.",
       "booking_closed": "Booking is closed for this event.",
       "booking_not_found": "The booking could not be found.",
@@ -1098,6 +1099,7 @@
       "invalid_media_type": "Only JPG and PNG images are allowed.",
       "adult_price_required": "Adult ticket price is required for paid events.",
       "invalid_unit_context": "You do not have access to book for the selected unit.",
+      "mark_paid_not_applicable": "Mark paid is only available for paid events.",
       "zero_amount_booking": "This booking has no payable amount.",
       "organization_required": "Organization context is required."
     },
