@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
@@ -62,6 +63,15 @@ WHERE me.organization_id = $1::uuid
 class MoveEventsRepository(BaseRepository):
     """Database operations for public.move_events."""
 
+    @staticmethod
+    def _jsonb_documents(value: Any) -> str:
+        """Serialize documents for asyncpg jsonb bind parameters."""
+        if value is None:
+            return "[]"
+        if isinstance(value, str):
+            return value
+        return json.dumps(value)
+
     UPDATABLE_FIELDS: frozenset[str] = frozenset(
         {
             "event_date",
@@ -116,7 +126,7 @@ class MoveEventsRepository(BaseRepository):
             data.get("fee_amount"),
             data.get("fee_currency", "INR"),
             data.get("notes"),
-            data.get("documents") or [],
+            self._jsonb_documents(data.get("documents")),
             data.get("recorded_by_user_id"),
         )
         return dict(row)
@@ -230,6 +240,7 @@ class MoveEventsRepository(BaseRepository):
                 set_parts.append(f"{col} = ${idx}::date")
             elif col == "documents":
                 set_parts.append(f"{col} = ${idx}::jsonb")
+                val = self._jsonb_documents(val)
             else:
                 set_parts.append(f"{col} = ${idx}")
             values.append(val)
