@@ -275,7 +275,7 @@ class CommunityEventsService:
 
     async def get_summary(self, *, project_id: str) -> CommunityEventSummaryResponse:
         """Dashboard summary."""
-        await self.setup_service.ensure_project(project_id)
+        await self.setup_service.ensure_project(project_id=project_id)
         counts = await self.repo.get_summary_counts(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -302,7 +302,7 @@ class CommunityEventsService:
         query: CommunityEventListQuery,
     ) -> tuple[list[CommunityEventListItemResponse], int]:
         """Paginated admin list."""
-        await self.setup_service.ensure_project(project_id)
+        await self.setup_service.ensure_project(project_id=project_id)
         offset = (query.page - 1) * query.page_size
         rows, total = await self.repo.list_events(
             organization_id=self.organization_id,
@@ -321,7 +321,7 @@ class CommunityEventsService:
         event_id: str,
     ) -> CommunityEventDetailResponse:
         """Event detail."""
-        await self.setup_service.ensure_project(project_id)
+        await self.setup_service.ensure_project(project_id=project_id)
         row = await self.repo.fetch_event_by_id(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -341,7 +341,7 @@ class CommunityEventsService:
         body: CreateCommunityEventRequest,
     ) -> CommunityEventDetailResponse:
         """Create draft or published event."""
-        await self.setup_service.ensure_project(project_id)
+        await self.setup_service.ensure_project(project_id=project_id)
         self._validate_gallery(body.gallery)
         publish = body.publish_mode == CommunityEventPublishMode.PUBLISH
         await self._validate_facility(
