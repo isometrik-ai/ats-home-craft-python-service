@@ -236,6 +236,19 @@ class CommunityEventsService:
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
 
+    @staticmethod
+    def _gallery_items_to_dicts(items: list[Any]) -> list[dict[str, Any]]:
+        """Normalize gallery rows for repository persistence."""
+        result: list[dict[str, Any]] = []
+        for item in items:
+            if isinstance(item, dict):
+                result.append(item)
+            elif hasattr(item, "model_dump"):
+                result.append(item.model_dump())
+            else:
+                result.append(dict(item))
+        return result
+
     async def _validate_facility(
         self,
         *,
@@ -406,7 +419,7 @@ class CommunityEventsService:
                 organization_id=self.organization_id,
                 project_id=project_id,
                 event_id=str(row["id"]),
-                items=[item.model_dump() for item in body.gallery],
+                items=self._gallery_items_to_dicts(body.gallery),
             )
         action = (
             CommunityEventAuditAction.PUBLISHED.value
@@ -491,7 +504,7 @@ class CommunityEventsService:
                 organization_id=self.organization_id,
                 project_id=project_id,
                 event_id=event_id,
-                items=[item.model_dump() for item in gallery],
+                items=self._gallery_items_to_dicts(gallery),
             )
         await self.repo.insert_audit_log(
             organization_id=self.organization_id,
