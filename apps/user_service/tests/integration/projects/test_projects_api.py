@@ -141,7 +141,7 @@ _FAKE_FACILITY = {
     "id": FACILITY_ID,
     "project_id": PROJECT_ID,
     "name": "Clubhouse",
-    "facility_type": "clubhouse",
+    "facility_type": "recreation",
     "location_type": "indoor_clubhouse",
     "status": "active",
     "active": True,
@@ -1389,7 +1389,7 @@ async def test_create_facility(monkeypatch, client):
         f"/v1/projects/{PROJECT_ID}/facilities",
         json={
             "name": "Clubhouse",
-            "facility_type": "clubhouse",
+            "facility_type": "recreation",
             "location_type": "indoor_clubhouse",
         },
     )

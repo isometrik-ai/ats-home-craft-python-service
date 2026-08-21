@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.enums import (
     ContactUnitRelationship,
     FacilityLocationType,
     FacilityStatus,
+    FacilityType,
     Facing,
     ParkingUserType,
     PlotItemStatus,
@@ -157,7 +158,7 @@ class CreateFacilityRequest(BaseModel):
 
     name: str = Field(..., min_length=1)
     status: FacilityStatus = FacilityStatus.ACTIVE
-    facility_type: str = Field(..., min_length=1)
+    facility_type: FacilityType
     facility_subtype: str | None = None
     location_type: FacilityLocationType
     tower_id: str | None = None
@@ -182,7 +183,7 @@ class UpdateFacilityRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1)
     status: FacilityStatus | None = None
-    facility_type: str | None = Field(default=None, min_length=1)
+    facility_type: FacilityType | None = None
     facility_subtype: str | None = None
     location_type: FacilityLocationType | None = None
     tower_id: str | None = None
