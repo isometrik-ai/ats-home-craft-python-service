@@ -232,3 +232,100 @@ async def test_lift_and_floor_operations():
     floors = await repo.list_floors(organization_id=ORG_ID, tower_id=TOWER_ID)
     assert len(floors) == 1
     assert await repo.delete_floor(organization_id=ORG_ID, tower_id=TOWER_ID, floor_id=floor_id)
+
+
+@pytest.mark.asyncio
+async def test_coerce_jsonb_variants():
+    from apps.user_service.app.db.repositories.towers_repository import _coerce_jsonb
+
+    assert _coerce_jsonb(None) is None
+    assert _coerce_jsonb({"a": 1}) == '{"a": 1}'
+    assert _coerce_jsonb("") is None
+    assert _coerce_jsonb('{"x": 1}') == '{"x": 1}'
+    assert _coerce_jsonb("not-json") == "not-json"
+    assert _coerce_jsonb(42) == 42
+
+
+@pytest.mark.asyncio
+async def test_wing_get_and_update():
+    wing_id = "880e8400-e29b-41d4-a716-446655440003"
+    conn = _FakeConn(row={"id": wing_id, "name": "West"})
+    repo = TowersRepository(db_connection=conn)
+
+    wing = await repo.get_wing(organization_id=ORG_ID, tower_id=TOWER_ID, wing_id=wing_id)
+    assert wing["name"] == "West"
+
+    conn.row = {"id": wing_id, "name": "West Wing"}
+    updated = await repo.update_wing(
+        organization_id=ORG_ID,
+        tower_id=TOWER_ID,
+        wing_id=wing_id,
+        update_data={"name": "West Wing"},
+    )
+    assert updated["name"] == "West Wing"
+
+    conn.row = {"id": wing_id}
+    unchanged = await repo.update_wing(
+        organization_id=ORG_ID,
+        tower_id=TOWER_ID,
+        wing_id=wing_id,
+        update_data={},
+    )
+    assert unchanged["id"] == wing_id
+
+
+@pytest.mark.asyncio
+async def test_gate_get_and_update():
+    gate_id = "990e8400-e29b-41d4-a716-446655440004"
+    conn = _FakeConn(row={"id": gate_id, "name": "Side Gate"})
+    repo = TowersRepository(db_connection=conn)
+
+    gate = await repo.get_gate(organization_id=ORG_ID, tower_id=TOWER_ID, gate_id=gate_id)
+    assert gate["name"] == "Side Gate"
+
+    conn.row = {"id": gate_id, "operating_hours": {"mon": "10:00-20:00"}}
+    updated = await repo.update_gate(
+        organization_id=ORG_ID,
+        tower_id=TOWER_ID,
+        gate_id=gate_id,
+        update_data={"operating_hours": {"mon": "10:00-20:00"}},
+    )
+    assert updated["id"] == gate_id
+
+
+@pytest.mark.asyncio
+async def test_lift_get_and_update():
+    lift_id = "aa0e8400-e29b-41d4-a716-446655440005"
+    conn = _FakeConn(row={"id": lift_id, "name": "Lift 2"})
+    repo = TowersRepository(db_connection=conn)
+
+    lift = await repo.get_lift(organization_id=ORG_ID, tower_id=TOWER_ID, lift_id=lift_id)
+    assert lift["name"] == "Lift 2"
+
+    conn.row = {"id": lift_id, "name": "Service Lift"}
+    updated = await repo.update_lift(
+        organization_id=ORG_ID,
+        tower_id=TOWER_ID,
+        lift_id=lift_id,
+        update_data={"name": "Service Lift"},
+    )
+    assert updated["name"] == "Service Lift"
+
+
+@pytest.mark.asyncio
+async def test_floor_get_and_update():
+    floor_id = "bb0e8400-e29b-41d4-a716-446655440006"
+    conn = _FakeConn(row={"id": floor_id, "display_name": "Level 1"})
+    repo = TowersRepository(db_connection=conn)
+
+    floor = await repo.get_floor(organization_id=ORG_ID, tower_id=TOWER_ID, floor_id=floor_id)
+    assert floor["display_name"] == "Level 1"
+
+    conn.row = {"id": floor_id, "display_name": "First Floor"}
+    updated = await repo.update_floor(
+        organization_id=ORG_ID,
+        tower_id=TOWER_ID,
+        floor_id=floor_id,
+        update_data={"display_name": "First Floor"},
+    )
+    assert updated["display_name"] == "First Floor"

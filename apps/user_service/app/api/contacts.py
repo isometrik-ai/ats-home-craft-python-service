@@ -8,7 +8,16 @@ Resource-specific endpoints targeting the split tables (`contacts`, `companies`,
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    Path,
+    Query,
+    Request,
+    Response,
+)
 from fastapi import status as http_status
 from supabase import AsyncClient
 
@@ -24,6 +33,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
 from apps.user_service.app.schemas.contacts import (
     ContactDetailsResponse,
     ContactOverviewResponse,
+    ContactsExportQuery,
     ContactSummaryResponse,
     CreateContactRequest,
     ListContactsRequest,
@@ -76,6 +86,13 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     422: {"description": "Validation error."},
     429: {"description": "Too many requests (rate limited)."},
     500: {"description": "Internal server error."},
+}
+EXPORT_SUCCESS_RESPONSES: dict[int | str, dict] = {
+    **COMMON_ERROR_RESPONSES,
+    http_status.HTTP_200_OK: {
+        "content": {"text/csv": {}},
+        "description": "CSV export of filtered contacts.",
+    },
 }
 
 
@@ -518,6 +535,43 @@ async def get_contact_overview(
         message_key="contacts.success.overview_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=payload,
+    )
+
+
+@handle_api_exceptions("export contacts")
+@router.get(
+    "/export",
+    status_code=http_status.HTTP_200_OK,
+    summary="Export contacts as CSV",
+    description=(
+        "Exports contacts using the same filters as `POST /contacts/list`. "
+        "Supports optional `project_id` for Community-scoped registries."
+    ),
+    response_model=None,
+    responses=EXPORT_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def export_contacts(
+    request: Request,
+    query: ContactsExportQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Export filtered contacts as a CSV attachment."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+    )
+    service = ContactsService(db_connection=db_connection, user_context=user_context)
+    csv_text = await service.export_contacts_csv(query=query)
+    filename = "contacts"
+    if query.project_id:
+        filename = f"contacts-{query.project_id}"
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
     )
 
 

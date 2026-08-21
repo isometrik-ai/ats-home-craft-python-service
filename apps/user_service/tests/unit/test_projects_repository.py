@@ -245,3 +245,96 @@ async def test_project_media_and_members():
 
     members = await repo.list_members(organization_id="org-1", project_id="p1")
     assert len(members) == 1
+
+
+@pytest.mark.asyncio
+async def test_member_helpers_and_media_by_kind():
+    """Member CRUD helpers and delete_media_by_kind."""
+    conn = _FakeConn(row={"id": "mem1", "role": "staff", "status": "active"})
+    repo = ProjectsRepository(db_connection=conn)
+
+    active = await repo.get_active_member(
+        organization_id="org-1", project_id="p1", user_id="user-1"
+    )
+    assert active["status"] == "active"
+
+    conn.row = {"id": "mem1", "status": "suspended"}
+    member = await repo.get_member(organization_id="org-1", project_id="p1", user_id="user-1")
+    assert member["status"] == "suspended"
+
+    conn.row = {"id": "mem1", "role": "security"}
+    updated = await repo.update_member(
+        organization_id="org-1",
+        project_id="p1",
+        user_id="user-1",
+        role="security",
+    )
+    assert updated["role"] == "security"
+    assert "UPDATE project_members" in conn.fetchrow_calls[-1][0]
+
+    conn.row = {"id": "mem1", "status": "active"}
+    noop = await repo.update_member(organization_id="org-1", project_id="p1", user_id="user-1")
+    assert noop["status"] == "active"
+
+    conn.row = {"id": "mem1", "status": "suspended"}
+    removed = await repo.remove_member(organization_id="org-1", project_id="p1", user_id="user-1")
+    assert removed["status"] == "suspended"
+
+    await repo.delete_media_by_kind(organization_id="org-1", project_id="p1", kind="cover_image")
+    assert "DELETE FROM project_media" in conn.execute_calls[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_list_members_with_profiles_and_count_by_role():
+    conn = _FakeConn(rows=[{"user_id": "user-1", "role": "staff"}], val=2)
+    repo = ProjectsRepository(db_connection=conn)
+
+    members = await repo.list_members_with_profiles(
+        organization_id="org-1",
+        project_id="p1",
+        role="staff",
+        status="active",
+        search="john",
+    )
+    assert len(members) == 1
+    query, _ = conn.fetch_calls[0]
+    assert "organization_members" in query
+    assert "pm.role = $" in query
+
+    count = await repo.count_active_members_by_role(
+        organization_id="org-1",
+        project_id="p1",
+        role="security",
+    )
+    assert count == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_project_returns_false_when_no_row():
+    conn = _FakeConn()
+    conn.execute_result = "DELETE 0"
+    repo = ProjectsRepository(db_connection=conn)
+
+    deleted = await repo.delete_project(organization_id="org-1", project_id="p1")
+
+    assert deleted is False
+
+
+@pytest.mark.asyncio
+async def test_list_projects_for_member_with_filters():
+    conn = _FakeConn(rows=[], val=0)
+    repo = ProjectsRepository(db_connection=conn)
+
+    await repo.list_projects_for_member(
+        organization_id="org-1",
+        user_id="user-1",
+        search="alpha",
+        status="active",
+        property_type="residential",
+        page=1,
+        page_size=10,
+    )
+
+    count_query, _ = conn.fetchval_calls[0]
+    assert "p.status = $" in count_query
+    assert "ILIKE" in count_query

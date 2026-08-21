@@ -16,9 +16,10 @@ TOWER_ID = "990e8400-e29b-41d4-a716-446655440004"
 class _FakeConn:
     """Minimal fake asyncpg connection."""
 
-    def __init__(self, *, rows=None, row=None, execute_result="DELETE 1"):
+    def __init__(self, *, rows=None, row=None, val=None, execute_result="DELETE 1"):
         self.rows = rows or []
         self.row = row
+        self.val = val
         self.execute_result = execute_result
         self.fetch_calls: list[tuple[str, tuple]] = []
         self.fetchrow_calls: list[tuple[str, tuple]] = []
@@ -34,6 +35,8 @@ class _FakeConn:
 
     async def fetchval(self, query, *args):
         self.fetchrow_calls.append((query.strip(), args))
+        if self.val is not None:
+            return self.val
         return len(self.rows)
 
     async def execute(self, query, *args):
@@ -255,3 +258,115 @@ async def test_reconcile_unit_inventory_status_marks_occupied_with_owner():
     assert status == "occupied"
     assert len(conn.execute_calls) == 1
     assert "occupied" in conn.execute_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_bulk_insert_units_empty_and_multi():
+    conn = _FakeConn(rows=[{"id": UNIT_ID, "code": "A-101"}])
+    repo = UnitsRepository(db_connection=conn)
+
+    assert await repo.bulk_insert_units([]) == []
+
+    inserted = await repo.bulk_insert_units(
+        [
+            {
+                "organization_id": ORG_ID,
+                "project_id": PROJECT_ID,
+                "code": "A-101",
+                "status": "available",
+            }
+        ]
+    )
+    assert inserted[0]["code"] == "A-101"
+    assert "INSERT INTO units" in conn.fetch_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_has_active_owner_and_mark_unit_status():
+    conn = _FakeConn(val=True)
+    repo = UnitsRepository(db_connection=conn)
+
+    assert await repo.has_active_owner(organization_id=ORG_ID, unit_id=UNIT_ID) is True
+
+    conn.execute_result = "UPDATE 1"
+    await repo.mark_unit_occupied(organization_id=ORG_ID, project_id=PROJECT_ID, unit_id=UNIT_ID)
+    assert "occupied" in conn.execute_calls[-1][0]
+
+    await repo.mark_unit_vacant(organization_id=ORG_ID, project_id=PROJECT_ID, unit_id=UNIT_ID)
+    assert "vacant" in conn.execute_calls[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_get_by_plot_item_id_and_parking_entitlement():
+    conn = _FakeConn(row={"id": UNIT_ID}, val=2)
+    repo = UnitsRepository(db_connection=conn)
+
+    unit = await repo.get_by_plot_item_id(
+        organization_id=ORG_ID,
+        plot_item_id="plot-1",
+    )
+    assert unit["id"] == UNIT_ID
+
+    entitlement = await repo.get_parking_entitlement_by_unit(
+        organization_id=ORG_ID,
+        unit_id=UNIT_ID,
+    )
+    assert entitlement == 2
+
+
+@pytest.mark.asyncio
+async def test_get_unit_owner_and_residents_batch():
+    conn = _FakeConn(
+        row={"contact_id": "c1", "first_name": "Jane"},
+        rows=[{"contact_id": "c1", "unit_id": UNIT_ID, "person_name": "Jane Doe"}],
+    )
+    repo = UnitsRepository(db_connection=conn)
+
+    owner = await repo.get_unit_owner_contact(organization_id=ORG_ID, unit_id=UNIT_ID)
+    assert owner["first_name"] == "Jane"
+
+    residents = await repo.get_contact_residents_batch(
+        organization_id=ORG_ID,
+        contact_unit_pairs=[],
+    )
+    assert residents == {}
+
+    residents = await repo.get_contact_residents_batch(
+        organization_id=ORG_ID,
+        contact_unit_pairs=[("c1", UNIT_ID)],
+    )
+    assert residents[f"c1:{UNIT_ID}"]["person_name"] == "Jane Doe"
+
+
+@pytest.mark.asyncio
+async def test_get_unit_role_occupants_and_summary_none():
+    conn = _FakeConn(
+        rows=[
+            {
+                "unit_id": UNIT_ID,
+                "role": "Owner",
+                "contact_id": "c1",
+                "person_name": "Jane Doe",
+            }
+        ]
+    )
+    repo = UnitsRepository(db_connection=conn)
+
+    occupants = await repo.get_unit_role_occupants(
+        organization_id=ORG_ID,
+        unit_id=UNIT_ID,
+    )
+    assert "owner" in occupants
+
+    batch = await repo.get_unit_role_occupants_batch(
+        organization_id=ORG_ID,
+        unit_ids=[UNIT_ID],
+    )
+    assert UNIT_ID in batch
+
+    conn.row = None
+    summary = await repo.get_units_registry_summary(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+    )
+    assert summary == {"total": 0, "sold_count": 0, "unsold_count": 0}

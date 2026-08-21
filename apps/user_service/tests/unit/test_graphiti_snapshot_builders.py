@@ -331,3 +331,68 @@ async def test_build_lead_snapshot_builds_linked_entities() -> None:
     assert len(snapshot.linked_contacts) == 1
     assert len(snapshot.linked_companies) == 1
     assert snapshot.linked_companies[0].company_id == "co-1"
+
+
+@pytest.mark.asyncio
+async def test_build_contact_snapshot_active_builds_full_snapshot() -> None:
+    """Active contacts should build a populated contact snapshot."""
+    db_connection = MagicMock()
+    updated_at = datetime(2026, 7, 1, tzinfo=UTC)
+    with (
+        patch("libs.shared_utils.graphiti_snapshot_builders.ContactsRepository") as repo_cls,
+        patch(
+            "libs.shared_utils.graphiti_snapshot_builders._prepare_contact_row",
+            return_value={
+                "custom_fields": [],
+                "companies": [],
+                "leads": [],
+                "addresses": [],
+                "notes": [],
+                "additional_data": {},
+                "work_history": [],
+                "educational_history": [],
+                "skills": [],
+            },
+        ),
+        patch(
+            "libs.shared_utils.graphiti_snapshot_builders._resolve_entity_custom_fields_for_snapshot",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "libs.shared_utils.graphiti_snapshot_builders._extract_phone_numbers_and_display",
+            return_value=([], []),
+        ),
+        patch(
+            "libs.shared_utils.graphiti_snapshot_builders._extract_contact_company_linkage",
+            return_value=(["co-1"], []),
+        ),
+        patch(
+            "libs.shared_utils.graphiti_snapshot_builders._normalize_tags",
+            return_value=["vip"],
+        ),
+        patch(
+            "libs.shared_utils.graphiti_snapshot_builders._build_contact_full_name",
+            return_value="Jane Doe",
+        ),
+    ):
+        repo_cls.return_value.get_contact_details = AsyncMock(
+            return_value={
+                "status": "active",
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "email": "jane@example.com",
+                "updated_at": updated_at,
+                "tags": ["vip"],
+            }
+        )
+
+        snapshot = await build_contact_snapshot(
+            db_connection,
+            organization_id="org-1",
+            contact_id="c-1",
+        )
+
+    assert isinstance(snapshot, ContactSnapshot)
+    assert snapshot.display_name == "Jane Doe"
+    assert snapshot.metadata.primary_email == "jane@example.com"
+    assert snapshot.updated_at_db == updated_at

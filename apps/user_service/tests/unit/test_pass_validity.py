@@ -43,3 +43,19 @@ def test_pass_validity_local_date_uses_asia_kolkata():
     """Local date conversion uses Asia/Kolkata for gate decisions."""
     dt = datetime(2026, 7, 21, 20, 0, tzinfo=timezone.utc)
     assert pass_validity_local_date(dt).isoformat() == "2026-07-22"
+
+
+def test_pass_validity_local_date_naive_assumes_utc():
+    """Naive datetimes are treated as UTC before converting to local date."""
+    dt = datetime(2026, 7, 21, 20, 0)
+    assert pass_validity_local_date(dt).isoformat() == "2026-07-22"
+
+
+def test_is_pass_expired_by_day_none_is_not_expired():
+    now = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+    assert is_pass_expired_by_day(None, now=now) is False
+
+
+def test_is_pass_too_early_by_day_none_is_not_too_early():
+    now = datetime(2026, 7, 22, 12, 0, tzinfo=timezone.utc)
+    assert is_pass_too_early_by_day(None, now=now) is False
