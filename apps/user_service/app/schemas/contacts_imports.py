@@ -52,7 +52,7 @@ class CreateContactsImportJobRequest(BaseModel):
 
     file_url: HttpUrl = Field(..., description="Reachable file URL (typically presigned).")
     file_type: ContactsImportFileType = ContactsImportFileType.CSV
-    schema_version: int = Field(..., ge=1, le=1000)
+    schema_version: int = Field(default=1, ge=1, le=1000)
     mapping: dict[str, str] | None = Field(
         default=None,
         description="Canonical field -> column header mapping (optional).",
@@ -65,7 +65,7 @@ class ExternalCreateContactsImportJobRequest(BaseModel):
 
     file_url: HttpUrl = Field(..., description="Reachable file URL (typically presigned).")
     file_type: ContactsImportFileType = ContactsImportFileType.CSV
-    schema_version: int = Field(..., ge=1, le=1000)
+    schema_version: int = Field(default=1, ge=1, le=1000)
     mapping: dict[str, str] | None = None
     options: ContactsImportOptions | None = None
 
