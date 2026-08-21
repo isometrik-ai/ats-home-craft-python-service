@@ -211,8 +211,10 @@ def build_unit_owner_detail(row: dict[str, Any]) -> dict[str, Any]:
     owner = build_unit_detail_person(row)
     phone = row.get("primary_phone") or format_primary_contact_phone(row.get("phones"))
     email = row.get("primary_email") or format_primary_contact_email(row.get("emails"))
+    profile_photo_url = row.get("profile_photo_url")
     owner["phone"] = str(phone).strip() if phone else None
     owner["email"] = str(email).strip() if email else None
+    owner["profile_photo_url"] = str(profile_photo_url).strip() if profile_photo_url else None
     assigned_at_raw = row.get("assigned_at") or row.get("created_at")
     owner["assigned_at"] = format_iso_datetime(assigned_at_raw)
     owner["assign_date"] = format_assign_date(assigned_at_raw)
