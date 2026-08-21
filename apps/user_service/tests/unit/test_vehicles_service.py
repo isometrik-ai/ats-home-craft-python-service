@@ -42,6 +42,7 @@ def _service(*, push: _FakePushDispatcher | None = None) -> VehiclesService:
     svc.repo.count_entitlement_consuming_by_unit = AsyncMock(return_value=0)
     svc.contact_units_repo = AsyncMock()
     svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.owner_has_active_unit = AsyncMock(return_value=True)
     svc.contact_units_repo.get_unit_project = AsyncMock(
         return_value={
             "project_id": "p1",
@@ -62,6 +63,7 @@ async def test_withdraw_pending_hard_deletes():
         "id": "v1",
         "status": VehicleStatus.PENDING.value,
         "project_id": "p1",
+        "unit_id": "u1",
     }
     svc.repo.delete.return_value = {"id": "v1"}
 
@@ -625,6 +627,28 @@ async def test_create_vehicle_validates_unit():
 
 
 @pytest.mark.asyncio
+async def test_create_vehicle_requires_primary_occupant():
+    """Create vehicle requires primary occupant on the unit."""
+    from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.owner_has_active_unit = AsyncMock(return_value=False)
+
+    body = CreateVehicleRequest(
+        unit_id="u1",
+        vehicle_type=VehicleType.FOUR_WHEELER,
+        registration_number="mh12ab1234",
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.create_vehicle(contact_id="c1", body=body)
+
+    assert exc_info.value.message_key == "contact_onboarding.errors.primary_occupant_required"
+
+
+@pytest.mark.asyncio
 async def test_create_vehicle_success():
     """Create vehicle uppercases registration and links project."""
     from apps.user_service.app.schemas.contact_onboarding import CreateVehicleRequest
@@ -1021,6 +1045,7 @@ async def test_remove_soft_remove_not_found():
             "id": "v1",
             "status": VehicleStatus.APPROVED.value,
             "project_id": "p1",
+            "unit_id": "u1",
             "parking_slot_id": None,
         }
     )
@@ -1188,6 +1213,7 @@ async def test_admin_delete_vehicle_approved_soft_removes():
         "id": "v1",
         "status": VehicleStatus.APPROVED.value,
         "project_id": "p1",
+        "unit_id": "u1",
         "parking_slot_id": None,
     }
     svc.repo.soft_remove.return_value = {
@@ -1254,6 +1280,7 @@ async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
         "contact_id": "c1",
         "status": VehicleStatus.APPROVED.value,
         "project_id": "p1",
+        "unit_id": "u1",
         "parking_slot_id": None,
     }
     svc.repo.get_by_id.return_value = {
@@ -1261,6 +1288,7 @@ async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
         "contact_id": "c1",
         "status": VehicleStatus.APPROVED.value,
         "project_id": "p1",
+        "unit_id": "u1",
         "parking_slot_id": None,
     }
     svc.repo.soft_remove.return_value = {

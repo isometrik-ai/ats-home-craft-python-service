@@ -263,6 +263,10 @@ class _FakeContactUnitsRepo:
         """Return configured household rows."""
         return getattr(self, "household_rows", [])
 
+    async def list_household_for_contact(self, **_kwargs):
+        """Return configured household rows."""
+        return getattr(self, "household_rows", [])
+
     async def get_household_member(self, **_kwargs):
         """Return configured household member row."""
         return getattr(self, "household_member", None)
@@ -278,6 +282,10 @@ class _FakeContactUnitsRepo:
     async def contact_has_active_unit(self, **_kwargs):
         """Return configured active-unit flag."""
         return getattr(self, "has_active_unit", True)
+
+    async def owner_has_active_unit(self, **_kwargs):
+        """Return configured primary-occupant flag."""
+        return getattr(self, "is_primary_occupant", True)
 
     async def get_unit_project(self, **_kwargs):
         """Return configured unit project row."""
@@ -709,6 +717,22 @@ async def test_list_household_formats_members():
 
     assert len(result) == 1
     assert result[0]["first_name"] == "Alex"
+
+
+@pytest.mark.asyncio
+async def test_add_household_member_requires_primary_occupant():
+    """Only the primary occupant can add household members."""
+    units_repo = _FakeContactUnitsRepo()
+    units_repo.is_primary_occupant = False
+    svc = _service(contact_units_repo=units_repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.add_household_member(
+            primary_contact_id="contact-1",
+            body=_household_create_body(),
+        )
+
+    assert exc_info.value.message_key == "contact_onboarding.errors.primary_occupant_required"
 
 
 @pytest.mark.asyncio

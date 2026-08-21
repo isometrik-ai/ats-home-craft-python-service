@@ -325,3 +325,40 @@ async def test_bucket_predicate_unknown_returns_empty():
     sql, args = PassesRepository._bucket_predicate("unknown", param_index=3)
     assert sql == ""
     assert args == []
+
+
+@pytest.mark.asyncio
+async def test_list_visible_to_contact_includes_shared_non_private_predicate():
+    """Visible list includes own passes and non-private passes on linked units."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+
+    await repo.list_visible_to_contact(
+        organization_id="org-1",
+        viewer_contact_id="family-1",
+        page=1,
+        page_size=20,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "p.host_contact_id = $2::uuid" in count_query
+    assert "COALESCE(p.is_private, false) = false" in count_query
+    assert "FROM contact_units cu" in count_query
+    assert "cu.contact_id = $2::uuid" in count_query
+
+
+@pytest.mark.asyncio
+async def test_get_visible_to_contact_uses_visibility_predicate():
+    """Visible get scopes by pass id and viewer visibility rules."""
+    conn = _FakeConn(row={"id": "pass-1", "code": "4821"})
+    repo = PassesRepository(db_connection=conn)
+
+    row = await repo.get_visible_to_contact(
+        organization_id="org-1",
+        viewer_contact_id="family-1",
+        pass_id="pass-1",
+    )
+    assert row["code"] == "4821"
+    query, _ = conn.fetchrow_calls[0]
+    assert "p.id = $3::uuid" in query
+    assert "COALESCE(p.is_private, false) = false" in query
+    assert "FROM contact_units cu" in query

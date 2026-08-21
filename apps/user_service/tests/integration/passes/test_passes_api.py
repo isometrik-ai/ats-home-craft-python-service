@@ -71,15 +71,16 @@ async def test_list_passes(monkeypatch, client):
         _self,
         *,
         contact_id: str,
+        unit_id: str,
         bucket=None,
         display_status=None,
-        unit_id=None,
         pass_type=None,
         page=1,
         page_size=20,
     ):
-        del _self, bucket, display_status, unit_id, pass_type
+        del _self, bucket, display_status, pass_type
         assert contact_id == CONTACT_ID
+        assert unit_id == "unit-1"
         assert page == 1
         assert page_size == 20
         return [_FAKE_LIST_ITEM], 1
@@ -89,7 +90,10 @@ async def test_list_passes(monkeypatch, client):
         fake_list_passes,
     )
 
-    res = await client.get("/v1/passes", params={"page": 1, "page_size": 20})
+    res = await client.get(
+        "/v1/passes",
+        params={"unit_id": "unit-1", "page": 1, "page_size": 20},
+    )
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == PASS_ID
     assert body["total"] == 1

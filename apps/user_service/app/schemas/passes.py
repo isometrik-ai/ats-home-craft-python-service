@@ -151,7 +151,7 @@ class PassListQuery(BaseModel):
 
     bucket: PassListBucket | None = None
     display_status: PassDisplayStatus | None = None
-    unit_id: str | None = None
+    unit_id: str
     pass_type: PassType | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)

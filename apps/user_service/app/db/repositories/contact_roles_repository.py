@@ -239,3 +239,28 @@ class ContactRolesRepository(BaseRepository):
             ContactRoleStatus.ACTIVE.value,
         )
         return int(count or 0)
+
+    async def get_active_tenant_contact_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> str | None:
+        """Return a contact id when an active Tenant role exists on the unit."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT contact_id::text AS contact_id
+            FROM contact_roles
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND role_type = $3::public.contact_role_type
+              AND status = $4::public.contact_role_status
+              AND ended_at IS NULL
+            LIMIT 1
+            """,
+            organization_id,
+            unit_id,
+            ContactType.TENANT.value,
+            ContactRoleStatus.ACTIVE.value,
+        )
+        return str(row["contact_id"]) if row else None

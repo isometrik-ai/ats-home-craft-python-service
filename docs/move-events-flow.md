@@ -177,6 +177,11 @@ Enforced in `move_events_service.py`:
 - **Fresh move-in without a link:** if no `contact_units` row exists for the unit+contact, create one
   (`relationship` defaults to `self`; `is_primary=false`) and activate it. (Alternatively require the
   link first — decide per product; default is auto-create.)
+- **Move-in guards:**
+  - Unit must be **sold/allotted** (`resolve_is_sold`: inventory `occupied`/`blocked`, or `vacant`
+    with an active Owner allotment) — else `move_events.errors.unit_not_sold`.
+  - No other contact may hold an **active Tenant** role on the unit — else
+    `move_events.errors.unit_occupied_by_other_tenant`.
 - **Fee:** `fee_amount` optional, must be `>= 0` (`move_events.errors.invalid_fee`); `fee_currency`
   defaults to `INR`.
 - **Edit:** `PATCH` may correct `event_date`, `fee_amount`, `fee_currency`, `notes`, `document_paths`
@@ -224,13 +229,15 @@ ______________________________________________________________________
 
 ## 8. Error keys (add under `move_events.errors.*`)
 
-| Key                                          | When                                                     |
-| -------------------------------------------- | -------------------------------------------------------- |
-| `move_events.errors.move_event_not_found`    | Invalid `move_event_id` / wrong org                      |
-| `move_events.errors.unit_not_found`          | `unit_id` not in the org                                 |
-| `move_events.errors.contact_not_found`       | `contact_id` not in the org                              |
-| `move_events.errors.not_currently_occupying` | move-out for a contact with no `active` link to the unit |
-| `move_events.errors.invalid_fee`             | `fee_amount < 0`                                         |
+| Key                                                | When                                                     |
+| -------------------------------------------------- | -------------------------------------------------------- |
+| `move_events.errors.move_event_not_found`          | Invalid `move_event_id` / wrong org                      |
+| `move_events.errors.unit_not_found`                | `unit_id` not in the org                                 |
+| `move_events.errors.contact_not_found`             | `contact_id` not in the org                              |
+| `move_events.errors.not_currently_occupying`       | move-out for a contact with no `active` link to the unit |
+| `move_events.errors.unit_not_sold`                 | move-in on a unit that is not sold or owner-allotted     |
+| `move_events.errors.unit_occupied_by_other_tenant` | move-in while another tenant is active on the unit       |
+| `move_events.errors.invalid_fee`                   | `fee_amount < 0`                                         |
 
 ______________________________________________________________________
 

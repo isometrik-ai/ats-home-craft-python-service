@@ -645,6 +645,7 @@
       "contact_unit_not_found": "One or more selected properties could not be found.",
       "invalid_contact_unit_id": "Invalid contact unit id.",
       "unit_not_assigned": "The selected unit is not assigned to your account.",
+      "primary_occupant_required": "Only the primary occupant of this unit can perform this action.",
       "unit_not_found": "The unit you selected does not exist.",
       "unit_already_assigned": "This unit is already assigned to another contact.",
       "unit_already_assigned_to_contact": "This unit is already assigned to this contact.",
@@ -762,6 +763,8 @@
       "unit_not_found": "The unit could not be found.",
       "contact_not_found": "The contact could not be found.",
       "not_currently_occupying": "The contact is not currently occupying this unit.",
+      "unit_not_sold": "Move-in is not allowed because this unit has not been sold or allotted to an owner.",
+      "unit_occupied_by_other_tenant": "This unit is already occupied by another tenant.",
       "invalid_fee": "The move fee must be zero or greater."
     },
     "success": {

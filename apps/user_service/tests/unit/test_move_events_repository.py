@@ -110,6 +110,17 @@ async def test_list_move_events_bucket_and_search_filters():
 
 
 @pytest.mark.asyncio
+async def test_list_move_events_contact_role_defaults_to_tenant_for_move_in():
+    """List SQL labels move-in rows as Tenant when no contact_roles row exists."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = MoveEventsRepository(db_connection=conn)
+    await repo.list(organization_id="org-1", page=1, page_size=20)
+    list_query, _ = conn.fetch_calls[0]
+    assert "WHEN me.move_type = 'move_in'::move_event_type THEN 'Tenant'" in list_query
+    assert "cu.relationship::text" not in list_query
+
+
+@pytest.mark.asyncio
 async def test_soft_delete_sets_deleted_at():
     """Soft delete updates deleted_at and returns row metadata."""
     conn = _FakeConn(
