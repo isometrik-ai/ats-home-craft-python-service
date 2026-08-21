@@ -68,6 +68,29 @@ async def test_insert_move_event_casts_enum():
 
 
 @pytest.mark.asyncio
+async def test_insert_move_event_serializes_documents_jsonb():
+    """Insert json-encodes documents for asyncpg jsonb bind."""
+    conn = _FakeConn(row={"id": "move-1"})
+    repo = MoveEventsRepository(db_connection=conn)
+    documents = [{"document_type": "id_proof", "file_path": "/docs/a.pdf"}]
+    await repo.insert(
+        {
+            "organization_id": "org-1",
+            "project_id": "project-1",
+            "unit_id": "unit-1",
+            "contact_id": "contact-1",
+            "contact_unit_id": "cu-1",
+            "move_type": "move_in",
+            "event_date": "2026-05-25",
+            "documents": documents,
+            "recorded_by_user_id": "user-1",
+        }
+    )
+    _, args = conn.fetchrow_calls[0]
+    assert args[10] == '[{"document_type": "id_proof", "file_path": "/docs/a.pdf"}]'
+
+
+@pytest.mark.asyncio
 async def test_list_move_events_bucket_and_search_filters():
     """List adds move_type bucket and search predicates."""
     conn = _FakeConn(rows=[], val=0)
@@ -167,9 +190,10 @@ async def test_update_move_event_and_noop_paths():
         },
     )
     assert updated["unit_code"] == "A-101"
-    update_query, _ = conn.fetchrow_calls[0]
+    update_query, update_args = conn.fetchrow_calls[0]
     assert "event_date = $1::date" in update_query
     assert "documents = $2::jsonb" in update_query
+    assert update_args[1] == '[{"document_type": "id_proof", "file_path": "/docs/a.pdf"}]'
     assert "move_type" not in update_query
 
     conn.fetchrow_calls.clear()

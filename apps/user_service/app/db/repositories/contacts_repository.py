@@ -1188,7 +1188,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if search:
             search_stripped = search.strip()
             search_parts = [
-                f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.last_name,'') "
+                f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.last_name,'')) "
                 f"ILIKE ${next_param_index}",
                 f"COALESCE(au.email::text,'') ILIKE ${next_param_index}",
             ]

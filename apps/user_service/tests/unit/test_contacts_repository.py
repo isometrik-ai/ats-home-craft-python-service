@@ -181,6 +181,7 @@ async def test_list_contacts_search_predicate():
 
     count_query, count_args = conn.fetchval_calls[0]
     assert "ILIKE" in count_query
+    assert count_query.count("(") == count_query.count(")")
     assert "%jane%" in count_args
     assert ContactType.OWNER.value in count_args
     _, list_args = conn.fetch_calls[0]

@@ -6,6 +6,7 @@ from typing import Any
 
 from apps.user_service.app.schemas.enums import (
     FacilityLocationType,
+    FacilityType,
     ParkingUserType,
     UnitNumberingPattern,
 )
@@ -13,8 +14,10 @@ from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
-def normalize_facility_type(facility_type: str | None) -> str:
+def normalize_facility_type(facility_type: str | FacilityType | None) -> str:
     """Normalize facility type for conditional validation."""
+    if isinstance(facility_type, FacilityType):
+        return facility_type.value
     return (facility_type or "").strip().lower()
 
 
@@ -52,7 +55,7 @@ def validate_facility_payload(
             custom_code=CustomStatusCode.VALIDATION_ERROR,
         )
 
-    if facility_type == "events":
+    if facility_type == FacilityType.EVENTS.value:
         capacity = data.get("capacity_persons")
         if capacity is None or int(capacity) <= 0:
             raise ValidationException(
@@ -60,7 +63,7 @@ def validate_facility_payload(
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-    if facility_type == "parking":
+    if facility_type == FacilityType.PARKING.value:
         slots = data.get("parking_slots")
         if slots is None or int(slots) <= 0:
             raise ValidationException(
