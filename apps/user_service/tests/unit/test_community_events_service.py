@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from apps.user_service.app.schemas.community_events import CommunityEventMediaInput
 from apps.user_service.app.schemas.enums import CommunityEventPublishStatus
 from apps.user_service.app.services.community_events_service import (
     CommunityEventsService,
@@ -69,3 +70,22 @@ class TestValidateFacility:
             )
 
         service.facilities_repo.get_facility.assert_not_awaited()
+
+
+class TestGalleryItemsToDicts:
+    def test_accepts_pydantic_models_and_dicts(self) -> None:
+        model = CommunityEventMediaInput(
+            file_path="/media/a.jpg",
+            mime_type="image/jpeg",
+            size_bytes=1024,
+            sort_order=0,
+        )
+        raw = {
+            "file_path": "/media/b.jpg",
+            "mime_type": "image/jpeg",
+            "size_bytes": 2048,
+            "sort_order": 1,
+        }
+        result = CommunityEventsService._gallery_items_to_dicts([model, raw])
+        assert result[0]["file_path"] == "/media/a.jpg"
+        assert result[1] == raw
