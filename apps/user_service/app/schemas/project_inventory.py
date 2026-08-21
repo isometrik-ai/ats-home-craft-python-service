@@ -151,6 +151,62 @@ class UpsertFloorInventoryRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _expand_facility_type_filter(value: Any) -> list[FacilityType] | None:
+    """Accept repeated params or comma-separated facility type filters."""
+    if value is None:
+        return None
+    if isinstance(value, FacilityType):
+        return [value]
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",") if part.strip()]
+        return [FacilityType(part) for part in parts] if parts else None
+    if isinstance(value, list):
+        expanded: list[str] = []
+        for item in value:
+            if isinstance(item, FacilityType):
+                expanded.append(item.value)
+            else:
+                expanded.extend(part.strip() for part in str(item).split(",") if part.strip())
+        return [FacilityType(part) for part in expanded] if expanded else None
+    raise ValueError("facility_types must be a valid facility type or list of types")
+
+
+class FacilityListQuery(BaseModel):
+    """Query params for GET /projects/{project_id}/facilities."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    facility_types: list[FacilityType] | None = Field(
+        default=None,
+        description=(
+            "Filter by one or more facility types. "
+            "Repeat facility_types or pass comma-separated values."
+        ),
+    )
+    status: FacilityStatus | None = None
+
+    @field_validator("facility_types", mode="before")
+    @classmethod
+    def parse_facility_types(cls, value: Any) -> list[FacilityType] | None:
+        """Normalize repeated and comma-separated facility type filters."""
+        return _expand_facility_type_filter(value)
+
+
+def build_facility_list_query(
+    *,
+    facility_types: list[str] | None,
+    status: FacilityStatus | None,
+) -> FacilityListQuery:
+    """Build list query from raw query-string values."""
+    if not facility_types:
+        return FacilityListQuery(status=status)
+    expanded: list[str] = []
+    for item in facility_types:
+        expanded.extend(part.strip() for part in item.split(",") if part.strip())
+    parsed = [FacilityType(part) for part in expanded] if expanded else None
+    return FacilityListQuery(facility_types=parsed, status=status)
+
+
 class CreateFacilityRequest(BaseModel):
     """Create a facility/amenity."""
 

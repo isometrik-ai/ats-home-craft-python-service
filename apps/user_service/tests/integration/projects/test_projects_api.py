@@ -6,6 +6,8 @@ units, site map, and vehicle review routes with mocked service methods.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from apps.user_service.app.schemas.project_members import ProjectMemberResponse
@@ -1404,7 +1406,8 @@ async def test_list_facilities(monkeypatch, client):
     _patch_projects_access(monkeypatch)
 
     async def fake_list_facilities(_self, *, project_id: str, facility_types=None, status=None):
-        del _self, facility_types, status
+        del _self, project_id, status
+        assert facility_types == ["sports", "events"]
         return [_FAKE_FACILITY]
 
     monkeypatch.setattr(
@@ -1412,9 +1415,37 @@ async def test_list_facilities(monkeypatch, client):
         fake_list_facilities,
     )
 
-    res = await client.get(f"/v1/projects/{PROJECT_ID}/facilities")
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/facilities",
+        params={"facility_types": ["sports", "events"]},
+    )
     body = assert_success(res, 200)
     assert body["data"][0]["name"] == "Clubhouse"
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_accepts_comma_separated_types(monkeypatch, client):
+    """GET facilities accepts comma-separated facility_types."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    async def fake_list_facilities(_self, *, project_id: str, facility_types=None, status=None):
+        del _self, project_id, status
+        captured["facility_types"] = facility_types
+        return [_FAKE_FACILITY]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
+        fake_list_facilities,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/facilities",
+        params={"facility_types": "recreation,services"},
+    )
+    assert_success(res, 200)
+    assert captured["facility_types"] == ["recreation", "services"]
 
 
 @pytest.mark.asyncio
