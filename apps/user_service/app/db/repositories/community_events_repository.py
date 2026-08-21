@@ -70,7 +70,6 @@ _BOOKING_SELECT = """
   b.display_code,
   b.sequence_number,
   b.contact_id::text AS contact_id,
-  b.unit_id::text AS unit_id,
   b.adult_tickets,
   b.child_tickets,
   b.total_tickets,
@@ -502,17 +501,17 @@ class CommunityEventsRepository(BaseRepository):
             """
             INSERT INTO community_event_bookings (
               organization_id, project_id, event_id, display_code, sequence_number,
-              contact_id, unit_id, adult_tickets, child_tickets, total_tickets,
+              contact_id, adult_tickets, child_tickets, total_tickets,
               subtotal_minor, tax_minor, total_amount_minor, currency,
               booking_status, payment_status, gate_qr_token
             )
             VALUES (
               $1::uuid, $2::uuid, $3::uuid, $4, $5,
-              $6::uuid, $7::uuid, $8, $9, $10,
-              $11, $12, $13, $14,
-              $15::community_event_booking_status,
-              $16::community_event_payment_status,
-              $17
+              $6::uuid, $7, $8, $9,
+              $10, $11, $12, $13,
+              $14::community_event_booking_status,
+              $15::community_event_payment_status,
+              $16
             )
             RETURNING id::text AS id
             """,
@@ -522,7 +521,6 @@ class CommunityEventsRepository(BaseRepository):
             data["display_code"],
             data["sequence_number"],
             data["contact_id"],
-            data["unit_id"],
             data["adult_tickets"],
             data["child_tickets"],
             data["total_tickets"],
@@ -555,11 +553,9 @@ class CommunityEventsRepository(BaseRepository):
         row = await self.db_connection.fetchrow(
             f"""
             SELECT {_BOOKING_SELECT},
-              {_CONTACT_NAME_SQL.strip()},
-              u.code AS unit_code
+              {_CONTACT_NAME_SQL.strip()}
             FROM community_event_bookings b
             LEFT JOIN contacts c ON c.id = b.contact_id
-            LEFT JOIN units u ON u.id = b.unit_id
             WHERE {" AND ".join(conditions)}
             """,
             *values,
@@ -577,12 +573,10 @@ class CommunityEventsRepository(BaseRepository):
             f"""
             SELECT {_BOOKING_SELECT},
               {_CONTACT_NAME_SQL.strip()},
-              u.code AS unit_code,
               ev.title AS event_title,
               ev.start_date AS event_start_date
             FROM community_event_bookings b
             LEFT JOIN contacts c ON c.id = b.contact_id
-            LEFT JOIN units u ON u.id = b.unit_id
             LEFT JOIN community_events ev ON ev.id = b.event_id
             WHERE b.organization_id = $1::uuid
               AND b.gate_qr_token = $2
@@ -628,11 +622,9 @@ class CommunityEventsRepository(BaseRepository):
         rows = await self.db_connection.fetch(
             f"""
             SELECT {_BOOKING_SELECT},
-              {_CONTACT_NAME_SQL.strip()},
-              u.code AS unit_code
+              {_CONTACT_NAME_SQL.strip()}
             FROM community_event_bookings b
             LEFT JOIN contacts c ON c.id = b.contact_id
-            LEFT JOIN units u ON u.id = b.unit_id
             WHERE {where_sql}
             ORDER BY b.booked_at DESC
             LIMIT ${idx} OFFSET ${idx + 1}
@@ -864,7 +856,6 @@ class CommunityEventsRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         contact_id: str,
-        unit_id: str,
     ) -> dict[str, int]:
         """Resident badge summary."""
         row = await self.db_connection.fetchrow(
@@ -877,7 +868,6 @@ class CommunityEventsRepository(BaseRepository):
             WHERE b.organization_id = $1::uuid
               AND e.project_id = $2::uuid
               AND b.contact_id = $3::uuid
-              AND b.unit_id = $4::uuid
               AND b.booking_status IN ('confirmed', 'waitlisted')
               AND e.publish_status = 'published'::community_event_publish_status
               AND e.record_status = 'active'::community_event_record_status
@@ -885,7 +875,6 @@ class CommunityEventsRepository(BaseRepository):
             organization_id,
             project_id,
             contact_id,
-            unit_id,
         )
         if not row:
             return {"active_ticket_count": 0, "active_booking_count": 0}
@@ -900,7 +889,6 @@ class CommunityEventsRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         contact_id: str,
-        unit_id: str,
     ) -> list[dict[str, Any]]:
         """All active bookings for resident."""
         rows = await self.db_connection.fetch(
@@ -921,14 +909,12 @@ class CommunityEventsRepository(BaseRepository):
             WHERE b.organization_id = $1::uuid
               AND e.project_id = $2::uuid
               AND b.contact_id = $3::uuid
-              AND b.unit_id = $4::uuid
               AND b.booking_status IN ('confirmed', 'waitlisted')
             ORDER BY e.start_date ASC
             """,
             organization_id,
             project_id,
             contact_id,
-            unit_id,
         )
         return [dict(row) for row in rows]
 
@@ -938,7 +924,6 @@ class CommunityEventsRepository(BaseRepository):
         organization_id: str,
         event_id: str,
         contact_id: str,
-        unit_id: str,
     ) -> dict[str, Any] | None:
         """Resident booking for one event."""
         row = await self.db_connection.fetchrow(
@@ -948,7 +933,6 @@ class CommunityEventsRepository(BaseRepository):
             WHERE b.organization_id = $1::uuid
               AND b.event_id = $2::uuid
               AND b.contact_id = $3::uuid
-              AND b.unit_id = $4::uuid
               AND b.booking_status IN ('confirmed', 'waitlisted')
             ORDER BY b.booked_at DESC
             LIMIT 1
@@ -956,35 +940,8 @@ class CommunityEventsRepository(BaseRepository):
             organization_id,
             event_id,
             contact_id,
-            unit_id,
         )
         return dict(row) if row else None
-
-    async def contact_has_owner_or_tenant_on_unit(
-        self,
-        *,
-        organization_id: str,
-        contact_id: str,
-        unit_id: str,
-    ) -> bool:
-        """True when contact has active Owner or Tenant role on unit."""
-        row = await self.db_connection.fetchrow(
-            """
-            SELECT 1
-            FROM contact_roles
-            WHERE organization_id = $1::uuid
-              AND contact_id = $2::uuid
-              AND unit_id = $3::uuid
-              AND status = 'active'::contact_role_status
-              AND ended_at IS NULL
-              AND role_type IN ('Owner'::contact_role_type, 'Tenant'::contact_role_type)
-            LIMIT 1
-            """,
-            organization_id,
-            contact_id,
-            unit_id,
-        )
-        return row is not None
 
     async def insert_audit_log(
         self,

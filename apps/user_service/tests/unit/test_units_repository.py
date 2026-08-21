@@ -324,6 +324,7 @@ async def test_get_unit_owner_and_residents_batch():
 
     owner = await repo.get_unit_owner_contact(organization_id=ORG_ID, unit_id=UNIT_ID)
     assert owner["first_name"] == "Jane"
+    assert "c.profile_photo_url" in conn.fetchrow_calls[0][0]
 
     residents = await repo.get_contact_residents_batch(
         organization_id=ORG_ID,

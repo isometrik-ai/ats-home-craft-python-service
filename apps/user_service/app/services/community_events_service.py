@@ -700,26 +700,7 @@ class CommunityEventsService:
             limit=query.page_size,
             offset=offset,
         )
-        items = [
-            CommunityEventBookingListItemResponse(
-                id=str(r["id"]),
-                display_code=str(r["display_code"]),
-                contact_id=str(r["contact_id"]),
-                contact_name=r.get("contact_name"),
-                unit_id=str(r["unit_id"]),
-                unit_code=r.get("unit_code"),
-                adult_tickets=int(r.get("adult_tickets") or 0),
-                child_tickets=int(r.get("child_tickets") or 0),
-                total_tickets=int(r.get("total_tickets") or 0),
-                total_amount_minor=int(r.get("total_amount_minor") or 0),
-                currency=str(r.get("currency") or "INR"),
-                booking_status=str(r.get("booking_status") or ""),
-                payment_status=str(r.get("payment_status") or ""),
-                paid_at=r.get("paid_at"),
-                booked_at=r["booked_at"],
-            )
-            for r in rows
-        ]
+        items = [self._booking_list_item(r) for r in rows]
         return items, total
 
     @staticmethod
@@ -730,8 +711,6 @@ class CommunityEventsService:
             display_code=str(row["display_code"]),
             contact_id=str(row["contact_id"]),
             contact_name=row.get("contact_name"),
-            unit_id=str(row["unit_id"]),
-            unit_code=row.get("unit_code"),
             adult_tickets=int(row.get("adult_tickets") or 0),
             child_tickets=int(row.get("child_tickets") or 0),
             total_tickets=int(row.get("total_tickets") or 0),
@@ -790,23 +769,7 @@ class CommunityEventsService:
             booking_id=booking_id,
             body=body,
         )
-        return CommunityEventBookingListItemResponse(
-            id=str(row["id"]),
-            display_code=str(row["display_code"]),
-            contact_id=str(row["contact_id"]),
-            contact_name=row.get("contact_name"),
-            unit_id=str(row["unit_id"]),
-            unit_code=row.get("unit_code"),
-            adult_tickets=int(row.get("adult_tickets") or 0),
-            child_tickets=int(row.get("child_tickets") or 0),
-            total_tickets=int(row.get("total_tickets") or 0),
-            total_amount_minor=int(row.get("total_amount_minor") or 0),
-            currency=str(row.get("currency") or "INR"),
-            booking_status=str(row.get("booking_status") or ""),
-            payment_status=str(row.get("payment_status") or ""),
-            paid_at=row.get("paid_at"),
-            booked_at=row["booked_at"],
-        )
+        return self._booking_list_item(row)
 
     async def export_events_csv(
         self,
@@ -874,7 +837,6 @@ class CommunityEventsService:
             [
                 "display_code",
                 "contact_name",
-                "unit_code",
                 "adult_tickets",
                 "child_tickets",
                 "total_amount_minor",
@@ -888,7 +850,6 @@ class CommunityEventsService:
                 [
                     row.get("display_code"),
                     row.get("contact_name"),
-                    row.get("unit_code"),
                     row.get("adult_tickets"),
                     row.get("child_tickets"),
                     row.get("total_amount_minor"),

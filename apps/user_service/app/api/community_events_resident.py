@@ -1,7 +1,7 @@
-"""Resident community events API."""
+"""Resident community events API (project-scoped, no unit linkage)."""
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -25,7 +25,10 @@ from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
-router = APIRouter(prefix="/community-events", tags=["Community Events (Resident)"])
+router = APIRouter(
+    prefix="/projects/{project_id}/resident/community-events",
+    tags=["Community Events (Resident)"],
+)
 
 
 @handle_api_exceptions("list resident community events")
@@ -37,11 +40,12 @@ router = APIRouter(prefix="/community-events", tags=["Community Events (Resident
 @limiter.limit("100/minute")
 async def list_resident_community_events(
     request: Request,
+    project_id: str = Path(...),
     query: ResidentEventListQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Upcoming/past events for resident."""
+    """Upcoming/past events for resident in a project."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -50,6 +54,7 @@ async def list_resident_community_events(
         user_context=user_context,
     )
     items, total = await service.list_events(
+        project_id=project_id,
         contact_id=str(contact["id"]),
         query=query,
     )
@@ -73,12 +78,11 @@ async def list_resident_community_events(
 @limiter.limit("100/minute")
 async def list_my_community_event_bookings(
     request: Request,
-    project_id: str = Query(...),
-    unit_id: str = Query(...),
+    project_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """All active bookings."""
+    """All active bookings for the caller in a project."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -87,9 +91,8 @@ async def list_my_community_event_bookings(
         user_context=user_context,
     )
     items = await service.list_my_bookings(
-        contact_id=str(contact["id"]),
-        unit_id=unit_id,
         project_id=project_id,
+        contact_id=str(contact["id"]),
     )
     return success_response(
         request=request,
@@ -108,12 +111,11 @@ async def list_my_community_event_bookings(
 @limiter.limit("100/minute")
 async def get_my_community_event_bookings_summary(
     request: Request,
-    project_id: str = Query(...),
-    unit_id: str = Query(...),
+    project_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Ticket badge count."""
+    """Ticket badge count for a project."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -122,9 +124,8 @@ async def get_my_community_event_bookings_summary(
         user_context=user_context,
     )
     data = await service.get_my_booking_summary(
-        contact_id=str(contact["id"]),
-        unit_id=unit_id,
         project_id=project_id,
+        contact_id=str(contact["id"]),
     )
     return success_response(
         request=request,
@@ -143,11 +144,12 @@ async def get_my_community_event_bookings_summary(
 @limiter.limit("120/minute")
 async def verify_community_event_booking(
     request: Request,
+    project_id: str = Path(...),
     body: VerifyBookingRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Security gate QR verification."""
+    """Security gate QR verification for a project."""
     user_context, _contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -156,6 +158,7 @@ async def verify_community_event_booking(
         user_context=user_context,
     )
     data = await booking_service.verify_booking_at_gate(
+        project_id=project_id,
         gate_qr_token=body.gate_qr_token,
     )
     return success_response(
@@ -175,8 +178,8 @@ async def verify_community_event_booking(
 @limiter.limit("30/minute")
 async def cancel_community_event_booking(
     request: Request,
+    project_id: str = Path(...),
     booking_id: str = Path(...),
-    unit_id: str = Query(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -189,8 +192,8 @@ async def cancel_community_event_booking(
         user_context=user_context,
     )
     await service.cancel_booking(
+        project_id=project_id,
         contact_id=str(contact["id"]),
-        unit_id=unit_id,
         booking_id=booking_id,
     )
     return success_response(
@@ -209,12 +212,12 @@ async def cancel_community_event_booking(
 @limiter.limit("100/minute")
 async def get_resident_community_event(
     request: Request,
+    project_id: str = Path(...),
     event_id: str = Path(...),
-    unit_id: str = Query(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Event detail."""
+    """Event detail for a project."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -223,8 +226,8 @@ async def get_resident_community_event(
         user_context=user_context,
     )
     data = await service.get_event_detail(
+        project_id=project_id,
         contact_id=str(contact["id"]),
-        unit_id=unit_id,
         event_id=event_id,
     )
     return success_response(
@@ -244,13 +247,13 @@ async def get_resident_community_event(
 @limiter.limit("30/minute")
 async def book_community_event(
     request: Request,
+    project_id: str = Path(...),
     event_id: str = Path(...),
-    unit_id: str = Query(...),
     body: CreateEventBookingRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Create booking."""
+    """Create booking for the authenticated resident."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -259,8 +262,8 @@ async def book_community_event(
         user_context=user_context,
     )
     data = await service.book_event(
+        project_id=project_id,
         contact_id=str(contact["id"]),
-        unit_id=unit_id,
         event_id=event_id,
         body=body,
     )
@@ -282,8 +285,8 @@ async def book_community_event(
 @limiter.limit("100/minute")
 async def get_my_community_event_booking(
     request: Request,
+    project_id: str = Path(...),
     event_id: str = Path(...),
-    unit_id: str = Query(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -296,8 +299,8 @@ async def get_my_community_event_booking(
         user_context=user_context,
     )
     data = await service.get_my_booking_for_event(
+        project_id=project_id,
         contact_id=str(contact["id"]),
-        unit_id=unit_id,
         event_id=event_id,
     )
     return success_response(

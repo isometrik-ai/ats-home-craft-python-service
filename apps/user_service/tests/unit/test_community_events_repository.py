@@ -212,7 +212,6 @@ async def test_booking_crud_and_filters():
             "display_code": "BKG-1",
             "sequence_number": 1,
             "contact_id": "contact-1",
-            "unit_id": "unit-1",
             "adult_tickets": 2,
             "child_tickets": 0,
             "total_tickets": 2,
@@ -357,7 +356,6 @@ async def test_resident_booking_helpers():
         organization_id=ORG,
         project_id=PROJECT,
         contact_id="contact-1",
-        unit_id="unit-1",
     )
     assert summary["active_ticket_count"] == 4
 
@@ -365,7 +363,6 @@ async def test_resident_booking_helpers():
         organization_id=ORG,
         project_id=PROJECT,
         contact_id="contact-1",
-        unit_id="unit-1",
     )
     assert bookings[0]["booking_id"] == BOOKING
 
@@ -374,16 +371,8 @@ async def test_resident_booking_helpers():
         organization_id=ORG,
         event_id=EVENT,
         contact_id="contact-1",
-        unit_id="unit-1",
     )
     assert mine["id"] == BOOKING
-
-    conn.row = {"?": 1}
-    assert await repo.contact_has_owner_or_tenant_on_unit(
-        organization_id=ORG,
-        contact_id="contact-1",
-        unit_id="unit-1",
-    )
 
 
 @pytest.mark.asyncio

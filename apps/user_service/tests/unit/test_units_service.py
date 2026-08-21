@@ -7,10 +7,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from apps.user_service.app.schemas.project_inventory import (
+    UnitDetailPerson,
+    UnitDetailResponse,
+)
 from apps.user_service.app.services.units_service import (
     UnitsService,
     build_location_label,
     build_plot_unit_code,
+    build_unit_owner_detail,
     pick_unit_owner,
     plot_item_status_to_unit_status,
     resolve_carpet_area_sqft,
@@ -362,6 +367,90 @@ async def test_get_units_registry_summary():
     service.units_repo.get_units_registry_summary.assert_awaited_once()
 
 
+def _owner_contact_row(**overrides) -> dict[str, Any]:
+    """Minimal owner contact row for build_unit_owner_detail tests."""
+    row = {
+        "contact_unit_id": "cu-1",
+        "contact_id": "c-1",
+        "is_primary": True,
+        "relationship": "self",
+        "status": "active",
+        "contact_type": "Owner",
+        "prefix": "Mr.",
+        "first_name": "Rajesh",
+        "last_name": "Kapoor",
+        "phones": [],
+        "emails": [],
+        "assigned_at": "2026-07-15T00:00:00+00:00",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_build_unit_owner_detail_includes_profile_photo_url():
+    """Owner detail exposes profile_photo_url from the contact row."""
+    owner = build_unit_owner_detail(
+        _owner_contact_row(
+            profile_photo_url="https://ats-assets.houseofapps.ai/contacts/org-1/c-1/profile.jpg",
+        )
+    )
+
+    assert (
+        owner["profile_photo_url"]
+        == "https://ats-assets.houseofapps.ai/contacts/org-1/c-1/profile.jpg"
+    )
+
+
+def test_build_unit_owner_detail_profile_photo_url_null_when_missing():
+    """Owner detail returns null profile_photo_url when contact has no photo."""
+    owner = build_unit_owner_detail(_owner_contact_row())
+
+    assert owner["profile_photo_url"] is None
+
+
+def test_unit_detail_person_schema_accepts_profile_photo_url():
+    """Unit detail owner schema validates profile_photo_url."""
+    person = UnitDetailPerson.model_validate(
+        {
+            "contact_id": "c-1",
+            "contact_unit_id": "cu-1",
+            "display_name": "Rajesh Kapoor",
+            "contact_type": "Owner",
+            "relationship": "self",
+            "profile_photo_url": "https://cdn.example.com/raj.jpg",
+        }
+    )
+
+    assert person.profile_photo_url == "https://cdn.example.com/raj.jpg"
+
+
+def test_unit_detail_response_owner_includes_profile_photo_url():
+    """Full unit detail response keeps owner profile_photo_url through validation."""
+    payload = UnitDetailResponse.model_validate(
+        {
+            "id": "unit-1",
+            "project_id": "proj-1",
+            "code": "A-1802",
+            "status": "occupied",
+            "occupancy_label": "sold",
+            "is_sold": True,
+            "created_at": "2026-07-16T09:00:00+00:00",
+            "updated_at": "2026-07-16T10:00:00+00:00",
+            "owner": {
+                "contact_id": "c-1",
+                "contact_unit_id": "cu-1",
+                "display_name": "Rajesh Kapoor",
+                "contact_type": "Owner",
+                "relationship": "self",
+                "profile_photo_url": "https://cdn.example.com/raj.jpg",
+            },
+        }
+    )
+
+    assert payload.owner is not None
+    assert payload.owner.profile_photo_url == "https://cdn.example.com/raj.jpg"
+
+
 @pytest.mark.asyncio
 async def test_get_unit_detail_not_found():
     """Missing unit raises not found."""
@@ -447,6 +536,7 @@ async def test_get_unit_detail_builds_payload():
         "emails": [{"email": "rajesh@example.com", "is_primary": True}],
         "primary_phone": "+919876543210",
         "primary_email": "rajesh@example.com",
+        "profile_photo_url": "https://ats-assets.houseofapps.ai/contacts/org-1/c-1/profile.jpg",
         "assigned_at": "2026-07-15T00:00:00+00:00",
     }
     service.units_repo.count_unit_vehicles.return_value = (1, 1)
@@ -469,6 +559,10 @@ async def test_get_unit_detail_builds_payload():
     assert data["owner"]["display_name"] == "Mr. Rajesh Kapoor"
     assert data["owner"]["phone"] == "+919876543210"
     assert data["owner"]["email"] == "rajesh@example.com"
+    assert (
+        data["owner"]["profile_photo_url"]
+        == "https://ats-assets.houseofapps.ai/contacts/org-1/c-1/profile.jpg"
+    )
     assert data["owner"]["assign_date"] == "2026-07-15"
     assert data["assign_date"] == "2026-07-15"
     assert data["location_label"] == "Tower A · F18"

@@ -35,7 +35,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 
 class CommunityEventsResidentService:
-    """Resident list, detail, and my bookings."""
+    """Resident list, detail, and my bookings (project-scoped)."""
 
     def __init__(
         self,
@@ -116,18 +116,19 @@ class CommunityEventsResidentService:
     async def list_events(
         self,
         *,
+        project_id: str,
         contact_id: str,
         query: ResidentEventListQuery,
     ) -> tuple[list[ResidentEventListItemResponse], int]:
-        """Resident upcoming/past list."""
-        await self.booking_service._ensure_resident_unit(
+        """Resident upcoming/past list for a project."""
+        await self.booking_service._ensure_resident_project(
             contact_id=contact_id,
-            unit_id=query.unit_id,
+            project_id=project_id,
         )
         offset = (query.page - 1) * query.page_size
         rows, total = await self.repo.list_resident_events(
             organization_id=self.organization_id,
-            project_id=query.project_id,
+            project_id=project_id,
             timeframe=query.timeframe.value,
             category=query.category.value if query.category else None,
             search=query.search,
@@ -140,14 +141,14 @@ class CommunityEventsResidentService:
     async def get_event_detail(
         self,
         *,
+        project_id: str,
         contact_id: str,
-        unit_id: str,
         event_id: str,
     ) -> ResidentEventDetailResponse:
         """Resident event detail."""
-        project_id = await self.booking_service._ensure_resident_unit(
+        await self.booking_service._ensure_resident_project(
             contact_id=contact_id,
-            unit_id=unit_id,
+            project_id=project_id,
         )
         row = await self.repo.fetch_resident_event_by_id(
             organization_id=self.organization_id,
@@ -166,7 +167,6 @@ class CommunityEventsResidentService:
             organization_id=self.organization_id,
             event_id=event_id,
             contact_id=contact_id,
-            unit_id=unit_id,
         )
         my_tickets = int(my_booking.get("total_tickets") or 0) if my_booking else 0
         booking_state = self._booking_state({**row, "my_tickets_count": my_tickets})
@@ -210,15 +210,15 @@ class CommunityEventsResidentService:
     async def book_event(
         self,
         *,
+        project_id: str,
         contact_id: str,
-        unit_id: str,
         event_id: str,
         body: CreateEventBookingRequest,
     ) -> BookEventResponse:
         """Delegate booking create."""
         return await self.booking_service.create_booking(
+            project_id=project_id,
             contact_id=contact_id,
-            unit_id=unit_id,
             event_id=event_id,
             body=body,
         )
@@ -226,17 +226,18 @@ class CommunityEventsResidentService:
     async def get_my_booking_summary(
         self,
         *,
-        contact_id: str,
-        unit_id: str,
         project_id: str,
+        contact_id: str,
     ) -> MyBookingsSummaryResponse:
-        """Badge counts for resident."""
-        await self.booking_service._ensure_resident_unit(contact_id=contact_id, unit_id=unit_id)
+        """Badge counts for resident in a project."""
+        await self.booking_service._ensure_resident_project(
+            contact_id=contact_id,
+            project_id=project_id,
+        )
         counts = await self.repo.sum_my_active_tickets(
             organization_id=self.organization_id,
             project_id=project_id,
             contact_id=contact_id,
-            unit_id=unit_id,
         )
         return MyBookingsSummaryResponse(
             active_ticket_count=counts["active_ticket_count"],
@@ -246,17 +247,18 @@ class CommunityEventsResidentService:
     async def list_my_bookings(
         self,
         *,
-        contact_id: str,
-        unit_id: str,
         project_id: str,
+        contact_id: str,
     ) -> list[MyBookingItemResponse]:
-        """All active bookings for resident."""
-        await self.booking_service._ensure_resident_unit(contact_id=contact_id, unit_id=unit_id)
+        """All active bookings for resident in a project."""
+        await self.booking_service._ensure_resident_project(
+            contact_id=contact_id,
+            project_id=project_id,
+        )
         rows = await self.repo.list_my_bookings(
             organization_id=self.organization_id,
             project_id=project_id,
             contact_id=contact_id,
-            unit_id=unit_id,
         )
         return [
             MyBookingItemResponse(
@@ -277,33 +279,37 @@ class CommunityEventsResidentService:
     async def cancel_booking(
         self,
         *,
+        project_id: str,
         contact_id: str,
-        unit_id: str,
         booking_id: str,
     ) -> None:
         """Resident cancel booking."""
         await self.booking_service.cancel_booking(
             contact_id=contact_id,
-            unit_id=unit_id,
+            project_id=project_id,
             booking_id=booking_id,
         )
 
     async def get_my_booking_for_event(
         self,
         *,
+        project_id: str,
         contact_id: str,
-        unit_id: str,
         event_id: str,
     ) -> MyBookingItemResponse | None:
         """Single event booking for resident."""
-        await self.booking_service._ensure_resident_unit(contact_id=contact_id, unit_id=unit_id)
+        await self.booking_service._ensure_resident_project(
+            contact_id=contact_id,
+            project_id=project_id,
+        )
         row = await self.repo.get_my_booking_for_event(
             organization_id=self.organization_id,
             event_id=event_id,
             contact_id=contact_id,
-            unit_id=unit_id,
         )
         if not row:
+            return None
+        if str(row.get("project_id")) != project_id:
             return None
         event = await self.repo.fetch_resident_event_by_id(
             organization_id=self.organization_id,

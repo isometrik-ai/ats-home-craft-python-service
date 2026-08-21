@@ -33,7 +33,6 @@ PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 EVENT_ID = "22222222-2222-2222-2222-222222222222"
 BOOKING_ID = "33333333-3333-3333-3333-333333333333"
 CONTACT_ID = "44444444-4444-4444-4444-444444444444"
-UNIT_ID = "55555555-5555-5555-5555-555555555555"
 
 
 def _service() -> CommunityEventBookingService:
@@ -47,6 +46,7 @@ def _service() -> CommunityEventBookingService:
     )
     svc.repo = MagicMock()
     svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_project_membership = AsyncMock(return_value=True)
     svc.notifications = MagicMock()
     svc.notifications.notify_booking_confirmed = AsyncMock()
     svc.notifications.notify_booking_waitlisted = AsyncMock()
@@ -164,9 +164,6 @@ class TestEventEndAt:
 @pytest.mark.asyncio
 async def test_create_booking_confirmed():
     svc = _service()
-    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
-    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": PROJECT_ID})
-    svc.repo.contact_has_owner_or_tenant_on_unit = AsyncMock(return_value=True)
     event = _published_event(project_id=PROJECT_ID, id=EVENT_ID)
     svc.repo.fetch_resident_event_by_id = AsyncMock(return_value=event)
     svc.repo.count_active_tickets_for_contact = AsyncMock(return_value=0)
@@ -182,8 +179,8 @@ async def test_create_booking_confirmed():
     svc.repo.insert_audit_log = AsyncMock()
 
     result = await svc.create_booking(
+        project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         event_id=EVENT_ID,
         body=CreateEventBookingRequest(adult_tickets=2, child_tickets=0),
     )
@@ -196,9 +193,6 @@ async def test_create_booking_confirmed():
 @pytest.mark.asyncio
 async def test_create_booking_waitlisted_when_full():
     svc = _service()
-    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
-    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": PROJECT_ID})
-    svc.repo.contact_has_owner_or_tenant_on_unit = AsyncMock(return_value=True)
     event = _published_event(
         project_id=PROJECT_ID,
         id=EVENT_ID,
@@ -215,8 +209,8 @@ async def test_create_booking_waitlisted_when_full():
     svc.repo.insert_audit_log = AsyncMock()
 
     result = await svc.create_booking(
+        project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
         event_id=EVENT_ID,
         body=CreateEventBookingRequest(adult_tickets=1, child_tickets=0),
     )
@@ -229,25 +223,23 @@ async def test_create_booking_waitlisted_when_full():
 @pytest.mark.asyncio
 async def test_create_booking_failures():
     svc = _service()
-    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=False)
+    svc.contact_units_repo.contact_has_active_project_membership = AsyncMock(return_value=False)
 
     with pytest.raises(ValidationException):
         await svc.create_booking(
+            project_id=PROJECT_ID,
             contact_id=CONTACT_ID,
-            unit_id=UNIT_ID,
             event_id=EVENT_ID,
             body=CreateEventBookingRequest(adult_tickets=1, child_tickets=0),
         )
 
-    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
-    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": PROJECT_ID})
-    svc.repo.contact_has_owner_or_tenant_on_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.contact_has_active_project_membership = AsyncMock(return_value=True)
     svc.repo.fetch_resident_event_by_id = AsyncMock(return_value=None)
 
     with pytest.raises(NotFoundException):
         await svc.create_booking(
+            project_id=PROJECT_ID,
             contact_id=CONTACT_ID,
-            unit_id=UNIT_ID,
             event_id=EVENT_ID,
             body=CreateEventBookingRequest(adult_tickets=1, child_tickets=0),
         )
@@ -259,8 +251,8 @@ async def test_create_booking_failures():
     svc.repo.fetch_resident_event_by_id = AsyncMock(return_value=closed)
     with pytest.raises(ValidationException):
         await svc.create_booking(
+            project_id=PROJECT_ID,
             contact_id=CONTACT_ID,
-            unit_id=UNIT_ID,
             event_id=EVENT_ID,
             body=CreateEventBookingRequest(adult_tickets=1, child_tickets=0),
         )
@@ -275,7 +267,6 @@ async def test_cancel_booking_and_promote_waitlist():
             "event_id": EVENT_ID,
             "project_id": PROJECT_ID,
             "contact_id": CONTACT_ID,
-            "unit_id": UNIT_ID,
             "booking_status": CommunityEventBookingStatus.CONFIRMED.value,
             "total_tickets": 2,
         }
@@ -287,7 +278,7 @@ async def test_cancel_booking_and_promote_waitlist():
 
     await svc.cancel_booking(
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
+        project_id=PROJECT_ID,
         booking_id=BOOKING_ID,
     )
     svc._promote_waitlist.assert_awaited_once_with(event_id=EVENT_ID)
@@ -295,13 +286,14 @@ async def test_cancel_booking_and_promote_waitlist():
     svc.repo.fetch_booking_by_id = AsyncMock(
         return_value={
             "id": BOOKING_ID,
+            "project_id": PROJECT_ID,
             "booking_status": CommunityEventBookingStatus.CANCELLED.value,
         }
     )
     with pytest.raises(ConflictException):
         await svc.cancel_booking(
             contact_id=CONTACT_ID,
-            unit_id=UNIT_ID,
+            project_id=PROJECT_ID,
             booking_id=BOOKING_ID,
         )
 
@@ -368,17 +360,18 @@ async def test_verify_booking_at_gate():
     )
     svc.repo.insert_audit_log = AsyncMock()
 
-    result = await svc.verify_booking_at_gate(gate_qr_token="token-123")
+    result = await svc.verify_booking_at_gate(project_id=PROJECT_ID, gate_qr_token="token-123")
     assert result.booking_id == BOOKING_ID
 
     svc.repo.fetch_booking_by_gate_token = AsyncMock(
         return_value={
             "id": BOOKING_ID,
+            "project_id": PROJECT_ID,
             "booking_status": CommunityEventBookingStatus.WAITLISTED.value,
         }
     )
     with pytest.raises(ValidationException):
-        await svc.verify_booking_at_gate(gate_qr_token="token-123")
+        await svc.verify_booking_at_gate(project_id=PROJECT_ID, gate_qr_token="token-123")
 
 
 @pytest.mark.asyncio
@@ -462,7 +455,6 @@ async def test_cancel_booking_confirmed_promotes_waitlist():
             "event_id": EVENT_ID,
             "project_id": PROJECT_ID,
             "contact_id": CONTACT_ID,
-            "unit_id": UNIT_ID,
             "booking_status": CommunityEventBookingStatus.CONFIRMED.value,
             "total_tickets": 2,
         }
@@ -474,7 +466,7 @@ async def test_cancel_booking_confirmed_promotes_waitlist():
 
     await svc.cancel_booking(
         contact_id=CONTACT_ID,
-        unit_id=UNIT_ID,
+        project_id=PROJECT_ID,
         booking_id=BOOKING_ID,
     )
 
@@ -486,13 +478,18 @@ async def test_cancel_booking_not_found_and_already_cancelled():
     svc = _service()
     svc.repo.fetch_booking_by_id = AsyncMock(return_value=None)
     with pytest.raises(NotFoundException):
-        await svc.cancel_booking(contact_id=CONTACT_ID, unit_id=UNIT_ID, booking_id=BOOKING_ID)
+        await svc.cancel_booking(
+            contact_id=CONTACT_ID, project_id=PROJECT_ID, booking_id=BOOKING_ID
+        )
 
     svc.repo.fetch_booking_by_id = AsyncMock(
         return_value={
             "id": BOOKING_ID,
+            "project_id": PROJECT_ID,
             "booking_status": CommunityEventBookingStatus.CANCELLED.value,
         }
     )
     with pytest.raises(ConflictException):
-        await svc.cancel_booking(contact_id=CONTACT_ID, unit_id=UNIT_ID, booking_id=BOOKING_ID)
+        await svc.cancel_booking(
+            contact_id=CONTACT_ID, project_id=PROJECT_ID, booking_id=BOOKING_ID
+        )
