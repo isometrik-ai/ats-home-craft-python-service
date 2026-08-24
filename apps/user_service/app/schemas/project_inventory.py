@@ -661,6 +661,7 @@ class UnitDetailPerson(BaseModel):
     is_primary: bool = False
     phone: str | None = None
     email: str | None = None
+    profile_photo_url: str | None = None
     assign_date: str | None = None
     assigned_at: str | None = None
     contact_unit_status: str | None = None
