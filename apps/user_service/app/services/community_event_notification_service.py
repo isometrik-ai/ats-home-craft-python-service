@@ -15,6 +15,12 @@ from libs.shared_utils.logger import get_logger
 logger = get_logger("community_event_notifications")
 
 
+def _event_title_params(event: dict[str, Any]) -> dict[str, str]:
+    """Template params for community event push copy."""
+    title = str(event.get("title") or "").strip()
+    return {"title": title or "Community event"}
+
+
 class CommunityEventNotificationService:
     """Dispatch community event push notifications."""
 
@@ -29,6 +35,7 @@ class CommunityEventNotificationService:
         organization_id: str,
         contact_id: str,
         message_key: str,
+        params: dict[str, Any],
         data: dict[str, Any],
     ) -> None:
         """Send push to contact's linked user if present."""
@@ -45,6 +52,7 @@ class CommunityEventNotificationService:
                 message_key=message_key,
                 notification_type="community_event",
                 feed_type="community_events",
+                params=params,
                 data=data,
                 entity={"type": "community_event", "id": data.get("event_id", "")},
                 options={},
@@ -60,9 +68,10 @@ class CommunityEventNotificationService:
         recipient_user_ids: list[str],
     ) -> None:
         """Notify project residents when event is published."""
+        params = _event_title_params(event)
         data = {
             "event_id": str(event["id"]),
-            "title": str(event.get("title") or ""),
+            "title": params["title"],
             "project_id": str(event.get("project_id") or ""),
         }
         for user_id in recipient_user_ids:
@@ -73,6 +82,7 @@ class CommunityEventNotificationService:
                     message_key="notifications.push.community_events.published",
                     notification_type="community_event",
                     feed_type="community_events",
+                    params=params,
                     data=data,
                     entity={"type": "community_event", "id": data["event_id"]},
                     options={},
@@ -89,14 +99,16 @@ class CommunityEventNotificationService:
         booking: dict[str, Any],
     ) -> None:
         """Notify resident on confirmed booking."""
+        params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
             contact_id=contact_id,
             message_key="notifications.push.community_events.booking_confirmed",
+            params=params,
             data={
                 "event_id": str(event["id"]),
                 "booking_id": str(booking["id"]),
-                "title": str(event.get("title") or ""),
+                "title": params["title"],
             },
         )
 
@@ -109,14 +121,16 @@ class CommunityEventNotificationService:
         booking: dict[str, Any],
     ) -> None:
         """Notify resident when waitlisted."""
+        params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
             contact_id=contact_id,
             message_key="notifications.push.community_events.booking_waitlisted",
+            params=params,
             data={
                 "event_id": str(event["id"]),
                 "booking_id": str(booking["id"]),
-                "title": str(event.get("title") or ""),
+                "title": params["title"],
             },
         )
 
@@ -129,14 +143,16 @@ class CommunityEventNotificationService:
         booking: dict[str, Any],
     ) -> None:
         """Notify resident when promoted from waitlist."""
+        params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
             contact_id=contact_id,
             message_key="notifications.push.community_events.waitlist_promoted",
+            params=params,
             data={
                 "event_id": str(event["id"]),
                 "booking_id": str(booking["id"]),
-                "title": str(event.get("title") or ""),
+                "title": params["title"],
             },
         )
 
@@ -149,14 +165,16 @@ class CommunityEventNotificationService:
         booking: dict[str, Any],
     ) -> None:
         """Notify resident when payment recorded."""
+        params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
             contact_id=contact_id,
             message_key="notifications.push.community_events.payment_received",
+            params=params,
             data={
                 "event_id": str(event["id"]),
                 "booking_id": str(booking["id"]),
-                "title": str(event.get("title") or ""),
+                "title": params["title"],
             },
         )
 
@@ -168,12 +186,14 @@ class CommunityEventNotificationService:
         event: dict[str, Any],
     ) -> None:
         """Remind confirmed bookers before event."""
+        params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
             contact_id=contact_id,
             message_key="notifications.push.community_events.reminder",
+            params=params,
             data={
                 "event_id": str(event["id"]),
-                "title": str(event.get("title") or ""),
+                "title": params["title"],
             },
         )

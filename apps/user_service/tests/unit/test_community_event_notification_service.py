@@ -56,6 +56,9 @@ async def test_send_to_contact_success():
         booking={"id": BOOKING},
     )
     svc.push_dispatcher.send_to_user.assert_awaited_once()
+    call_kwargs = svc.push_dispatcher.send_to_user.await_args.kwargs
+    assert call_kwargs["params"] == {"title": "Fest"}
+    assert call_kwargs["data"]["title"] == "Fest"
 
 
 @pytest.mark.asyncio
@@ -80,6 +83,8 @@ async def test_notify_event_published_sends_to_each_user():
         recipient_user_ids=["user-1", "user-2"],
     )
     assert svc.push_dispatcher.send_to_user.await_count == 2
+    call_kwargs = svc.push_dispatcher.send_to_user.await_args.kwargs
+    assert call_kwargs["params"] == {"title": "Fest"}
 
 
 @pytest.mark.asyncio
