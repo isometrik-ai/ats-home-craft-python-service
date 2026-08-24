@@ -432,9 +432,11 @@ class UserService:  # pylint: disable=too-many-public-methods
         """Validate and normalize user custom fields for member creation."""
         if not (self.user_context and self.user_context.organization_id):
             return []
+        if not custom_fields_payload and not enforce_required:
+            return []
 
         custom_field_service = CustomFieldService(
-            db_connection=self.db_connection,
+            db_connection=self.organization_member_repository.db_connection,
             user_context=self.user_context,
         )
         return await custom_field_service.validate_for_create(
