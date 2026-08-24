@@ -1,0 +1,150 @@
+"""Unit tests for ParkingAllotmentService."""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from apps.user_service.app.schemas.enums import (
+    ParkingAllotmentBasis,
+    ParkingSlotDisplayStatus,
+    ParkingSlotType,
+)
+from apps.user_service.app.schemas.parking_allotment import AllotParkingSlotRequest
+from apps.user_service.app.services.parking_allotment_service import (
+    ParkingAllotmentService,
+)
+from apps.user_service.app.utils.common_utils import UserContext
+
+
+def _user_context() -> UserContext:
+    return UserContext(
+        user_id="staff-1",
+        email="staff@example.com",
+        organization_id="org-1",
+    )
+
+
+def _slot_row(**overrides: object) -> dict[str, object]:
+    row = {
+        "id": "slot-1",
+        "slot_number": 2,
+        "slot_status": "available",
+        "facility_id": "facility-1",
+        "facility_name": "Bay B",
+        "floor_level": "B2",
+        "wing": "Bay B",
+        "tower_id": "tower-1",
+        "tower_code": "A",
+        "tower_name": "Tower A",
+        "display_status": ParkingSlotDisplayStatus.FREE.value,
+        "slot_type": ParkingSlotType.CAR_STANDARD.value,
+        "unit_id": None,
+        "unit_code": None,
+        "allotment_basis": None,
+        "effective_from": None,
+        "allotted_at": None,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    row.update(overrides)
+    return row
+
+
+def test_build_slot_code_formats_tower_floor_and_number():
+    assert (
+        ParkingAllotmentService._build_slot_code(
+            tower_code="A",
+            floor_level="B2",
+            slot_number=2,
+        )
+        == "A-B2-002"
+    )
+
+
+def test_slot_allowed_actions_for_free_slot():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    assert "allot" in svc._slot_allowed_actions(display_status=ParkingSlotDisplayStatus.FREE.value)
+
+
+def test_unit_allowed_actions_when_short_on_entitlement():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    assert svc._unit_allowed_actions(parking_entitlement=2, slots_assigned=0) == ["allot_slot"]
+
+
+def test_unit_allowed_actions_when_entitlement_met():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    assert svc._unit_allowed_actions(parking_entitlement=1, slots_assigned=1) == ["add_slot"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_list_scope_validates_parking_facility():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.facilities_repo = MagicMock()
+    svc.facilities_repo.get_facility = AsyncMock(
+        return_value={
+            "id": "facility-1",
+            "facility_type": "parking",
+            "tower_id": "tower-1",
+        }
+    )
+
+    tower_id, facility_id = await svc._resolve_list_scope(
+        project_id="project-1",
+        tower_id=None,
+        facility_id="facility-1",
+    )
+
+    assert tower_id == "tower-1"
+    assert facility_id == "facility-1"
+
+
+@pytest.mark.asyncio
+async def test_allot_slot_creates_allotment_and_assigns_slot():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.slots_repo = MagicMock()
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "code": "A-1804",
+            "is_parking": False,
+            "parking_entitlement": 2,
+            "included_slots_assigned": 0,
+            "slots_assigned": 0,
+        }
+    )
+    svc.repo.insert_allotment = AsyncMock(return_value={"id": "allotment-1"})
+    svc.slots_repo.assign_slot = AsyncMock(return_value={"id": "slot-1", "status": "assigned"})
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.get_slot_row = AsyncMock(
+        side_effect=[
+            _slot_row(),
+            _slot_row(
+                display_status=ParkingSlotDisplayStatus.ALLOTTED.value,
+                unit_id="unit-1",
+                unit_code="A-1804",
+                allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT.value,
+                effective_from=date(2026, 8, 16),
+            ),
+        ]
+    )
+
+    result = await svc.allot_slot(
+        project_id="project-1",
+        slot_id="slot-1",
+        body=AllotParkingSlotRequest(
+            unit_id="unit-1",
+            effective_from=date(2026, 8, 16),
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+        ),
+    )
+
+    assert result.slot_code == "A-B2-002"
+    assert result.allotted_to_unit is not None
+    assert result.allotted_to_unit.code == "A-1804"
+    svc.repo.insert_allotment.assert_awaited_once()
+    svc.slots_repo.assign_slot.assert_awaited_once()

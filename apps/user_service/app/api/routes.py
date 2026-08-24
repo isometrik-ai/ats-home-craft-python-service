@@ -50,6 +50,9 @@ from apps.user_service.app.api.organization import router as organization_router
 from apps.user_service.app.api.organization_memory import (
     router as organization_memory_router,
 )
+from apps.user_service.app.api.parking_allotment import (
+    router as parking_allotment_router,
+)
 from apps.user_service.app.api.passes import router as passes_router
 from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
@@ -110,6 +113,7 @@ router.include_router(visitor_logs_router)
 router.include_router(move_events_router)
 router.include_router(custom_fields_router)
 router.include_router(projects_router)
+router.include_router(parking_allotment_router)
 router.include_router(fee_configuration_router)
 router.include_router(fee_invoices_router)
 router.include_router(maintenance_fees_router)
