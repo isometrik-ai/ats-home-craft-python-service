@@ -21,7 +21,7 @@ import io
 import json
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from email.utils import parseaddr
 from typing import Any
 
@@ -51,6 +51,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
 )
 from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.schemas.common import NoteItem, Phone
+from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.contacts import (
     ContactCompanyUpdate,
     ContactsExportQuery,
@@ -85,6 +86,7 @@ from apps.user_service.app.services.client_enrichment_service import (
 from apps.user_service.app.services.contact_delete_cascade_service import (
     ContactDeleteCascadeService,
 )
+from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.lead_service import LeadService
@@ -1439,6 +1441,22 @@ class ContactsService:
             organization_name=org_name,
             password=created_password,
         )
+
+        if body.unit_assignment is not None:
+            units_service = ContactUnitsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            assign_date = body.unit_assignment.assign_date or date.today()
+            await units_service.admin_assign_unit(
+                contact_id=str(contact_id),
+                body=AdminAssignUnitRequest(
+                    unit_id=body.unit_assignment.unit_id,
+                    assign_date=assign_date,
+                    is_primary=body.unit_assignment.is_primary,
+                    relationship=body.unit_assignment.relationship,
+                ),
+            )
 
         person_payload = self._build_person_payload(
             body=body,

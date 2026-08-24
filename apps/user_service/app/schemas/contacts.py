@@ -40,6 +40,7 @@ from apps.user_service.app.schemas.enums import (
     ContactBloodGroup,
     ContactGender,
     ContactType,
+    ContactUnitRelationship,
 )
 from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
 from apps.user_service.app.utils.common_utils import parse_flexible_date
@@ -151,6 +152,20 @@ class ContactCompaniesCreate(BaseModel):
         return self
 
 
+class ContactUnitAssignmentAtCreate(BaseModel):
+    """Optional unit pre-allotment when creating a contact (e.g. Community Contacts drawer)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str
+    assign_date: date | None = Field(
+        default=None,
+        description="Allotment date (YYYY-MM-DD). Defaults to today when omitted.",
+    )
+    is_primary: bool = False
+    relationship: ContactUnitRelationship = ContactUnitRelationship.SELF
+
+
 class CreateContactRequest(BaseModel):
     """Create a contact.
 
@@ -159,6 +174,7 @@ class CreateContactRequest(BaseModel):
     - contact + link to existing company (optionally primary)
     - contact + create new company + link (optionally primary)
     - optional org-scoped role (Vendor / Staff) via contact_type
+    - optional unit pre-allotment via unit_assignment (Community Contacts drawer)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -232,6 +248,14 @@ class CreateContactRequest(BaseModel):
     # optional addresses created on contact
     addresses: list[AddressInput] = Field(default_factory=list, max_length=50)
 
+    unit_assignment: ContactUnitAssignmentAtCreate | None = Field(
+        default=None,
+        description=(
+            "Optional unit pre-allotment. Creates a pending contact_units row and assigns "
+            "an Owner role when relationship is self."
+        ),
+    )
+
     @field_validator("phones")
     @classmethod
     def validate_primary_phone_when_present(
@@ -260,6 +284,19 @@ class CreateContactRequest(BaseModel):
             message_key="contacts.errors.email_required",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
         )
+
+    @model_validator(mode="after")
+    def validate_unit_assignment_with_contact_type(self) -> "CreateContactRequest":
+        """Reject unit pre-allotment combined with org-scoped contact_type."""
+        if self.unit_assignment is not None and self.contact_type in {
+            ContactType.VENDOR,
+            ContactType.STAFF,
+        }:
+            raise ValidationException(
+                message_key="contacts.errors.unit_assignment_incompatible_with_contact_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self
 
 
 class CreateContactRequestStandalone(BaseModel):
