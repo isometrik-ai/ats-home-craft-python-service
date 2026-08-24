@@ -280,7 +280,7 @@ async def list_project_daily_help_categories(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=[PROJECTS_MANAGEMENT_VIEW, VISITOR_MANAGEMENT_VERIFY],
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -321,7 +321,7 @@ async def create_project_daily_help_category(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=[PROJECTS_MANAGEMENT_EDIT, VISITOR_MANAGEMENT_VERIFY],
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
