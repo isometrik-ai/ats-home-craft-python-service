@@ -723,6 +723,79 @@ async def test_verify_document_success() -> None:
     call = push.contact_calls[0]
     assert call["message_key"] == "notifications.push.tenant_request.document_verified"
     assert call["params"]["document_name"] == "ID proof"
+    assert call["params"]["unit_label"] == "A-101"
+
+
+@pytest.mark.asyncio
+async def test_verify_document_notification_prefers_unit_label() -> None:
+    """Push uses unit_label when both label and code are present."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(unit_label="Flat 1203", unit_code="T4102")
+    repo.documents[0]["id"] = DOC_ID
+    svc = _service(repo=repo)
+
+    await svc.verify_document(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        document_id=DOC_ID,
+    )
+
+    call = svc._push_dispatcher.contact_calls[0]
+    assert call["params"]["unit_label"] == "Flat 1203"
+    assert call["params"]["document_name"] == "ID proof"
+
+
+@pytest.mark.asyncio
+async def test_verify_document_notification_falls_back_to_unit_code() -> None:
+    """Push falls back to unit_code when unit_label is missing."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(unit_label=None, unit_code="B-202")
+    repo.documents[0]["id"] = DOC_ID
+    svc = _service(repo=repo)
+
+    await svc.verify_document(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        document_id=DOC_ID,
+    )
+
+    call = svc._push_dispatcher.contact_calls[0]
+    assert call["params"]["unit_label"] == "B-202"
+
+
+@pytest.mark.asyncio
+async def test_verify_document_notification_falls_back_to_unit_id() -> None:
+    """Push falls back to unit_id when label and code are missing."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(unit_label=None, unit_code=None)
+    repo.documents[0]["id"] = DOC_ID
+    svc = _service(repo=repo)
+
+    await svc.verify_document(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        document_id=DOC_ID,
+    )
+
+    call = svc._push_dispatcher.contact_calls[0]
+    assert call["params"]["unit_label"] == UNIT_ID
+
+
+@pytest.mark.asyncio
+async def test_verify_document_notification_includes_unit_id_in_data() -> None:
+    """Push data includes unit_id for deep linking across multiple units."""
+    repo = _FakeTenantRequestsRepo()
+    repo.documents[0]["id"] = DOC_ID
+    svc = _service(repo=repo)
+
+    await svc.verify_document(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        document_id=DOC_ID,
+    )
+
+    call = svc._push_dispatcher.contact_calls[0]
+    assert call["data"]["unit_id"] == UNIT_ID
 
 
 @pytest.mark.asyncio
@@ -758,6 +831,27 @@ async def test_reject_document_success() -> None:
     assert len(push.contact_calls) == 1
     call = push.contact_calls[0]
     assert call["message_key"] == "notifications.push.tenant_request.document_rejected"
+    assert call["params"]["document_name"] == "ID proof"
+    assert call["params"]["unit_label"] == "A-101"
+
+
+@pytest.mark.asyncio
+async def test_reject_document_notification_uses_distinct_unit_label() -> None:
+    """Reject push includes the unit label so multi-unit owners can tell requests apart."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(unit_label="Tower B - 501", unit_code="B-501")
+    repo.documents[0]["id"] = DOC_ID
+    svc = _service(repo=repo)
+
+    await svc.reject_document(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        document_id=DOC_ID,
+        body=RejectTenantDocumentRequest(rejection_reason="Blurry image"),
+    )
+
+    call = svc._push_dispatcher.contact_calls[0]
+    assert call["params"]["unit_label"] == "Tower B - 501"
     assert call["params"]["document_name"] == "ID proof"
 
 

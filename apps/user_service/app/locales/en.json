@@ -895,12 +895,12 @@
           "body": "A tenant request was submitted for {unit_label}"
         },
         "document_verified": {
-          "title": "{document_name} verified",
-          "body": "An admin verified your {document_name} document on the tenant request"
+          "title": "{document_name} verified for {unit_label}",
+          "body": "An admin verified your {document_name} document for {unit_label}"
         },
         "document_rejected": {
-          "title": "{document_name} rejected",
-          "body": "Your {document_name} document was rejected. Please re-upload it"
+          "title": "{document_name} rejected for {unit_label}",
+          "body": "Your {document_name} document for {unit_label} was rejected. Please re-upload it"
         },
         "approved": {
           "title": "Tenant request approved",
