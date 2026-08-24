@@ -899,6 +899,7 @@ class CommunityEventsRepository(BaseRepository):
               b.event_id::text AS event_id,
               e.title AS event_title,
               e.start_date AS event_start_date,
+              e.cover_image_path,
               b.total_tickets,
               b.total_amount_minor,
               b.payment_status::text AS payment_status,
