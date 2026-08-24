@@ -996,7 +996,9 @@
       "reviewer_access_denied": "You do not have permission to review daily help submissions.",
       "not_pending_approval": "This profile is not awaiting admin approval.",
       "not_rejected": "Only rejected profiles can be resubmitted.",
-      "pending_review_profile": "Approve or reject this submission before using registry actions."
+      "pending_review_profile": "Approve or reject this submission before using registry actions.",
+      "not_active": "Only active daily help profiles can regenerate a gate passcode.",
+      "no_gate_passcode": "This profile does not have a gate passcode yet."
     },
     "success": {
       "summary_retrieved": "Daily help summary retrieved successfully.",
@@ -1004,6 +1006,7 @@
       "household_links_retrieved": "Daily help household links retrieved successfully.",
       "admin_household_linked": "Daily help profile linked to the unit successfully.",
       "admin_household_unlinked": "Daily help profile unlinked from the unit successfully.",
+      "gate_passcode_regenerated": "Gate pass verification code regenerated successfully.",
       "resident_household_links_retrieved": "Linked daily help profiles retrieved successfully.",
       "categories_retrieved": "Daily help categories retrieved successfully.",
       "category_created": "Daily help category created successfully.",

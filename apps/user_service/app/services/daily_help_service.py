@@ -40,6 +40,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpDocumentResponse,
     DailyHelpEventResponse,
     DailyHelpExportQuery,
+    DailyHelpGatePasscodeResponse,
     DailyHelpHouseholdLinkResponse,
     DailyHelpListItemResponse,
     DailyHelpListQuery,
@@ -1211,6 +1212,93 @@ class DailyHelpService:
             },
         )
         return self._serialize_household_link({**target, **removed})
+
+    async def regenerate_gate_passcode(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+    ) -> DailyHelpGatePasscodeResponse:
+        """Admin regenerates the gate verification code for an active profile."""
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_not_deleted(row)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise ValidationException(
+                message_key="daily_help.errors.not_active",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if not row.get("gate_passcode"):
+            raise ValidationException(
+                message_key="daily_help.errors.no_gate_passcode",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        user_id = self.user_context.user_id
+        actor_user_id = str(user_id) if user_id else None
+        new_code = await self.repo.generate_unique_passcode(
+            organization_id=self.organization_id,
+            project_id=project_id,
+        )
+        updated = await self.repo.update_profile(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            fields={"gate_passcode": new_code},
+            updated_by_user_id=actor_user_id,
+        )
+        assert updated
+
+        linked_pass_id = updated.get("linked_pass_id")
+        pass_synced = False
+        if linked_pass_id:
+            pass_row = await self.passes_repo.get_by_id(
+                organization_id=self.organization_id,
+                pass_id=str(linked_pass_id),
+            )
+            if pass_row and str(pass_row.get("status")) == PassStatus.ACTIVE.value:
+                synced = await self.passes_repo.update_active_pass_code(
+                    organization_id=self.organization_id,
+                    pass_id=str(linked_pass_id),
+                    code=new_code,
+                )
+                pass_synced = bool(synced)
+
+        if not pass_synced:
+            await self._reissue_pass_if_needed(
+                project_id=project_id,
+                profile_id=profile_id,
+                row=updated,
+                user_id=actor_user_id,
+            )
+            refreshed = await self.repo.get_profile(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                profile_id=profile_id,
+            )
+            if refreshed:
+                updated = refreshed
+
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.UPDATED.value,
+            actor_user_id=actor_user_id,
+            payload={
+                "gate_passcode_regenerated": True,
+                "linked_pass_id": updated.get("linked_pass_id"),
+            },
+        )
+
+        return DailyHelpGatePasscodeResponse(
+            id=profile_id,
+            display_name=str(updated.get("display_name") or row.get("display_name") or ""),
+            gate_passcode=new_code,
+            linked_pass_id=(
+                str(updated["linked_pass_id"]) if updated.get("linked_pass_id") else None
+            ),
+            updated_at=format_iso_datetime(updated.get("updated_at")),
+            updated_by_user_id=actor_user_id,
+            updated_by_name=await self._resolve_created_by_name(actor_user_id),
+        )
 
     async def create_profile(
         self,

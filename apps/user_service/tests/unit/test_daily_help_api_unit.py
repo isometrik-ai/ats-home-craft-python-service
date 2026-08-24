@@ -26,6 +26,7 @@ from apps.user_service.app.api.daily_help import (
     list_project_daily_help_profiles,
     list_security_daily_help_submissions,
     reactivate_project_daily_help_profile,
+    regenerate_daily_help_gate_passcode,
     reject_project_daily_help_profile,
     replace_daily_help_availability,
     restore_project_daily_help_profile,
@@ -555,6 +556,36 @@ async def test_admin_household_link_and_unlink(mock_service_cls, mock_access):
             current_user={"sub": "staff-1"},
         )
     ).status_code == 200
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.api.daily_help.ensure_staff_project_access", new_callable=AsyncMock)
+@patch("apps.user_service.app.api.daily_help.DailyHelpService")
+async def test_regenerate_daily_help_gate_passcode(mock_service_cls, mock_access):
+    mock_access.return_value = _user_context()
+    from apps.user_service.app.schemas.daily_help import DailyHelpGatePasscodeResponse
+
+    service = mock_service_cls.return_value
+    service.regenerate_gate_passcode = AsyncMock(
+        return_value=DailyHelpGatePasscodeResponse(
+            id=PROFILE_ID,
+            display_name="Gangu tai M",
+            gate_passcode="5798",
+            linked_pass_id="pass-1",
+            updated_at="2026-08-22T09:00:00Z",
+            updated_by_user_id="staff-1",
+            updated_by_name="Admin User",
+        )
+    )
+
+    response = await regenerate_daily_help_gate_passcode(
+        request=_request(),
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+    assert response.status_code == 200
 
 
 @pytest.mark.asyncio

@@ -1363,6 +1363,114 @@ async def test_remove_admin_household_link():
 
 
 @pytest.mark.asyncio
+async def test_regenerate_gate_passcode_updates_profile_and_pass():
+    """Admin regenerate issues a new code and syncs the active linked pass."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._get_profile_or_raise = AsyncMock(
+        return_value=_detail_row(
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="1234",
+            linked_pass_id="pass-1",
+        )
+    )
+    svc.repo = MagicMock()
+    svc.repo.generate_unique_passcode = AsyncMock(return_value="5798")
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="5798",
+            linked_pass_id="pass-1",
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.get_by_id = AsyncMock(return_value={"id": "pass-1", "status": "active"})
+    svc.passes_repo.update_active_pass_code = AsyncMock(
+        return_value={"id": "pass-1", "code": "5798"}
+    )
+    svc.members_repo = MagicMock()
+    svc.members_repo.get_user_profile_by_id = AsyncMock(
+        return_value={"first_name": "Admin", "last_name": "User"}
+    )
+
+    result = await svc.regenerate_gate_passcode(
+        project_id="project-1",
+        profile_id="profile-1",
+    )
+
+    assert result.gate_passcode == "5798"
+    assert result.linked_pass_id == "pass-1"
+    assert result.updated_by_name == "Admin User"
+    svc.passes_repo.update_active_pass_code.assert_awaited_once_with(
+        organization_id="org-1",
+        pass_id="pass-1",
+        code="5798",
+    )
+
+
+@pytest.mark.asyncio
+async def test_regenerate_gate_passcode_reissues_missing_pass():
+    """Regenerate re-issues the linked pass when it is missing or inactive."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._get_profile_or_raise = AsyncMock(
+        return_value=_detail_row(
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="1234",
+            linked_pass_id="pass-1",
+        )
+    )
+    svc.repo = MagicMock()
+    svc.repo.generate_unique_passcode = AsyncMock(return_value="5798")
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="5798",
+            linked_pass_id="pass-1",
+        )
+    )
+    svc.repo.get_profile = AsyncMock(
+        return_value=_detail_row(
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="5798",
+            linked_pass_id="pass-2",
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.get_by_id = AsyncMock(return_value={"id": "pass-1", "status": "cancelled"})
+    svc._reissue_pass_if_needed = AsyncMock()
+    svc.members_repo = MagicMock()
+    svc.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
+
+    result = await svc.regenerate_gate_passcode(
+        project_id="project-1",
+        profile_id="profile-1",
+    )
+
+    assert result.gate_passcode == "5798"
+    assert result.linked_pass_id == "pass-2"
+    svc._reissue_pass_if_needed.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_regenerate_gate_passcode_requires_active_profile():
+    """Inactive profiles cannot regenerate a gate passcode."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._get_profile_or_raise = AsyncMock(
+        return_value=_detail_row(
+            status=DailyHelpStatus.INACTIVE.value,
+            gate_passcode="1234",
+        )
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.regenerate_gate_passcode(
+            project_id="project-1",
+            profile_id="profile-1",
+        )
+
+
+@pytest.mark.asyncio
 async def test_add_household_link_and_create_rating():
     from decimal import Decimal
 

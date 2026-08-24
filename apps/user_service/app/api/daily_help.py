@@ -22,6 +22,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpDetailApiResponse,
     DailyHelpDocumentApiResponse,
     DailyHelpExportQuery,
+    DailyHelpGatePasscodeApiResponse,
     DailyHelpHouseholdLinkApiResponse,
     DailyHelpHouseholdLinkListApiResponse,
     DailyHelpListApiResponse,
@@ -149,6 +150,10 @@ HOUSEHOLD_LINK_CREATED_RESPONSES = _created_response(
 HOUSEHOLD_LINK_REMOVED_RESPONSES = _ok_response(
     DailyHelpHouseholdLinkApiResponse,
     "Daily help profile unlinked from the unit.",
+)
+GATE_PASSCODE_REGENERATED_RESPONSES = _ok_response(
+    DailyHelpGatePasscodeApiResponse,
+    "New gate pass verification code for the daily help profile.",
 )
 
 
@@ -709,6 +714,59 @@ async def unlink_project_daily_help_from_unit(
     return success_response(
         request=request,
         message_key="daily_help.success.admin_household_unlinked",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("regenerate daily help gate passcode")
+@router.post(
+    "/{project_id}/daily-help/{profile_id}/regenerate-passcode",
+    status_code=http_status.HTTP_200_OK,
+    summary="Regenerate gate pass verification code",
+    response_model=None,
+    responses=GATE_PASSCODE_REGENERATED_RESPONSES,
+)
+@limiter.limit("20/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="general",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_profiles",
+    category="DAILY_HELP",
+)
+async def regenerate_daily_help_gate_passcode(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Admin issues a new gate verification code and syncs the linked pass."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.regenerate_gate_passcode(
+        project_id=project_id,
+        profile_id=profile_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_profiles",
+        requested_id=profile_id,
+        description=f"Regenerated gate passcode for daily help profile {profile_id}",
+        risk_level="medium",
+        new_data={"linked_pass_id": data.linked_pass_id},
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.gate_passcode_regenerated",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
     )
