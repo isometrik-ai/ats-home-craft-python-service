@@ -6,7 +6,7 @@ These schemas are used for request/response validation and API documentation.
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -105,6 +105,10 @@ class InviteCreateRequest(BaseModel):
         None,
         description="Optional tags to assign to the member when the invitation is accepted",
     )
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="User custom fields (FieldCell create payload; no type or instance_id).",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -197,6 +201,10 @@ class InviteListItem(BaseModel):
     tags: list[str] | None = Field(
         None,
         description="Tags to assign to the member on acceptance, if set at invite time",
+    )
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Admin pre-filled user custom fields stored on the invitation.",
     )
 
     model_config = ConfigDict(

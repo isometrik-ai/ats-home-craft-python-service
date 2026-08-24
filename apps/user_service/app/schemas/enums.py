@@ -1032,6 +1032,7 @@ class EntityType(str, Enum):
     CONTACT = "contact"
     LEAD = "lead"
     PROJECT = "project"
+    USER = "user"
 
 
 class EntityListStatus(str, Enum):

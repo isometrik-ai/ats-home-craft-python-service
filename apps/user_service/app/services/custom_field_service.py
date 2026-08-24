@@ -2061,8 +2061,14 @@ class CustomFieldService:
         self,
         custom_fields: list[dict[str, Any]] | None,
         entity_type: EntityType,
+        *,
+        enforce_required: bool = True,
     ) -> list[dict[str, Any]]:
-        """Validate for create."""
+        """Validate for create.
+
+        When ``enforce_required`` is False, only fields present in the payload are
+        validated (e.g. optional admin pre-fill on invites).
+        """
         roots = self._parse_roots_create_payload(custom_fields)
         field_definitions, _ = await self.get_custom_fields_list(entity_type)
         id_to_def = self._root_id_to_def(field_definitions)
@@ -2086,42 +2092,34 @@ class CustomFieldService:
         out_cells: list[dict[str, Any]] = []
         for field_def in sorted(id_to_def.values(), key=lambda definition: definition.sort_order):
             sid = str(field_def.id)
-            if field_def.is_required:
-                if sid not in payload_by_id:
+            if sid not in payload_by_id:
+                if field_def.is_required and enforce_required:
                     raise ValidationException(
                         message_key="custom_fields.errors.custom_field_required",
                         custom_code=CustomStatusCode.VALIDATION_ERROR,
                         params={"field_key": field_def.field_key},
                     )
-                cell = payload_by_id[sid]
-                if self._cell_explicit_null(cell):
+                continue
+
+            cell = payload_by_id[sid]
+            if self._cell_explicit_null(cell):
+                if field_def.is_required and enforce_required:
                     raise ValidationException(
                         message_key="custom_fields.errors.custom_field_cannot_be_null",
                         custom_code=CustomStatusCode.VALIDATION_ERROR,
                         params={"field_key": field_def.field_key},
                     )
-                out_cells.append(
-                    self._validate_field_cell(
-                        field_def,
-                        cell,
-                        path_key=field_def.field_key,
-                        for_reconcile=False,
-                        role="root",
-                    )
+                continue
+
+            out_cells.append(
+                self._validate_field_cell(
+                    field_def,
+                    cell,
+                    path_key=field_def.field_key,
+                    for_reconcile=False,
+                    role="root",
                 )
-            elif sid in payload_by_id:
-                cell = payload_by_id[sid]
-                if self._cell_explicit_null(cell):
-                    continue
-                out_cells.append(
-                    self._validate_field_cell(
-                        field_def,
-                        cell,
-                        path_key=field_def.field_key,
-                        for_reconcile=False,
-                        role="root",
-                    )
-                )
+            )
         return self._sort_root_cells(out_cells, field_definitions)
 
     def _scalar_value_stale_against_def(self, cell: dict[str, Any], field_def: Any) -> bool:

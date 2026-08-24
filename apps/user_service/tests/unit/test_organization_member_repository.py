@@ -1,5 +1,6 @@
 """Unit tests for OrganizationMemberRepository with fake connection."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -143,6 +144,28 @@ async def test_get_users_details_list_with_search():
 
 
 @pytest.mark.asyncio
+async def test_users_list_selects_custom_fields() -> None:
+    """Users list query selects om.custom_fields and parses JSONB rows."""
+    conn = _FakeConn(
+        rows=[
+            {
+                "user_id": "u1",
+                "email": "u1@example.com",
+                "custom_fields": json.dumps([{"field_id": "f1", "value": "Legal"}]),
+                "alternate_emails": "[]",
+            }
+        ]
+    )
+    repo = OrganizationMemberRepository(db_connection=conn)
+
+    rows = await repo.get_users_details_list(organization_id="org-1")
+
+    query = conn.fetch_calls[0][0]
+    assert "om.custom_fields" in query
+    assert rows[0]["custom_fields"] == [{"field_id": "f1", "value": "Legal"}]
+
+
+@pytest.mark.asyncio
 async def test_delete_member_by_user_id():
     """Soft delete sets status to deleted."""
     conn = _FakeConn(row={"id": "m1"})
@@ -185,6 +208,32 @@ async def test_get_user_profile_by_id_with_org():
     query, args = _sql_args(conn.fetchrow)
     assert "organization_id = $2" in query
     assert args[-1] == OrganizationMemberStatus.DELETED.value
+
+
+@pytest.mark.asyncio
+async def test_add_member_serializes_custom_fields() -> None:
+    """add_member INSERT includes custom_fields JSONB."""
+    conn = _FakeConn(row={"user_id": "u1"})
+    repo = OrganizationMemberRepository(db_connection=conn)
+
+    payload = [{"field_id": "f1", "value": "Legal", "type": "text", "instance_id": "i1"}]
+    await repo.add_member(
+        organization_id="org-1",
+        member_data={
+            "user_id": "u1",
+            "email": "u1@example.com",
+            "role_id": "role-1",
+            "role": "member",
+            "member_role": "member",
+            "custom_fields": payload,
+        },
+    )
+
+    query, args = conn.fetchrow_calls[0]
+    assert "custom_fields" in query
+    assert "custom_fields = EXCLUDED.custom_fields" in query
+    assert isinstance(args[-1], str)
+    assert json.loads(args[-1]) == payload
 
 
 @pytest.mark.asyncio

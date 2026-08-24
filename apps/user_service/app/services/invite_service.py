@@ -40,8 +40,10 @@ from apps.user_service.app.schemas.teams import MemberData
 from apps.user_service.app.services.session_management_service import (
     SessionManagementService,
 )
+from apps.user_service.app.services.user_service import UserService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    coerce_json_list,
     hash_token,
     validate_uuid_format,
 )
@@ -633,6 +635,7 @@ class InviteService:
                 "timezone": "UTC",
                 "salutation": inv_meta.get("salutation", None),
                 "tags": inv_meta.get("tags") or [],
+                "custom_fields": coerce_json_list(inv_meta.get("custom_fields")),
             },
             email=invitation_data["email"],
             role_data={"id": invitation_data["role_id"], "name": role_data["name"]},
@@ -779,7 +782,17 @@ class InviteService:
         invite_token, token_hash = self._generate_invite_token()
         expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
 
+        user_service = UserService(
+            user_context=self.user_context,
+            db_connection=self.db_connection,
+        )
+        validated_custom_fields = await user_service.validate_member_custom_fields_for_create(
+            body.custom_fields,
+            enforce_required=False,
+        )
+
         metadata = self._build_invite_metadata(body)
+        metadata["custom_fields"] = validated_custom_fields
 
         if pending_invite:
             created_invite = await self.invite_repository.renew_expired_invite(
@@ -1053,6 +1066,7 @@ class InviteService:
             "invited_by": invited_by,
             "isometrik_user_id": isometrik_user_id,
             "tags": invite_data.get("tags") or [],
+            "custom_fields": invite_data.get("custom_fields") or [],
         }
 
         await self.organization_member_repository.add_member(
@@ -1175,4 +1189,5 @@ class InviteService:
             "project_id": project_id,
             "project_role": project_role,
             "tags": tags if tags else None,
+            "custom_fields": coerce_json_list(metadata.get("custom_fields")),
         }

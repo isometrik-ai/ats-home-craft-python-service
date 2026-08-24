@@ -5,6 +5,7 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
@@ -440,6 +441,10 @@ class UserListItem(BaseModel):
     isometrik_user_id: str | None = Field(
         None, description="Isometrik chat user ID for this organization member"
     )
+    custom_fields: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Custom fields root cells payload (validated and stored as JSONB).",
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -457,6 +462,9 @@ class UserListItem(BaseModel):
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "member_role": OrganizationMemberRole.OWNER.value,
                 "isometrik_user_id": "isometrik-user-123",
+                "custom_fields": [
+                    {"field_id": "550e8400-e29b-41d4-a716-446655440001", "value": "Legal"},
+                ],
             }
         }
     )

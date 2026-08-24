@@ -20,6 +20,7 @@ from apps.user_service.app.db.repositories.role_repository import RoleRepository
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
+    EntityType,
     OrganizationMemberRole,
     OrganizationMemberStatus,
 )
@@ -33,9 +34,11 @@ from apps.user_service.app.schemas.users import (
     UserProfileData,
     VerificationPreference,
 )
+from apps.user_service.app.services.custom_field_service import CustomFieldService
 from apps.user_service.app.services.organization_service import OrganizationService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    coerce_json_list,
     format_iso_datetime,
     parse_json_field,
 )
@@ -418,6 +421,28 @@ class UserService:  # pylint: disable=too-many-public-methods
         raise ValidationException(
             message_key="users.errors.no_fields_provided_for_update",
             custom_code=CustomStatusCode.INVALID_DATA,
+        )
+
+    async def validate_member_custom_fields_for_create(
+        self,
+        custom_fields_payload: list[dict[str, Any]] | None,
+        *,
+        enforce_required: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Validate and normalize user custom fields for member creation."""
+        if not (self.user_context and self.user_context.organization_id):
+            return []
+        if not custom_fields_payload and not enforce_required:
+            return []
+
+        custom_field_service = CustomFieldService(
+            db_connection=self.organization_member_repository.db_connection,
+            user_context=self.user_context,
+        )
+        return await custom_field_service.validate_for_create(
+            custom_fields_payload,
+            EntityType.USER,
+            enforce_required=enforce_required,
         )
 
     async def check_user_exists(self, email: str, organization_id: str) -> bool:
@@ -1027,6 +1052,7 @@ class UserService:  # pylint: disable=too-many-public-methods
                 last_active_at=format_iso_datetime(u.get("last_active_at")),
                 permissions_count=permissions_count_map.get(str(u.get("role_id")), 0),
                 isometrik_user_id=u.get("isometrik_user_id"),
+                custom_fields=coerce_json_list(u.get("custom_fields")),
             )
             for u in users_data
         ]
