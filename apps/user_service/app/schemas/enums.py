@@ -432,16 +432,16 @@ class ContactRoleStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-class ContactGender(str, Enum):
-    """Gender stored on public.contacts.gender (Postgres contact_gender enum)."""
+class Gender(str, Enum):
+    """Gender stored on profile fields (Postgres public.gender enum)."""
 
     MALE = "male"
     FEMALE = "female"
     OTHER = "other"
 
 
-class ContactBloodGroup(str, Enum):
-    """Blood group stored on public.contacts.blood_group (Postgres contact_blood_group enum)."""
+class BloodGroup(str, Enum):
+    """Blood group stored on profile fields (Postgres public.blood_group enum)."""
 
     A_POSITIVE = "A+"
     A_NEGATIVE = "A-"

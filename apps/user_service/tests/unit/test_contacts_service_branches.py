@@ -24,9 +24,9 @@ from apps.user_service.app.schemas.contacts import (
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import (
+    BloodGroup,
     ClientStatus,
-    ContactBloodGroup,
-    ContactGender,
+    Gender,
 )
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -469,8 +469,8 @@ async def test_update_contact_all_scalar_fields_and_no_row(monkeypatch) -> None:
         portal_access=True,
         additional_data={"k": "v"},
         sales_intelligence={"score": 1},
-        gender=ContactGender.FEMALE,
-        blood_group=ContactBloodGroup.A_POSITIVE,
+        gender=Gender.FEMALE,
+        blood_group=BloodGroup.A_POSITIVE,
         communication_preferences=CommunicationPreferences(),
         skills=["python"],
     )

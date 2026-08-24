@@ -230,6 +230,16 @@ class InviteService:
             "phone_isd_code": body.phone_isd_code,
             "salutation": body.salutation,
         }
+        if body.avatar_url:
+            metadata["avatar_url"] = body.avatar_url
+        if body.gender:
+            metadata["gender"] = body.gender.value
+        if body.dob:
+            metadata["dob"] = body.dob.isoformat()
+        if body.blood_group:
+            metadata["blood_group"] = body.blood_group.value
+        if body.designation:
+            metadata["designation"] = body.designation.strip()
         if body.team_id:
             metadata["team_id"] = str(body.team_id)
         if body.project_id:
@@ -634,6 +644,11 @@ class InviteService:
                 "phone_isd_code": phone_isd_code,
                 "timezone": "UTC",
                 "salutation": inv_meta.get("salutation", None),
+                "avatar_url": inv_meta.get("avatar_url"),
+                "gender": inv_meta.get("gender"),
+                "dob": inv_meta.get("dob"),
+                "blood_group": inv_meta.get("blood_group"),
+                "designation": inv_meta.get("designation"),
                 "tags": inv_meta.get("tags") or [],
                 "custom_fields": coerce_json_list(inv_meta.get("custom_fields")),
             },
@@ -1059,6 +1074,11 @@ class InviteService:
             "phone_isd_code": invite_data.get("phone_isd_code", None),
             "timezone": invite_data.get("timezone", "UTC"),
             "salutation": invite_data.get("salutation", None),
+            "avatar_url": invite_data.get("avatar_url"),
+            "gender": invite_data.get("gender"),
+            "dob": invite_data.get("dob"),
+            "blood_group": invite_data.get("blood_group"),
+            "designation": invite_data.get("designation"),
             "role_id": role_data["id"],
             "role": role_data["name"],
             "member_role": member_role,
@@ -1189,5 +1209,10 @@ class InviteService:
             "project_id": project_id,
             "project_role": project_role,
             "tags": tags if tags else None,
+            "avatar_url": metadata.get("avatar_url"),
+            "gender": metadata.get("gender"),
+            "dob": metadata.get("dob"),
+            "blood_group": metadata.get("blood_group"),
+            "designation": metadata.get("designation"),
             "custom_fields": coerce_json_list(metadata.get("custom_fields")),
         }

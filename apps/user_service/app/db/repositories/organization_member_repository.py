@@ -23,6 +23,12 @@ logger = get_logger("organization_member_repository")
 
 ORGANIZATION_MEMBER_JSONB_COLUMNS: frozenset[str] = frozenset({"custom_fields"})
 
+ORGANIZATION_MEMBER_TYPED_UPDATE_FIELDS: dict[str, str] = {
+    "gender": "public.gender",
+    "blood_group": "public.blood_group",
+    "dob": "date",
+}
+
 
 class OrganizationMemberRepository:
     """Database operations class for organization members using asyncpg."""
@@ -63,6 +69,11 @@ class OrganizationMemberRepository:
                 phone_isd_code = EXCLUDED.phone_isd_code,
                 timezone = EXCLUDED.timezone,
                 salutation = EXCLUDED.salutation,
+                avatar_url = EXCLUDED.avatar_url,
+                gender = EXCLUDED.gender,
+                dob = EXCLUDED.dob,
+                blood_group = EXCLUDED.blood_group,
+                designation = EXCLUDED.designation,
                 invited_by = EXCLUDED.invited_by,
                 tags = EXCLUDED.tags,
                 custom_fields = EXCLUDED.custom_fields,
@@ -91,6 +102,11 @@ class OrganizationMemberRepository:
                     phone_isd_code,
                     timezone,
                     salutation,
+                    avatar_url,
+                    gender,
+                    dob,
+                    blood_group,
+                    designation,
                     invited_by,
                     tags,
                     custom_fields
@@ -98,7 +114,8 @@ class OrganizationMemberRepository:
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
                     $9, NOW(), NOW(), NOW(),
-                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16, $17::text[], $18::jsonb
+                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16, $17::public.gender, $18::date,
+                    $19::public.blood_group, $20, $21, $22::text[], $23::jsonb
                 )
                 {on_conflict_clause}
                 RETURNING *
@@ -120,6 +137,11 @@ class OrganizationMemberRepository:
                 member_data.get("phone_isd_code"),
                 member_data.get("timezone"),
                 member_data.get("salutation"),
+                member_data.get("avatar_url"),
+                member_data.get("gender"),
+                member_data.get("dob"),
+                member_data.get("blood_group"),
+                member_data.get("designation"),
                 member_data.get("invited_by"),
                 tags,
                 custom_fields_param,
@@ -144,6 +166,11 @@ class OrganizationMemberRepository:
                     phone_isd_code,
                     timezone,
                     salutation,
+                    avatar_url,
+                    gender,
+                    dob,
+                    blood_group,
+                    designation,
                     invited_by,
                     tags,
                     custom_fields
@@ -151,7 +178,8 @@ class OrganizationMemberRepository:
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     $8, NOW(), NOW(), NOW(),
-                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15, $16::text[], $17::jsonb
+                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15, $16::public.gender, $17::date,
+                    $18::public.blood_group, $19, $20, $21::text[], $22::jsonb
                 )
                 {on_conflict_clause}
                 RETURNING *
@@ -172,6 +200,11 @@ class OrganizationMemberRepository:
                 member_data.get("phone_isd_code"),
                 member_data.get("timezone"),
                 member_data.get("salutation"),
+                member_data.get("avatar_url"),
+                member_data.get("gender"),
+                member_data.get("dob"),
+                member_data.get("blood_group"),
+                member_data.get("designation"),
                 member_data.get("invited_by"),
                 tags,
                 custom_fields_param,
@@ -212,6 +245,10 @@ class OrganizationMemberRepository:
                 om.first_name,
                 om.last_name,
                 om.avatar_url,
+                om.gender,
+                om.dob,
+                om.blood_group,
+                om.designation,
                 om.salutation,
                 om.phone_number,
                 om.phone_isd_code,
@@ -535,6 +572,11 @@ class OrganizationMemberRepository:
                 om.salutation,
                 om.phone_number,
                 om.phone_isd_code,
+                om.avatar_url,
+                om.gender,
+                om.dob,
+                om.blood_group,
+                om.designation,
                 om.timezone,
                 om.role_id,
                 om.role,
@@ -633,7 +675,11 @@ class OrganizationMemberRepository:
         params: list[Any] = []
         for field, value in update_data.items():
             if value is not None:
-                set_clauses.append(f"{field} = ${len(params) + 1}")
+                cast_type = ORGANIZATION_MEMBER_TYPED_UPDATE_FIELDS.get(field)
+                if cast_type:
+                    set_clauses.append(f"{field} = ${len(params) + 1}::{cast_type}")
+                else:
+                    set_clauses.append(f"{field} = ${len(params) + 1}")
                 params.append(value)
 
         if not set_clauses:

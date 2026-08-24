@@ -36,11 +36,11 @@ from apps.user_service.app.schemas.common import (
     WorkHistoryUpdate,
 )
 from apps.user_service.app.schemas.enums import (
+    BloodGroup,
     ClientStatus,
-    ContactBloodGroup,
-    ContactGender,
     ContactType,
     ContactUnitRelationship,
+    Gender,
 )
 from apps.user_service.app.schemas.list_filters import DropdownCustomFieldFilter
 from apps.user_service.app.utils.common_utils import parse_flexible_date
@@ -199,8 +199,8 @@ class CreateContactRequest(BaseModel):
     title: str | None = Field(None, max_length=100)
     date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = Field(None, max_length=500)
-    gender: ContactGender | None = Field(None, description="Optional gender.")
-    blood_group: ContactBloodGroup | None = Field(None, description="Optional blood group.")
+    gender: Gender | None = Field(None, description="Optional gender.")
+    blood_group: BloodGroup | None = Field(None, description="Optional blood group.")
     communication_preferences: CommunicationPreferences = Field(
         default_factory=CommunicationPreferences,
         description="Notification channel preferences.",
@@ -425,8 +425,8 @@ class UpdateContactRequest(BaseModel):
     title: str | None = None
     date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = None
-    gender: ContactGender | None = None
-    blood_group: ContactBloodGroup | None = None
+    gender: Gender | None = None
+    blood_group: BloodGroup | None = None
     communication_preferences: CommunicationPreferences | None = None
     phones: list[Phone] | None = None
     emails: list[Email] | None = None

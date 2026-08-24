@@ -199,8 +199,8 @@ class CompleteProfileRequest(BaseModel):
     last_name: str | None = None
     date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = None
-    gender: ContactGender | None = None
-    blood_group: ContactBloodGroup | None = None
+    gender: Gender | None = None
+    blood_group: BloodGroup | None = None
     communication_preferences: CommunicationPreferences | None = None
     emails: list[Email] | None = None
     phones: list[Phone] | None = None  # if allowing update here

@@ -38,12 +38,12 @@ from apps.user_service.app.schemas.contacts import (
     UpdateContactRequest,
 )
 from apps.user_service.app.schemas.enums import (
+    BloodGroup,
     ClientStatus,
     CompanyEventType,
-    ContactBloodGroup,
     ContactEventType,
-    ContactGender,
     ContactType,
+    Gender,
 )
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -1786,8 +1786,8 @@ async def test_update_contact_scalar_profile_fields(monkeypatch):
     repo = _FakeContactsRepo(
         contact_for_update=current,
         updated_row={
-            "gender": ContactGender.FEMALE.value,
-            "blood_group": ContactBloodGroup.A_POSITIVE.value,
+            "gender": Gender.FEMALE.value,
+            "blood_group": BloodGroup.A_POSITIVE.value,
         },
     )
     svc = _service(contacts_repo=repo)
@@ -1795,8 +1795,8 @@ async def test_update_contact_scalar_profile_fields(monkeypatch):
     await svc.update_contact(
         contact_id=CONTACT_ID,
         body=UpdateContactRequest(
-            gender=ContactGender.FEMALE,
-            blood_group=ContactBloodGroup.A_POSITIVE,
+            gender=Gender.FEMALE,
+            blood_group=BloodGroup.A_POSITIVE,
             communication_preferences=CommunicationPreferences(email=False, sms=True),
             skills=["python"],
             description="Senior contact",
@@ -1804,8 +1804,8 @@ async def test_update_contact_scalar_profile_fields(monkeypatch):
     )
 
     update_data = repo.last_update_kwargs["update_data"]
-    assert update_data["gender"] == ContactGender.FEMALE.value
-    assert update_data["blood_group"] == ContactBloodGroup.A_POSITIVE.value
+    assert update_data["gender"] == Gender.FEMALE.value
+    assert update_data["blood_group"] == BloodGroup.A_POSITIVE.value
     assert update_data["communication_preferences"]["email"] is False
     assert update_data["skills"] == ["python"]
 

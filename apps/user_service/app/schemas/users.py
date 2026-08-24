@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
+    BloodGroup,
+    Gender,
     OrganizationMemberRole,
     OrganizationMemberStatus,
     UserStatus,
@@ -157,6 +159,10 @@ class UserProfileData(BaseModel):
     first_name: str | None = Field(None, description="User's first name")
     last_name: str | None = Field(None, description="User's last name")
     avatar_url: str | None = Field(None, description="URL to user's profile picture")
+    gender: Gender | None = Field(None, description="User's gender")
+    dob: datetime.date | None = Field(None, description="User's date of birth")
+    blood_group: BloodGroup | None = Field(None, description="User's blood group")
+    designation: str | None = Field(None, description="User's job title or designation")
     phone_number: str | None = Field(None, description="User's phone number (without ISD code)")
     phone_isd_code: str | None = Field(None, description="User's phone ISD code (e.g., '+91')")
     timezone: str = Field(default="UTC", description="User's timezone setting")
@@ -428,6 +434,11 @@ class UserListItem(BaseModel):
     salutation: str | None = Field(None, description="Updated salutation")
     phone_number: str | None = Field(None, description="Phone number (without ISD code)")
     phone_isd_code: str | None = Field(None, description="Phone ISD code (e.g., '+91')")
+    avatar_url: str | None = Field(None, description="URL to user's profile picture")
+    gender: Gender | None = Field(None, description="User's gender")
+    dob: datetime.date | None = Field(None, description="User's date of birth")
+    blood_group: BloodGroup | None = Field(None, description="User's blood group")
+    designation: str | None = Field(None, description="User's job title or designation")
     # role_name: str = Field(..., description="Name of user's assigned role")
     role: str = Field(..., description="User's role in organization based on role id")
     status: OrganizationMemberStatus = Field(..., description="User's membership status")
@@ -511,6 +522,10 @@ class UpdateUserProfileRequest(BaseModel):
     - salutation: Updated salutation (Mr., Mrs., Ms., Dr., Prof., Adv.)
     - timezone: Updated timezone preference
     - avatar_url: Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')
+    - gender: Updated gender
+    - dob: Updated date of birth
+    - blood_group: Updated blood group
+    - designation: Updated job title or designation
     - two_fa_enabled: Enable or disable verification preference
     - verification_method: Type of verification preference (PHONE or EMAIL, defaults to EMAIL)
 
@@ -524,6 +539,14 @@ class UpdateUserProfileRequest(BaseModel):
     avatar_url: str | None = Field(
         None,
         description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')",
+    )
+    gender: Gender | None = Field(None, description="Updated gender")
+    dob: datetime.date | None = Field(None, description="Updated date of birth")
+    blood_group: BloodGroup | None = Field(None, description="Updated blood group")
+    designation: str | None = Field(
+        None,
+        max_length=255,
+        description="Updated job title or designation",
     )
     two_fa_enabled: bool | None = Field(
         None, description="Enable or disable verification preference"
@@ -545,6 +568,10 @@ class UpdateUserProfileRequest(BaseModel):
                 "salutation": "Mr.",
                 "timezone": "America/New_York",
                 "avatar_url": "house-of-apps-legal-ai/user-id/avatar.jpg",
+                "gender": Gender.FEMALE.value,
+                "dob": "1990-05-15",
+                "blood_group": BloodGroup.A_POSITIVE.value,
+                "designation": "Community Manager",
                 "two_fa_enabled": True,
                 "verification_method": "EMAIL",
                 "alternate_emails": ["john@example.com", "john@example.com"],
