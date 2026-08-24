@@ -4,7 +4,7 @@ This service handles all business logic related to users, including
 validation, formatting, and orchestration of user operations.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import asyncpg
@@ -1040,6 +1040,11 @@ class UserService:  # pylint: disable=too-many-public-methods
                 last_name=u.get("last_name"),
                 phone_number=u.get("phone_number"),
                 phone_isd_code=u.get("phone_isd_code"),
+                avatar_url=u.get("avatar_url"),
+                gender=u.get("gender"),
+                dob=u.get("dob"),
+                blood_group=u.get("blood_group"),
+                designation=u.get("designation"),
                 role_id=str(u["role_id"]) if u.get("role_id") else "",
                 role=u.get("role"),
                 member_role=u.get("member_role"),
@@ -1352,6 +1357,18 @@ class UserService:  # pylint: disable=too-many-public-methods
             update_data["avatar_url"] = body.avatar_url
             metadata_update["avatar_url"] = body.avatar_url
 
+        if body.gender is not None:
+            update_data["gender"] = body.gender.value
+
+        if body.dob is not None:
+            update_data["dob"] = body.dob.isoformat()
+
+        if body.blood_group is not None:
+            update_data["blood_group"] = body.blood_group.value
+
+        if body.designation is not None:
+            update_data["designation"] = body.designation.strip()
+
         if body.salutation is not None:
             update_data["salutation"] = body.salutation
             metadata_update["salutation"] = body.salutation
@@ -1403,6 +1420,10 @@ class UserService:  # pylint: disable=too-many-public-methods
             "salutation": profile.get("salutation"),
             "timezone": profile.get("timezone"),
             "avatar_url": profile.get("avatar_url"),
+            "gender": profile.get("gender"),
+            "dob": self._format_profile_date(profile.get("dob")),
+            "blood_group": profile.get("blood_group"),
+            "designation": profile.get("designation"),
             "organization_id": str(organization_id) if organization_id else None,
             "updated_by_user_id": self.user_context.user_id,
             "updated_by_email": self.user_context.email,
@@ -1454,6 +1475,10 @@ class UserService:  # pylint: disable=too-many-public-methods
             first_name=user_profile["first_name"],
             last_name=user_profile["last_name"],
             avatar_url=user_profile["avatar_url"],
+            gender=user_profile.get("gender"),
+            dob=self._format_profile_date(user_profile.get("dob")),
+            blood_group=user_profile.get("blood_group"),
+            designation=user_profile.get("designation"),
             phone_number=phone_number,
             phone_isd_code=phone_isd_code,
             timezone=user_profile["timezone"] or "UTC",
@@ -1481,6 +1506,19 @@ class UserService:  # pylint: disable=too-many-public-methods
             member_role=user_profile.get("member_role"),
             is_superadmin=is_superadmin,
         )
+
+    @staticmethod
+    def _format_profile_date(value: Any) -> date | None:
+        """Normalize date values from DB rows for API schemas."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            return date.fromisoformat(value)
+        return None
 
     async def _update_isometrik_user_if_needed(
         self,

@@ -1,12 +1,14 @@
 """Unit tests for invite custom fields handling."""
 
 import json
+from datetime import date
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from apps.user_service.app.schemas.enums import InviteStatus
+from apps.user_service.app.schemas.enums import BloodGroup, Gender, InviteStatus
+from apps.user_service.app.schemas.invites import InviteCreateRequest
 from apps.user_service.app.services.invite_service import InviteService
 from apps.user_service.app.utils.common_utils import UserContext
 
@@ -74,6 +76,62 @@ def test_invite_list_item_legacy_metadata_no_fields() -> None:
     )
 
     assert item["custom_fields"] == []
+
+
+def test_build_invite_metadata_includes_profile_fields() -> None:
+    """Invite metadata stores optional member profile fields for acceptance."""
+    service = _invite_service()
+    body = InviteCreateRequest(
+        first_name="Jane",
+        email="user@example.com",
+        role_id=ROLE_ID,
+        avatar_url="house-of-apps-legal-ai/user-id/avatar.jpg",
+        gender=Gender.FEMALE,
+        dob=date(1990, 5, 15),
+        blood_group=BloodGroup.A_POSITIVE,
+        designation="Community Manager",
+    )
+
+    metadata = service._build_invite_metadata(body)
+
+    assert metadata["avatar_url"] == "house-of-apps-legal-ai/user-id/avatar.jpg"
+    assert metadata["gender"] == Gender.FEMALE.value
+    assert metadata["dob"] == "1990-05-15"
+    assert metadata["blood_group"] == BloodGroup.A_POSITIVE.value
+    assert metadata["designation"] == "Community Manager"
+
+
+def test_build_invite_list_item_includes_profile_fields() -> None:
+    """Pending invite list items expose profile fields from metadata."""
+    service = _invite_service()
+
+    item = service.build_invite_list_item(
+        {
+            "id": "inv-1",
+            "email": "user@example.com",
+            "role_id": "role-1",
+            "status": InviteStatus.PENDING.value,
+            "invited_by": "admin-1",
+            "expires_at": "2024-12-26T10:00:00Z",
+            "created_at": "2024-12-19T10:00:00Z",
+            "updated_at": "2024-12-19T10:00:00Z",
+            "metadata": {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "avatar_url": "avatars/jane.jpg",
+                "gender": Gender.FEMALE.value,
+                "dob": "1990-05-15",
+                "blood_group": BloodGroup.B_POSITIVE.value,
+                "designation": "Secretary",
+            },
+        }
+    )
+
+    assert item["avatar_url"] == "avatars/jane.jpg"
+    assert item["gender"] == Gender.FEMALE.value
+    assert item["dob"] == "1990-05-15"
+    assert item["blood_group"] == BloodGroup.B_POSITIVE.value
+    assert item["designation"] == "Secretary"
 
 
 @pytest.mark.asyncio

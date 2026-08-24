@@ -14,9 +14,9 @@ from apps.user_service.app.schemas.contacts import (
     FlexibleOptionalDate,
 )
 from apps.user_service.app.schemas.enums import (
-    ContactBloodGroup,
-    ContactGender,
+    BloodGroup,
     ContactUnitRelationship,
+    Gender,
     VehicleFuelType,
     VehicleStatus,
     VehicleType,
@@ -182,8 +182,8 @@ class CompleteProfileRequest(BaseModel):
     last_name: str | None = Field(None, max_length=100)
     date_of_birth: FlexibleOptionalDate = None
     profile_photo_url: str | None = Field(None, max_length=500)
-    gender: ContactGender | None = None
-    blood_group: ContactBloodGroup | None = None
+    gender: Gender | None = None
+    blood_group: BloodGroup | None = None
     communication_preferences: CommunicationPreferences | None = None
     emails: list[Email] | None = Field(None, max_length=20)
     phones: list[Phone] | None = Field(None, max_length=20)
@@ -471,7 +471,7 @@ class CreateHouseholdMemberRequest(BaseModel):
     unit_id: str
     first_name: str = Field(..., max_length=100)
     last_name: str | None = Field(None, max_length=100)
-    gender: ContactGender | None = None
+    gender: Gender | None = None
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
     emails: list[Email] | None = Field(None, max_length=20)
     relationship: ContactUnitRelationship

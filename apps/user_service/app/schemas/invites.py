@@ -5,12 +5,17 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from apps.user_service.app.schemas.enums import InviteStatus, ProjectMemberRole
+from apps.user_service.app.schemas.enums import (
+    BloodGroup,
+    Gender,
+    InviteStatus,
+    ProjectMemberRole,
+)
 
 
 class InviteDetailsResponse(BaseModel):
@@ -104,6 +109,18 @@ class InviteCreateRequest(BaseModel):
     tags: list[str] | None = Field(
         None,
         description="Optional tags to assign to the member when the invitation is accepted",
+    )
+    avatar_url: str | None = Field(
+        None,
+        description="Optional avatar URL stored on membership when the invitation is accepted",
+    )
+    gender: Gender | None = Field(None, description="Optional gender for the invitee")
+    dob: date | None = Field(None, description="Optional date of birth for the invitee")
+    blood_group: BloodGroup | None = Field(None, description="Optional blood group for the invitee")
+    designation: str | None = Field(
+        None,
+        max_length=255,
+        description="Optional job title or designation for the invitee",
     )
     custom_fields: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -201,6 +218,25 @@ class InviteListItem(BaseModel):
     tags: list[str] | None = Field(
         None,
         description="Tags to assign to the member on acceptance, if set at invite time",
+    )
+    avatar_url: str | None = Field(
+        None,
+        description="Avatar URL to assign to the member on acceptance, if set at invite time",
+    )
+    gender: Gender | None = Field(
+        None, description="Gender to assign to the member on acceptance, if set at invite time"
+    )
+    dob: date | None = Field(
+        None,
+        description="Date of birth to assign to the member on acceptance, if set at invite time",
+    )
+    blood_group: BloodGroup | None = Field(
+        None,
+        description="Blood group to assign to the member on acceptance, if set at invite time",
+    )
+    designation: str | None = Field(
+        None,
+        description="Designation to assign to the member on acceptance, if set at invite time",
     )
     custom_fields: list[dict[str, Any]] = Field(
         default_factory=list,

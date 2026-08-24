@@ -65,12 +65,12 @@ Every new table carries **`organization_id NOT NULL`**. `contact_units` and `veh
 
 Migration `20260629112000_contacts_profile_fields.sql` adds:
 
-| Column                      | Type                       | Default / notes                                                 |
-| --------------------------- | -------------------------- | --------------------------------------------------------------- |
-| `gender`                    | `contact_gender` enum      | Optional                                                        |
-| `blood_group`               | `contact_blood_group` enum | Optional                                                        |
-| `communication_preferences` | `jsonb`                    | API default `{ email: true, sms: true, push: false }` on create |
-| `portal_access`             | `boolean`                  | `NOT NULL DEFAULT true`; persisted; drives auth provisioning    |
+| Column                      | Type               | Default / notes                                                 |
+| --------------------------- | ------------------ | --------------------------------------------------------------- |
+| `gender`                    | `gender` enum      | Optional                                                        |
+| `blood_group`               | `blood_group` enum | Optional                                                        |
+| `communication_preferences` | `jsonb`            | API default `{ email: true, sms: true, push: false }` on create |
+| `portal_access`             | `boolean`          | `NOT NULL DEFAULT true`; persisted; drives auth provisioning    |
 
 Onboarding **progress** is **not** stored on `contacts` — it lives in `contact_onboarding_steps`.
 
@@ -100,7 +100,7 @@ Step status reuses **`setup_step_status`** from Project Setup (`not_started`, `i
 
 Core enums and profile fields:
 
-- `ContactGender`, `ContactBloodGroup` enums in `app/schemas/enums.py`
+- `Gender`, `BloodGroup` enums in `app/schemas/enums.py`
 - `CommunicationPreferences` model with defaults on `CreateContactRequest`
 - `gender`, `blood_group`, `communication_preferences`, `portal_access` on create/update/response schemas
 - `ContactsRepository` and `ContactsService` persist and normalize profile fields
