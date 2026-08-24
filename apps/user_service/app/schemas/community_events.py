@@ -344,6 +344,7 @@ class ResidentEventListItemResponse(BaseModel):
     location_label: str | None = None
     tickets_booked: int
     total_capacity: int | None = None
+    cover_image_path: str | None = None
     booking_state: str
     my_tickets_count: int = 0
     cta: str
@@ -420,6 +421,7 @@ class MyBookingItemResponse(BaseModel):
     event_id: str
     event_title: str
     event_start_date: date
+    cover_image_path: str | None = None
     total_tickets: int
     total_amount_minor: int
     payment_status: str
