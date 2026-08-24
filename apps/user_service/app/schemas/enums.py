@@ -1363,6 +1363,49 @@ class ParkingSlotStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class ParkingAllotmentBasis(str, Enum):
+    """Why a parking slot was allotted to a unit."""
+
+    INCLUDED_WITH_UNIT = "included_with_unit"
+    ADDITIONAL_CHARGEABLE = "additional_chargeable"
+    TEMPORARY = "temporary"
+
+
+class ParkingAllotmentStatus(str, Enum):
+    """Lifecycle status of a unit parking allotment."""
+
+    ACTIVE = "active"
+    RELEASED = "released"
+
+
+class ParkingSlotEventType(str, Enum):
+    """Audit events on parking slots."""
+
+    ALLOTTED = "allotted"
+    RELEASED = "released"
+    REASSIGNED = "reassigned"
+    BLOCKED = "blocked"
+    UNBLOCKED = "unblocked"
+
+
+class ParkingSlotDisplayStatus(str, Enum):
+    """Derived parking slot status for admin allotment UI."""
+
+    ALLOTTED = "allotted"
+    FREE = "free"
+    VISITOR_POOL = "visitor_pool"
+    BLOCKED = "blocked"
+
+
+class ParkingSlotType(str, Enum):
+    """Parking slot category shown in allotment UI."""
+
+    VISITOR = "visitor"
+    CAR_STANDARD = "car_standard"
+    EV_CHARGING = "ev_charging"
+    TWO_WHEELER = "two_wheeler"
+
+
 # ============================================================================
 # VISITOR PASSES ENUMS — mirror Postgres visitor_passes enums
 # ============================================================================

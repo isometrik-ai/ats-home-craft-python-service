@@ -1041,6 +1041,34 @@
       "open_to_work_updated": "Open to work status updated successfully."
     }
   },
+  "parking_allotment": {
+    "errors": {
+      "slot_not_found": "The parking slot could not be found.",
+      "unit_not_found": "The unit could not be found.",
+      "invalid_unit": "Parking slots cannot be allotted to parking inventory units.",
+      "no_entitlement": "This unit has no parking entitlement configured.",
+      "entitlement_full": "This unit has already reached its included parking entitlement.",
+      "slot_not_available": "This parking slot is not available for allotment.",
+      "slot_not_allotted": "This parking slot is not currently allotted to a unit.",
+      "slot_not_blocked": "This parking slot is not blocked.",
+      "allotment_not_found": "No active parking allotment was found for this slot.",
+      "visitor_slot_not_allottable": "Visitor pool slots cannot be allotted to units.",
+      "facility_not_found": "The parking facility could not be found.",
+      "facility_tower_mismatch": "The selected facility does not belong to the chosen tower."
+    },
+    "success": {
+      "summary_retrieved": "Parking allotment summary retrieved successfully.",
+      "slots_retrieved": "Parking slots retrieved successfully.",
+      "slot_retrieved": "Parking slot retrieved successfully.",
+      "units_retrieved": "Parking allotment units retrieved successfully.",
+      "history_retrieved": "Parking slot history retrieved successfully.",
+      "slot_allotted": "Parking slot allotted to the unit successfully.",
+      "slot_reassigned": "Parking slot reassigned successfully.",
+      "slot_released": "Parking slot released successfully.",
+      "slot_blocked": "Parking slot blocked successfully.",
+      "slot_unblocked": "Parking slot unblocked successfully."
+    }
+  },
   "notices": {
     "errors": {
       "title_too_long": "Notice title cannot exceed 70 characters.",

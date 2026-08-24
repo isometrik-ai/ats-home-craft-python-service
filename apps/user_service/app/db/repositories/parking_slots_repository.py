@@ -132,6 +132,56 @@ class ParkingSlotsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def block_slot(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        slot_id: str,
+    ) -> dict[str, Any] | None:
+        """Mark a slot as blocked."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE facility_parking_slots
+            SET status = 'blocked'::parking_slot_status,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND id = $3::uuid
+              AND status = 'available'::parking_slot_status
+            RETURNING *
+            """,
+            organization_id,
+            project_id,
+            slot_id,
+        )
+        return dict(row) if row else None
+
+    async def unblock_slot(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        slot_id: str,
+    ) -> dict[str, Any] | None:
+        """Mark a blocked slot as available."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE facility_parking_slots
+            SET status = 'available'::parking_slot_status,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND id = $3::uuid
+              AND status = 'blocked'::parking_slot_status
+            RETURNING *
+            """,
+            organization_id,
+            project_id,
+            slot_id,
+        )
+        return dict(row) if row else None
+
     async def delete_by_facility(
         self,
         *,
