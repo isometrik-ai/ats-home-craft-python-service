@@ -77,6 +77,8 @@ Creates a contact. Optionally links **one** company (existing or created inline)
 **Contact roles:** optional `contact_type` on create assigns an **org-scoped** role only (`Vendor` or
 `Staff`) in `contact_roles`. Unit-scoped roles (`Owner`, `Tenant`, `Family`, `Guest`) are assigned
 when a unit is linked (allotment, tenant approve, household) — not via bare contact create.
+Optional `unit_assignment` on create performs admin pre-allotment in the same request (Community
+Contacts drawer).
 See [ADR 0010](../adr/0010-contact-roles.md).
 
 ### Request body (all fields shown)
@@ -154,7 +156,13 @@ See [ADR 0010](../adr/0010-contact-roles.md).
       },
       "is_primary": true
     }
-  ]
+  ],
+  "unit_assignment": {
+    "unit_id": "UNIT_UUID",
+    "assign_date": "2026-08-24",
+    "is_primary": false,
+    "relationship": "self"
+  }
 }
 ```
 
