@@ -225,6 +225,7 @@ class TenantRequestsService:
         tenant_request_id: str,
         document_id: str,
         contact_id: str,
+        request_row: dict[str, Any],
         document: dict[str, Any],
         message_key: str,
         idempotency_suffix: str,
@@ -233,17 +234,19 @@ class TenantRequestsService:
         if not contact_id:
             return
         document_name = self._document_display_name(document)
+        unit_label = unit_label_from_row(request_row)
         await self._push().send_to_contact(
             organization_id=organization_id,
             contact_id=contact_id,
             message_key=message_key,
             notification_type="NOTIFICATION_TYPE_TENANT",
             feed_type="tenant",
-            params={"document_name": document_name},
+            params={"document_name": document_name, "unit_label": unit_label},
             data={
                 "tenant_request_id": tenant_request_id,
                 "document_id": document_id,
                 "project_id": project_id,
+                "unit_id": str(request_row.get("unit_id") or ""),
                 "screen": "tenant_request_detail",
             },
             entity={"kind": "tenant_request", "id": tenant_request_id},
@@ -953,6 +956,7 @@ class TenantRequestsService:
             tenant_request_id=tenant_request_id,
             document_id=document_id,
             contact_id=str(row.get("submitted_by_contact_id") or ""),
+            request_row=row,
             document=updated,
             message_key="notifications.push.tenant_request.document_verified",
             idempotency_suffix="document_verified",
@@ -1011,6 +1015,7 @@ class TenantRequestsService:
             tenant_request_id=tenant_request_id,
             document_id=document_id,
             contact_id=str(row.get("submitted_by_contact_id") or ""),
+            request_row=row,
             document=updated,
             message_key="notifications.push.tenant_request.document_rejected",
             idempotency_suffix="document_rejected",
