@@ -11,6 +11,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.daily_help import (
     AddDailyHelpDocumentRequest,
+    AdminLinkDailyHelpUnitRequest,
     CreateDailyHelpApiResponse,
     CreateDailyHelpCategoryRequest,
     CreateDailyHelpRequest,
@@ -21,6 +22,8 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpDetailApiResponse,
     DailyHelpDocumentApiResponse,
     DailyHelpExportQuery,
+    DailyHelpGatePasscodeApiResponse,
+    DailyHelpHouseholdLinkApiResponse,
     DailyHelpHouseholdLinkListApiResponse,
     DailyHelpListApiResponse,
     DailyHelpListQuery,
@@ -28,6 +31,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpSubmissionListQuery,
     DailyHelpSummaryApiResponse,
     RejectDailyHelpRequest,
+    RemoveDailyHelpHouseholdLinkRequest,
     ReplaceDailyHelpAvailabilityRequest,
     UpdateDailyHelpCategoryRequest,
     UpdateDailyHelpRequest,
@@ -138,6 +142,18 @@ ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
 HOUSEHOLD_LINK_LIST_SUCCESS_RESPONSES = _ok_response(
     DailyHelpHouseholdLinkListApiResponse,
     "Active household unit links for the daily help profile.",
+)
+HOUSEHOLD_LINK_CREATED_RESPONSES = _created_response(
+    DailyHelpHouseholdLinkApiResponse,
+    "Daily help profile linked to the unit.",
+)
+HOUSEHOLD_LINK_REMOVED_RESPONSES = _ok_response(
+    DailyHelpHouseholdLinkApiResponse,
+    "Daily help profile unlinked from the unit.",
+)
+GATE_PASSCODE_REGENERATED_RESPONSES = _ok_response(
+    DailyHelpGatePasscodeApiResponse,
+    "New gate pass verification code for the daily help profile.",
 )
 
 
@@ -587,6 +603,172 @@ async def list_project_daily_help_household_links(
         message_key="daily_help.success.household_links_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=[item.model_dump() for item in items],
+    )
+
+
+@handle_api_exceptions("link project daily help profile to unit")
+@router.post(
+    "/{project_id}/daily-help/{profile_id}/household-links",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Link daily help profile to a unit",
+    response_model=None,
+    responses=HOUSEHOLD_LINK_CREATED_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="general",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_household_links",
+    category="DAILY_HELP",
+)
+async def link_project_daily_help_to_unit(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    body: AdminLinkDailyHelpUnitRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Admin links an active daily help profile to a project unit."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.add_admin_household_link(
+        project_id=project_id,
+        profile_id=profile_id,
+        unit_id=body.unit_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_household_links",
+        requested_id=data.id,
+        description=f"Linked daily help profile {profile_id} to unit {body.unit_id}",
+        risk_level="low",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.admin_household_linked",
+        custom_code=CustomStatusCode.CREATED,
+        data=data.model_dump(),
+        status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("unlink project daily help profile from unit")
+@router.delete(
+    "/{project_id}/daily-help/{profile_id}/household-links/{link_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Unlink daily help profile from a unit",
+    response_model=None,
+    responses=HOUSEHOLD_LINK_REMOVED_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="general",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_household_links",
+    category="DAILY_HELP",
+)
+async def unlink_project_daily_help_from_unit(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    link_id: str = Path(...),
+    body: RemoveDailyHelpHouseholdLinkRequest | None = Body(None),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Admin removes a daily help profile link from a unit."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.remove_admin_household_link(
+        project_id=project_id,
+        profile_id=profile_id,
+        link_id=link_id,
+        reason=body.reason if body else None,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_household_links",
+        requested_id=link_id,
+        description=f"Unlinked daily help profile {profile_id} from unit {data.unit_id}",
+        risk_level="low",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.admin_household_unlinked",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("regenerate daily help gate passcode")
+@router.post(
+    "/{project_id}/daily-help/{profile_id}/regenerate-passcode",
+    status_code=http_status.HTTP_200_OK,
+    summary="Regenerate gate pass verification code",
+    response_model=None,
+    responses=GATE_PASSCODE_REGENERATED_RESPONSES,
+)
+@limiter.limit("20/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="general",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_profiles",
+    category="DAILY_HELP",
+)
+async def regenerate_daily_help_gate_passcode(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Admin issues a new gate verification code and syncs the linked pass."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.regenerate_gate_passcode(
+        project_id=project_id,
+        profile_id=profile_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_profiles",
+        requested_id=profile_id,
+        description=f"Regenerated gate passcode for daily help profile {profile_id}",
+        risk_level="medium",
+        new_data={"linked_pass_id": data.linked_pass_id},
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.gate_passcode_regenerated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
     )
 
 

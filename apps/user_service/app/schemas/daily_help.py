@@ -77,6 +77,14 @@ class RemoveDailyHelpHouseholdLinkRequest(BaseModel):
     reason: str | None = Field(None, max_length=500)
 
 
+class AdminLinkDailyHelpUnitRequest(BaseModel):
+    """Admin links an active daily help profile to a project unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str
+
+
 class UpdateDailyHelpRequest(BaseModel):
     """Admin patches identity and contact fields on a profile."""
 
@@ -606,6 +614,20 @@ class ResidentDailyHelpCategoryStatsResponse(BaseModel):
     preview_profiles: list[ResidentDailyHelpProfilePreviewResponse] = Field(default_factory=list)
 
 
+class DailyHelpGatePasscodeResponse(BaseModel):
+    """Gate pass verification code after admin regeneration."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    display_name: str
+    gate_passcode: str
+    linked_pass_id: str | None = None
+    updated_at: str | None = None
+    updated_by_user_id: str | None = None
+    updated_by_name: str | None = None
+
+
 class DailyHelpMessageResponse(BaseModel):
     """Simple mutation payload (deactivate, delete, restore)."""
 
@@ -782,6 +804,16 @@ class DailyHelpHouseholdLinkApiResponse(BaseModel):
     statusCode: int
     code: str
     data: DailyHelpHouseholdLinkResponse
+
+
+class DailyHelpGatePasscodeApiResponse(BaseModel):
+    """API envelope for POST regenerate gate passcode."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: DailyHelpGatePasscodeResponse
 
 
 class DailyHelpAvailabilityApiResponse(BaseModel):

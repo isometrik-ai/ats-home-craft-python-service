@@ -383,6 +383,31 @@ class PassesRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def update_active_pass_code(
+        self,
+        *,
+        organization_id: str,
+        pass_id: str,
+        code: str,
+    ) -> dict[str, Any] | None:
+        """Update the verification code on an active pass."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE passes
+            SET code = $3,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+              AND status = $4::pass_status
+            RETURNING id::text AS id, code, updated_at
+            """,
+            organization_id,
+            pass_id,
+            code,
+            PassStatus.ACTIVE.value,
+        )
+        return dict(row) if row else None
+
     async def get_owned_by_contact(
         self,
         *,

@@ -606,7 +606,7 @@ class DailyHelpRepository(BaseRepository):
         project_id: str,
         profile_id: str,
         unit_id: str,
-        linked_by_contact_id: str,
+        linked_by_contact_id: str | None = None,
         started_at: datetime | None = None,
     ) -> dict[str, Any]:
         """Insert an active daily_help_household_links row."""
