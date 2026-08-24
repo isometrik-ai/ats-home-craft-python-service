@@ -1271,6 +1271,98 @@ async def test_list_and_search_resident_profiles():
 
 
 @pytest.mark.asyncio
+async def test_add_admin_household_link():
+    """Admin can link an active profile to a project unit."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._get_profile_or_raise = AsyncMock(
+        return_value=_detail_row(status=DailyHelpStatus.ACTIVE.value)
+    )
+    svc._ensure_project_unit = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.has_active_link = AsyncMock(return_value=False)
+    svc.repo.insert_link = AsyncMock(
+        return_value={
+            "id": "link-1",
+            "unit_id": "unit-1",
+            "linked_by_contact_id": None,
+            "status": "active",
+            "started_at": datetime.now(timezone.utc),
+        }
+    )
+    svc.repo.list_active_links_for_profile = AsyncMock(
+        return_value=[
+            {
+                "id": "link-1",
+                "unit_id": "unit-1",
+                "linked_by_contact_id": None,
+                "status": "active",
+                "started_at": datetime.now(timezone.utc),
+                "unit_code": "A-101",
+                "unit_label": "Flat 101",
+            }
+        ]
+    )
+    svc.repo.insert_event = AsyncMock()
+
+    link = await svc.add_admin_household_link(
+        project_id="project-1",
+        profile_id="profile-1",
+        unit_id="unit-1",
+    )
+
+    assert link.id == "link-1"
+    assert link.unit_code == "A-101"
+    svc.repo.insert_link.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="project-1",
+        profile_id="profile-1",
+        unit_id="unit-1",
+        linked_by_contact_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_remove_admin_household_link():
+    """Admin can unlink a profile from a unit."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._get_profile_or_raise = AsyncMock(return_value=_detail_row())
+    svc.repo = MagicMock()
+    svc.repo.list_active_links_for_profile = AsyncMock(
+        return_value=[
+            {
+                "id": "link-1",
+                "unit_id": "unit-1",
+                "linked_by_contact_id": None,
+                "status": "active",
+                "started_at": datetime.now(timezone.utc),
+                "unit_code": "A-101",
+                "unit_label": None,
+            }
+        ]
+    )
+    svc.repo.remove_link = AsyncMock(
+        return_value={
+            "id": "link-1",
+            "unit_id": "unit-1",
+            "status": "removed",
+            "removed_at": datetime.now(timezone.utc),
+            "removal_reason": "Admin update",
+        }
+    )
+    svc.repo.insert_event = AsyncMock()
+
+    link = await svc.remove_admin_household_link(
+        project_id="project-1",
+        profile_id="profile-1",
+        link_id="link-1",
+        reason="Admin update",
+    )
+
+    assert link.status == "removed"
+    assert link.removal_reason == "Admin update"
+
+
+@pytest.mark.asyncio
 async def test_add_household_link_and_create_rating():
     from decimal import Decimal
 

@@ -77,6 +77,14 @@ class RemoveDailyHelpHouseholdLinkRequest(BaseModel):
     reason: str | None = Field(None, max_length=500)
 
 
+class AdminLinkDailyHelpUnitRequest(BaseModel):
+    """Admin links an active daily help profile to a project unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str
+
+
 class UpdateDailyHelpRequest(BaseModel):
     """Admin patches identity and contact fields on a profile."""
 

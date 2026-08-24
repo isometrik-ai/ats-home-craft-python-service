@@ -170,6 +170,24 @@ class DailyHelpService:
         """Raise when the project is missing or outside the organization."""
         await self.setup_service.ensure_project(project_id=project_id)
 
+    async def _ensure_project_unit(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+    ) -> None:
+        """Ensure the unit belongs to the project within the organization."""
+        await self._ensure_project(project_id=project_id)
+        unit_row = await self.contact_units_repo.get_unit_project(
+            organization_id=self.organization_id,
+            unit_id=unit_id,
+        )
+        if not unit_row or str(unit_row.get("project_id")) != project_id:
+            raise ValidationException(
+                message_key="daily_help.errors.unit_not_in_project",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     async def _ensure_resident_unit(
         self,
         *,
@@ -1099,6 +1117,100 @@ class DailyHelpService:
             profile_id=profile_id,
         )
         return [self._serialize_household_link(link) for link in link_rows]
+
+    async def add_admin_household_link(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        unit_id: str,
+    ) -> DailyHelpHouseholdLinkResponse:
+        """Admin links an active daily help profile to a project unit."""
+        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
+        if await self.repo.has_active_link(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+            unit_id=unit_id,
+        ):
+            raise ConflictException(
+                message_key="daily_help.errors.duplicate_household_link",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        link = await self.repo.insert_link(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            profile_id=profile_id,
+            unit_id=unit_id,
+            linked_by_contact_id=None,
+        )
+        user_id = self.user_context.user_id
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.HOUSEHOLD_LINKED.value,
+            actor_type=DailyHelpActorType.STAFF.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={"unit_id": unit_id, "link_id": str(link["id"]), "linked_by": "admin"},
+        )
+        links = await self.repo.list_active_links_for_profile(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+        )
+        enriched = next((item for item in links if str(item["id"]) == str(link["id"])), link)
+        return self._serialize_household_link(enriched)
+
+    async def remove_admin_household_link(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        link_id: str,
+        reason: str | None = None,
+    ) -> DailyHelpHouseholdLinkResponse:
+        """Admin removes a daily help profile link from a unit."""
+        await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        links = await self.repo.list_active_links_for_profile(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+        )
+        target = next((link for link in links if str(link["id"]) == link_id), None)
+        if not target:
+            raise NotFoundException(
+                message_key="daily_help.errors.link_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        removed = await self.repo.remove_link(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+            link_id=link_id,
+            removal_reason=reason.strip() if reason and reason.strip() else None,
+        )
+        if not removed:
+            raise NotFoundException(
+                message_key="daily_help.errors.link_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        user_id = self.user_context.user_id
+        await self._append_event(
+            profile_id=profile_id,
+            event_type=DailyHelpEventType.HOUSEHOLD_REMOVED.value,
+            actor_type=DailyHelpActorType.STAFF.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={
+                "link_id": link_id,
+                "unit_id": str(target["unit_id"]),
+                "removed_by": "admin",
+                **({"reason": reason.strip()} if reason and reason.strip() else {}),
+            },
+        )
+        return self._serialize_household_link({**target, **removed})
 
     async def create_profile(
         self,

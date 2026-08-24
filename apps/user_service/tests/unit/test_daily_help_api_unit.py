@@ -20,6 +20,7 @@ from apps.user_service.app.api.daily_help import (
     get_project_daily_help_profile,
     get_project_daily_help_summary,
     get_security_daily_help_submission,
+    link_project_daily_help_to_unit,
     list_project_daily_help_categories,
     list_project_daily_help_household_links,
     list_project_daily_help_profiles,
@@ -30,16 +31,19 @@ from apps.user_service.app.api.daily_help import (
     restore_project_daily_help_profile,
     resubmit_project_daily_help_profile,
     submit_project_daily_help_profile,
+    unlink_project_daily_help_from_unit,
     update_project_daily_help_category,
     update_project_daily_help_profile,
 )
 from apps.user_service.app.schemas.daily_help import (
     AddDailyHelpDocumentRequest,
+    AdminLinkDailyHelpUnitRequest,
     CreateDailyHelpCategoryRequest,
     CreateDailyHelpRequest,
     DailyHelpCategoryResponse,
     DailyHelpDetailResponse,
     DailyHelpDocumentResponse,
+    DailyHelpHouseholdLinkResponse,
     DailyHelpListQuery,
     DailyHelpSubmissionListQuery,
     DailyHelpSummaryResponse,
@@ -502,6 +506,51 @@ async def test_household_links_and_availability(mock_service_cls, mock_access):
             project_id=PROJECT_ID,
             profile_id=PROFILE_ID,
             body=ReplaceDailyHelpAvailabilityRequest(slots=[]),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.api.daily_help.ensure_staff_project_access", new_callable=AsyncMock)
+@patch("apps.user_service.app.api.daily_help.DailyHelpService")
+async def test_admin_household_link_and_unlink(mock_service_cls, mock_access):
+    mock_access.return_value = _user_context()
+    service = mock_service_cls.return_value
+    service.add_admin_household_link = AsyncMock(
+        return_value=DailyHelpHouseholdLinkResponse(
+            id="link-1",
+            unit_id="unit-1",
+            status="active",
+        )
+    )
+    service.remove_admin_household_link = AsyncMock(
+        return_value=DailyHelpHouseholdLinkResponse(
+            id="link-1",
+            unit_id="unit-1",
+            status="removed",
+        )
+    )
+
+    assert (
+        await link_project_daily_help_to_unit(
+            request=_request(),
+            project_id=PROJECT_ID,
+            profile_id=PROFILE_ID,
+            body=AdminLinkDailyHelpUnitRequest(unit_id="unit-1"),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 201
+
+    assert (
+        await unlink_project_daily_help_from_unit(
+            request=_request(),
+            project_id=PROJECT_ID,
+            profile_id=PROFILE_ID,
+            link_id="link-1",
+            body=None,
             db_connection=MagicMock(),
             current_user={"sub": "staff-1"},
         )
