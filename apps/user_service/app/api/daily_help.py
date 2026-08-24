@@ -30,6 +30,8 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpMessageApiResponse,
     DailyHelpSubmissionListQuery,
     DailyHelpSummaryApiResponse,
+    MarkDailyHelpAttendanceAbsenceApiResponse,
+    MarkDailyHelpAttendanceAbsenceRequest,
     RejectDailyHelpRequest,
     RemoveDailyHelpHouseholdLinkRequest,
     ReplaceDailyHelpAvailabilityRequest,
@@ -137,7 +139,11 @@ AVAILABILITY_SUCCESS_RESPONSES = _ok_response(
 )
 ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpAttendanceApiResponse,
-    "Monthly attendance calendar with gate check-in days and events.",
+    "Monthly attendance calendar with gate check-ins, resident absences, and events.",
+)
+ATTENDANCE_ABSENCE_SUCCESS_RESPONSES = _ok_response(
+    MarkDailyHelpAttendanceAbsenceApiResponse,
+    "Calendar day marked absent for a household-linked helper.",
 )
 HOUSEHOLD_LINK_LIST_SUCCESS_RESPONSES = _ok_response(
     DailyHelpHouseholdLinkListApiResponse,
@@ -1398,6 +1404,12 @@ async def get_daily_help_attendance(
     request: Request,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
     profile_id: str = Path(...),
+    unit_id: str | None = Query(
+        None,
+        description=(
+            "Optional household unit filter. When omitted, absences from all linked units are merged."
+        ),
+    ),
     year: int | None = Query(
         None,
         ge=2000,
@@ -1413,7 +1425,7 @@ async def get_daily_help_attendance(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return monthly gate check-in calendar for a daily help profile."""
+    """Return monthly attendance calendar for a daily help profile."""
     user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
@@ -1425,12 +1437,73 @@ async def get_daily_help_attendance(
     data = await service.get_attendance(
         project_id=project_id,
         profile_id=profile_id,
+        unit_id=unit_id,
         year=year,
         month=month,
     )
     return success_response(
         request=request,
         message_key="daily_help.success.attendance_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("mark daily help attendance absence")
+@router.post(
+    "/{project_id}/daily-help/{profile_id}/attendance/absence",
+    status_code=http_status.HTTP_200_OK,
+    summary="Mark a day absent for a linked household unit",
+    response_model=None,
+    responses=ATTENDANCE_ABSENCE_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="general",
+    compliance_tags=["audit_required"],
+    table_name="daily_help_attendance_absences",
+    category="DAILY_HELP",
+)
+async def mark_daily_help_attendance_absence(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Linked household unit identifier (UUID string)."),
+    body: MarkDailyHelpAttendanceAbsenceRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Record that the helper did not visit the linked unit on the given date."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.mark_attendance_absence_admin(
+        project_id=project_id,
+        profile_id=profile_id,
+        unit_id=unit_id,
+        attendance_date=body.attendance_date,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="daily_help_attendance_absences",
+        requested_id=profile_id,
+        description=(
+            f"Marked daily help profile {profile_id} absent for unit {unit_id} "
+            f"on {body.attendance_date.isoformat()}"
+        ),
+        risk_level="low",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.attendance_absence_marked",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

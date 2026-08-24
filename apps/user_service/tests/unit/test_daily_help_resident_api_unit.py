@@ -250,3 +250,65 @@ async def test_resident_daily_help_write_endpoints(mock_service_cls, mock_contac
             current_user=user,
         )
     ).status_code == 200
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.api.daily_help_resident.extract_onboarding_contact_context",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.api.daily_help_resident.DailyHelpService")
+async def test_resident_attendance_endpoint_passes_unit_id(mock_service_cls, mock_contact_ctx):
+    mock_contact_ctx.return_value = _contact_context()
+    mock_service_cls.return_value.get_attendance = AsyncMock(return_value={"days": []})
+
+    response = await get_resident_daily_help_attendance(
+        request=_request(),
+        profile_id=PROFILE_ID,
+        unit_id=UNIT_ID,
+        month=8,
+        year=2026,
+        db_connection=MagicMock(),
+        current_user={"sub": "user-1"},
+    )
+
+    assert response.status_code == 200
+    mock_service_cls.return_value.get_attendance.assert_awaited_once_with(
+        contact_id="contact-1",
+        unit_id=UNIT_ID,
+        profile_id=PROFILE_ID,
+        year=2026,
+        month=8,
+    )
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.api.daily_help_resident.extract_onboarding_contact_context",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.api.daily_help_resident.DailyHelpService")
+async def test_resident_mark_absence_endpoint_passes_contact_and_unit(
+    mock_service_cls, mock_contact_ctx
+):
+    mock_contact_ctx.return_value = _contact_context()
+    mock_service_cls.return_value.mark_attendance_absence = AsyncMock(
+        return_value={"date": "2026-08-24", "status": "absent"}
+    )
+
+    response = await mark_resident_daily_help_attendance_absence(
+        request=_request(),
+        profile_id=PROFILE_ID,
+        unit_id=UNIT_ID,
+        body=MarkDailyHelpAttendanceAbsenceRequest(attendance_date=date(2026, 8, 24)),
+        db_connection=MagicMock(),
+        current_user={"sub": "user-1"},
+    )
+
+    assert response.status_code == 200
+    mock_service_cls.return_value.mark_attendance_absence.assert_awaited_once_with(
+        contact_id="contact-1",
+        unit_id=UNIT_ID,
+        profile_id=PROFILE_ID,
+        attendance_date=date(2026, 8, 24),
+    )

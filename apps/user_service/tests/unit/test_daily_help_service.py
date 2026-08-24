@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.daily_help import (
     SetDailyHelpOpenToWorkRequest,
 )
 from apps.user_service.app.schemas.enums import (
+    DailyHelpActorType,
     DailyHelpStatus,
     PassType,
     VisitorType,
@@ -679,6 +680,70 @@ async def test_get_attendance_builds_monthly_calendar():
 
 
 @pytest.mark.asyncio
+async def test_get_attendance_merges_absences_without_unit_filter():
+    """Admin/staff attendance includes absences reported across all linked units."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._get_profile_or_raise = AsyncMock(return_value={"id": "profile-1", "linked_pass_id": None})
+    svc.repo = MagicMock()
+    svc.repo.list_attendance_absence_dates_for_month = AsyncMock(
+        return_value=[__import__("datetime").date(2024, 5, 9)]
+    )
+
+    result = await svc.get_attendance(
+        project_id="project-1",
+        profile_id="profile-1",
+        year=2024,
+        month=5,
+    )
+
+    assert result["absent_count"] == 1
+    assert result["days"][8] == {"date": "2024-05-09", "status": "absent"}
+    svc.repo.list_attendance_absence_dates_for_month.assert_awaited_once_with(
+        organization_id=svc.organization_id,
+        profile_id="profile-1",
+        unit_id=None,
+        year=2024,
+        month=5,
+    )
+
+
+@pytest.mark.asyncio
+async def test_mark_attendance_absence_admin_records_staff_event():
+    """Staff can mark absent for a linked unit so residents see the same calendar day."""
+    from datetime import date
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._get_profile_or_raise = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "linked_pass_id": None,
+        }
+    )
+    svc._ensure_project_unit = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.has_active_link = AsyncMock(return_value=True)
+    svc.repo.list_active_links_for_profile = AsyncMock(
+        return_value=[{"unit_id": "unit-1", "linked_by_contact_id": "contact-1"}]
+    )
+    svc.repo.resolve_absence_marked_by_contact = AsyncMock(return_value="contact-1")
+    svc.repo.upsert_attendance_absence = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+
+    result = await svc.mark_attendance_absence_admin(
+        project_id="project-1",
+        profile_id="profile-1",
+        unit_id="unit-1",
+        attendance_date=date(2024, 5, 22),
+    )
+
+    assert result == {"date": "2024-05-22", "status": "absent"}
+    svc.repo.upsert_attendance_absence.assert_awaited_once()
+    event_kwargs = svc.repo.insert_event.await_args.kwargs
+    assert event_kwargs["actor_type"] == DailyHelpActorType.STAFF.value
+
+
+@pytest.mark.asyncio
 async def test_mark_attendance_absence_records_resident_report():
     """Marking absent persists the row and audit event when no gate check-in exists."""
     from datetime import date
@@ -747,6 +812,204 @@ async def test_mark_attendance_absence_rejects_gate_check_in_day():
             profile_id="profile-1",
             attendance_date=date(2024, 5, 22),
         )
+
+
+def _attendance_service_with_in_memory_absences() -> DailyHelpService:
+    """Build a service whose absence repo reads/writes a shared in-memory store."""
+
+    stored_absences: list[tuple[str, str, date]] = []
+
+    async def fake_upsert(**kwargs):
+        stored_absences.append(
+            (str(kwargs["profile_id"]), str(kwargs["unit_id"]), kwargs["attendance_date"])
+        )
+        return {"id": "absence-1", "attendance_date": kwargs["attendance_date"]}
+
+    async def fake_list(**kwargs):
+        profile_id = str(kwargs["profile_id"])
+        unit_id = kwargs.get("unit_id")
+        year = kwargs["year"]
+        month = kwargs["month"]
+        matched = [
+            absence_date
+            for profile, unit, absence_date in stored_absences
+            if profile == profile_id
+            and (unit_id is None or str(unit) == str(unit_id))
+            and absence_date.year == year
+            and absence_date.month == month
+        ]
+        return sorted(set(matched))
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._ensure_resident_unit = AsyncMock(return_value="project-1")
+    svc._get_profile_or_raise = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "linked_pass_id": None,
+        }
+    )
+    svc._ensure_project_unit = AsyncMock()
+    svc._viewer_has_household_link = AsyncMock(return_value=True)
+    svc.repo = MagicMock()
+    svc.repo.upsert_attendance_absence = AsyncMock(side_effect=fake_upsert)
+    svc.repo.list_attendance_absence_dates_for_month = AsyncMock(side_effect=fake_list)
+    svc.repo.has_active_link = AsyncMock(return_value=True)
+    svc.repo.list_active_links_for_profile = AsyncMock(
+        return_value=[{"unit_id": "unit-1", "linked_by_contact_id": "contact-1"}]
+    )
+    svc.repo.resolve_absence_marked_by_contact = AsyncMock(return_value="contact-1")
+    svc.repo.insert_event = AsyncMock()
+    svc.events_repo = MagicMock()
+    svc.events_repo.list_check_in_dates_for_month = AsyncMock(return_value=[])
+    svc.events_repo.list_check_ins_for_month = AsyncMock(return_value=[])
+    svc.events_repo.get_last_check_in = AsyncMock(return_value=None)
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_resident_marked_absence_visible_to_staff_calendar():
+    """Resident-reported absence appears on the staff monthly calendar."""
+    from datetime import date
+
+    svc = _attendance_service_with_in_memory_absences()
+    absence_date = date(2024, 5, 15)
+
+    await svc.mark_attendance_absence(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        attendance_date=absence_date,
+    )
+
+    staff_view = await svc.get_attendance(
+        project_id="project-1",
+        profile_id="profile-1",
+        year=2024,
+        month=5,
+    )
+
+    assert staff_view["absent_count"] == 1
+    assert staff_view["days"][14] == {"date": "2024-05-15", "status": "absent"}
+    svc.repo.list_attendance_absence_dates_for_month.assert_awaited_with(
+        organization_id=svc.organization_id,
+        profile_id="profile-1",
+        unit_id=None,
+        year=2024,
+        month=5,
+    )
+
+
+@pytest.mark.asyncio
+async def test_staff_marked_absence_visible_to_resident_calendar():
+    """Staff-reported absence appears on the resident unit-scoped calendar."""
+    from datetime import date
+
+    svc = _attendance_service_with_in_memory_absences()
+    absence_date = date(2024, 5, 20)
+
+    await svc.mark_attendance_absence_admin(
+        project_id="project-1",
+        profile_id="profile-1",
+        unit_id="unit-1",
+        attendance_date=absence_date,
+    )
+
+    resident_view = await svc.get_attendance(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        year=2024,
+        month=5,
+    )
+
+    assert resident_view["absent_count"] == 1
+    assert resident_view["days"][19] == {"date": "2024-05-20", "status": "absent"}
+    svc.repo.list_attendance_absence_dates_for_month.assert_awaited_with(
+        organization_id=svc.organization_id,
+        profile_id="profile-1",
+        unit_id="unit-1",
+        year=2024,
+        month=5,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resident_calendar_scopes_absences_to_their_unit():
+    """Resident view only includes absences for the selected unit, not other linked units."""
+    from datetime import date
+
+    svc = _attendance_service_with_in_memory_absences()
+    await svc.mark_attendance_absence_admin(
+        project_id="project-1",
+        profile_id="profile-1",
+        unit_id="unit-1",
+        attendance_date=date(2024, 5, 10),
+    )
+    await svc.mark_attendance_absence_admin(
+        project_id="project-1",
+        profile_id="profile-1",
+        unit_id="unit-2",
+        attendance_date=date(2024, 5, 11),
+    )
+
+    unit_one_view = await svc.get_attendance(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        year=2024,
+        month=5,
+    )
+    staff_view = await svc.get_attendance(
+        project_id="project-1",
+        profile_id="profile-1",
+        year=2024,
+        month=5,
+    )
+
+    assert unit_one_view["absent_count"] == 1
+    assert unit_one_view["days"][9] == {"date": "2024-05-10", "status": "absent"}
+    assert unit_one_view["days"][10] == {"date": "2024-05-11", "status": None}
+    assert staff_view["absent_count"] == 2
+    assert staff_view["days"][9] == {"date": "2024-05-10", "status": "absent"}
+    assert staff_view["days"][10] == {"date": "2024-05-11", "status": "absent"}
+
+
+@pytest.mark.asyncio
+async def test_attendance_present_overrides_absent_on_same_day():
+    """Gate check-in (present) wins on the calendar when both records exist for a day."""
+    from datetime import date
+
+    svc = _attendance_service_with_in_memory_absences()
+    svc._get_profile_or_raise = AsyncMock(
+        return_value={
+            "id": "profile-1",
+            "status": DailyHelpStatus.ACTIVE.value,
+            "linked_pass_id": "pass-1",
+        }
+    )
+    svc.events_repo.list_check_in_dates_for_month = AsyncMock(return_value=[date(2024, 5, 12)])
+    svc.events_repo.list_check_ins_for_month = AsyncMock(return_value=[])
+    svc.events_repo.get_last_check_in = AsyncMock(return_value=None)
+
+    # Seed an absence directly (e.g. marked before a late gate check-in was recorded).
+    await svc.repo.upsert_attendance_absence(
+        organization_id=svc.organization_id,
+        project_id="project-1",
+        profile_id="profile-1",
+        unit_id="unit-1",
+        marked_by_contact_id="contact-1",
+        attendance_date=date(2024, 5, 12),
+    )
+
+    calendar = await svc.get_attendance(
+        project_id="project-1",
+        profile_id="profile-1",
+        year=2024,
+        month=5,
+    )
+
+    assert calendar["days"][11] == {"date": "2024-05-12", "status": "present"}
 
 
 @pytest.mark.asyncio

@@ -599,12 +599,82 @@ async def test_attendance_endpoint(mock_service_cls, mock_access):
         request=_request(),
         project_id=PROJECT_ID,
         profile_id=PROFILE_ID,
+        unit_id=None,
         month=8,
         year=2026,
         db_connection=MagicMock(),
         current_user={"sub": "staff-1"},
     )
     assert response.status_code == 200
+    mock_service_cls.return_value.get_attendance.assert_awaited_once_with(
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        unit_id=None,
+        year=2026,
+        month=8,
+    )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.api.daily_help.ensure_staff_project_access", new_callable=AsyncMock)
+@patch("apps.user_service.app.api.daily_help.DailyHelpService")
+async def test_mark_attendance_absence_endpoint(mock_service_cls, mock_access):
+    from datetime import date
+
+    from apps.user_service.app.api.daily_help import mark_daily_help_attendance_absence
+    from apps.user_service.app.schemas.daily_help import (
+        MarkDailyHelpAttendanceAbsenceRequest,
+    )
+
+    mock_access.return_value = _user_context()
+    mock_service_cls.return_value.mark_attendance_absence_admin = AsyncMock(
+        return_value={"date": "2026-08-24", "status": "absent"}
+    )
+
+    response = await mark_daily_help_attendance_absence(
+        request=_request(),
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        unit_id="unit-1",
+        body=MarkDailyHelpAttendanceAbsenceRequest(attendance_date=date(2026, 8, 24)),
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+    assert response.status_code == 200
+    mock_service_cls.return_value.mark_attendance_absence_admin.assert_awaited_once_with(
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        unit_id="unit-1",
+        attendance_date=date(2026, 8, 24),
+    )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.api.daily_help.ensure_staff_project_access", new_callable=AsyncMock)
+@patch("apps.user_service.app.api.daily_help.DailyHelpService")
+async def test_staff_attendance_endpoint_with_unit_filter(mock_service_cls, mock_access):
+    mock_access.return_value = _user_context()
+    mock_service_cls.return_value.get_attendance = AsyncMock(return_value={"days": []})
+
+    response = await get_daily_help_attendance(
+        request=_request(),
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        unit_id="unit-1",
+        month=8,
+        year=2026,
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+
+    assert response.status_code == 200
+    mock_service_cls.return_value.get_attendance.assert_awaited_once_with(
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        unit_id="unit-1",
+        year=2026,
+        month=8,
+    )
 
 
 @pytest.mark.asyncio

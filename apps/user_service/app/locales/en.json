@@ -992,6 +992,7 @@
       "attendance_household_link_required": "Link this helper to your household before marking attendance.",
       "attendance_date_in_future": "Attendance can only be marked for today or earlier dates.",
       "attendance_already_checked_in": "This helper already checked in at the gate on the selected date.",
+      "attendance_unit_contact_required": "Cannot mark attendance absence because this unit has no active owner or tenant contact.",
       "invalid_attendance_month": "Attendance month must be between 1 and 12.",
       "security_role_required": "Only assigned security staff can submit daily help profiles.",
       "reviewer_access_denied": "You do not have permission to review daily help submissions.",

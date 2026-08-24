@@ -1163,29 +1163,79 @@ class DailyHelpRepository(BaseRepository):
         *,
         organization_id: str,
         profile_id: str,
-        unit_id: str,
+        unit_id: str | None = None,
         year: int,
         month: int,
     ) -> list[Any]:
-        """Return calendar dates marked absent by the resident for a month."""
-        rows = await self.db_connection.fetch(
+        """Return calendar dates marked absent for a month (optionally scoped to one unit)."""
+        if unit_id:
+            rows = await self.db_connection.fetch(
+                """
+                SELECT attendance_date
+                FROM daily_help_attendance_absences
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                  AND unit_id = $3::uuid
+                  AND EXTRACT(YEAR FROM attendance_date) = $4
+                  AND EXTRACT(MONTH FROM attendance_date) = $5
+                ORDER BY attendance_date
+                """,
+                organization_id,
+                profile_id,
+                unit_id,
+                year,
+                month,
+            )
+        else:
+            rows = await self.db_connection.fetch(
+                """
+                SELECT DISTINCT attendance_date
+                FROM daily_help_attendance_absences
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                  AND EXTRACT(YEAR FROM attendance_date) = $3
+                  AND EXTRACT(MONTH FROM attendance_date) = $4
+                ORDER BY attendance_date
+                """,
+                organization_id,
+                profile_id,
+                year,
+                month,
+            )
+        return [row["attendance_date"] for row in rows]
+
+    async def resolve_absence_marked_by_contact(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        preferred_contact_id: str | None = None,
+    ) -> str | None:
+        """Resolve a contact id to store as the absence reporter for a unit."""
+        if preferred_contact_id:
+            return preferred_contact_id
+        row = await self.db_connection.fetchrow(
             """
-            SELECT attendance_date
-            FROM daily_help_attendance_absences
+            SELECT contact_id::text AS contact_id
+            FROM contact_roles
             WHERE organization_id = $1::uuid
-              AND daily_help_profile_id = $2::uuid
-              AND unit_id = $3::uuid
-              AND EXTRACT(YEAR FROM attendance_date) = $4
-              AND EXTRACT(MONTH FROM attendance_date) = $5
-            ORDER BY attendance_date
+              AND unit_id = $2::uuid
+              AND status = 'active'::public.contact_role_status
+              AND ended_at IS NULL
+              AND role_type IN (
+                  'tenant'::public.contact_role_type,
+                  'owner'::public.contact_role_type
+              )
+            ORDER BY CASE role_type
+                WHEN 'tenant'::public.contact_role_type THEN 0
+                ELSE 1
+            END
+            LIMIT 1
             """,
             organization_id,
-            profile_id,
             unit_id,
-            year,
-            month,
         )
-        return [row["attendance_date"] for row in rows]
+        return str(row["contact_id"]) if row else None
 
     async def upsert_attendance_absence(
         self,
