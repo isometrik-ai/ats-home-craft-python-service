@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,6 +33,7 @@ from apps.user_service.app.schemas.contacts import (
     ContactCompanyAssociationUpdate,
     ContactCompanyUpdate,
     ContactLeadAssociation,
+    ContactUnitAssignmentAtCreate,
     CreateContactRequest,
     UpdateContactRequest,
 )
@@ -690,6 +691,43 @@ async def test_create_contact_minimal_body():
     contact_data = repo.last_create_kwargs["contact_data"]
     assert contact_data["first_name"] == "New"
     assert contact_data["email"] == "new@example.com"
+
+
+@pytest.mark.asyncio
+async def test_create_contact_with_unit_assignment(monkeypatch):
+    """Create contact optionally pre-allots a unit in the same request."""
+    repo = _FakeContactsRepo()
+    svc = _service(contacts_repo=repo)
+    _patch_create_identity(svc)
+    admin_assign = AsyncMock(return_value={"id": "cu-1", "unit_id": "unit-1", "status": "pending"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.ContactUnitsService.admin_assign_unit",
+        admin_assign,
+    )
+
+    await svc.create_contact(
+        CreateContactRequest(
+            email="owner@example.com",
+            first_name="Owner",
+            unit_assignment=ContactUnitAssignmentAtCreate(unit_id="unit-1"),
+        )
+    )
+
+    admin_assign.assert_awaited_once()
+    assign_kwargs = admin_assign.await_args.kwargs
+    assert assign_kwargs["contact_id"] == CONTACT_ID
+    assert assign_kwargs["body"].unit_id == "unit-1"
+    assert assign_kwargs["body"].assign_date == date.today()
+
+
+def test_create_contact_rejects_unit_assignment_with_vendor_type():
+    """Unit assignment cannot be combined with org-scoped contact_type."""
+    with pytest.raises(ValidationException):
+        CreateContactRequest(
+            email="vendor@example.com",
+            contact_type=ContactType.VENDOR,
+            unit_assignment=ContactUnitAssignmentAtCreate(unit_id="unit-1"),
+        )
 
 
 @pytest.mark.asyncio
