@@ -126,6 +126,17 @@ class WalkInMilestoneResponse(BaseModel):
     occurred_at: str | None = None
 
 
+class WalkInRequestedByResponse(BaseModel):
+    """Staff/guard who registered the walk-in."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    user_id: str
+    display_name: str | None = None
+    phone_isd_code: str | None = None
+    phone_number: str | None = None
+
+
 class WalkInSummaryResponse(BaseModel):
     """Walk-in row for security list."""
 
@@ -155,6 +166,7 @@ class WalkInDetailResponse(WalkInSummaryResponse):
     visit_units: list[WalkInVisitUnitResponse] = Field(default_factory=list)
     events: list[WalkInEventResponse] = Field(default_factory=list)
     milestones: list[WalkInMilestoneResponse] = Field(default_factory=list)
+    requested_by: WalkInRequestedByResponse | None = None
 
 
 class ResidentWalkInVisitUnitListItemResponse(BaseModel):

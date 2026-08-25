@@ -7,6 +7,9 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.db.repositories.organization_member_repository import (
+    OrganizationMemberRepository,
+)
 from apps.user_service.app.db.repositories.walk_in_repository import WalkInRepository
 from apps.user_service.app.schemas.enums import (
     WalkInActorType,
@@ -23,6 +26,7 @@ from apps.user_service.app.schemas.walk_in import (
     WalkInEventResponse,
     WalkInListQuery,
     WalkInMilestoneResponse,
+    WalkInRequestedByResponse,
     WalkInSummaryResponse,
     WalkInVisitUnitResponse,
 )
@@ -61,6 +65,7 @@ class WalkInService:
         self.db_connection = db_connection
         self.user_context = user_context
         self.repo = WalkInRepository(db_connection)
+        self.members_repo = OrganizationMemberRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
             user_context=user_context,
@@ -315,6 +320,42 @@ class WalkInService:
         return name or None
 
     @staticmethod
+    def _staff_display_name(profile: dict[str, Any]) -> str | None:
+        """Build staff display name from organization member profile."""
+        parts = [
+            str(profile.get("salutation") or "").strip(),
+            str(profile.get("first_name") or "").strip(),
+            str(profile.get("last_name") or "").strip(),
+        ]
+        name = " ".join(part for part in parts if part)
+        if name:
+            return name
+        email = str(profile.get("email") or "").strip()
+        return email or None
+
+    async def _resolve_requested_by(
+        self,
+        user_id: str | None,
+    ) -> dict[str, Any] | None:
+        """Resolve staff/guard who created the walk-in request."""
+        if not user_id:
+            return None
+        org_id = self.user_context.organization_id
+        assert org_id
+        profile = await self.members_repo.get_user_profile_by_id(
+            user_id=str(user_id),
+            organization_id=org_id,
+        )
+        if not profile:
+            return None
+        return WalkInRequestedByResponse(
+            user_id=str(user_id),
+            display_name=self._staff_display_name(profile),
+            phone_isd_code=profile.get("phone_isd_code"),
+            phone_number=profile.get("phone_number"),
+        ).model_dump()
+
+    @staticmethod
     def _serialize_visit_unit(row: dict[str, Any]) -> dict[str, Any]:
         """Map a visit unit row to API fields."""
         return WalkInVisitUnitResponse(
@@ -465,6 +506,7 @@ class WalkInService:
             visit_units=[self._serialize_visit_unit(unit) for unit in visit_units],
             events=serialized_events,
             milestones=self._derive_milestones(row=row, events=events),
+            requested_by=await self._resolve_requested_by(row.get("requested_by_user_id")),
         )
         return detail.model_dump()
 
