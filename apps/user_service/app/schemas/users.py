@@ -160,7 +160,7 @@ class UserProfileData(BaseModel):
     last_name: str | None = Field(None, description="User's last name")
     avatar_url: str | None = Field(None, description="URL to user's profile picture")
     gender: Gender | None = Field(None, description="User's gender")
-    dob: datetime.date | None = Field(None, description="User's date of birth")
+    dob: str | None = Field(None, description="User's date of birth (YYYY-MM-DD)")
     blood_group: BloodGroup | None = Field(None, description="User's blood group")
     designation: str | None = Field(None, description="User's job title or designation")
     phone_number: str | None = Field(None, description="User's phone number (without ISD code)")
@@ -436,7 +436,7 @@ class UserListItem(BaseModel):
     phone_isd_code: str | None = Field(None, description="Phone ISD code (e.g., '+91')")
     avatar_url: str | None = Field(None, description="URL to user's profile picture")
     gender: Gender | None = Field(None, description="User's gender")
-    dob: datetime.date | None = Field(None, description="User's date of birth")
+    dob: str | None = Field(None, description="User's date of birth (YYYY-MM-DD)")
     blood_group: BloodGroup | None = Field(None, description="User's blood group")
     designation: str | None = Field(None, description="User's job title or designation")
     # role_name: str = Field(..., description="Name of user's assigned role")
@@ -541,7 +541,7 @@ class UpdateUserProfileRequest(BaseModel):
         description="Updated avatar path (e.g., 'house-of-apps-legal-ai/user-id/filename.jpg')",
     )
     gender: Gender | None = Field(None, description="Updated gender")
-    dob: datetime.date | None = Field(None, description="Updated date of birth")
+    dob: str | None = Field(None, description="Updated date of birth (YYYY-MM-DD)")
     blood_group: BloodGroup | None = Field(None, description="Updated blood group")
     designation: str | None = Field(
         None,

@@ -26,7 +26,6 @@ ORGANIZATION_MEMBER_JSONB_COLUMNS: frozenset[str] = frozenset({"custom_fields"})
 ORGANIZATION_MEMBER_TYPED_UPDATE_FIELDS: dict[str, str] = {
     "gender": "public.gender",
     "blood_group": "public.blood_group",
-    "dob": "date",
 }
 
 
@@ -114,7 +113,7 @@ class OrganizationMemberRepository:
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
                     $9, NOW(), NOW(), NOW(),
-                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16, $17::public.gender, $18::date,
+                    $10, $11, $12, $13, COALESCE($14, 'UTC'), $15, $16, $17::public.gender, $18,
                     $19::public.blood_group, $20, $21, $22::text[], $23::jsonb
                 )
                 {on_conflict_clause}
@@ -178,7 +177,7 @@ class OrganizationMemberRepository:
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7,
                     $8, NOW(), NOW(), NOW(),
-                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15, $16::public.gender, $17::date,
+                    $9, $10, $11, $12, COALESCE($13, 'UTC'), $14, $15, $16::public.gender, $17,
                     $18::public.blood_group, $19, $20, $21::text[], $22::jsonb
                 )
                 {on_conflict_clause}

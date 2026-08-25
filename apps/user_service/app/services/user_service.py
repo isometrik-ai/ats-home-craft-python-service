@@ -1042,7 +1042,7 @@ class UserService:  # pylint: disable=too-many-public-methods
                 phone_isd_code=u.get("phone_isd_code"),
                 avatar_url=u.get("avatar_url"),
                 gender=u.get("gender"),
-                dob=u.get("dob"),
+                dob=self._format_profile_date(u.get("dob")),
                 blood_group=u.get("blood_group"),
                 designation=u.get("designation"),
                 role_id=str(u["role_id"]) if u.get("role_id") else "",
@@ -1361,7 +1361,7 @@ class UserService:  # pylint: disable=too-many-public-methods
             update_data["gender"] = body.gender.value
 
         if body.dob is not None:
-            update_data["dob"] = body.dob.isoformat()
+            update_data["dob"] = body.dob.strip() or None
 
         if body.blood_group is not None:
             update_data["blood_group"] = body.blood_group.value
@@ -1508,16 +1508,17 @@ class UserService:  # pylint: disable=too-many-public-methods
         )
 
     @staticmethod
-    def _format_profile_date(value: Any) -> date | None:
-        """Normalize date values from DB rows for API schemas."""
+    def _format_profile_date(value: Any) -> str | None:
+        """Normalize date values from DB rows to ISO date strings for API schemas."""
         if value is None:
             return None
         if isinstance(value, datetime):
-            return value.date()
+            return value.date().isoformat()
         if isinstance(value, date):
-            return value
+            return value.isoformat()
         if isinstance(value, str):
-            return date.fromisoformat(value)
+            stripped = value.strip()
+            return stripped or None
         return None
 
     async def _update_isometrik_user_if_needed(

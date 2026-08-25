@@ -1,7 +1,6 @@
 """Unit tests for invite custom fields handling."""
 
 import json
-from datetime import date
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -87,7 +86,7 @@ def test_build_invite_metadata_includes_profile_fields() -> None:
         role_id=ROLE_ID,
         avatar_url="house-of-apps-legal-ai/user-id/avatar.jpg",
         gender=Gender.FEMALE,
-        dob=date(1990, 5, 15),
+        dob="1990-05-15",
         blood_group=BloodGroup.A_POSITIVE,
         designation="Community Manager",
     )

@@ -234,8 +234,8 @@ class InviteService:
             metadata["avatar_url"] = body.avatar_url
         if body.gender:
             metadata["gender"] = body.gender.value
-        if body.dob:
-            metadata["dob"] = body.dob.isoformat()
+        if body.dob and body.dob.strip():
+            metadata["dob"] = body.dob.strip()
         if body.blood_group:
             metadata["blood_group"] = body.blood_group.value
         if body.designation:

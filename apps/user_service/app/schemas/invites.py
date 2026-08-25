@@ -5,7 +5,7 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import uuid
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -115,7 +115,7 @@ class InviteCreateRequest(BaseModel):
         description="Optional avatar URL stored on membership when the invitation is accepted",
     )
     gender: Gender | None = Field(None, description="Optional gender for the invitee")
-    dob: date | None = Field(None, description="Optional date of birth for the invitee")
+    dob: str | None = Field(None, description="Optional date of birth for the invitee (YYYY-MM-DD)")
     blood_group: BloodGroup | None = Field(None, description="Optional blood group for the invitee")
     designation: str | None = Field(
         None,
@@ -226,7 +226,7 @@ class InviteListItem(BaseModel):
     gender: Gender | None = Field(
         None, description="Gender to assign to the member on acceptance, if set at invite time"
     )
-    dob: date | None = Field(
+    dob: str | None = Field(
         None,
         description="Date of birth to assign to the member on acceptance, if set at invite time",
     )
