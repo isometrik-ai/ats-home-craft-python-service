@@ -226,6 +226,8 @@ def _service(
         push_dispatcher=push,  # type: ignore[arg-type]
     )
     service.repo = repo or _FakeWalkInRepo()
+    service.members_repo = MagicMock()
+    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
     service.setup_service = AsyncMock()
     service.setup_service.ensure_project = AsyncMock(return_value={"id": PROJECT_ID})
     return service
