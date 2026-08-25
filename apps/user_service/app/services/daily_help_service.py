@@ -2511,6 +2511,7 @@ class DailyHelpService:
 
         row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
         return await self._build_attendance_calendar(
+            project_id=project_id,
             profile_id=profile_id,
             unit_id=unit_id,
             year=resolved_year,
@@ -2555,65 +2556,6 @@ class DailyHelpService:
             marked_by_contact_id=contact_id,
             actor_type=DailyHelpActorType.RESIDENT.value,
             actor_contact_id=contact_id,
-            linked_pass_id=row.get("linked_pass_id"),
-        )
-
-    async def mark_attendance_absence_admin(
-        self,
-        *,
-        project_id: str,
-        profile_id: str,
-        unit_id: str,
-        attendance_date: date,
-    ) -> dict[str, Any]:
-        """Staff marks that the helper did not visit a linked household unit on a given day."""
-        row = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
-        self._ensure_not_deleted(row)
-        if str(row.get("status")) != DailyHelpStatus.ACTIVE.value:
-            raise NotFoundException(
-                message_key="daily_help.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
-        if not await self.repo.has_active_link(
-            organization_id=self.organization_id,
-            profile_id=profile_id,
-            unit_id=unit_id,
-        ):
-            raise ValidationException(
-                message_key="daily_help.errors.attendance_household_link_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        links = await self.repo.list_active_links_for_profile(
-            organization_id=self.organization_id,
-            profile_id=profile_id,
-        )
-        link = next((item for item in links if str(item["unit_id"]) == unit_id), None)
-        marked_by_contact_id = await self.repo.resolve_absence_marked_by_contact(
-            organization_id=self.organization_id,
-            unit_id=unit_id,
-            preferred_contact_id=(
-                str(link["linked_by_contact_id"])
-                if link and link.get("linked_by_contact_id")
-                else None
-            ),
-        )
-        if not marked_by_contact_id:
-            raise ValidationException(
-                message_key="daily_help.errors.attendance_unit_contact_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-
-        user_id = self.user_context.user_id
-        return await self._mark_attendance_absence_for_unit(
-            project_id=project_id,
-            profile_id=profile_id,
-            unit_id=unit_id,
-            attendance_date=attendance_date,
-            marked_by_contact_id=marked_by_contact_id,
-            actor_type=DailyHelpActorType.STAFF.value,
-            actor_user_id=str(user_id) if user_id else None,
             linked_pass_id=row.get("linked_pass_id"),
         )
 
@@ -2675,13 +2617,14 @@ class DailyHelpService:
     async def _build_attendance_calendar(
         self,
         *,
+        project_id: str,
         profile_id: str,
         unit_id: str | None,
         year: int,
         month: int,
         linked_pass_id: str | None,
     ) -> dict[str, Any]:
-        """Merge gate check-ins and unit-scoped absences for one month."""
+        """Merge gate check-ins and resident-reported absences for one month."""
         days_in_month = calendar.monthrange(year, month)[1]
         present_dates: set[date] = set()
         absent_dates: set[date] = set()
@@ -2723,6 +2666,7 @@ class DailyHelpService:
                 organization_id=self.organization_id,
                 profile_id=profile_id,
                 unit_id=unit_id,
+                project_id=project_id if unit_id is None else None,
                 year=year,
                 month=month,
             )

@@ -15,6 +15,12 @@ def test_daily_help_admin_router_registered():
     assert "/projects/{project_id}/daily-help/{profile_id}/submission" in paths
     assert any("/approve" in path for path in paths)
     assert any("/reject" in path for path in paths)
+    assert "/projects/{project_id}/daily-help/{profile_id}/attendance" in paths
+    assert not any(
+        "attendance/absence" in route.path
+        for route in daily_help_api.router.routes
+        if hasattr(route, "path")
+    )
 
 
 def test_daily_help_resident_router_registered():
@@ -26,3 +32,5 @@ def test_daily_help_resident_router_registered():
     assert "/daily-help/search" in paths
     assert "/daily-help/{profile_id}/household-links" in paths
     assert "/daily-help/{profile_id}/open-to-work" in paths
+    assert "/daily-help/{profile_id}/attendance" in paths
+    assert "/daily-help/{profile_id}/attendance/absence" in paths

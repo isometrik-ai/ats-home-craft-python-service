@@ -450,7 +450,7 @@ async def test_list_attendance_absence_dates_unit_scoped_query():
 
 
 @pytest.mark.asyncio
-async def test_list_attendance_absence_dates_profile_wide_query():
+async def test_list_attendance_absence_dates_project_scoped_query():
     conn = _FakeConn(
         rows=[
             {"attendance_date": "2026-05-10"},
@@ -463,6 +463,7 @@ async def test_list_attendance_absence_dates_profile_wide_query():
         organization_id=ORG,
         profile_id=PROFILE,
         unit_id=None,
+        project_id=PROJECT,
         year=2026,
         month=5,
     )
@@ -470,34 +471,5 @@ async def test_list_attendance_absence_dates_profile_wide_query():
     assert dates == ["2026-05-10", "2026-05-11"]
     query, args = conn.fetch_calls[0]
     assert "SELECT DISTINCT attendance_date" in query
-    assert "unit_id" not in query
-    assert args == (ORG, PROFILE, 2026, 5)
-
-
-@pytest.mark.asyncio
-async def test_resolve_absence_marked_by_contact_prefers_link_contact():
-    conn = _FakeConn()
-    repo = DailyHelpRepository(db_connection=conn)
-
-    contact_id = await repo.resolve_absence_marked_by_contact(
-        organization_id=ORG,
-        unit_id=UNIT,
-        preferred_contact_id="contact-linked",
-    )
-
-    assert contact_id == "contact-linked"
-    assert conn.fetchrow_calls == []
-
-
-@pytest.mark.asyncio
-async def test_resolve_absence_marked_by_contact_falls_back_to_unit_role():
-    conn = _FakeConn(row={"contact_id": "contact-tenant"})
-    repo = DailyHelpRepository(db_connection=conn)
-
-    contact_id = await repo.resolve_absence_marked_by_contact(
-        organization_id=ORG,
-        unit_id=UNIT,
-    )
-
-    assert contact_id == "contact-tenant"
-    assert len(conn.fetchrow_calls) == 1
+    assert "project_id = $3::uuid" in query
+    assert args == (ORG, PROFILE, PROJECT, 2026, 5)
