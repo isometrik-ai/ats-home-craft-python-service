@@ -226,6 +226,8 @@ def _service(
         push_dispatcher=push,  # type: ignore[arg-type]
     )
     service.repo = repo or _FakeWalkInRepo()
+    service.members_repo = MagicMock()
+    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
     service.setup_service = AsyncMock()
     service.setup_service.ensure_project = AsyncMock(return_value={"id": PROJECT_ID})
     return service
@@ -599,6 +601,40 @@ def test_serialize_event_non_dict_payload():
         }
     )
     assert event["payload"] == {}
+
+
+@pytest.mark.asyncio
+async def test_get_project_walk_in_includes_requested_by_phone():
+    """Detail includes staff/guard phone who registered the walk-in."""
+    repo = _FakeWalkInRepo()
+    service = _service(repo=repo)
+    service.members_repo = MagicMock()
+    service.members_repo.get_user_profile_by_id = AsyncMock(
+        return_value={
+            "salutation": "Mr.",
+            "first_name": "Ajay",
+            "last_name": "Guard",
+            "phone_isd_code": "+91",
+            "phone_number": "9876512345",
+            "email": "guard@example.com",
+        }
+    )
+
+    result = await service.get_project_walk_in(
+        project_id=PROJECT_ID,
+        walk_in_entry_id=ENTRY_ID,
+    )
+
+    assert result["requested_by"] == {
+        "user_id": "staff-user",
+        "display_name": "Mr. Ajay Guard",
+        "phone_isd_code": "+91",
+        "phone_number": "9876512345",
+    }
+    service.members_repo.get_user_profile_by_id.assert_awaited_once_with(
+        user_id="staff-user",
+        organization_id=ORG_ID,
+    )
 
 
 def test_derive_milestones_completed_states():
