@@ -418,6 +418,8 @@ class DailyHelpListItemResponse(BaseModel):
     phone_isd_code: str
     phone_number: str
     phone: str | None = None
+    photo_path: str | None = None
+    photo_url: str | None = None
     document_count: int = 0
     household_link_count: int = 0
     status: str
@@ -474,6 +476,7 @@ class DailyHelpDetailResponse(BaseModel):
     gender: str | None = None
     date_of_birth: str | None = None
     photo_path: str | None = None
+    photo_url: str | None = None
     gate_passcode: str | None = None
     status: str
     open_to_work: bool = False
@@ -508,6 +511,7 @@ class ResidentDailyHelpListItemResponse(BaseModel):
     category_id: str
     category_name: str | None = None
     photo_path: str | None = None
+    photo_url: str | None = None
     phone: str | None = None
     phone_masked: bool = False
     gate_passcode: str | None = None
@@ -527,6 +531,7 @@ class ResidentDailyHelpProfilePreviewResponse(BaseModel):
     id: str
     display_name: str
     photo_path: str | None = None
+    photo_url: str | None = None
     initials: str | None = None
     phone: str | None = None
     open_to_work: bool = False
@@ -544,6 +549,7 @@ class ResidentDailyHelpHouseholdLinkItemResponse(BaseModel):
     profile_id: str
     display_name: str
     photo_path: str | None = None
+    photo_url: str | None = None
     initials: str | None = None
     phone: str | None = None
     gate_passcode: str | None = None
@@ -587,6 +593,7 @@ class ResidentDailyHelpDetailResponse(BaseModel):
     gender: str | None = None
     date_of_birth: str | None = None
     photo_path: str | None = None
+    photo_url: str | None = None
     gate_passcode: str
     status: str
     open_to_work: bool = False
