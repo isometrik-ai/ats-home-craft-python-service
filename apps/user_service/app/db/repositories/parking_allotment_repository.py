@@ -32,9 +32,24 @@ CASE
 END
 """
 
-_SLOT_TYPE_SQL = """
+_SLOT_CATEGORY_SQL = """
+CASE
+  WHEN f.parking_vehicle_category = 'two_wheeler'::parking_vehicle_category THEN 'two_wheeler'
+  WHEN f.parking_vehicle_category = 'four_wheeler'::parking_vehicle_category THEN 'four_wheeler'
+  WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%two%wheel%' THEN 'two_wheeler'
+  ELSE 'four_wheeler'
+END
+"""
+
+_SLOT_TYPE_SQL = f"""
 CASE
   WHEN f.parking_user_type = 'visitors'::parking_user_type THEN 'visitor'
+  WHEN f.parking_vehicle_category = 'two_wheeler'::parking_vehicle_category THEN 'two_wheeler'
+  WHEN f.parking_vehicle_category = 'four_wheeler'::parking_vehicle_category THEN
+    CASE
+      WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%ev%' THEN 'ev_charging'
+      ELSE 'car_standard'
+    END
   WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%ev%' THEN 'ev_charging'
   WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%two%wheel%' THEN 'two_wheeler'
   ELSE 'car_standard'
@@ -109,30 +124,56 @@ class ParkingAllotmentRepository(BaseRepository):
         )
 
         units_short = await self.db_connection.fetchval(
-            """
+            f"""
             WITH unit_counts AS (
                 SELECT
                     u.id,
-                    COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
+                    COALESCE(uc.two_wheeler_parking_entitlement, 0)::int
+                        AS two_wheeler_parking_entitlement,
+                    COALESCE(uc.four_wheeler_parking_entitlement, 0)::int
+                        AS four_wheeler_parking_entitlement,
                     COUNT(upa.id) FILTER (
                         WHERE upa.status = 'active'::parking_allotment_status
-                    )::int AS slots_assigned
+                          AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                          AND {_SLOT_CATEGORY_SQL} = 'two_wheeler'
+                    )::int AS included_two_wheeler_slots_assigned,
+                    COUNT(upa.id) FILTER (
+                        WHERE upa.status = 'active'::parking_allotment_status
+                          AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                          AND {_SLOT_CATEGORY_SQL} = 'four_wheeler'
+                    )::int AS included_four_wheeler_slots_assigned
                 FROM units u
                 LEFT JOIN unit_configs uc ON uc.id = u.config_id
                 LEFT JOIN unit_parking_allotments upa
                   ON upa.unit_id = u.id
                  AND upa.organization_id = u.organization_id
                  AND upa.project_id = u.project_id
+                LEFT JOIN facility_parking_slots fps
+                  ON fps.id = upa.parking_slot_id
+                LEFT JOIN facilities f
+                  ON f.id = fps.facility_id
                 WHERE u.organization_id = $1::uuid
                   AND u.project_id = $2::uuid
                   AND u.is_parking = false
-                  AND COALESCE(uc.parking_entitlement, 0) > 0
+                  AND (
+                      COALESCE(uc.two_wheeler_parking_entitlement, 0) > 0
+                      OR COALESCE(uc.four_wheeler_parking_entitlement, 0) > 0
+                  )
                   AND ($3::uuid IS NULL OR u.tower_id = $3::uuid)
-                GROUP BY u.id, uc.parking_entitlement
+                GROUP BY
+                    u.id,
+                    uc.two_wheeler_parking_entitlement,
+                    uc.four_wheeler_parking_entitlement
             )
             SELECT COUNT(*)::int
             FROM unit_counts
-            WHERE slots_assigned < parking_entitlement
+            WHERE (
+                two_wheeler_parking_entitlement > 0
+                AND included_two_wheeler_slots_assigned < two_wheeler_parking_entitlement
+            ) OR (
+                four_wheeler_parking_entitlement > 0
+                AND included_four_wheeler_slots_assigned < four_wheeler_parking_entitlement
+            )
             """,
             organization_id,
             project_id,
@@ -358,17 +399,49 @@ class ParkingAllotmentRepository(BaseRepository):
 
         having_sql = ""
         if entitlement_status == "met":
-            having_sql = (
-                "HAVING COUNT(upa.id) FILTER (WHERE upa.status = 'active') "
-                ">= COALESCE(uc.parking_entitlement, 0) "
-                "AND COALESCE(uc.parking_entitlement, 0) > 0"
-            )
+            having_sql = f"""
+                HAVING NOT (
+                    (
+                        COALESCE(uc.two_wheeler_parking_entitlement, 0) > 0
+                        AND COUNT(upa.id) FILTER (
+                            WHERE upa.status = 'active'::parking_allotment_status
+                              AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                              AND {_SLOT_CATEGORY_SQL} = 'two_wheeler'
+                        ) < COALESCE(uc.two_wheeler_parking_entitlement, 0)
+                    ) OR (
+                        COALESCE(uc.four_wheeler_parking_entitlement, 0) > 0
+                        AND COUNT(upa.id) FILTER (
+                            WHERE upa.status = 'active'::parking_allotment_status
+                              AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                              AND {_SLOT_CATEGORY_SQL} = 'four_wheeler'
+                        ) < COALESCE(uc.four_wheeler_parking_entitlement, 0)
+                    )
+                )
+                AND (
+                    COALESCE(uc.two_wheeler_parking_entitlement, 0) > 0
+                    OR COALESCE(uc.four_wheeler_parking_entitlement, 0) > 0
+                )
+            """
         elif entitlement_status == "short":
-            having_sql = (
-                "HAVING COUNT(upa.id) FILTER (WHERE upa.status = 'active') "
-                "< COALESCE(uc.parking_entitlement, 0) "
-                "AND COALESCE(uc.parking_entitlement, 0) > 0"
-            )
+            having_sql = f"""
+                HAVING (
+                    (
+                        COALESCE(uc.two_wheeler_parking_entitlement, 0) > 0
+                        AND COUNT(upa.id) FILTER (
+                            WHERE upa.status = 'active'::parking_allotment_status
+                              AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                              AND {_SLOT_CATEGORY_SQL} = 'two_wheeler'
+                        ) < COALESCE(uc.two_wheeler_parking_entitlement, 0)
+                    ) OR (
+                        COALESCE(uc.four_wheeler_parking_entitlement, 0) > 0
+                        AND COUNT(upa.id) FILTER (
+                            WHERE upa.status = 'active'::parking_allotment_status
+                              AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                              AND {_SLOT_CATEGORY_SQL} = 'four_wheeler'
+                        ) < COALESCE(uc.four_wheeler_parking_entitlement, 0)
+                    )
+                )
+            """
 
         where_sql = " AND ".join(conditions)
         offset = (page - 1) * page_size
@@ -380,6 +453,10 @@ class ParkingAllotmentRepository(BaseRepository):
               ON upa.unit_id = u.id
              AND upa.organization_id = u.organization_id
              AND upa.project_id = u.project_id
+            LEFT JOIN facility_parking_slots fps
+              ON fps.id = upa.parking_slot_id
+            LEFT JOIN facilities f
+              ON f.id = fps.facility_id
             WHERE {where_sql}
             GROUP BY
                 u.id,
@@ -388,7 +465,9 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.tower_id,
                 uc.display_label,
                 uc.name,
-                uc.parking_entitlement
+                uc.parking_entitlement,
+                uc.two_wheeler_parking_entitlement,
+                uc.four_wheeler_parking_entitlement
         """
 
         total = await self.db_connection.fetchval(
@@ -412,9 +491,23 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.tower_id,
                 COALESCE(uc.display_label, uc.name) AS configuration_label,
                 COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
+                COALESCE(uc.two_wheeler_parking_entitlement, 0)::int
+                    AS two_wheeler_parking_entitlement,
+                COALESCE(uc.four_wheeler_parking_entitlement, 0)::int
+                    AS four_wheeler_parking_entitlement,
                 COUNT(upa.id) FILTER (
                     WHERE upa.status = 'active'::parking_allotment_status
                 )::int AS slots_assigned,
+                COUNT(upa.id) FILTER (
+                    WHERE upa.status = 'active'::parking_allotment_status
+                      AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                      AND {_SLOT_CATEGORY_SQL} = 'two_wheeler'
+                )::int AS included_two_wheeler_slots_assigned,
+                COUNT(upa.id) FILTER (
+                    WHERE upa.status = 'active'::parking_allotment_status
+                      AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                      AND {_SLOT_CATEGORY_SQL} = 'four_wheeler'
+                )::int AS included_four_wheeler_slots_assigned,
                 COALESCE(
                     json_agg(
                         json_build_object(
@@ -445,7 +538,7 @@ class ParkingAllotmentRepository(BaseRepository):
     ) -> dict[str, Any] | None:
         """Fetch one unit row for the by-unit parking allotment view."""
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
                 u.id,
                 u.code,
@@ -453,9 +546,23 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.tower_id,
                 COALESCE(uc.display_label, uc.name) AS configuration_label,
                 COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
+                COALESCE(uc.two_wheeler_parking_entitlement, 0)::int
+                    AS two_wheeler_parking_entitlement,
+                COALESCE(uc.four_wheeler_parking_entitlement, 0)::int
+                    AS four_wheeler_parking_entitlement,
                 COUNT(upa.id) FILTER (
                     WHERE upa.status = 'active'::parking_allotment_status
                 )::int AS slots_assigned,
+                COUNT(upa.id) FILTER (
+                    WHERE upa.status = 'active'::parking_allotment_status
+                      AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                      AND {_SLOT_CATEGORY_SQL} = 'two_wheeler'
+                )::int AS included_two_wheeler_slots_assigned,
+                COUNT(upa.id) FILTER (
+                    WHERE upa.status = 'active'::parking_allotment_status
+                      AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                      AND {_SLOT_CATEGORY_SQL} = 'four_wheeler'
+                )::int AS included_four_wheeler_slots_assigned,
                 COALESCE(
                     json_agg(
                         json_build_object(
@@ -474,6 +581,10 @@ class ParkingAllotmentRepository(BaseRepository):
               ON upa.unit_id = u.id
              AND upa.organization_id = u.organization_id
              AND upa.project_id = u.project_id
+            LEFT JOIN facility_parking_slots fps
+              ON fps.id = upa.parking_slot_id
+            LEFT JOIN facilities f
+              ON f.id = fps.facility_id
             WHERE u.organization_id = $1::uuid
               AND u.project_id = $2::uuid
               AND u.id = $3::uuid
@@ -485,7 +596,9 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.tower_id,
                 uc.display_label,
                 uc.name,
-                uc.parking_entitlement
+                uc.parking_entitlement,
+                uc.two_wheeler_parking_entitlement,
+                uc.four_wheeler_parking_entitlement
             """,
             organization_id,
             project_id,
@@ -502,16 +615,30 @@ class ParkingAllotmentRepository(BaseRepository):
     ) -> dict[str, Any] | None:
         """Fetch unit row with parking entitlement and active allotment count."""
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
                 u.id,
                 u.code,
                 u.is_parking,
                 COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
+                COALESCE(uc.two_wheeler_parking_entitlement, 0)::int
+                    AS two_wheeler_parking_entitlement,
+                COALESCE(uc.four_wheeler_parking_entitlement, 0)::int
+                    AS four_wheeler_parking_entitlement,
                 COUNT(upa.id) FILTER (
                     WHERE upa.status = 'active'::parking_allotment_status
                       AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
                 )::int AS included_slots_assigned,
+                COUNT(upa.id) FILTER (
+                    WHERE upa.status = 'active'::parking_allotment_status
+                      AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                      AND {_SLOT_CATEGORY_SQL} = 'two_wheeler'
+                )::int AS included_two_wheeler_slots_assigned,
+                COUNT(upa.id) FILTER (
+                    WHERE upa.status = 'active'::parking_allotment_status
+                      AND upa.allotment_basis = 'included_with_unit'::parking_allotment_basis
+                      AND {_SLOT_CATEGORY_SQL} = 'four_wheeler'
+                )::int AS included_four_wheeler_slots_assigned,
                 COUNT(upa.id) FILTER (
                     WHERE upa.status = 'active'::parking_allotment_status
                 )::int AS slots_assigned
@@ -521,10 +648,20 @@ class ParkingAllotmentRepository(BaseRepository):
               ON upa.unit_id = u.id
              AND upa.organization_id = u.organization_id
              AND upa.project_id = u.project_id
+            LEFT JOIN facility_parking_slots fps
+              ON fps.id = upa.parking_slot_id
+            LEFT JOIN facilities f
+              ON f.id = fps.facility_id
             WHERE u.organization_id = $1::uuid
               AND u.project_id = $2::uuid
               AND u.id = $3::uuid
-            GROUP BY u.id, u.code, u.is_parking, uc.parking_entitlement
+            GROUP BY
+                u.id,
+                u.code,
+                u.is_parking,
+                uc.parking_entitlement,
+                uc.two_wheeler_parking_entitlement,
+                uc.four_wheeler_parking_entitlement
             """,
             organization_id,
             project_id,

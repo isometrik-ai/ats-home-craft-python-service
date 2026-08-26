@@ -161,6 +161,17 @@ class UnitConfigsService:
             project_id=project_id,
         )
 
+    @staticmethod
+    def _sync_parking_entitlement(data: dict[str, Any]) -> None:
+        """Keep total parking_entitlement aligned with split entitlements."""
+        if (
+            "two_wheeler_parking_entitlement" in data
+            or "four_wheeler_parking_entitlement" in data
+        ):
+            two = int(data.get("two_wheeler_parking_entitlement") or 0)
+            four = int(data.get("four_wheeler_parking_entitlement") or 0)
+            data["parking_entitlement"] = two + four
+
     async def create_config(
         self, *, project_id: str, body: CreateUnitConfigRequest
     ) -> dict[str, Any]:
@@ -169,6 +180,7 @@ class UnitConfigsService:
         data = body.model_dump()
         config_kind = body.config_kind.value
         self._validate_kind_fields(config_kind, data)
+        self._sync_parking_entitlement(data)
         data["config_kind"] = config_kind
         for enum_field in ("default_facing", "commercial_unit_type", "plot_type", "facing"):
             value = getattr(body, enum_field)
@@ -208,6 +220,7 @@ class UnitConfigsService:
                 patch[enum_field] = value.value
         merged = {**current, **patch}
         self._validate_kind_fields(str(current["config_kind"]), merged)
+        self._sync_parking_entitlement(patch)
         try:
             updated = await self.configs_repo.update_config(
                 organization_id=self._org_id,

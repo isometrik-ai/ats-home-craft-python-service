@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.enums import (
     FacilityType,
     Facing,
     ParkingUserType,
+    ParkingVehicleCategory,
     PlotItemStatus,
     PlotType,
     PropertyType,
@@ -46,6 +47,8 @@ class CreateUnitConfigRequest(BaseModel):
     bedrooms: float | None = Field(default=None, ge=0)
     bathrooms: float | None = Field(default=None, ge=0)
     area_sqft: float | None = Field(default=None, ge=0)
+    two_wheeler_parking_entitlement: int = Field(default=0, ge=0)
+    four_wheeler_parking_entitlement: int = Field(default=0, ge=0)
     parking_entitlement: int = Field(default=0, ge=0)
     balconies: int = Field(default=0, ge=0)
     default_facing: Facing | None = None
@@ -80,6 +83,8 @@ class UpdateUnitConfigRequest(BaseModel):
     bedrooms: float | None = Field(default=None, ge=0)
     bathrooms: float | None = Field(default=None, ge=0)
     area_sqft: float | None = Field(default=None, ge=0)
+    two_wheeler_parking_entitlement: int | None = Field(default=None, ge=0)
+    four_wheeler_parking_entitlement: int | None = Field(default=None, ge=0)
     parking_entitlement: int | None = Field(default=None, ge=0)
     balconies: int | None = Field(default=None, ge=0)
     default_facing: Facing | None = None
@@ -225,6 +230,7 @@ class CreateFacilityRequest(BaseModel):
     capacity_persons: int | None = Field(default=None, ge=0)
     parking_slots: int | None = Field(default=None, ge=0)
     parking_user_type: ParkingUserType | None = None
+    parking_vehicle_category: ParkingVehicleCategory | None = None
     numbering_pattern: UnitNumberingPattern | None = None
     starting_slots_number: int | None = Field(default=None, ge=0)
     custom_prefix: str | None = Field(default=None, max_length=32)
@@ -253,6 +259,7 @@ class UpdateFacilityRequest(BaseModel):
     capacity_persons: int | None = Field(default=None, ge=0)
     parking_slots: int | None = Field(default=None, ge=0)
     parking_user_type: ParkingUserType | None = None
+    parking_vehicle_category: ParkingVehicleCategory | None = None
     numbering_pattern: UnitNumberingPattern | None = None
     starting_slots_number: int | None = Field(default=None, ge=0)
     custom_prefix: str | None = Field(default=None, max_length=32)

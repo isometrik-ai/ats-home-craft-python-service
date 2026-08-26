@@ -8,6 +8,7 @@ from apps.user_service.app.schemas.enums import (
     FacilityLocationType,
     FacilityType,
     ParkingUserType,
+    ParkingVehicleCategory,
     UnitNumberingPattern,
 )
 from libs.shared_utils.http_exceptions import ValidationException
@@ -84,6 +85,14 @@ def validate_facility_payload(
         if not parking_user_type:
             raise ValidationException(
                 message_key="project_setup.errors.facility_parking_user_type_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        parking_vehicle_category = data.get("parking_vehicle_category")
+        if isinstance(parking_vehicle_category, ParkingVehicleCategory):
+            parking_vehicle_category = parking_vehicle_category.value
+        if not parking_vehicle_category:
+            raise ValidationException(
+                message_key="project_setup.errors.facility_parking_vehicle_category_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         starting_slots_number = data.get("starting_slots_number")

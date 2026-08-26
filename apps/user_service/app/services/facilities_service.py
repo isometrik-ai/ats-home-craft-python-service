@@ -67,6 +67,8 @@ class FacilitiesService:
         data["location_type"] = body.location_type.value
         if body.parking_user_type:
             data["parking_user_type"] = body.parking_user_type.value
+        if body.parking_vehicle_category:
+            data["parking_vehicle_category"] = body.parking_vehicle_category.value
         if body.facility_type == FacilityType.PARKING:
             data["numbering_pattern"] = (
                 body.numbering_pattern or UnitNumberingPattern.FLOOR_UNIT
@@ -89,6 +91,8 @@ class FacilitiesService:
             data["location_type"] = body.location_type.value
         if body.parking_user_type:
             data["parking_user_type"] = body.parking_user_type.value
+        if body.parking_vehicle_category:
+            data["parking_vehicle_category"] = body.parking_vehicle_category.value
         if body.numbering_pattern:
             data["numbering_pattern"] = body.numbering_pattern.value
         return data

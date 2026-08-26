@@ -84,12 +84,24 @@ def test_slot_allowed_actions_for_free_slot():
 
 def test_unit_allowed_actions_when_short_on_entitlement():
     svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
-    assert svc._unit_allowed_actions(parking_entitlement=2, slots_assigned=0) == ["allot_slot"]
+    assert svc._unit_allowed_actions(
+        two_wheeler_parking_entitlement=1,
+        four_wheeler_parking_entitlement=1,
+        included_two_wheeler_slots_assigned=0,
+        included_four_wheeler_slots_assigned=0,
+        slots_assigned=0,
+    ) == ["allot_slot"]
 
 
 def test_unit_allowed_actions_when_entitlement_met():
     svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
-    assert svc._unit_allowed_actions(parking_entitlement=1, slots_assigned=1) == ["add_slot"]
+    assert svc._unit_allowed_actions(
+        two_wheeler_parking_entitlement=1,
+        four_wheeler_parking_entitlement=1,
+        included_two_wheeler_slots_assigned=1,
+        included_four_wheeler_slots_assigned=1,
+        slots_assigned=2,
+    ) == ["add_slot"]
 
 
 @pytest.mark.asyncio
@@ -162,6 +174,36 @@ async def test_get_unit_not_found():
 
 
 @pytest.mark.asyncio
+async def test_validate_unit_rejects_four_wheeler_entitlement_full():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.repo = MagicMock()
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "code": "A-1804",
+            "is_parking": False,
+            "parking_entitlement": 1,
+            "two_wheeler_parking_entitlement": 0,
+            "four_wheeler_parking_entitlement": 1,
+            "included_slots_assigned": 1,
+            "included_two_wheeler_slots_assigned": 0,
+            "included_four_wheeler_slots_assigned": 1,
+            "slots_assigned": 1,
+        }
+    )
+
+    from libs.shared_utils.http_exceptions import ValidationException
+
+    with pytest.raises(ValidationException):
+        await svc._validate_unit_for_allotment(
+            project_id="project-1",
+            unit_id="unit-1",
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+            slot_row=_slot_row(slot_type=ParkingSlotType.CAR_STANDARD.value),
+        )
+
+
+@pytest.mark.asyncio
 async def test_allot_slot_creates_allotment_and_assigns_slot():
     svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
     svc.setup_service = MagicMock()
@@ -174,7 +216,11 @@ async def test_allot_slot_creates_allotment_and_assigns_slot():
             "code": "A-1804",
             "is_parking": False,
             "parking_entitlement": 2,
+            "two_wheeler_parking_entitlement": 0,
+            "four_wheeler_parking_entitlement": 2,
             "included_slots_assigned": 0,
+            "included_two_wheeler_slots_assigned": 0,
+            "included_four_wheeler_slots_assigned": 0,
             "slots_assigned": 0,
         }
     )

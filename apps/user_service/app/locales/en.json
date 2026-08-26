@@ -398,6 +398,7 @@
       "facility_capacity_required": "Capacity (persons) is required for event facilities.",
       "facility_parking_slots_required": "Parking slots count is required for parking facilities.",
       "facility_parking_user_type_required": "Parking for (resident/visitors) is required for parking facilities.",
+      "facility_parking_vehicle_category_required": "Parking vehicle category (two-wheeler, four-wheeler, or both) is required for parking facilities.",
       "facility_parking_numbering_not_applicable": "Numbering pattern fields apply only to parking facilities.",
       "facility_starting_slot_number_invalid": "Starting slot number must be at least 1 for parking facilities.",
       "community_admin_not_org_member": "The selected community admin must be an active member of this organization."
@@ -1051,6 +1052,10 @@
       "invalid_unit": "Parking slots cannot be allotted to parking inventory units.",
       "no_entitlement": "This unit has no parking entitlement configured.",
       "entitlement_full": "This unit has already reached its included parking entitlement.",
+      "no_two_wheeler_entitlement": "This unit has no included two-wheeler parking entitlement.",
+      "no_four_wheeler_entitlement": "This unit has no included four-wheeler parking entitlement.",
+      "two_wheeler_entitlement_full": "This unit has already reached its included two-wheeler parking entitlement.",
+      "four_wheeler_entitlement_full": "This unit has already reached its included four-wheeler parking entitlement.",
       "slot_not_available": "This parking slot is not available for allotment.",
       "slot_not_allotted": "This parking slot is not currently allotted to a unit.",
       "slot_not_blocked": "This parking slot is not blocked.",

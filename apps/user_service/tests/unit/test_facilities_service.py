@@ -11,6 +11,7 @@ from apps.user_service.app.schemas.enums import (
     FacilityStatus,
     FacilityType,
     ParkingUserType,
+    ParkingVehicleCategory,
     UnitNumberingPattern,
 )
 from apps.user_service.app.schemas.project_inventory import (
@@ -65,6 +66,7 @@ def _create_body(**overrides) -> CreateFacilityRequest:
         "location_type": FacilityLocationType.OUTDOOR_STANDALONE,
         "parking_slots": 10,
         "parking_user_type": ParkingUserType.VISITORS,
+        "parking_vehicle_category": ParkingVehicleCategory.FOUR_WHEELER,
     }
     base.update(overrides)
     return CreateFacilityRequest(**base)

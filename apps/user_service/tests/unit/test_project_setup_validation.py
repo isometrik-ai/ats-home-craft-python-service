@@ -73,6 +73,7 @@ def test_validate_facility_parking_numbering_defaults():
             "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
             "parking_slots": 10,
             "parking_user_type": "visitors",
+            "parking_vehicle_category": "four_wheeler",
             "numbering_pattern": "floor_unit",
             "starting_slots_number": 1,
         }
@@ -88,7 +89,21 @@ def test_validate_facility_parking_custom_prefix_required():
                 "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
                 "parking_slots": 10,
                 "parking_user_type": "visitors",
+                "parking_vehicle_category": "four_wheeler",
                 "numbering_pattern": "custom",
+            }
+        )
+
+
+def test_validate_facility_parking_vehicle_category_required():
+    """Parking facilities require parking_vehicle_category."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "parking",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "parking_slots": 10,
+                "parking_user_type": "visitors",
             }
         )
 

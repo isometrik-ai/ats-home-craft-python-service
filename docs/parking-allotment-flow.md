@@ -10,6 +10,7 @@ and how **vehicles** optionally reference allotted slots. It complements the wiz
 - **DB migrations:**
   - `20260629101000_property_setup_tables.sql` — `facilities`, `facility_parking_slots`
   - `20260826120000_facility_parking_numbering.sql` — facility numbering columns
+  - `20260826140000_parking_vehicle_category_entitlements.sql` — facility vehicle category + split unit entitlements
   - `20260826130000_facility_parking_slot_codes.sql` — `slot_code` on slots
   - `20260824180000_parking_allotment_tables.sql` — `unit_parking_allotments`, `parking_slot_events`
   - `20260629111000_resident_onboarding_tables.sql` — `vehicles.parking_slot_id`
@@ -73,7 +74,15 @@ When `facility_type = "parking"`, the request supports numbering options (same e
 | `starting_slots_number` | `1`          | First `slot_number` when provisioning        |
 | `custom_prefix`         | —            | Required when `numbering_pattern = "custom"` |
 
-Also required for parking facilities: `parking_slots` (> 0), `parking_user_type` (`resident` / `visitors`).
+Also required for parking facilities: `parking_slots` (> 0), `parking_user_type` (`resident` / `visitors`), and `parking_vehicle_category` (`two_wheeler` / `four_wheeler` / `both`).
+
+| Field | Values | Notes |
+| ----- | ------ | ----- |
+| `parking_vehicle_category` | `two_wheeler` · `four_wheeler` · `both` | All slots in the facility inherit this category unless `both` (then use `facility_subtype` per bay) |
+
+Unit configurations store split entitlements: `two_wheeler_parking_entitlement` and `four_wheeler_parking_entitlement` (`parking_entitlement` is kept as their sum).
+
+When allotting with `allotment_basis = included_with_unit`, the service checks the slot category against the matching entitlement bucket (two-wheeler slots vs four-wheeler/car/EV slots).
 
 ### Example — custom prefix
 
@@ -85,6 +94,7 @@ POST /v1/projects/{project_id}/facilities
   "location_type": "outdoor_standalone",
   "parking_slots": 10,
   "parking_user_type": "visitors",
+  "parking_vehicle_category": "four_wheeler",
   "numbering_pattern": "custom",
   "custom_prefix": "SLT-A",
   "starting_slots_number": 1
