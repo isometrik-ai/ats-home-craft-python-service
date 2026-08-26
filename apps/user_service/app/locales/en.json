@@ -398,6 +398,8 @@
       "facility_capacity_required": "Capacity (persons) is required for event facilities.",
       "facility_parking_slots_required": "Parking slots count is required for parking facilities.",
       "facility_parking_user_type_required": "Parking for (resident/visitors) is required for parking facilities.",
+      "facility_parking_numbering_not_applicable": "Numbering pattern fields apply only to parking facilities.",
+      "facility_starting_slot_number_invalid": "Starting slot number must be at least 1 for parking facilities.",
       "community_admin_not_org_member": "The selected community admin must be an active member of this organization."
     },
     "success": {

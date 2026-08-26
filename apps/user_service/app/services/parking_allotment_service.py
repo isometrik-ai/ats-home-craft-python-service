@@ -88,6 +88,18 @@ class ParkingAllotmentService:
         number = int(slot_number or 0)
         return f"{tower}-{floor}-{number:03d}"
 
+    @classmethod
+    def _resolve_slot_code(cls, row: dict[str, Any]) -> str:
+        """Prefer persisted slot_code; fall back to tower/floor formatting."""
+        stored = row.get("slot_code")
+        if stored:
+            return str(stored)
+        return cls._build_slot_code(
+            tower_code=row.get("tower_code"),
+            floor_level=row.get("floor_level"),
+            slot_number=int(row.get("slot_number") or 0),
+        )
+
     @staticmethod
     def _slot_type_label(slot_type: str) -> str:
         return _SLOT_TYPE_LABELS.get(slot_type, slot_type.replace("_", " ").title())
@@ -244,11 +256,7 @@ class ParkingAllotmentService:
         allotted_since = row.get("allotted_at") or row.get("effective_from")
         return ParkingAllotmentSlotListItemResponse(
             id=str(row["id"]),
-            slot_code=self._build_slot_code(
-                tower_code=row.get("tower_code"),
-                floor_level=row.get("floor_level"),
-                slot_number=int(row.get("slot_number") or 0),
-            ),
+            slot_code=self._resolve_slot_code(row),
             level_label=row.get("floor_level"),
             bay_label=row.get("wing") or row.get("facility_name"),
             slot_type=ParkingSlotType(slot_type),
@@ -301,11 +309,7 @@ class ParkingAllotmentService:
                 ParkingAllotmentSlotHeldResponse(
                     allotment_id=str(item.get("allotment_id") or ""),
                     slot_id=slot_id,
-                    slot_code=self._build_slot_code(
-                        tower_code=slot_meta.get("tower_code"),
-                        floor_level=slot_meta.get("floor_level"),
-                        slot_number=int(slot_meta.get("slot_number") or 0),
-                    ),
+                    slot_code=self._resolve_slot_code(slot_meta),
                     slot_type=ParkingSlotType(slot_type),
                     slot_type_label=self._slot_type_label(slot_type),
                     effective_from=self._format_date(item.get("effective_from")) or "",

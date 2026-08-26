@@ -189,7 +189,8 @@ class ParkingAllotmentRepository(BaseRepository):
             needle = f"%{search.strip()}%"
             conditions.append(
                 f"""(
-                    CONCAT(
+                    COALESCE(fps.slot_code, '') ILIKE ${idx}
+                    OR CONCAT(
                         COALESCE(t.code, ''), '-',
                         COALESCE(f.floor_level, ''), '-',
                         LPAD(fps.slot_number::text, 3, '0')
@@ -217,6 +218,7 @@ class ParkingAllotmentRepository(BaseRepository):
             SELECT
                 fps.id,
                 fps.slot_number,
+                fps.slot_code,
                 fps.status AS slot_status,
                 fps.created_at,
                 fps.updated_at,
@@ -259,6 +261,7 @@ class ParkingAllotmentRepository(BaseRepository):
             SELECT
                 fps.id,
                 fps.slot_number,
+                fps.slot_code,
                 fps.status AS slot_status,
                 fps.created_at,
                 fps.updated_at,

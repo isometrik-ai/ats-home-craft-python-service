@@ -34,6 +34,14 @@ def validate_tower_numbering(
         )
 
 
+def _has_parking_numbering_fields(data: dict[str, Any]) -> bool:
+    """Return True when parking numbering fields are explicitly set."""
+    return any(
+        data.get(field) is not None
+        for field in ("numbering_pattern", "starting_slots_number", "custom_prefix")
+    )
+
+
 def validate_facility_payload(
     data: dict[str, Any],
     *,
@@ -78,3 +86,23 @@ def validate_facility_payload(
                 message_key="project_setup.errors.facility_parking_user_type_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        starting_slots_number = data.get("starting_slots_number")
+        if starting_slots_number is not None and int(starting_slots_number) < 1:
+            raise ValidationException(
+                message_key="project_setup.errors.facility_starting_slot_number_invalid",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        numbering_pattern = data.get("numbering_pattern")
+        if isinstance(numbering_pattern, UnitNumberingPattern):
+            numbering_pattern = numbering_pattern.value
+        validate_tower_numbering(
+            numbering_pattern=str(numbering_pattern or UnitNumberingPattern.FLOOR_UNIT.value),
+            custom_prefix=data.get("custom_prefix"),
+        )
+        return
+
+    if _has_parking_numbering_fields(data):
+        raise ValidationException(
+            message_key="project_setup.errors.facility_parking_numbering_not_applicable",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )

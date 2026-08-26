@@ -63,3 +63,43 @@ def test_validate_facility_parking_fields():
                 "parking_slots": 10,
             }
         )
+
+
+def test_validate_facility_parking_numbering_defaults():
+    """Parking facilities accept default numbering pattern and starting slot."""
+    validate_facility_payload(
+        {
+            "facility_type": "parking",
+            "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+            "parking_slots": 10,
+            "parking_user_type": "visitors",
+            "numbering_pattern": "floor_unit",
+            "starting_slots_number": 1,
+        }
+    )
+
+
+def test_validate_facility_parking_custom_prefix_required():
+    """Custom parking numbering requires custom_prefix."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "parking",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "parking_slots": 10,
+                "parking_user_type": "visitors",
+                "numbering_pattern": "custom",
+            }
+        )
+
+
+def test_validate_facility_numbering_not_applicable_for_non_parking():
+    """Non-parking facilities reject numbering fields."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "sports",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "numbering_pattern": "sequential",
+            }
+        )

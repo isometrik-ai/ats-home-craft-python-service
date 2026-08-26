@@ -63,6 +63,20 @@ def test_build_slot_code_formats_tower_floor_and_number():
     )
 
 
+def test_resolve_slot_code_prefers_persisted_value():
+    assert (
+        ParkingAllotmentService._resolve_slot_code(
+            {
+                "slot_code": "SLT-A-2",
+                "tower_code": "A",
+                "floor_level": "B2",
+                "slot_number": 2,
+            }
+        )
+        == "SLT-A-2"
+    )
+
+
 def test_slot_allowed_actions_for_free_slot():
     svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
     assert "allot" in svc._slot_allowed_actions(display_status=ParkingSlotDisplayStatus.FREE.value)

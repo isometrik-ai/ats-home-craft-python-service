@@ -21,6 +21,7 @@ from apps.user_service.app.schemas.enums import (
     PlotType,
     PropertyType,
     UnitConfigKind,
+    UnitNumberingPattern,
     UnitStatus,
 )
 
@@ -224,6 +225,9 @@ class CreateFacilityRequest(BaseModel):
     capacity_persons: int | None = Field(default=None, ge=0)
     parking_slots: int | None = Field(default=None, ge=0)
     parking_user_type: ParkingUserType | None = None
+    numbering_pattern: UnitNumberingPattern | None = None
+    starting_slots_number: int | None = Field(default=None, ge=0)
+    custom_prefix: str | None = Field(default=None, max_length=32)
     extra_attributes: dict[str, Any] = Field(default_factory=dict)
     location_notes: str | None = None
     latitude: float | None = None
@@ -249,6 +253,9 @@ class UpdateFacilityRequest(BaseModel):
     capacity_persons: int | None = Field(default=None, ge=0)
     parking_slots: int | None = Field(default=None, ge=0)
     parking_user_type: ParkingUserType | None = None
+    numbering_pattern: UnitNumberingPattern | None = None
+    starting_slots_number: int | None = Field(default=None, ge=0)
+    custom_prefix: str | None = Field(default=None, max_length=32)
     extra_attributes: dict[str, Any] | None = None
     location_notes: str | None = None
     latitude: float | None = None

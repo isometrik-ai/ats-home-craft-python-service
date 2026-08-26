@@ -11,6 +11,7 @@ _FACILITY_COLUMN_CASTS: dict[str, str] = {
     "status": "::facility_status",
     "location_type": "::facility_location_type",
     "parking_user_type": "::parking_user_type",
+    "numbering_pattern": "::unit_numbering_pattern",
 }
 
 _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
@@ -28,6 +29,9 @@ _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
     "capacity_persons",
     "parking_slots",
     "parking_user_type",
+    "numbering_pattern",
+    "starting_slots_number",
+    "custom_prefix",
     "extra_attributes",
     "location_notes",
     "latitude",

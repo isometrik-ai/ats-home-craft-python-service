@@ -40,11 +40,11 @@ class _FakeConn:
 
 @pytest.mark.asyncio
 async def test_bulk_insert_slots():
-    """Bulk insert creates numbered slots via generate_series."""
+    """Bulk insert creates numbered slots via unnest."""
     conn = _FakeConn(
         rows=[
-            {"id": "slot-1", "slot_number": 1},
-            {"id": "slot-2", "slot_number": 2},
+            {"id": "slot-1", "slot_number": 1, "slot_code": "SLT-A-1"},
+            {"id": "slot-2", "slot_number": 2, "slot_code": "SLT-A-2"},
         ]
     )
     repo = ParkingSlotsRepository(db_connection=conn)
@@ -53,14 +53,32 @@ async def test_bulk_insert_slots():
         organization_id=ORG_ID,
         project_id=PROJECT_ID,
         facility_id=FACILITY_ID,
-        slot_count=2,
+        slots=[(1, "SLT-A-1"), (2, "SLT-A-2")],
     )
 
     assert len(slots) == 2
     query, args = conn.fetch_calls[0]
     assert "INSERT INTO facility_parking_slots" in query
-    assert "generate_series" in query
-    assert args == (ORG_ID, PROJECT_ID, FACILITY_ID, 2)
+    assert "unnest" in query
+    assert "slot_code" in query
+    assert args == (ORG_ID, PROJECT_ID, FACILITY_ID, [1, 2], ["SLT-A-1", "SLT-A-2"])
+
+
+@pytest.mark.asyncio
+async def test_bulk_insert_slots_empty_list():
+    """Empty slot list is a no-op."""
+    conn = _FakeConn()
+    repo = ParkingSlotsRepository(db_connection=conn)
+
+    slots = await repo.bulk_insert_slots(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        slots=[],
+    )
+
+    assert slots == []
+    assert conn.fetch_calls == []
 
 
 @pytest.mark.asyncio
