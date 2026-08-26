@@ -16,22 +16,28 @@ class ParkingSlotsRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         facility_id: str,
-        slot_count: int,
+        slots: list[tuple[int, str]],
     ) -> list[dict[str, Any]]:
         """Create numbered parking slots for a facility."""
+        if not slots:
+            return []
+
+        slot_numbers = [slot_number for slot_number, _ in slots]
+        slot_codes = [slot_code for _, slot_code in slots]
         rows = await self.db_connection.fetch(
             """
             INSERT INTO facility_parking_slots (
-                organization_id, project_id, facility_id, slot_number
+                organization_id, project_id, facility_id, slot_number, slot_code
             )
-            SELECT $1::uuid, $2::uuid, $3::uuid, gs
-            FROM generate_series(1, $4::int) AS gs
+            SELECT $1::uuid, $2::uuid, $3::uuid, s.num, s.code
+            FROM unnest($4::int[], $5::text[]) AS s(num, code)
             RETURNING *
             """,
             organization_id,
             project_id,
             facility_id,
-            slot_count,
+            slot_numbers,
+            slot_codes,
         )
         return [dict(row) for row in rows]
 

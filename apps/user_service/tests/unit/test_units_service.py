@@ -198,7 +198,8 @@ def test_serialize_unit_list_item_builds_registry_row():
             "resolved_property_type": "residential",
             "resolved_config_kind": "apartment",
             "config_display_label": "2BHK Standard",
-            "parking_entitlement": 2,
+            "two_wheeler_parking_entitlement": 1,
+            "four_wheeler_parking_entitlement": 1,
             "owner_contact_id": "c-1",
             "owner_prefix": "Mr.",
             "owner_first_name": "Rajesh",
@@ -227,7 +228,8 @@ def test_serialize_unit_list_item_builds_registry_row():
     assert item["owner"]["phone"] == "+919876543210"
     assert item["owner"]["email"] == "rajesh@example.com"
     assert item["is_sold"] is True
-    assert item["parking_entitlement"] == 2
+    assert item["two_wheeler_parking_entitlement"] == 1
+    assert item["four_wheeler_parking_entitlement"] == 1
 
 
 def test_format_primary_contact_phone_and_email():
@@ -307,7 +309,8 @@ def test_list_item_occupied_without_owner():
     assert item["is_sold"] is True
     assert item["owner"] is None
     assert item["assign_date"] is None
-    assert item["parking_entitlement"] == 0
+    assert item["two_wheeler_parking_entitlement"] == 0
+    assert item["four_wheeler_parking_entitlement"] == 0
 
 
 @pytest.mark.asyncio
@@ -498,7 +501,8 @@ async def test_get_unit_detail_builds_payload():
         "bathrooms": 2,
         "area_sqft": 1080,
         "carpet_area_sqft": None,
-        "parking_entitlement": 2,
+        "two_wheeler_parking_entitlement": 1,
+        "four_wheeler_parking_entitlement": 1,
         "default_facing": "east",
         "config_facing": None,
         "commercial_unit_type": None,
@@ -567,7 +571,8 @@ async def test_get_unit_detail_builds_payload():
     assert data["assign_date"] == "2026-07-15"
     assert data["location_label"] == "Tower A · F18"
     assert data["carpet_area_sqft"] == 1080.0
-    assert data["parking_entitlement"] == 2
+    assert data["two_wheeler_parking_entitlement"] == 1
+    assert data["four_wheeler_parking_entitlement"] == 1
     assert data["vehicles_count"] == 1
     assert data["financials"]["base_fee_monthly"] == 3000.0
     assert data["financials"]["outstanding_amount"] == 0.0

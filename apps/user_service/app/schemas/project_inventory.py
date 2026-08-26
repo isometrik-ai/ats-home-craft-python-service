@@ -17,10 +17,12 @@ from apps.user_service.app.schemas.enums import (
     FacilityType,
     Facing,
     ParkingUserType,
+    ParkingVehicleCategory,
     PlotItemStatus,
     PlotType,
     PropertyType,
     UnitConfigKind,
+    UnitNumberingPattern,
     UnitStatus,
 )
 
@@ -45,7 +47,8 @@ class CreateUnitConfigRequest(BaseModel):
     bedrooms: float | None = Field(default=None, ge=0)
     bathrooms: float | None = Field(default=None, ge=0)
     area_sqft: float | None = Field(default=None, ge=0)
-    parking_entitlement: int = Field(default=0, ge=0)
+    two_wheeler_parking_entitlement: int = Field(default=0, ge=0)
+    four_wheeler_parking_entitlement: int = Field(default=0, ge=0)
     balconies: int = Field(default=0, ge=0)
     default_facing: Facing | None = None
     view: str | None = None
@@ -79,7 +82,8 @@ class UpdateUnitConfigRequest(BaseModel):
     bedrooms: float | None = Field(default=None, ge=0)
     bathrooms: float | None = Field(default=None, ge=0)
     area_sqft: float | None = Field(default=None, ge=0)
-    parking_entitlement: int | None = Field(default=None, ge=0)
+    two_wheeler_parking_entitlement: int | None = Field(default=None, ge=0)
+    four_wheeler_parking_entitlement: int | None = Field(default=None, ge=0)
     balconies: int | None = Field(default=None, ge=0)
     default_facing: Facing | None = None
     view: str | None = None
@@ -224,6 +228,10 @@ class CreateFacilityRequest(BaseModel):
     capacity_persons: int | None = Field(default=None, ge=0)
     parking_slots: int | None = Field(default=None, ge=0)
     parking_user_type: ParkingUserType | None = None
+    parking_vehicle_category: ParkingVehicleCategory | None = None
+    numbering_pattern: UnitNumberingPattern | None = None
+    starting_slots_number: int | None = Field(default=None, ge=0)
+    custom_prefix: str | None = Field(default=None, max_length=32)
     extra_attributes: dict[str, Any] = Field(default_factory=dict)
     location_notes: str | None = None
     latitude: float | None = None
@@ -249,6 +257,10 @@ class UpdateFacilityRequest(BaseModel):
     capacity_persons: int | None = Field(default=None, ge=0)
     parking_slots: int | None = Field(default=None, ge=0)
     parking_user_type: ParkingUserType | None = None
+    parking_vehicle_category: ParkingVehicleCategory | None = None
+    numbering_pattern: UnitNumberingPattern | None = None
+    starting_slots_number: int | None = Field(default=None, ge=0)
+    custom_prefix: str | None = Field(default=None, max_length=32)
     extra_attributes: dict[str, Any] | None = None
     location_notes: str | None = None
     latitude: float | None = None
@@ -404,7 +416,8 @@ class UnitListItemResponse(BaseModel):
     status: UnitStatus
     is_sold: bool = False
     sort_order: int = Field(default=0, ge=0)
-    parking_entitlement: int = Field(default=0, ge=0)
+    two_wheeler_parking_entitlement: int = Field(default=0, ge=0)
+    four_wheeler_parking_entitlement: int = Field(default=0, ge=0)
 
 
 class UnitListSummary(BaseModel):
@@ -630,7 +643,8 @@ class UnitDetailConfig(BaseModel):
     bathrooms: float | None = None
     area_sqft: float | None = None
     carpet_area_sqft: float | None = None
-    parking_entitlement: int = Field(default=0, ge=0)
+    two_wheeler_parking_entitlement: int = Field(default=0, ge=0)
+    four_wheeler_parking_entitlement: int = Field(default=0, ge=0)
     default_facing: str | None = None
     facing: str | None = None
     commercial_unit_type: str | None = None
@@ -695,7 +709,8 @@ class UnitDetailResponse(BaseModel):
     location_label: str | None = None
     carpet_area_sqft: float | None = None
     facing: str | None = None
-    parking_entitlement: int = Field(default=0, ge=0)
+    two_wheeler_parking_entitlement: int = Field(default=0, ge=0)
+    four_wheeler_parking_entitlement: int = Field(default=0, ge=0)
     parking_slots_assigned: int = Field(default=0, ge=0)
     tower: UnitDetailTower | None = None
     floor: UnitDetailFloor | None = None

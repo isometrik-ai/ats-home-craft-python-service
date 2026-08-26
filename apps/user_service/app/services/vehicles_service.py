@@ -10,10 +10,12 @@ from asyncpg import UniqueViolationError
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.db.repositories.parking_allotment_repository import (
+    ParkingAllotmentRepository,
+)
 from apps.user_service.app.db.repositories.parking_slots_repository import (
     ParkingSlotsRepository,
 )
-from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
     CreateVehicleRequest,
@@ -59,7 +61,7 @@ class VehiclesService:
         self.user_context = user_context
         self.repo = VehiclesRepository(db_connection)
         self.parking_slots_repo = ParkingSlotsRepository(db_connection)
-        self.units_repo = UnitsRepository(db_connection)
+        self.parking_allotment_repo = ParkingAllotmentRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
@@ -298,15 +300,28 @@ class VehiclesService:
             out.pop(key, None)
         return out
 
-    async def _validate_unit_for_contact(self, *, contact_id: str, unit_id: str) -> dict[str, Any]:
-        """Ensure the unit is actively assigned to the contact; return unit metadata."""
+    async def _validate_unit_for_contact(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        require_active_unit: bool = True,
+    ) -> dict[str, Any]:
+        """Ensure the unit is assigned to the contact; return unit metadata."""
         org_id = self.user_context.organization_id
         assert org_id
-        has_unit = await self.contact_units_repo.contact_has_active_unit(
-            organization_id=org_id,
-            contact_id=contact_id,
-            unit_id=unit_id,
-        )
+        if require_active_unit:
+            has_unit = await self.contact_units_repo.contact_has_active_unit(
+                organization_id=org_id,
+                contact_id=contact_id,
+                unit_id=unit_id,
+            )
+        else:
+            has_unit = await self.contact_units_repo.contact_has_assigned_unit(
+                organization_id=org_id,
+                contact_id=contact_id,
+                unit_id=unit_id,
+            )
         if not has_unit:
             raise ValidationException(
                 message_key="contact_onboarding.errors.unit_not_assigned",
@@ -351,29 +366,35 @@ class VehiclesService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-    async def _assert_parking_entitlement_available(
+    async def _validate_vehicle_parking_slot(
         self,
         *,
+        project_id: str,
         unit_id: str,
-        exclude_vehicle_id: str | None = None,
+        parking_slot_id: str,
     ) -> None:
-        """Ensure the unit has not reached its configured parking entitlement."""
+        """Ensure the slot exists and is actively allotted to the vehicle's unit."""
         org_id = self.user_context.organization_id
         assert org_id
-        entitlement = await self.units_repo.get_parking_entitlement_by_unit(
+        slot = await self.parking_slots_repo.get_slot(
             organization_id=org_id,
-            unit_id=unit_id,
+            project_id=project_id,
+            slot_id=parking_slot_id,
         )
-        current = await self.repo.count_entitlement_consuming_by_unit(
-            organization_id=org_id,
-            unit_id=unit_id,
-            exclude_vehicle_id=exclude_vehicle_id,
-        )
-        if current >= entitlement:
+        if not slot:
             raise ValidationException(
-                message_key="contact_onboarding.errors.parking_entitlement_exceeded",
+                message_key="contact_onboarding.errors.parking_slot_unavailable",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
-                params={"parking_entitlement": entitlement},
+            )
+        allotment = await self.parking_allotment_repo.get_active_allotment_by_slot(
+            organization_id=org_id,
+            project_id=project_id,
+            slot_id=parking_slot_id,
+        )
+        if not allotment or str(allotment.get("unit_id")) != unit_id:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_slot_not_allotted_to_unit",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
     async def release_for_move_out(
@@ -417,13 +438,6 @@ class VehiclesService:
                 continue
             if status != VehicleStatus.APPROVED.value:
                 continue
-            slot_id = vehicle.get("parking_slot_id")
-            if slot_id:
-                await self.parking_slots_repo.release_slot(
-                    organization_id=org_id,
-                    project_id=str(vehicle["project_id"]),
-                    slot_id=str(slot_id),
-                )
             await self.repo.soft_remove(
                 organization_id=org_id,
                 contact_id=vehicle_contact_id,
@@ -435,12 +449,17 @@ class VehiclesService:
         *,
         contact_id: str,
         unit_id: str | None = None,
+        require_active_unit: bool = True,
     ) -> list[dict[str, Any]]:
         """List active vehicles for the contact, optionally filtered by unit."""
         org_id = self.user_context.organization_id
         assert org_id
         if unit_id:
-            await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
+            await self._validate_unit_for_contact(
+                contact_id=contact_id,
+                unit_id=unit_id,
+                require_active_unit=require_active_unit,
+            )
         rows = await self.repo.list_details_by_contact(
             organization_id=org_id,
             contact_id=contact_id,
@@ -527,7 +546,6 @@ class VehiclesService:
             unit_id=body.unit_id,
         )
         project_id = str(unit["project_id"])
-        await self._assert_parking_entitlement_available(unit_id=body.unit_id)
         try:
             row = await self.repo.create(
                 organization_id=org_id,
@@ -660,7 +678,6 @@ class VehiclesService:
         unit_id = str(existing["unit_id"])
         project_id = str(existing["project_id"])
         await self._assert_primary_occupant_for_unit(contact_id=contact_id, unit_id=unit_id)
-        await self._assert_parking_entitlement_available(unit_id=unit_id)
         patch = body.model_dump(exclude_unset=True, exclude_none=True)
         if "vehicle_type" in patch and isinstance(patch["vehicle_type"], VehicleType):
             patch["vehicle_type"] = patch["vehicle_type"].value
@@ -783,12 +800,6 @@ class VehiclesService:
             contact_id=contact_id,
             unit_id=str(existing["unit_id"]),
         )
-        if existing.get("parking_slot_id"):
-            await self.parking_slots_repo.release_slot(
-                organization_id=org_id,
-                project_id=existing["project_id"],
-                slot_id=existing["parking_slot_id"],
-            )
         row = await self.repo.soft_remove(
             organization_id=org_id,
             contact_id=contact_id,
@@ -923,7 +934,7 @@ class VehiclesService:
         vehicle_id: str,
         body: ReviewVehicleRequest,
     ) -> dict[str, Any]:
-        """Approve or reject a vehicle request and assign a parking slot on approval."""
+        """Approve or reject a vehicle request; optional slot links to a unit allotment."""
         org_id = self.user_context.organization_id
         assert org_id
         reviewer_user_id = self.user_context.user_id
@@ -944,36 +955,18 @@ class VehiclesService:
             )
 
         if body.status == VehicleStatus.APPROVED:
-            assert body.parking_slot_id
             unit_id = str(vehicle.get("unit_id") or "")
             if not unit_id:
                 raise ValidationException(
                     message_key="contact_onboarding.errors.unit_not_found",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
-            await self._assert_parking_entitlement_available(
-                unit_id=unit_id,
-                exclude_vehicle_id=vehicle_id,
-            )
-            slot = await self.parking_slots_repo.get_slot(
-                organization_id=org_id,
-                project_id=project_id,
-                slot_id=body.parking_slot_id,
-            )
-            if not slot or slot.get("status") != "available":
-                raise ValidationException(
-                    message_key="contact_onboarding.errors.parking_slot_unavailable",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
-                )
-            assigned = await self.parking_slots_repo.assign_slot(
-                organization_id=org_id,
-                project_id=project_id,
-                slot_id=body.parking_slot_id,
-            )
-            if not assigned:
-                raise ValidationException(
-                    message_key="contact_onboarding.errors.parking_slot_unavailable",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+            parking_slot_id = body.parking_slot_id
+            if parking_slot_id:
+                await self._validate_vehicle_parking_slot(
+                    project_id=project_id,
+                    unit_id=unit_id,
+                    parking_slot_id=parking_slot_id,
                 )
             row = await self.repo.update_by_project(
                 organization_id=org_id,
@@ -981,7 +974,7 @@ class VehiclesService:
                 vehicle_id=vehicle_id,
                 update_data={
                     "status": VehicleStatus.APPROVED.value,
-                    "parking_slot_id": body.parking_slot_id,
+                    "parking_slot_id": parking_slot_id,
                     "rejection_reason": None,
                     "approved_by_user_id": reviewer_user_id,
                     "rejected_by_user_id": None,

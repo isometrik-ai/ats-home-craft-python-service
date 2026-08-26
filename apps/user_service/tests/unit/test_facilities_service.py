@@ -11,6 +11,8 @@ from apps.user_service.app.schemas.enums import (
     FacilityStatus,
     FacilityType,
     ParkingUserType,
+    ParkingVehicleCategory,
+    UnitNumberingPattern,
 )
 from apps.user_service.app.schemas.project_inventory import (
     CreateFacilityRequest,
@@ -64,6 +66,7 @@ def _create_body(**overrides) -> CreateFacilityRequest:
         "location_type": FacilityLocationType.OUTDOOR_STANDALONE,
         "parking_slots": 10,
         "parking_user_type": ParkingUserType.VISITORS,
+        "parking_vehicle_category": ParkingVehicleCategory.FOUR_WHEELER,
     }
     base.update(overrides)
     return CreateFacilityRequest(**base)
@@ -78,7 +81,64 @@ async def test_create_facility_provisions_parking_slots():
     assert result["id"] == FACILITY_ID
     svc.parking_slots_repo.bulk_insert_slots.assert_awaited_once()
     kwargs = svc.parking_slots_repo.bulk_insert_slots.await_args.kwargs
-    assert kwargs["slot_count"] == 10
+    assert kwargs["slots"] == [(i, str(i)) for i in range(1, 11)]
+
+
+@pytest.mark.asyncio
+async def test_create_parking_facility_builds_custom_slot_codes():
+    """Custom numbering generates prefixed slot_code values."""
+    svc = _service()
+    await svc.create_facility(
+        project_id=PROJECT_ID,
+        body=_create_body(
+            parking_slots=3,
+            numbering_pattern=UnitNumberingPattern.CUSTOM,
+            custom_prefix="SLT-A",
+        ),
+    )
+
+    kwargs = svc.parking_slots_repo.bulk_insert_slots.await_args.kwargs
+    assert kwargs["slots"] == [(1, "SLT-A-1"), (2, "SLT-A-2"), (3, "SLT-A-3")]
+
+
+@pytest.mark.asyncio
+async def test_create_parking_facility_honors_starting_slots_number():
+    """Parking facilities can start slot numbering from a custom offset."""
+    svc = _service()
+    await svc.create_facility(
+        project_id=PROJECT_ID,
+        body=_create_body(starting_slots_number=100, parking_slots=2),
+    )
+
+    kwargs = svc.parking_slots_repo.bulk_insert_slots.await_args.kwargs
+    assert kwargs["slots"] == [(100, "100"), (101, "101")]
+
+
+@pytest.mark.asyncio
+async def test_create_parking_facility_rejects_custom_pattern_without_prefix():
+    """Custom parking numbering requires custom_prefix."""
+    svc = _service()
+    with pytest.raises(ValidationException):
+        await svc.create_facility(
+            project_id=PROJECT_ID,
+            body=_create_body(numbering_pattern=UnitNumberingPattern.CUSTOM),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_facility_non_parking_rejects_numbering_fields():
+    """Numbering fields are only valid for parking facilities."""
+    svc = _service()
+    with pytest.raises(ValidationException):
+        await svc.create_facility(
+            project_id=PROJECT_ID,
+            body=CreateFacilityRequest(
+                name="Gym",
+                facility_type=FacilityType.SPORTS,
+                location_type=FacilityLocationType.OUTDOOR_STANDALONE,
+                numbering_pattern=UnitNumberingPattern.SEQUENTIAL,
+            ),
+        )
 
 
 @pytest.mark.asyncio

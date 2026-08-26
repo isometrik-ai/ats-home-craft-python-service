@@ -58,6 +58,29 @@ async def test_create_apartment_config_requires_core_fields():
 
 
 @pytest.mark.asyncio
+async def test_create_apartment_config_persists_split_parking_entitlements():
+    """Split parking entitlements are stored on the config row."""
+    svc = _service()
+    body = CreateUnitConfigRequest(
+        config_kind=UnitConfigKind.APARTMENT,
+        name="2BHK",
+        code="2BHK",
+        bedrooms=2,
+        bathrooms=2,
+        area_sqft=1200,
+        two_wheeler_parking_entitlement=1,
+        four_wheeler_parking_entitlement=2,
+    )
+
+    await svc.create_config(project_id="p1", body=body)
+
+    payload = svc.configs_repo.insert_config.await_args.args[0]
+    assert payload["two_wheeler_parking_entitlement"] == 1
+    assert payload["four_wheeler_parking_entitlement"] == 2
+    assert "parking_entitlement" not in payload
+
+
+@pytest.mark.asyncio
 async def test_create_apartment_config_succeeds_with_fields():
     """Apartment config with required fields inserts successfully."""
     svc = _service()

@@ -152,7 +152,8 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
             owner_contact_id=str(owner_contact_id) if owner_contact_id else None,
         ),
         "sort_order": int(row.get("sort_order") or 0),
-        "parking_entitlement": int(row.get("parking_entitlement") or 0),
+        "two_wheeler_parking_entitlement": int(row.get("two_wheeler_parking_entitlement") or 0),
+        "four_wheeler_parking_entitlement": int(row.get("four_wheeler_parking_entitlement") or 0),
     }
 
 
@@ -431,7 +432,12 @@ class UnitsService:
                     if row.get("carpet_area_sqft") is not None
                     else None
                 ),
-                "parking_entitlement": int(row.get("parking_entitlement") or 0),
+                "two_wheeler_parking_entitlement": int(
+                    row.get("two_wheeler_parking_entitlement") or 0
+                ),
+                "four_wheeler_parking_entitlement": int(
+                    row.get("four_wheeler_parking_entitlement") or 0
+                ),
                 "default_facing": (
                     str(row["default_facing"]) if row.get("default_facing") is not None else None
                 ),
@@ -450,7 +456,6 @@ class UnitsService:
                 "description": row.get("plot_description"),
             }
 
-        parking_entitlement = int(row.get("parking_entitlement") or 0)
         unit_id = str(row["id"])
         outstanding_minor = await self.invoices_repo.sum_outstanding_by_unit(
             organization_id=self._org_id,
@@ -481,7 +486,10 @@ class UnitsService:
             ),
             "carpet_area_sqft": resolve_carpet_area_sqft(row),
             "facing": resolve_unit_facing(row),
-            "parking_entitlement": parking_entitlement,
+            "two_wheeler_parking_entitlement": int(row.get("two_wheeler_parking_entitlement") or 0),
+            "four_wheeler_parking_entitlement": int(
+                row.get("four_wheeler_parking_entitlement") or 0
+            ),
             "parking_slots_assigned": parking_slots_assigned,
             "tower": tower,
             "floor": floor,

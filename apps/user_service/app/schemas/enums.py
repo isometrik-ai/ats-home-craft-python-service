@@ -1356,6 +1356,14 @@ class ParkingUserType(str, Enum):
     VISITORS = "visitors"
 
 
+class ParkingVehicleCategory(str, Enum):
+    """Parking facility vehicle category (Postgres parking_vehicle_category enum)."""
+
+    TWO_WHEELER = "two_wheeler"
+    FOUR_WHEELER = "four_wheeler"
+    BOTH = "both"
+
+
 class ParkingSlotStatus(str, Enum):
     """Individual parking slot status (Postgres parking_slot_status enum)."""
 

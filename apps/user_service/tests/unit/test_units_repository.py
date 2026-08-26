@@ -113,7 +113,8 @@ async def test_list_units_applies_registry_filters():
     assert "tower_id" in list_query
     assert "config_id" in list_query
     assert "::unit_status" in list_query
-    assert "parking_entitlement" in list_query
+    assert "two_wheeler_parking_entitlement" in list_query
+    assert "four_wheeler_parking_entitlement" in list_query
 
 
 @pytest.mark.asyncio
@@ -297,8 +298,8 @@ async def test_has_active_owner_and_mark_unit_status():
 
 
 @pytest.mark.asyncio
-async def test_get_by_plot_item_id_and_parking_entitlement():
-    conn = _FakeConn(row={"id": UNIT_ID}, val=2)
+async def test_get_by_plot_item_id():
+    conn = _FakeConn(row={"id": UNIT_ID})
     repo = UnitsRepository(db_connection=conn)
 
     unit = await repo.get_by_plot_item_id(
@@ -306,12 +307,6 @@ async def test_get_by_plot_item_id_and_parking_entitlement():
         plot_item_id="plot-1",
     )
     assert unit["id"] == UNIT_ID
-
-    entitlement = await repo.get_parking_entitlement_by_unit(
-        organization_id=ORG_ID,
-        unit_id=UNIT_ID,
-    )
-    assert entitlement == 2
 
 
 @pytest.mark.asyncio

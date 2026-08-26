@@ -131,7 +131,8 @@ async def test_normalize_unit_row_includes_project():
         "project_latitude": 19.076,
         "project_longitude": 72.877,
         "project_property_types": ["residential"],
-        "parking_entitlement": 2,
+        "two_wheeler_parking_entitlement": 1,
+        "four_wheeler_parking_entitlement": 1,
     }
 
     item = svc._normalize_unit_row(row)
@@ -140,7 +141,8 @@ async def test_normalize_unit_row_includes_project():
     assert item["project"]["name"] == "Sunrise Towers"
     assert item["project"]["city"] == "Mumbai"
     assert item["project"]["property_types"] == ["residential"]
-    assert item["parking_entitlement"] == 2
+    assert item["two_wheeler_parking_entitlement"] == 1
+    assert item["four_wheeler_parking_entitlement"] == 1
 
 
 def test_group_properties_by_project():

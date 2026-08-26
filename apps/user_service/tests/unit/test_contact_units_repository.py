@@ -175,6 +175,22 @@ async def test_contact_has_active_unit():
 
 
 @pytest.mark.asyncio
+async def test_contact_has_assigned_unit():
+    """Pending or active unit check returns bool from fetchval."""
+    conn = _FakeConn(val=1)
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    assert (
+        await repo.contact_has_assigned_unit(
+            organization_id=ORG_ID,
+            contact_id=CONTACT_ID,
+            unit_id=UNIT_ID,
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_by_unit_and_contact():
     """Unit+contact lookup uses both ids."""
     conn = _FakeConn(row={"id": CU_ID})

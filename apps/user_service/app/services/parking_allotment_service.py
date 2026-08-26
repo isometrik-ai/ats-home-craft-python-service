@@ -39,7 +39,11 @@ from apps.user_service.app.schemas.parking_allotment import (
     UnitAllotParkingSlotRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_any,
+)
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -88,6 +92,18 @@ class ParkingAllotmentService:
         number = int(slot_number or 0)
         return f"{tower}-{floor}-{number:03d}"
 
+    @classmethod
+    def _resolve_slot_code(cls, row: dict[str, Any]) -> str:
+        """Prefer persisted slot_code; fall back to tower/floor formatting."""
+        stored = row.get("slot_code")
+        if stored:
+            return str(stored)
+        return cls._build_slot_code(
+            tower_code=row.get("tower_code"),
+            floor_level=row.get("floor_level"),
+            slot_number=int(row.get("slot_number") or 0),
+        )
+
     @staticmethod
     def _slot_type_label(slot_type: str) -> str:
         return _SLOT_TYPE_LABELS.get(slot_type, slot_type.replace("_", " ").title())
@@ -99,6 +115,11 @@ class ParkingAllotmentService:
         if isinstance(value, date):
             return value.isoformat()
         return str(value)
+
+    @staticmethod
+    def _normalize_event_payload(value: Any) -> dict[str, Any]:
+        payload = parse_json_any(value, default={}) or {}
+        return payload if isinstance(payload, dict) else {}
 
     async def _ensure_project(self, *, project_id: str) -> None:
         await self.setup_service.ensure_project(project_id=project_id)
@@ -148,18 +169,36 @@ class ParkingAllotmentService:
             return ["unblock", "details", "history"]
         return ["details", "history"]
 
+    @staticmethod
+    def _slot_vehicle_category(slot_type: str) -> str:
+        """Map a parking slot type to two_wheeler or four_wheeler entitlement bucket."""
+        if slot_type == ParkingSlotType.TWO_WHEELER.value:
+            return ParkingSlotType.TWO_WHEELER.value
+        return "four_wheeler"
+
     def _unit_allowed_actions(
         self,
         *,
-        parking_entitlement: int,
+        two_wheeler_parking_entitlement: int,
+        four_wheeler_parking_entitlement: int,
+        included_two_wheeler_slots_assigned: int,
+        included_four_wheeler_slots_assigned: int,
         slots_assigned: int,
     ) -> list[str]:
         actions: list[str] = []
-        if parking_entitlement <= 0:
+        total_entitlement = two_wheeler_parking_entitlement + four_wheeler_parking_entitlement
+        if total_entitlement <= 0:
             return actions
-        if slots_assigned < parking_entitlement:
+        has_included_room = (
+            two_wheeler_parking_entitlement > 0
+            and included_two_wheeler_slots_assigned < two_wheeler_parking_entitlement
+        ) or (
+            four_wheeler_parking_entitlement > 0
+            and included_four_wheeler_slots_assigned < four_wheeler_parking_entitlement
+        )
+        if has_included_room:
             actions.append("allot_slot")
-        if slots_assigned >= parking_entitlement:
+        if slots_assigned >= total_entitlement:
             actions.append("add_slot")
         return actions
 
@@ -169,6 +208,7 @@ class ParkingAllotmentService:
         project_id: str,
         unit_id: str,
         allotment_basis: ParkingAllotmentBasis,
+        slot_row: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         unit = await self.repo.get_unit_allotment_context(
             organization_id=self.organization_id,
@@ -185,17 +225,51 @@ class ParkingAllotmentService:
                 message_key="parking_allotment.errors.invalid_unit",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        entitlement = int(unit.get("parking_entitlement") or 0)
-        included_assigned = int(unit.get("included_slots_assigned") or 0)
-        if allotment_basis == ParkingAllotmentBasis.INCLUDED_WITH_UNIT:
-            if entitlement <= 0:
+        if allotment_basis != ParkingAllotmentBasis.INCLUDED_WITH_UNIT:
+            return unit
+
+        two_entitlement = int(unit.get("two_wheeler_parking_entitlement") or 0)
+        four_entitlement = int(unit.get("four_wheeler_parking_entitlement") or 0)
+        two_assigned = int(unit.get("included_two_wheeler_slots_assigned") or 0)
+        four_assigned = int(unit.get("included_four_wheeler_slots_assigned") or 0)
+
+        if slot_row is None:
+            total_entitlement = two_entitlement + four_entitlement
+            included_assigned = int(unit.get("included_slots_assigned") or 0)
+            if total_entitlement <= 0:
                 raise ValidationException(
                     message_key="parking_allotment.errors.no_entitlement",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
-            if included_assigned >= entitlement:
+            if included_assigned >= total_entitlement:
                 raise ValidationException(
                     message_key="parking_allotment.errors.entitlement_full",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            return unit
+
+        slot_type = str(slot_row.get("slot_type") or ParkingSlotType.CAR_STANDARD.value)
+        vehicle_category = self._slot_vehicle_category(slot_type)
+        if vehicle_category == ParkingSlotType.TWO_WHEELER.value:
+            if two_entitlement <= 0:
+                raise ValidationException(
+                    message_key="parking_allotment.errors.no_two_wheeler_entitlement",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            if two_assigned >= two_entitlement:
+                raise ValidationException(
+                    message_key="parking_allotment.errors.two_wheeler_entitlement_full",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        else:
+            if four_entitlement <= 0:
+                raise ValidationException(
+                    message_key="parking_allotment.errors.no_four_wheeler_entitlement",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            if four_assigned >= four_entitlement:
+                raise ValidationException(
+                    message_key="parking_allotment.errors.four_wheeler_entitlement_full",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
         return unit
@@ -244,11 +318,7 @@ class ParkingAllotmentService:
         allotted_since = row.get("allotted_at") or row.get("effective_from")
         return ParkingAllotmentSlotListItemResponse(
             id=str(row["id"]),
-            slot_code=self._build_slot_code(
-                tower_code=row.get("tower_code"),
-                floor_level=row.get("floor_level"),
-                slot_number=int(row.get("slot_number") or 0),
-            ),
+            slot_code=self._resolve_slot_code(row),
             level_label=row.get("floor_level"),
             bay_label=row.get("wing") or row.get("facility_name"),
             slot_type=ParkingSlotType(slot_type),
@@ -280,15 +350,22 @@ class ParkingAllotmentService:
         *,
         slot_rows_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> ParkingAllotmentUnitListItemResponse:
-        entitlement = int(row.get("parking_entitlement") or 0)
+        two_entitlement = int(row.get("two_wheeler_parking_entitlement") or 0)
+        four_entitlement = int(row.get("four_wheeler_parking_entitlement") or 0)
         assigned = int(row.get("slots_assigned") or 0)
-        short_by = max(entitlement - assigned, 0) if entitlement > 0 else 0
-        if entitlement <= 0:
+        two_included_assigned = int(row.get("included_two_wheeler_slots_assigned") or 0)
+        four_included_assigned = int(row.get("included_four_wheeler_slots_assigned") or 0)
+        short_by = 0
+        if two_entitlement > two_included_assigned:
+            short_by += two_entitlement - two_included_assigned
+        if four_entitlement > four_included_assigned:
+            short_by += four_entitlement - four_included_assigned
+        if two_entitlement + four_entitlement <= 0:
             entitlement_status = "none"
-        elif assigned >= entitlement:
-            entitlement_status = "met"
-        else:
+        elif short_by > 0:
             entitlement_status = "short"
+        else:
+            entitlement_status = "met"
 
         slots_held: list[ParkingAllotmentSlotHeldResponse] = []
         for item in row.get("active_allotments") or []:
@@ -301,11 +378,7 @@ class ParkingAllotmentService:
                 ParkingAllotmentSlotHeldResponse(
                     allotment_id=str(item.get("allotment_id") or ""),
                     slot_id=slot_id,
-                    slot_code=self._build_slot_code(
-                        tower_code=slot_meta.get("tower_code"),
-                        floor_level=slot_meta.get("floor_level"),
-                        slot_number=int(slot_meta.get("slot_number") or 0),
-                    ),
+                    slot_code=self._resolve_slot_code(slot_meta),
                     slot_type=ParkingSlotType(slot_type),
                     slot_type_label=self._slot_type_label(slot_type),
                     effective_from=self._format_date(item.get("effective_from")) or "",
@@ -322,13 +395,17 @@ class ParkingAllotmentService:
             id=str(row["id"]),
             code=str(row["code"]),
             configuration_label=row.get("configuration_label"),
-            parking_entitlement=entitlement,
+            two_wheeler_parking_entitlement=two_entitlement,
+            four_wheeler_parking_entitlement=four_entitlement,
             slots_assigned=assigned,
             entitlement_status=entitlement_status,
             entitlement_short_by=short_by,
             slots_held=slots_held,
             allowed_actions=self._unit_allowed_actions(
-                parking_entitlement=entitlement,
+                two_wheeler_parking_entitlement=two_entitlement,
+                four_wheeler_parking_entitlement=four_entitlement,
+                included_two_wheeler_slots_assigned=two_included_assigned,
+                included_four_wheeler_slots_assigned=four_included_assigned,
                 slots_assigned=assigned,
             ),
         )
@@ -435,7 +512,7 @@ class ParkingAllotmentService:
                 unit_code=row.get("unit_code"),
                 allotment_id=str(row["allotment_id"]) if row.get("allotment_id") else None,
                 actor_user_id=str(row["actor_user_id"]) if row.get("actor_user_id") else None,
-                payload=dict(row.get("payload") or {}),
+                payload=self._normalize_event_payload(row.get("payload")),
                 occurred_at=format_iso_datetime(row.get("occurred_at")) or "",
             )
             for row in rows
@@ -461,6 +538,21 @@ class ParkingAllotmentService:
             page=page,
             page_size=page_size,
         )
+        slot_rows_by_id = await self._slot_rows_by_id_for_unit_rows(
+            project_id=project_id,
+            rows=rows,
+        )
+        items = [
+            self._serialize_unit_list_item(row, slot_rows_by_id=slot_rows_by_id) for row in rows
+        ]
+        return items, total
+
+    async def _slot_rows_by_id_for_unit_rows(
+        self,
+        *,
+        project_id: str,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
         slot_ids: set[str] = set()
         for row in rows:
             for item in row.get("active_allotments") or []:
@@ -475,10 +567,30 @@ class ParkingAllotmentService:
             )
             if slot_row:
                 slot_rows_by_id[slot_id] = slot_row
-        items = [
-            self._serialize_unit_list_item(row, slot_rows_by_id=slot_rows_by_id) for row in rows
-        ]
-        return items, total
+        return slot_rows_by_id
+
+    async def get_unit(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+    ) -> ParkingAllotmentUnitListItemResponse:
+        await self._ensure_project(project_id=project_id)
+        row = await self.repo.get_unit_for_allotment_view(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="parking_allotment.errors.unit_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        slot_rows_by_id = await self._slot_rows_by_id_for_unit_rows(
+            project_id=project_id,
+            rows=[row],
+        )
+        return self._serialize_unit_list_item(row, slot_rows_by_id=slot_rows_by_id)
 
     async def _create_allotment(
         self,
@@ -491,12 +603,16 @@ class ParkingAllotmentService:
         event_type: ParkingSlotEventType = ParkingSlotEventType.ALLOTTED,
         payload: dict[str, Any] | None = None,
     ) -> ParkingAllotmentSlotDetailResponse:
+        slot_row = await self._validate_slot_for_allotment(
+            project_id=project_id,
+            slot_id=slot_id,
+        )
         await self._validate_unit_for_allotment(
             project_id=project_id,
             unit_id=unit_id,
             allotment_basis=allotment_basis,
+            slot_row=slot_row,
         )
-        await self._validate_slot_for_allotment(project_id=project_id, slot_id=slot_id)
 
         user_id = self.user_context.user_id
         actor_user_id = str(user_id) if user_id else None
@@ -640,6 +756,7 @@ class ParkingAllotmentService:
             project_id=project_id,
             unit_id=body.unit_id,
             allotment_basis=body.allotment_basis,
+            slot_row=row,
         )
         new_allotment = await self.repo.insert_allotment(
             organization_id=self.organization_id,

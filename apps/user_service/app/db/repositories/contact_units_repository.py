@@ -40,7 +40,8 @@ SELECT
   t.name AS tower_name,
   f.display_name AS floor_name,
   uc.display_label AS config_label,
-  COALESCE(uc.parking_entitlement, 0) AS parking_entitlement,
+  COALESCE(uc.two_wheeler_parking_entitlement, 0)::int AS two_wheeler_parking_entitlement,
+  COALESCE(uc.four_wheeler_parking_entitlement, 0)::int AS four_wheeler_parking_entitlement,
   (
     SELECT cr.role_type::text
     FROM contact_roles cr
@@ -169,6 +170,31 @@ class ContactUnitsRepository(BaseRepository):
             contact_id,
             unit_id,
             ContactUnitStatus.ACTIVE.value,
+        )
+        return row is not None
+
+    async def contact_has_assigned_unit(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        unit_id: str,
+    ) -> bool:
+        """True if contact has a pending or active link to the unit."""
+        row = await self.db_connection.fetchval(
+            """
+            SELECT 1
+            FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND contact_id = $2::uuid
+              AND unit_id = $3::uuid
+              AND status = ANY($4::contact_unit_status[])
+            LIMIT 1
+            """,
+            organization_id,
+            contact_id,
+            unit_id,
+            [ContactUnitStatus.PENDING.value, ContactUnitStatus.ACTIVE.value],
         )
         return row is not None
 
