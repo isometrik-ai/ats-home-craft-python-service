@@ -393,12 +393,7 @@ class ReviewVehicleRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_review(self) -> ReviewVehicleRequest:
-        """Enforce slot on approve and reason on reject."""
-        if self.status == VehicleStatus.APPROVED and not self.parking_slot_id:
-            raise ValidationException(
-                message_key="contact_onboarding.errors.parking_slot_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+        """Enforce reason on reject; parking slot is optional on approve."""
         if self.status == VehicleStatus.REJECTED and not self.rejection_reason:
             raise ValidationException(
                 message_key="contact_onboarding.errors.rejection_reason_required",

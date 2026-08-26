@@ -115,6 +115,53 @@ async def test_resolve_list_scope_validates_parking_facility():
 
 
 @pytest.mark.asyncio
+async def test_get_unit_returns_slots_held():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_unit_for_allotment_view = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "code": "A-1804",
+            "configuration_label": "3 BHK",
+            "parking_entitlement": 2,
+            "slots_assigned": 1,
+            "active_allotments": [
+                {
+                    "allotment_id": "allotment-1",
+                    "slot_id": "slot-1",
+                    "effective_from": date(2026, 8, 16),
+                    "allotment_basis": ParkingAllotmentBasis.INCLUDED_WITH_UNIT.value,
+                }
+            ],
+        }
+    )
+    svc.repo.get_slot_row = AsyncMock(return_value=_slot_row(slot_code="SLT-A-1"))
+
+    result = await svc.get_unit(project_id="project-1", unit_id="unit-1")
+
+    assert result.code == "A-1804"
+    assert result.slots_assigned == 1
+    assert len(result.slots_held) == 1
+    assert result.slots_held[0].slot_code == "SLT-A-1"
+
+
+@pytest.mark.asyncio
+async def test_get_unit_not_found():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_unit_for_allotment_view = AsyncMock(return_value=None)
+
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    with pytest.raises(NotFoundException):
+        await svc.get_unit(project_id="project-1", unit_id="missing-unit")
+
+
+@pytest.mark.asyncio
 async def test_allot_slot_creates_allotment_and_assigns_slot():
     svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
     svc.setup_service = MagicMock()

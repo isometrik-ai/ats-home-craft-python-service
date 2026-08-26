@@ -436,6 +436,63 @@ class ParkingAllotmentRepository(BaseRepository):
         )
         return [dict(row) for row in rows], int(total or 0)
 
+    async def get_unit_for_allotment_view(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetch one unit row for the by-unit parking allotment view."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+                u.id,
+                u.code,
+                u.unit_label,
+                u.tower_id,
+                COALESCE(uc.display_label, uc.name) AS configuration_label,
+                COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
+                COUNT(upa.id) FILTER (
+                    WHERE upa.status = 'active'::parking_allotment_status
+                )::int AS slots_assigned,
+                COALESCE(
+                    json_agg(
+                        json_build_object(
+                            'allotment_id', upa.id,
+                            'slot_id', upa.parking_slot_id,
+                            'effective_from', upa.effective_from,
+                            'allotment_basis', upa.allotment_basis
+                        )
+                        ORDER BY upa.effective_from, upa.created_at
+                    ) FILTER (WHERE upa.id IS NOT NULL AND upa.status = 'active'),
+                    '[]'::json
+                ) AS active_allotments
+            FROM units u
+            LEFT JOIN unit_configs uc ON uc.id = u.config_id
+            LEFT JOIN unit_parking_allotments upa
+              ON upa.unit_id = u.id
+             AND upa.organization_id = u.organization_id
+             AND upa.project_id = u.project_id
+            WHERE u.organization_id = $1::uuid
+              AND u.project_id = $2::uuid
+              AND u.id = $3::uuid
+              AND u.is_parking = false
+            GROUP BY
+                u.id,
+                u.code,
+                u.unit_label,
+                u.tower_id,
+                uc.display_label,
+                uc.name,
+                uc.parking_entitlement
+            """,
+            organization_id,
+            project_id,
+            unit_id,
+        )
+        return dict(row) if row else None
+
     async def get_unit_allotment_context(
         self,
         *,

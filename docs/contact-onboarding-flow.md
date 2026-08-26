@@ -269,11 +269,11 @@ most endpoints take **no** contact id in the path.
 
 These live under `/v1/projects` (community admin RBAC), not contact-onboarding:
 
-| Method | Path                                                               | Purpose                                    |
-| ------ | ------------------------------------------------------------------ | ------------------------------------------ |
-| GET    | `/v1/projects/{project_id}/vehicle-requests`                       | List vehicle requests (`?status=pending`)  |
-| PATCH  | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`          | Approve (with `parking_slot_id`) or reject |
-| GET    | `/v1/projects/{project_id}/facilities/{facility_id}/parking-slots` | List slots (`?status=available`)           |
+| Method | Path                                                               | Purpose                                        |
+| ------ | ------------------------------------------------------------------ | ---------------------------------------------- |
+| GET    | `/v1/projects/{project_id}/vehicle-requests`                       | List vehicle requests (`?status=pending`)      |
+| PATCH  | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`          | Approve (optional `parking_slot_id`) or reject |
+| GET    | `/v1/projects/{project_id}/facilities/{facility_id}/parking-slots` | List slots (`?status=available`)               |
 
 ______________________________________________________________________
 
@@ -307,27 +307,33 @@ in `contact_onboarding_service.py`, `contact_units_service.py`, and related serv
     `fuel_type`, and `photo_paths` (list of storage paths, up to 10).
   - New vehicles default to `status = pending`. Contacts cannot set `status`, `rejection_reason`,
     or `parking_slot_id`.
-  - **Admin review** (community admin, project APIs):
-    1. Resident submits vehicle → `pending`
+  - **Admin review** (community admin, project APIs) — full parking model in
+    [`parking-allotment-flow.md`](parking-allotment-flow.md):
+    1. Resident submits vehicle → `pending` (no parking entitlement limit).
     1. Admin lists `GET /v1/projects/{id}/vehicle-requests?status=pending`
-    1. Admin lists available slots `GET .../facilities/{facility_id}/parking-slots?status=available`
-    1. Admin approves `PATCH .../vehicle-requests/{vehicle_id}` with `{ "status": "approved", "parking_slot_id": "..." }`
-       or rejects with `{ "status": "rejected", "rejection_reason": "..." }`
+    1. *(Recommended)* Admin allots parking slot(s) to the unit via `/parking-allotment/…`
+    1. Admin approves `PATCH .../vehicle-requests/{vehicle_id}` with `{ "status": "approved" }` or
+       `{ "status": "approved", "parking_slot_id": "..." }` when linking to an allotted bay;
+       rejects with `{ "status": "rejected", "rejection_reason": "..." }`
     1. On approve/reject the API stores `approved_by_user_id` / `rejected_by_user_id` from the
        authenticated org member (cleared on resubmit). List/detail/review responses also include
        nested `approved_by` / `rejected_by` summaries (`user_id`, `display_name`, `email`, `phone`,
        `avatar_url`) from `organization_members`.
     1. If rejected, resident may fix details and `POST /vehicles/{vehicle_id}/resubmit` → back to `pending`
-    1. On approve: slot → `assigned`, vehicle gets `parking_slot_id`. On remove: slot released.
+    1. `parking_slot_id` on approve is **optional**; when set, the slot must be actively allotted to
+       the vehicle's unit. Vehicle approval does **not** change `facility_parking_slots.status`.
+    1. On vehicle remove: `vehicles.parking_slot_id` is cleared; the unit allotment (and slot status)
+       is unchanged until admin releases via parking allotment.
   - Parking slots are provisioned when a **parking** facility is created in project setup
-    (`facilities.parking_slots` → `facility_parking_slots` rows). See `docs/project-setup-flow.md`.
+    (`facilities.parking_slots` → `facility_parking_slots` rows with `slot_code`). See
+    [`parking-allotment-flow.md`](parking-allotment-flow.md).
   - **Resubmit (rejected only):** `POST /vehicles/{id}/resubmit` sets `status = pending`, clears
     `rejection_reason`, optionally updates `photo_paths` / make / model / color / registration, and
-    re-notifies admins. Parking entitlement is re-checked (rejected rows do not consume a slot).
+    re-notifies admins.
   - **Withdraw (pending only):** `POST /vehicles/{id}/withdraw` permanently deletes the row.
     Allowed only while `status = pending` (before admin approval).
   - **Remove (approved only):** `DELETE /vehicles/{id}` sets `status = removed`, `deleted_at = now()`,
-    releases parking slot; row is kept for audit (soft delete).
+    clears `parking_slot_id`; row is kept for audit (soft delete). Does not release the parking slot.
   - `status_updated_at` is set on create and on every status change (approve, reject, remove).
   - Registration numbers are unique per project among active vehicles (`vehicle_registration_duplicate` on conflict).
 - **Household requires an assigned unit:** adding a member checks the primary contact has an

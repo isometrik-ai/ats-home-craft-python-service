@@ -212,6 +212,14 @@ class ParkingAllotmentUnitListApiResponse(BaseModel):
     page_size: int
 
 
+class ParkingAllotmentUnitDetailApiResponse(BaseModel):
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ParkingAllotmentUnitListItemResponse
+
+
 class ParkingAllotmentSlotDetailApiResponse(BaseModel):
     status: str
     message: str

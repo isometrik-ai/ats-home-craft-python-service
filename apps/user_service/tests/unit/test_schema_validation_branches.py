@@ -194,9 +194,9 @@ class TestContactOnboardingSchemaValidators:
         with pytest.raises(ValidationException):
             UpdateVehicleRequest(photo_paths=["x" * 501])
 
-    def test_review_vehicle_requires_slot_on_approve(self) -> None:
-        with pytest.raises(ValidationException):
-            ReviewVehicleRequest(status=VehicleStatus.APPROVED)
+    def test_review_vehicle_allows_approve_without_slot(self) -> None:
+        request = ReviewVehicleRequest(status=VehicleStatus.APPROVED)
+        assert request.parking_slot_id is None
 
     def test_review_vehicle_requires_reason_on_reject(self) -> None:
         with pytest.raises(ValidationException):

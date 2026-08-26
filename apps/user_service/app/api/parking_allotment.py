@@ -19,6 +19,7 @@ from apps.user_service.app.schemas.parking_allotment import (
     ParkingAllotmentSlotMutationApiResponse,
     ParkingAllotmentSummaryApiResponse,
     ParkingAllotmentSummaryQuery,
+    ParkingAllotmentUnitDetailApiResponse,
     ParkingAllotmentUnitListApiResponse,
     ParkingAllotmentUnitListQuery,
     ReassignParkingSlotRequest,
@@ -77,6 +78,10 @@ SLOT_LIST_RESPONSES = _ok_response(
 UNIT_LIST_RESPONSES = _ok_response(
     ParkingAllotmentUnitListApiResponse,
     "Paginated units for the by-unit parking view.",
+)
+UNIT_DETAIL_RESPONSES = _ok_response(
+    ParkingAllotmentUnitDetailApiResponse,
+    "One unit with parking entitlement and allotted slots.",
 )
 SLOT_DETAIL_RESPONSES = _ok_response(
     ParkingAllotmentSlotDetailApiResponse,
@@ -286,6 +291,40 @@ async def list_parking_allotment_units(
         total=total,
         page=query.page,
         page_size=query.page_size,
+    )
+
+
+@handle_api_exceptions("get parking allotment unit")
+@router.get(
+    "/{project_id}/parking-allotment/units/{unit_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get unit parking allotment detail",
+    response_model=None,
+    responses=UNIT_DETAIL_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_parking_allotment_unit(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    unit_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return one unit with entitlement, slots held, and allowed allotment actions."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_unit(project_id=project_id, unit_id=unit_id)
+    return success_response(
+        request=request,
+        message_key="parking_allotment.success.unit_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
     )
 
 

@@ -74,9 +74,10 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | Unit configs + plot items + config media  | `app/services/unit_configs_service.py`                                                                      |
 | Inventory / Facilities / Units / Site map | `app/services/inventory_service.py`                                                                         |
 | Facilities + parking slot provisioning    | `app/services/facilities_service.py`                                                                        |
+| Parking allotment (unit ↔ slot)           | `app/services/parking_allotment_service.py` · `app/api/parking_allotment.py`                                |
 | Conditional field validation              | `app/services/project_setup_validation.py`                                                                  |
 | Units + parking zones                     | `app/services/units_service.py`                                                                             |
-| Vehicle admin review (parking assignment) | `app/services/vehicles_service.py`                                                                          |
+| Vehicle admin review (optional slot link) | `app/services/vehicles_service.py`                                                                          |
 | Site map location + overlays              | `app/services/site_map_service.py`                                                                          |
 | Step persistence                          | `app/db/repositories/project_setup_repository.py`                                                           |
 | Project persistence                       | `app/db/repositories/projects_repository.py`                                                                |
@@ -102,6 +103,9 @@ Defined in `20260629101000_property_setup_tables.sql` (+ `20260716120000_project
 | Facilities    | `facilities`, `facility_parking_slots`                                |
 | Floor plans   | `units`, `parking_zones`                                              |
 | Site map      | `site_map_overlays`                                                   |
+
+Post-setup parking allotment tables (`unit_parking_allotments`, `parking_slot_events`) are documented in
+[`parking-allotment-flow.md`](parking-allotment-flow.md).
 
 See `ats-home-craft-supabase/docs/project-setup-schema.md` for every column.
 
@@ -192,7 +196,7 @@ for the builder edit page.
 | GET        | `/v1/projects/{project_id}/units/{unit_id}/detail`                        | Inventory slide-out / unit registry   |
 | POST / GET | `/v1/projects/{project_id}/parking-zones` · DELETE `.../{zone_id}`        | Tower basement zone ranges            |
 | GET        | `/v1/projects/{project_id}/vehicle-requests`                              | Admin: list resident vehicle requests |
-| PATCH      | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`                 | Admin: approve/reject + assign slot   |
+| PATCH      | `/v1/projects/{project_id}/vehicle-requests/{vehicle_id}`                 | Admin: approve/reject (optional slot) |
 | PATCH      | `/v1/projects/{project_id}/site-map/location`                             | Set project center lat/lng            |
 | POST / GET | `/v1/projects/{project_id}/site-map/overlays` · DELETE `.../{overlay_id}` | Geo pins for towers, facilities, etc. |
 | POST       | `/v1/projects/{project_id}/steps/site_map/complete`                       | Mark site_map wizard step complete    |
@@ -231,18 +235,38 @@ POST /v1/projects/{project_id}/site-map/overlays
 
 Validated in `app/services/project_setup_validation.py` (towers + facilities).
 
-| Step / entity | API field           | Required when                                             |
-| ------------- | ------------------- | --------------------------------------------------------- |
-| Tower         | `custom_prefix`     | `numbering_pattern = "custom"`                            |
-| Plot item     | `description`       | Optional (e.g. "Near park, road-facing")                  |
-| Facility      | `wing`              | `location_type = "in_tower"` and tower `has_wings = true` |
-| Facility      | `capacity_persons`  | `facility_type = "events"` (integer > 0)                  |
-| Facility      | `parking_slots`     | `facility_type = "parking"` (integer > 0)                 |
-| Facility      | `parking_user_type` | `facility_type = "parking"` (`resident` / `visitors`)     |
-| Facility      | `extra_attributes`  | Optional JSON object; defaults to `{}` on create          |
+| Step / entity | API field               | Required when                                                   |
+| ------------- | ----------------------- | --------------------------------------------------------------- |
+| Tower         | `custom_prefix`         | `numbering_pattern = "custom"`                                  |
+| Plot item     | `description`           | Optional (e.g. "Near park, road-facing")                        |
+| Facility      | `wing`                  | `location_type = "in_tower"` and tower `has_wings = true`       |
+| Facility      | `capacity_persons`      | `facility_type = "events"` (integer > 0)                        |
+| Facility      | `parking_slots`         | `facility_type = "parking"` (integer > 0)                       |
+| Facility      | `parking_user_type`     | `facility_type = "parking"` (`resident` / `visitors`)           |
+| Facility      | `numbering_pattern`     | Optional; parking only (`floor_unit` · `sequential` · `custom`) |
+| Facility      | `custom_prefix`         | Required when `numbering_pattern = "custom"` (parking)          |
+| Facility      | `starting_slots_number` | Optional; parking only (default `1`)                            |
+| Facility      | `extra_attributes`      | Optional JSON object; defaults to `{}` on create                |
 
-When a **parking** facility is created, the API auto-provisions `facility_parking_slots` rows
-(`slot_number` 1…N). These are separate from Step 8 `parking_zones` (tower basement ranges).
+When a **parking** facility is created, the API auto-provisions `facility_parking_slots` rows with
+`slot_number` and `slot_code` (display label). Numbering rules live in
+`app/utils/parking_slot_numbering.py`. Full details: [`parking-allotment-flow.md`](parking-allotment-flow.md).
+
+These facility slots are **separate** from Step 8 `parking_zones` (tower basement ranges).
+
+### Parking allotment & vehicles (post-setup)
+
+Slot **assignment** to units is done via the **parking allotment** admin APIs (`/parking-allotment/…`),
+not during vehicle approval. See [`parking-allotment-flow.md`](parking-allotment-flow.md) for the full
+API catalog, unit-first model, and vehicle review rules.
+
+Summary:
+
+1. **Allot** — admin assigns slot to unit → `unit_parking_allotments`, slot status `assigned`.
+1. **Vehicle review** — admin approves resident request; `parking_slot_id` is **optional** and must
+   reference a slot already allotted to that unit. Does not change slot status.
+1. **Vehicle remove** — clears `vehicles.parking_slot_id` only; slot stays assigned to the unit.
+1. **Release allotment** — admin releases slot from unit → slot `available`, vehicle references cleared.
 
 ### Vehicle registration review (admin)
 
@@ -250,12 +274,21 @@ Residents submit vehicles during contact onboarding (`status = pending`). Commun
 review via project APIs:
 
 1. `GET /vehicle-requests?status=pending` — queue
-1. `GET /facilities/{facility_id}/parking-slots?status=available` — pick a slot
-1. `PATCH /vehicle-requests/{vehicle_id}` — approve with `parking_slot_id`, or reject with `rejection_reason`
-   (stores `approved_by_user_id` / `rejected_by_user_id` on the vehicle row)
+1. *(Optional)* Allot parking to the unit first — [`parking-allotment-flow.md`](parking-allotment-flow.md)
+1. `PATCH /vehicle-requests/{vehicle_id}` — approve (optional `parking_slot_id`) or reject with `rejection_reason`
 
-On approval the slot becomes `assigned` and `vehicles.parking_slot_id` is set. Deleting a
-vehicle releases the slot back to `available`.
+```json
+{ "status": "approved" }
+```
+
+or, to link a vehicle to an allotted bay:
+
+```json
+{ "status": "approved", "parking_slot_id": "<slot-uuid>" }
+```
+
+There is **no parking entitlement cap** on vehicle requests — admin decides how many to approve.
+On approve/reject the API stores `approved_by_user_id` / `rejected_by_user_id` on the vehicle row.
 
 ______________________________________________________________________
 
@@ -317,6 +350,12 @@ Unit tests (fake repos, no DB):
 - `tests/unit/test_projects_repository.py` — SQL generation (insert/list/recompute).
 - `tests/unit/test_unit_configs_service.py` — kind‑specific validation + config→step mapping.
 - `tests/unit/test_project_setup_validation.py` — tower custom prefix + facility conditional fields.
+- `tests/unit/test_parking_slot_numbering.py` — parking slot label generation.
+- `tests/unit/test_facilities_service.py` — parking slot provisioning.
+- `tests/unit/test_parking_allotment_service.py` — unit allotment mutations.
+- `tests/unit/test_vehicles_service.py` — vehicle review (optional slot, no status changes).
 - `tests/unit/test_inventory_service.py` — inventory summary aggregation.
+
+Related doc: [`parking-allotment-flow.md`](parking-allotment-flow.md).
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`

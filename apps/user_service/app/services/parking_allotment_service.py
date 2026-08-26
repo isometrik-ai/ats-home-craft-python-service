@@ -465,6 +465,21 @@ class ParkingAllotmentService:
             page=page,
             page_size=page_size,
         )
+        slot_rows_by_id = await self._slot_rows_by_id_for_unit_rows(
+            project_id=project_id,
+            rows=rows,
+        )
+        items = [
+            self._serialize_unit_list_item(row, slot_rows_by_id=slot_rows_by_id) for row in rows
+        ]
+        return items, total
+
+    async def _slot_rows_by_id_for_unit_rows(
+        self,
+        *,
+        project_id: str,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, dict[str, Any]]:
         slot_ids: set[str] = set()
         for row in rows:
             for item in row.get("active_allotments") or []:
@@ -479,10 +494,30 @@ class ParkingAllotmentService:
             )
             if slot_row:
                 slot_rows_by_id[slot_id] = slot_row
-        items = [
-            self._serialize_unit_list_item(row, slot_rows_by_id=slot_rows_by_id) for row in rows
-        ]
-        return items, total
+        return slot_rows_by_id
+
+    async def get_unit(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+    ) -> ParkingAllotmentUnitListItemResponse:
+        await self._ensure_project(project_id=project_id)
+        row = await self.repo.get_unit_for_allotment_view(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="parking_allotment.errors.unit_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        slot_rows_by_id = await self._slot_rows_by_id_for_unit_rows(
+            project_id=project_id,
+            rows=[row],
+        )
+        return self._serialize_unit_list_item(row, slot_rows_by_id=slot_rows_by_id)
 
     async def _create_allotment(
         self,
