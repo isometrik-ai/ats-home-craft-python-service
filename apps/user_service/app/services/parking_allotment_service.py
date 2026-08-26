@@ -181,14 +181,11 @@ class ParkingAllotmentService:
         if total_entitlement <= 0:
             return actions
         has_included_room = (
-            (
-                two_wheeler_parking_entitlement > 0
-                and included_two_wheeler_slots_assigned < two_wheeler_parking_entitlement
-            )
-            or (
-                four_wheeler_parking_entitlement > 0
-                and included_four_wheeler_slots_assigned < four_wheeler_parking_entitlement
-            )
+            two_wheeler_parking_entitlement > 0
+            and included_two_wheeler_slots_assigned < two_wheeler_parking_entitlement
+        ) or (
+            four_wheeler_parking_entitlement > 0
+            and included_four_wheeler_slots_assigned < four_wheeler_parking_entitlement
         )
         if has_included_room:
             actions.append("allot_slot")
@@ -344,7 +341,6 @@ class ParkingAllotmentService:
         *,
         slot_rows_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> ParkingAllotmentUnitListItemResponse:
-        entitlement = int(row.get("parking_entitlement") or 0)
         two_entitlement = int(row.get("two_wheeler_parking_entitlement") or 0)
         four_entitlement = int(row.get("four_wheeler_parking_entitlement") or 0)
         assigned = int(row.get("slots_assigned") or 0)
@@ -390,7 +386,6 @@ class ParkingAllotmentService:
             id=str(row["id"]),
             code=str(row["code"]),
             configuration_label=row.get("configuration_label"),
-            parking_entitlement=entitlement,
             two_wheeler_parking_entitlement=two_entitlement,
             four_wheeler_parking_entitlement=four_entitlement,
             slots_assigned=assigned,

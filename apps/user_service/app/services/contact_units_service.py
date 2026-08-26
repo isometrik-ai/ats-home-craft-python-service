@@ -123,7 +123,10 @@ class ContactUnitsService:
             "last_name": row.get("last_name"),
             "assign_date": self._format_assign_date(row.get("assigned_at")),
             "created_at": format_iso_datetime(row.get("created_at")),
-            "parking_entitlement": int(row.get("parking_entitlement") or 0),
+            "two_wheeler_parking_entitlement": int(row.get("two_wheeler_parking_entitlement") or 0),
+            "four_wheeler_parking_entitlement": int(
+                row.get("four_wheeler_parking_entitlement") or 0
+            ),
             "project": self._build_project_summary(row),
         }
 

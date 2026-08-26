@@ -76,11 +76,11 @@ When `facility_type = "parking"`, the request supports numbering options (same e
 
 Also required for parking facilities: `parking_slots` (> 0), `parking_user_type` (`resident` / `visitors`), and `parking_vehicle_category` (`two_wheeler` / `four_wheeler` / `both`).
 
-| Field | Values | Notes |
-| ----- | ------ | ----- |
-| `parking_vehicle_category` | `two_wheeler` · `four_wheeler` · `both` | All slots in the facility inherit this category unless `both` (then use `facility_subtype` per bay) |
+| Field                      | Values                                  | Notes                                                                                 |
+| -------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `parking_vehicle_category` | `two_wheeler` · `four_wheeler` · `both` | Slot type is derived from this field (`facility_subtype` is not used for two-wheeler) |
 
-Unit configurations store split entitlements: `two_wheeler_parking_entitlement` and `four_wheeler_parking_entitlement` (`parking_entitlement` is kept as their sum).
+Unit configurations store split entitlements: `two_wheeler_parking_entitlement` and `four_wheeler_parking_entitlement`.
 
 When allotting with `allotment_basis = included_with_unit`, the service checks the slot category against the matching entitlement bucket (two-wheeler slots vs four-wheeler/car/EV slots).
 

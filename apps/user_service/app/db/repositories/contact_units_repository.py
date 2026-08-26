@@ -40,7 +40,8 @@ SELECT
   t.name AS tower_name,
   f.display_name AS floor_name,
   uc.display_label AS config_label,
-  COALESCE(uc.parking_entitlement, 0) AS parking_entitlement,
+  COALESCE(uc.two_wheeler_parking_entitlement, 0)::int AS two_wheeler_parking_entitlement,
+  COALESCE(uc.four_wheeler_parking_entitlement, 0)::int AS four_wheeler_parking_entitlement,
   (
     SELECT cr.role_type::text
     FROM contact_roles cr

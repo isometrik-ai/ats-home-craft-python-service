@@ -78,7 +78,6 @@ class ParkingAllotmentUnitListItemResponse(BaseModel):
     id: str
     code: str
     configuration_label: str | None = None
-    parking_entitlement: int = 0
     two_wheeler_parking_entitlement: int = 0
     four_wheeler_parking_entitlement: int = 0
     slots_assigned: int = 0

@@ -2522,7 +2522,7 @@ async def bulk_create_units(
     summary="List units",
     description=(
         "Returns paginated non-parking units for the unit registry table. "
-        "Each item includes `parking_entitlement` from the unit config. "
+        "Each item includes `two_wheeler_parking_entitlement` and `four_wheeler_parking_entitlement` from the unit config. "
         "Supports search by unit code/label/owner name and filters for property type, "
         "tower, config, and unit status."
     ),

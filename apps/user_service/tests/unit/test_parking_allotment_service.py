@@ -137,7 +137,8 @@ async def test_get_unit_returns_slots_held():
             "id": "unit-1",
             "code": "A-1804",
             "configuration_label": "3 BHK",
-            "parking_entitlement": 2,
+            "two_wheeler_parking_entitlement": 1,
+            "four_wheeler_parking_entitlement": 1,
             "slots_assigned": 1,
             "active_allotments": [
                 {
@@ -182,7 +183,6 @@ async def test_validate_unit_rejects_four_wheeler_entitlement_full():
             "id": "unit-1",
             "code": "A-1804",
             "is_parking": False,
-            "parking_entitlement": 1,
             "two_wheeler_parking_entitlement": 0,
             "four_wheeler_parking_entitlement": 1,
             "included_slots_assigned": 1,
@@ -215,7 +215,6 @@ async def test_allot_slot_creates_allotment_and_assigns_slot():
             "id": "unit-1",
             "code": "A-1804",
             "is_parking": False,
-            "parking_entitlement": 2,
             "two_wheeler_parking_entitlement": 0,
             "four_wheeler_parking_entitlement": 2,
             "included_slots_assigned": 0,

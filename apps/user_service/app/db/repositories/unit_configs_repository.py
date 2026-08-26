@@ -30,7 +30,6 @@ _CONFIG_INSERT_COLUMNS: tuple[str, ...] = (
     "bedrooms",
     "bathrooms",
     "area_sqft",
-    "parking_entitlement",
     "two_wheeler_parking_entitlement",
     "four_wheeler_parking_entitlement",
     "balconies",

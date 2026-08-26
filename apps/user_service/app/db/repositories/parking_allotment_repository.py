@@ -35,23 +35,15 @@ END
 _SLOT_CATEGORY_SQL = """
 CASE
   WHEN f.parking_vehicle_category = 'two_wheeler'::parking_vehicle_category THEN 'two_wheeler'
-  WHEN f.parking_vehicle_category = 'four_wheeler'::parking_vehicle_category THEN 'four_wheeler'
-  WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%two%wheel%' THEN 'two_wheeler'
   ELSE 'four_wheeler'
 END
 """
 
-_SLOT_TYPE_SQL = f"""
+_SLOT_TYPE_SQL = """
 CASE
   WHEN f.parking_user_type = 'visitors'::parking_user_type THEN 'visitor'
   WHEN f.parking_vehicle_category = 'two_wheeler'::parking_vehicle_category THEN 'two_wheeler'
-  WHEN f.parking_vehicle_category = 'four_wheeler'::parking_vehicle_category THEN
-    CASE
-      WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%ev%' THEN 'ev_charging'
-      ELSE 'car_standard'
-    END
   WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%ev%' THEN 'ev_charging'
-  WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%two%wheel%' THEN 'two_wheeler'
   ELSE 'car_standard'
 END
 """
@@ -465,7 +457,6 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.tower_id,
                 uc.display_label,
                 uc.name,
-                uc.parking_entitlement,
                 uc.two_wheeler_parking_entitlement,
                 uc.four_wheeler_parking_entitlement
         """
@@ -490,7 +481,6 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.unit_label,
                 u.tower_id,
                 COALESCE(uc.display_label, uc.name) AS configuration_label,
-                COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
                 COALESCE(uc.two_wheeler_parking_entitlement, 0)::int
                     AS two_wheeler_parking_entitlement,
                 COALESCE(uc.four_wheeler_parking_entitlement, 0)::int
@@ -545,7 +535,6 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.unit_label,
                 u.tower_id,
                 COALESCE(uc.display_label, uc.name) AS configuration_label,
-                COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
                 COALESCE(uc.two_wheeler_parking_entitlement, 0)::int
                     AS two_wheeler_parking_entitlement,
                 COALESCE(uc.four_wheeler_parking_entitlement, 0)::int
@@ -596,7 +585,6 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.tower_id,
                 uc.display_label,
                 uc.name,
-                uc.parking_entitlement,
                 uc.two_wheeler_parking_entitlement,
                 uc.four_wheeler_parking_entitlement
             """,
@@ -620,7 +608,6 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.id,
                 u.code,
                 u.is_parking,
-                COALESCE(uc.parking_entitlement, 0)::int AS parking_entitlement,
                 COALESCE(uc.two_wheeler_parking_entitlement, 0)::int
                     AS two_wheeler_parking_entitlement,
                 COALESCE(uc.four_wheeler_parking_entitlement, 0)::int
@@ -659,7 +646,6 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.id,
                 u.code,
                 u.is_parking,
-                uc.parking_entitlement,
                 uc.two_wheeler_parking_entitlement,
                 uc.four_wheeler_parking_entitlement
             """,
