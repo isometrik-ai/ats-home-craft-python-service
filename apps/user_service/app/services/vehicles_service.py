@@ -300,15 +300,28 @@ class VehiclesService:
             out.pop(key, None)
         return out
 
-    async def _validate_unit_for_contact(self, *, contact_id: str, unit_id: str) -> dict[str, Any]:
-        """Ensure the unit is actively assigned to the contact; return unit metadata."""
+    async def _validate_unit_for_contact(
+        self,
+        *,
+        contact_id: str,
+        unit_id: str,
+        require_active_unit: bool = True,
+    ) -> dict[str, Any]:
+        """Ensure the unit is assigned to the contact; return unit metadata."""
         org_id = self.user_context.organization_id
         assert org_id
-        has_unit = await self.contact_units_repo.contact_has_active_unit(
-            organization_id=org_id,
-            contact_id=contact_id,
-            unit_id=unit_id,
-        )
+        if require_active_unit:
+            has_unit = await self.contact_units_repo.contact_has_active_unit(
+                organization_id=org_id,
+                contact_id=contact_id,
+                unit_id=unit_id,
+            )
+        else:
+            has_unit = await self.contact_units_repo.contact_has_assigned_unit(
+                organization_id=org_id,
+                contact_id=contact_id,
+                unit_id=unit_id,
+            )
         if not has_unit:
             raise ValidationException(
                 message_key="contact_onboarding.errors.unit_not_assigned",
@@ -436,12 +449,17 @@ class VehiclesService:
         *,
         contact_id: str,
         unit_id: str | None = None,
+        require_active_unit: bool = True,
     ) -> list[dict[str, Any]]:
         """List active vehicles for the contact, optionally filtered by unit."""
         org_id = self.user_context.organization_id
         assert org_id
         if unit_id:
-            await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
+            await self._validate_unit_for_contact(
+                contact_id=contact_id,
+                unit_id=unit_id,
+                require_active_unit=require_active_unit,
+            )
         rows = await self.repo.list_details_by_contact(
             organization_id=org_id,
             contact_id=contact_id,

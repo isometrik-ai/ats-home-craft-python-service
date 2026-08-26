@@ -950,6 +950,7 @@ async def list_contact_vehicles(
     items = await vehicles_service.list_vehicles(
         contact_id=contact_id,
         unit_id=unit_id,
+        require_active_unit=False,
     )
     return list_response(
         request=request,

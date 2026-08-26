@@ -1077,6 +1077,25 @@ async def test_list_vehicles_with_unit_filter():
 
 
 @pytest.mark.asyncio
+async def test_list_vehicles_with_unit_filter_allows_pending_assignment():
+    """Admin-style listing accepts pending contact-unit links."""
+    svc = _service()
+    svc.contact_units_repo = AsyncMock()
+    svc.contact_units_repo.contact_has_assigned_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(return_value={"project_id": "p1"})
+    svc.repo.list_details_by_contact = AsyncMock(return_value=[])
+
+    await svc.list_vehicles(
+        contact_id="c1",
+        unit_id="u1",
+        require_active_unit=False,
+    )
+
+    svc.contact_units_repo.contact_has_assigned_unit.assert_awaited_once()
+    svc.contact_units_repo.contact_has_active_unit.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_update_vehicle_success_and_duplicate():
     """Update vehicle normalizes enums and maps duplicate registration."""
     from asyncpg.exceptions import UniqueViolationError

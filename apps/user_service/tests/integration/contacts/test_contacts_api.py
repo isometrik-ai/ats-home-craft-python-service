@@ -568,8 +568,11 @@ async def test_list_contact_vehicles(monkeypatch, client):
         assert contact_id == CONTACT_ID
         return _FAKE_DETAILS
 
-    async def fake_list_vehicles(_self, *, contact_id: str, unit_id=None):
-        del _self, contact_id, unit_id
+    async def fake_list_vehicles(_self, *, contact_id: str, unit_id=None, require_active_unit=True):
+        del _self
+        assert contact_id == CONTACT_ID
+        assert unit_id is None
+        assert require_active_unit is False
         return []
 
     monkeypatch.setattr(

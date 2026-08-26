@@ -172,6 +172,31 @@ class ContactUnitsRepository(BaseRepository):
         )
         return row is not None
 
+    async def contact_has_assigned_unit(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        unit_id: str,
+    ) -> bool:
+        """True if contact has a pending or active link to the unit."""
+        row = await self.db_connection.fetchval(
+            """
+            SELECT 1
+            FROM contact_units
+            WHERE organization_id = $1::uuid
+              AND contact_id = $2::uuid
+              AND unit_id = $3::uuid
+              AND status = ANY($4::contact_unit_status[])
+            LIMIT 1
+            """,
+            organization_id,
+            contact_id,
+            unit_id,
+            [ContactUnitStatus.PENDING.value, ContactUnitStatus.ACTIVE.value],
+        )
+        return row is not None
+
     async def contact_has_active_project_membership(
         self,
         *,
