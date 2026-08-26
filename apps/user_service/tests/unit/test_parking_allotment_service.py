@@ -161,6 +161,34 @@ async def test_get_unit_returns_slots_held():
 
 
 @pytest.mark.asyncio
+async def test_list_slot_history_parses_json_string_payload():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_slot_row = AsyncMock(return_value={"id": "slot-1"})
+    svc.repo.list_slot_history = AsyncMock(
+        return_value=[
+            {
+                "id": "event-1",
+                "event_type": "allotted",
+                "unit_id": "unit-1",
+                "unit_code": "A-1804",
+                "allotment_id": "allotment-1",
+                "actor_user_id": "staff-1",
+                "payload": '{"allotment_basis": "included_with_unit"}',
+                "occurred_at": datetime(2026, 8, 16, tzinfo=timezone.utc),
+            }
+        ]
+    )
+
+    items = await svc.list_slot_history(project_id="project-1", slot_id="slot-1")
+
+    assert len(items) == 1
+    assert items[0].payload == {"allotment_basis": "included_with_unit"}
+
+
+@pytest.mark.asyncio
 async def test_get_unit_not_found():
     svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
     svc.setup_service = MagicMock()

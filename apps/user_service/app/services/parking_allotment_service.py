@@ -39,7 +39,11 @@ from apps.user_service.app.schemas.parking_allotment import (
     UnitAllotParkingSlotRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_any,
+)
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -111,6 +115,11 @@ class ParkingAllotmentService:
         if isinstance(value, date):
             return value.isoformat()
         return str(value)
+
+    @staticmethod
+    def _normalize_event_payload(value: Any) -> dict[str, Any]:
+        payload = parse_json_any(value, default={}) or {}
+        return payload if isinstance(payload, dict) else {}
 
     async def _ensure_project(self, *, project_id: str) -> None:
         await self.setup_service.ensure_project(project_id=project_id)
@@ -503,7 +512,7 @@ class ParkingAllotmentService:
                 unit_code=row.get("unit_code"),
                 allotment_id=str(row["allotment_id"]) if row.get("allotment_id") else None,
                 actor_user_id=str(row["actor_user_id"]) if row.get("actor_user_id") else None,
-                payload=dict(row.get("payload") or {}),
+                payload=self._normalize_event_payload(row.get("payload")),
                 occurred_at=format_iso_datetime(row.get("occurred_at")) or "",
             )
             for row in rows
