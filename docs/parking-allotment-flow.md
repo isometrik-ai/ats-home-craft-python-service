@@ -295,8 +295,10 @@ Computed in `parking_allotment_repository._DISPLAY_STATUS_SQL`:
 | `blocked`      | Admin-blocked                                  |
 | `visitor_pool` | Visitor facility slot, still available         |
 
-List/detail responses expose `slot_code` (stored label). Legacy rows without `slot_code` fall back
-to `{tower}-{floor}-{slot_number:03d}` formatting in `ParkingAllotmentService._resolve_slot_code`.
+List/detail responses expose:
+
+- `slot_code` — stored facility numbering label (e.g. `SLT-A-1`, `101`). Legacy rows without `slot_code` fall back to `{tower}-{floor}-{slot_number:03d}` in `_resolve_slot_code`.
+- `slot_code_label` — derived as `{tower}-{floor}-{slot_code}` (e.g. `A-B2-SLT-A-9`), omitting tower/floor when absent. Falls back to padded `slot_number` when `slot_code` is missing.
 
 ______________________________________________________________________
 

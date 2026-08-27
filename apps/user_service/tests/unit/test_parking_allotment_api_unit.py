@@ -149,6 +149,7 @@ async def test_allot_parking_slot_to_unit(mock_service_cls, mock_access):
         return_value=ParkingAllotmentSlotDetailResponse(
             id=SLOT_ID,
             slot_code="A-B2-002",
+            slot_code_label="A-B2-002",
             level_label="B2",
             bay_label="Bay B",
             slot_type=ParkingFacilitySubtype.BASEMENT,

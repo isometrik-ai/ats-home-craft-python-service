@@ -110,6 +110,22 @@ class ParkingAllotmentService:
         )
 
     @staticmethod
+    def _build_slot_code_label(row: dict[str, Any]) -> str:
+        """Format display label as {tower}-{floor}-{slot_code}, omitting missing parts."""
+        parts: list[str] = []
+        tower = str(row.get("tower_code") or "").strip()
+        floor = str(row.get("floor_level") or "").strip()
+        if tower:
+            parts.append(tower)
+        if floor:
+            parts.append(floor)
+        slot_code = str(row.get("slot_code") or "").strip()
+        if not slot_code:
+            slot_code = f"{int(row.get('slot_number') or 0):03d}"
+        parts.append(slot_code)
+        return "-".join(parts)
+
+    @staticmethod
     def _slot_type_label(slot_type: str) -> str:
         return _SLOT_TYPE_LABELS.get(slot_type, slot_type.replace("_", " ").title())
 
@@ -341,6 +357,7 @@ class ParkingAllotmentService:
         return ParkingAllotmentSlotListItemResponse(
             id=str(row["id"]),
             slot_code=self._resolve_slot_code(row),
+            slot_code_label=self._build_slot_code_label(row),
             level_label=row.get("floor_level"),
             bay_label=row.get("wing") or row.get("facility_name"),
             slot_type=ParkingFacilitySubtype(slot_type),

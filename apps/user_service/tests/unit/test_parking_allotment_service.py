@@ -53,6 +53,51 @@ def _slot_row(**overrides: object) -> dict[str, object]:
     return row
 
 
+def test_build_slot_code_label_uses_slot_code_when_present():
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "tower_code": "A",
+                "floor_level": "B2",
+                "slot_code": "SLT-A-9",
+                "slot_number": 9,
+            }
+        )
+        == "A-B2-SLT-A-9"
+    )
+
+
+def test_build_slot_code_label_omits_missing_tower_and_floor():
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "tower_code": "A",
+                "floor_level": "B2",
+                "slot_number": 9,
+            }
+        )
+        == "A-B2-009"
+    )
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "floor_level": "B2",
+                "slot_number": 9,
+            }
+        )
+        == "B2-009"
+    )
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "tower_code": "A",
+                "slot_number": 9,
+            }
+        )
+        == "A-009"
+    )
+
+
 def test_build_slot_code_formats_tower_floor_and_number():
     assert (
         ParkingAllotmentService._build_slot_code(
@@ -315,6 +360,7 @@ async def test_allot_slot_creates_allotment_and_assigns_slot():
     )
 
     assert result.slot_code == "A-B2-002"
+    assert result.slot_code_label == "A-B2-002"
     assert result.allotted_to_unit is not None
     assert result.allotted_to_unit.code == "A-1804"
     svc.repo.insert_allotment.assert_awaited_once()

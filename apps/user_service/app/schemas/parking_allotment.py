@@ -43,6 +43,7 @@ class ParkingAllotmentSlotListItemResponse(BaseModel):
 
     id: str
     slot_code: str
+    slot_code_label: str
     level_label: str | None = None
     bay_label: str | None = None
     slot_type: ParkingFacilitySubtype
