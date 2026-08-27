@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from apps.user_service.app.schemas.enums import (
+    WalkInActorType,
     WalkInEventType,
     WalkInStatus,
     WalkInVisitUnitStatus,
@@ -209,6 +210,18 @@ class _FakePushDispatcher:
         return None
 
 
+def _guard_profile() -> dict[str, Any]:
+    """Staff profile used for guard name resolution tests."""
+    return {
+        "salutation": "Mr.",
+        "first_name": "Ajay",
+        "last_name": "Guard",
+        "phone_isd_code": "+91",
+        "phone_number": "9876512345",
+        "email": "guard@example.com",
+    }
+
+
 def _service(
     *,
     repo: _FakeWalkInRepo | None = None,
@@ -238,6 +251,7 @@ async def test_create_walk_in_inserts_entry_and_visit_units():
     """Create persists entry, visit units, and requested event."""
     repo = _FakeWalkInRepo()
     service = _service(repo=repo)
+    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=_guard_profile())
     body = CreateWalkInRequest(
         visitor_first_name="Sushil",
         visitor_phone_isd_code="+91",
@@ -251,6 +265,13 @@ async def test_create_walk_in_inserts_entry_and_visit_units():
     assert result["visitor_first_name"] == "Sushil"
     assert len(result["visit_units"]) == 1
     assert repo.events[0]["event_type"] == WalkInEventType.REQUESTED.value
+    assert repo.events[0]["actor_label"] == "Mr. Ajay Guard"
+    requested_event = next(
+        event
+        for event in result["events"]
+        if event["event_type"] == WalkInEventType.REQUESTED.value
+    )
+    assert requested_event["actor_label"] == "Mr. Ajay Guard"
     service.setup_service.ensure_project.assert_awaited_once()
 
 
@@ -298,11 +319,19 @@ async def test_enter_succeeds_when_flat_approved():
         approved_flats_count=1,
     )
     service = _service(repo=repo)
+    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=_guard_profile())
 
     result = await service.enter_walk_in(project_id=PROJECT_ID, walk_in_entry_id=ENTRY_ID)
 
     assert result["status"] == WalkInStatus.ENTERED.value
-    assert any(event.get("event_type") == WalkInEventType.ENTERED.value for event in repo.events)
+    entered = next(
+        event for event in repo.events if event.get("event_type") == WalkInEventType.ENTERED.value
+    )
+    assert entered["actor_label"] == "Mr. Ajay Guard"
+    entered_event = next(
+        event for event in result["events"] if event["event_type"] == WalkInEventType.ENTERED.value
+    )
+    assert entered_event["actor_label"] == "Mr. Ajay Guard"
 
 
 @pytest.mark.asyncio
@@ -454,7 +483,19 @@ async def test_list_resident_visit_units():
 async def test_get_resident_walk_in_success():
     """Resident detail succeeds when contact can act on a visit unit."""
     repo = _FakeWalkInRepo()
+    repo.events = [
+        {
+            "id": "event-requested",
+            "event_type": WalkInEventType.REQUESTED.value,
+            "actor_type": WalkInActorType.STAFF.value,
+            "actor_user_id": "staff-user",
+            "actor_label": None,
+            "occurred_at": datetime(2026, 7, 27, 10, 0, tzinfo=timezone.utc),
+            "payload": {},
+        }
+    ]
     service = _service(repo=repo)
+    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=_guard_profile())
 
     detail = await service.get_resident_walk_in(
         contact_id=CONTACT_ID,
@@ -463,6 +504,7 @@ async def test_get_resident_walk_in_success():
 
     assert detail["id"] == ENTRY_ID
     assert detail["visit_units"][0]["id"] == VISIT_UNIT_ID
+    assert detail["events"][0]["actor_label"] == "Mr. Ajay Guard"
 
 
 @pytest.mark.asyncio
@@ -607,18 +649,20 @@ def test_serialize_event_non_dict_payload():
 async def test_get_project_walk_in_includes_requested_by_phone():
     """Detail includes staff/guard phone who registered the walk-in."""
     repo = _FakeWalkInRepo()
+    repo.events = [
+        {
+            "id": "event-requested",
+            "event_type": WalkInEventType.REQUESTED.value,
+            "actor_type": WalkInActorType.STAFF.value,
+            "actor_user_id": "staff-user",
+            "actor_label": None,
+            "occurred_at": datetime(2026, 7, 27, 10, 0, tzinfo=timezone.utc),
+            "payload": {},
+        }
+    ]
     service = _service(repo=repo)
     service.members_repo = MagicMock()
-    service.members_repo.get_user_profile_by_id = AsyncMock(
-        return_value={
-            "salutation": "Mr.",
-            "first_name": "Ajay",
-            "last_name": "Guard",
-            "phone_isd_code": "+91",
-            "phone_number": "9876512345",
-            "email": "guard@example.com",
-        }
-    )
+    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=_guard_profile())
 
     result = await service.get_project_walk_in(
         project_id=PROJECT_ID,
@@ -631,10 +675,8 @@ async def test_get_project_walk_in_includes_requested_by_phone():
         "phone_isd_code": "+91",
         "phone_number": "9876512345",
     }
-    service.members_repo.get_user_profile_by_id.assert_awaited_once_with(
-        user_id="staff-user",
-        organization_id=ORG_ID,
-    )
+    assert result["events"][0]["actor_label"] == "Mr. Ajay Guard"
+    assert service.members_repo.get_user_profile_by_id.await_count >= 1
 
 
 def test_derive_milestones_completed_states():

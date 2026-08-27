@@ -148,13 +148,25 @@ async def test_get_resident_walk_in(monkeypatch, client):
         del _self
         assert contact_id == CONTACT_ID
         assert walk_in_entry_id == ENTRY_ID
-        return _fake_detail()
+        return _fake_detail(
+            events=[
+                {
+                    "id": "event-requested",
+                    "event_type": "requested",
+                    "actor_type": "staff",
+                    "actor_label": "Mr. Ajay Guard",
+                    "occurred_at": datetime(2026, 7, 28, 10, 0, tzinfo=timezone.utc).isoformat(),
+                    "payload": {},
+                }
+            ]
+        )
 
     monkeypatch.setattr(f"{_SERVICE}.get_resident_walk_in", fake_get_resident_walk_in)
 
     res = await client.get(f"/v1/walk-ins/{ENTRY_ID}")
     body = assert_success(res, 200)
     assert body["data"]["id"] == ENTRY_ID
+    assert body["data"]["events"][0]["actor_label"] == "Mr. Ajay Guard"
 
 
 @pytest.mark.asyncio
