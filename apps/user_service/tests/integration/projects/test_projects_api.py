@@ -1418,10 +1418,12 @@ async def test_list_facilities(monkeypatch, client):
 
     _patch_projects_access(monkeypatch)
 
-    async def fake_list_facilities(_self, *, project_id: str, facility_types=None, status=None):
-        del _self, project_id, status
+    async def fake_list_facilities(
+        _self, *, project_id: str, facility_types=None, status=None, page=1, page_size=20
+    ):
+        del _self, project_id, status, page, page_size
         assert facility_types == ["sports", "events"]
-        return [_FAKE_FACILITY]
+        return {"items": [_FAKE_FACILITY], "total": 1}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
@@ -1443,10 +1445,12 @@ async def test_list_facilities_accepts_comma_separated_types(monkeypatch, client
     _patch_projects_access(monkeypatch)
     captured: dict[str, Any] = {}
 
-    async def fake_list_facilities(_self, *, project_id: str, facility_types=None, status=None):
-        del _self, project_id, status
+    async def fake_list_facilities(
+        _self, *, project_id: str, facility_types=None, status=None, page=1, page_size=20
+    ):
+        del _self, project_id, status, page, page_size
         captured["facility_types"] = facility_types
-        return [_FAKE_FACILITY]
+        return {"items": [_FAKE_FACILITY], "total": 1}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
