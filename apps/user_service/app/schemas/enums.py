@@ -1406,13 +1406,15 @@ class ParkingSlotDisplayStatus(str, Enum):
     BLOCKED = "blocked"
 
 
-class ParkingSlotType(str, Enum):
-    """Parking slot category shown in allotment UI."""
+class ParkingFacilitySubtype(str, Enum):
+    """Parking facility physical subtype (stored on facilities.facility_subtype)."""
 
-    VISITOR = "visitor"
-    CAR_STANDARD = "car_standard"
+    COVERED = "covered"
+    OPEN = "open"
+    BASEMENT = "basement"
+    STILT = "stilt"
+    PODIUM = "podium"
     EV_CHARGING = "ev_charging"
-    TWO_WHEELER = "two_wheeler"
 
 
 # ============================================================================

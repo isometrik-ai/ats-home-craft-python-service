@@ -9,8 +9,8 @@ import pytest
 
 from apps.user_service.app.schemas.enums import (
     ParkingAllotmentBasis,
+    ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
-    ParkingSlotType,
 )
 from apps.user_service.app.schemas.parking_allotment import AllotParkingSlotRequest
 from apps.user_service.app.services.parking_allotment_service import (
@@ -40,7 +40,8 @@ def _slot_row(**overrides: object) -> dict[str, object]:
         "tower_code": "A",
         "tower_name": "Tower A",
         "display_status": ParkingSlotDisplayStatus.FREE.value,
-        "slot_type": ParkingSlotType.CAR_STANDARD.value,
+        "slot_type": ParkingFacilitySubtype.OPEN.value,
+        "parking_vehicle_category": "four_wheeler",
         "unit_id": None,
         "unit_code": None,
         "allotment_basis": None,
@@ -260,7 +261,10 @@ async def test_validate_unit_rejects_four_wheeler_entitlement_full():
             project_id="project-1",
             unit_id="unit-1",
             allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
-            slot_row=_slot_row(slot_type=ParkingSlotType.CAR_STANDARD.value),
+            slot_row=_slot_row(
+                slot_type=ParkingFacilitySubtype.BASEMENT.value,
+                parking_vehicle_category="four_wheeler",
+            ),
         )
 
 

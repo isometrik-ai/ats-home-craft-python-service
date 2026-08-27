@@ -67,6 +67,7 @@ def _create_body(**overrides) -> CreateFacilityRequest:
         "parking_slots": 10,
         "parking_user_type": ParkingUserType.VISITORS,
         "parking_vehicle_category": ParkingVehicleCategory.FOUR_WHEELER,
+        "facility_subtype": "open",
     }
     base.update(overrides)
     return CreateFacilityRequest(**base)
