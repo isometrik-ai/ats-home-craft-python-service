@@ -16,6 +16,9 @@ from apps.user_service.app.db.repositories.contact_roles_repository import (
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.db.repositories.contacts_repository import (
+    ContactsRepository,
+)
 from apps.user_service.app.db.repositories.move_events_repository import (
     MoveEventsRepository,
 )
@@ -108,6 +111,7 @@ class TenantRequestsService:
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
         self.move_events_repo = move_events_repository or MoveEventsRepository(db_connection)
         self.contact_roles_repo = ContactRolesRepository(db_connection)
+        self.contacts_repo = ContactsRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
@@ -591,6 +595,20 @@ class TenantRequestsService:
             )
         return unit
 
+    async def _assert_no_active_tenant_on_unit(self, *, unit_id: str) -> None:
+        """Reject new tenant requests while the unit still has an active tenant."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        tenant_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if tenant_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.active_tenant_exists",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     async def _assert_owner_owns_request(
         self,
         *,
@@ -617,6 +635,7 @@ class TenantRequestsService:
             owner_contact_id=owner_contact_id,
             unit_id=body.unit_id,
         )
+        await self._assert_no_active_tenant_on_unit(unit_id=body.unit_id)
         phones_payload = [phone.model_dump(exclude_none=True) for phone in body.phones]
         emails_payload = [email.model_dump(exclude_none=True) for email in (body.emails or [])]
         now = datetime.now(timezone.utc)
@@ -681,6 +700,115 @@ class TenantRequestsService:
             },
         )
         return await self._serialize_detail(row)
+
+    async def sync_after_admin_move_in(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+        tenant_contact_id: str,
+        contact_unit_id: str,
+        move_in_date: date,
+        move_in_fee: Decimal,
+        move_event_id: str,
+    ) -> None:
+        """Reflect an admin-recorded move-in on the owner tenant-requests list."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        user_id = self.user_context.user_id
+
+        existing_approved = await self.repo.find_active_approved_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if (
+            existing_approved
+            and str(existing_approved.get("tenant_contact_id") or "") == tenant_contact_id
+        ):
+            return
+
+        now = datetime.now(timezone.utc)
+        admin_notes = f"Approved via move event {move_event_id}"
+        approve_fields = {
+            "tenant_contact_id": tenant_contact_id,
+            "contact_unit_id": contact_unit_id,
+            "approved_at": now,
+            "approved_by_user_id": str(user_id) if user_id else None,
+            "move_in_date": move_in_date,
+            "move_in_fee": move_in_fee,
+            "admin_notes": admin_notes,
+        }
+
+        open_request = await self.repo.find_latest_open_request_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if open_request:
+            await self.repo.update_request_status(
+                organization_id=org_id,
+                tenant_request_id=str(open_request["id"]),
+                status=TenantRequestStatus.APPROVED.value,
+                **approve_fields,
+            )
+            await self.repo.insert_event(
+                organization_id=org_id,
+                tenant_request_id=str(open_request["id"]),
+                event_type=TenantRequestEventType.APPROVED.value,
+                actor_user_id=str(user_id) if user_id else None,
+                payload={
+                    "tenant_contact_id": tenant_contact_id,
+                    "move_event_id": move_event_id,
+                },
+            )
+            return
+
+        owner = await self.units_repo.get_unit_owner_contact(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        owner_contact_id = str(owner["contact_id"]) if owner and owner.get("contact_id") else None
+        if not owner_contact_id:
+            return
+
+        tenant = await self.contacts_repo.get_contact_details(
+            contact_id=tenant_contact_id,
+            organization_id=org_id,
+        )
+        if not tenant:
+            return
+
+        phones = parse_json_any(tenant.get("phones"), default=[]) or []
+        emails = parse_json_any(tenant.get("emails"), default=[]) or []
+        inserted = await self.repo.insert_request(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            submitted_by_contact_id=owner_contact_id,
+            tenant_first_name=str(tenant.get("first_name") or ""),
+            tenant_last_name=tenant.get("last_name"),
+            tenant_phones=phones if isinstance(phones, list) else [],
+            tenant_emails=emails if isinstance(emails, list) else [],
+            move_in_date=move_in_date,
+            portal_access=bool(tenant.get("portal_access", False)),
+            status=TenantRequestStatus.APPROVED.value,
+            submitted_at=now,
+        )
+        await self.repo.update_request_status(
+            organization_id=org_id,
+            tenant_request_id=str(inserted["id"]),
+            status=TenantRequestStatus.APPROVED.value,
+            **approve_fields,
+        )
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=str(inserted["id"]),
+            event_type=TenantRequestEventType.APPROVED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={
+                "tenant_contact_id": tenant_contact_id,
+                "move_event_id": move_event_id,
+            },
+        )
 
     async def list_owner_requests(
         self,
