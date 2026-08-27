@@ -722,6 +722,7 @@ class DailyHelpService:
                 isd_code=row.get("phone_isd_code"),
                 phone_number=row.get("phone_number"),
             ),
+            photo_path=row.get("photo_path"),
             document_count=int(row.get("document_count") or 0),
             household_link_count=units_linked_count,
             status=str(row["status"]),
