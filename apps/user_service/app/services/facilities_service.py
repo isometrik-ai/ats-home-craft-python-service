@@ -209,16 +209,21 @@ class FacilitiesService:
         project_id: str,
         facility_types: list[str] | None = None,
         status: str | None = None,
-    ) -> list[dict[str, Any]]:
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
         """List facilities for a project."""
         await self.setup_service.ensure_project(project_id=project_id)
-        rows = await self.facilities_repo.list_facilities(
+        rows, total = await self.facilities_repo.list_facilities(
             organization_id=self._org_id,
             project_id=project_id,
             facility_types=facility_types,
             status=status,
+            page=page,
+            page_size=page_size,
         )
-        return [serialize_row(row) for row in rows]
+        items = [serialize_row(row) for row in rows]
+        return {"items": items, "total": total}
 
     async def list_parking_slots(
         self,

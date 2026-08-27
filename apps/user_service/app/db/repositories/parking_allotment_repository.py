@@ -39,14 +39,7 @@ CASE
 END
 """
 
-_SLOT_TYPE_SQL = """
-CASE
-  WHEN f.parking_user_type = 'visitors'::parking_user_type THEN 'visitor'
-  WHEN f.parking_vehicle_category = 'two_wheeler'::parking_vehicle_category THEN 'two_wheeler'
-  WHEN LOWER(COALESCE(f.facility_subtype, '')) LIKE '%ev%' THEN 'ev_charging'
-  ELSE 'car_standard'
-END
-"""
+_SLOT_SUBTYPE_SQL = "COALESCE(NULLIF(TRIM(f.facility_subtype), ''), 'open')"
 
 
 class ParkingAllotmentRepository(BaseRepository):
@@ -211,7 +204,7 @@ class ParkingAllotmentRepository(BaseRepository):
             args.append(floor_level.strip())
             idx += 1
         if slot_type:
-            conditions.append(f"{_SLOT_TYPE_SQL} = ${idx}")
+            conditions.append(f"{_SLOT_SUBTYPE_SQL} = ${idx}")
             args.append(slot_type)
             idx += 1
         if status:
@@ -261,6 +254,7 @@ class ParkingAllotmentRepository(BaseRepository):
                 f.wing,
                 f.facility_subtype,
                 f.parking_user_type,
+                f.parking_vehicle_category,
                 t.id AS tower_id,
                 t.code AS tower_code,
                 t.name AS tower_name,
@@ -271,7 +265,7 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.id AS unit_id,
                 u.code AS unit_code,
                 {_DISPLAY_STATUS_SQL} AS display_status,
-                {_SLOT_TYPE_SQL} AS slot_type
+                {_SLOT_SUBTYPE_SQL} AS slot_type
             {_SLOT_FROM_SQL}
             WHERE {where_sql}
             ORDER BY t.code NULLS LAST, f.floor_level NULLS LAST, fps.slot_number
@@ -304,6 +298,7 @@ class ParkingAllotmentRepository(BaseRepository):
                 f.wing,
                 f.facility_subtype,
                 f.parking_user_type,
+                f.parking_vehicle_category,
                 t.id AS tower_id,
                 t.code AS tower_code,
                 t.name AS tower_name,
@@ -314,7 +309,7 @@ class ParkingAllotmentRepository(BaseRepository):
                 u.id AS unit_id,
                 u.code AS unit_code,
                 {_DISPLAY_STATUS_SQL} AS display_status,
-                {_SLOT_TYPE_SQL} AS slot_type
+                {_SLOT_SUBTYPE_SQL} AS slot_type
             {_SLOT_FROM_SQL}
             WHERE fps.organization_id = $1::uuid
               AND fps.project_id = $2::uuid

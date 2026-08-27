@@ -8,9 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from apps.user_service.app.schemas.enums import (
     ParkingAllotmentBasis,
+    ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
     ParkingSlotEventType,
-    ParkingSlotType,
 )
 
 
@@ -43,9 +43,10 @@ class ParkingAllotmentSlotListItemResponse(BaseModel):
 
     id: str
     slot_code: str
+    slot_code_label: str
     level_label: str | None = None
     bay_label: str | None = None
-    slot_type: ParkingSlotType
+    slot_type: ParkingFacilitySubtype
     slot_type_label: str
     status: ParkingSlotDisplayStatus
     allotted_to_unit: ParkingAllotmentUnitRefResponse | None = None
@@ -64,7 +65,7 @@ class ParkingAllotmentSlotHeldResponse(BaseModel):
     allotment_id: str
     slot_id: str
     slot_code: str
-    slot_type: ParkingSlotType
+    slot_type: ParkingFacilitySubtype
     slot_type_label: str
     effective_from: str
     allotment_basis: ParkingAllotmentBasis
@@ -163,7 +164,10 @@ class ParkingAllotmentSlotListQuery(ParkingAllotmentListQuery):
 
     facility_id: str | None = None
     floor_level: str | None = Field(default=None, max_length=50)
-    slot_type: ParkingSlotType | None = None
+    slot_type: ParkingFacilitySubtype | None = Field(
+        default=None,
+        description="Filter by parking facility subtype: covered | open | basement | stilt | podium | ev_charging",
+    )
     status: ParkingSlotDisplayStatus | None = None
 
 

@@ -188,6 +188,8 @@ class FacilityListQuery(BaseModel):
         ),
     )
     status: FacilityStatus | None = None
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
 
     @field_validator("facility_types", mode="before")
     @classmethod
@@ -200,15 +202,22 @@ def build_facility_list_query(
     *,
     facility_types: list[str] | None,
     status: FacilityStatus | None,
+    page: int = 1,
+    page_size: int = 20,
 ) -> FacilityListQuery:
     """Build list query from raw query-string values."""
     if not facility_types:
-        return FacilityListQuery(status=status)
+        return FacilityListQuery(status=status, page=page, page_size=page_size)
     expanded: list[str] = []
     for item in facility_types:
         expanded.extend(part.strip() for part in item.split(",") if part.strip())
     parsed = [FacilityType(part) for part in expanded] if expanded else None
-    return FacilityListQuery(facility_types=parsed, status=status)
+    return FacilityListQuery(
+        facility_types=parsed,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
 
 
 class CreateFacilityRequest(BaseModel):

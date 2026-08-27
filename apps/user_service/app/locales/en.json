@@ -399,6 +399,8 @@
       "facility_parking_slots_required": "Parking slots count is required for parking facilities.",
       "facility_parking_user_type_required": "Parking for (resident/visitors) is required for parking facilities.",
       "facility_parking_vehicle_category_required": "Parking vehicle category (two-wheeler, four-wheeler, or both) is required for parking facilities.",
+      "facility_parking_subtype_required": "Parking subtype (covered, open, basement, stilt, podium, or EV charging) is required for parking facilities.",
+      "facility_parking_subtype_invalid": "Invalid parking subtype. Allowed values: covered, open, basement, stilt, podium, ev_charging.",
       "facility_parking_numbering_not_applicable": "Numbering pattern fields apply only to parking facilities.",
       "facility_starting_slot_number_invalid": "Starting slot number must be at least 1 for parking facilities.",
       "community_admin_not_org_member": "The selected community admin must be an active member of this organization."

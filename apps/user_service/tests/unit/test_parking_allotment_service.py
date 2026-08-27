@@ -9,8 +9,8 @@ import pytest
 
 from apps.user_service.app.schemas.enums import (
     ParkingAllotmentBasis,
+    ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
-    ParkingSlotType,
 )
 from apps.user_service.app.schemas.parking_allotment import AllotParkingSlotRequest
 from apps.user_service.app.services.parking_allotment_service import (
@@ -40,7 +40,8 @@ def _slot_row(**overrides: object) -> dict[str, object]:
         "tower_code": "A",
         "tower_name": "Tower A",
         "display_status": ParkingSlotDisplayStatus.FREE.value,
-        "slot_type": ParkingSlotType.CAR_STANDARD.value,
+        "slot_type": ParkingFacilitySubtype.OPEN.value,
+        "parking_vehicle_category": "four_wheeler",
         "unit_id": None,
         "unit_code": None,
         "allotment_basis": None,
@@ -50,6 +51,51 @@ def _slot_row(**overrides: object) -> dict[str, object]:
     }
     row.update(overrides)
     return row
+
+
+def test_build_slot_code_label_uses_slot_code_when_present():
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "tower_code": "A",
+                "floor_level": "B2",
+                "slot_code": "SLT-A-9",
+                "slot_number": 9,
+            }
+        )
+        == "A-B2-SLT-A-9"
+    )
+
+
+def test_build_slot_code_label_omits_missing_tower_and_floor():
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "tower_code": "A",
+                "floor_level": "B2",
+                "slot_number": 9,
+            }
+        )
+        == "A-B2-009"
+    )
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "floor_level": "B2",
+                "slot_number": 9,
+            }
+        )
+        == "B2-009"
+    )
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "tower_code": "A",
+                "slot_number": 9,
+            }
+        )
+        == "A-009"
+    )
 
 
 def test_build_slot_code_formats_tower_floor_and_number():
@@ -260,7 +306,10 @@ async def test_validate_unit_rejects_four_wheeler_entitlement_full():
             project_id="project-1",
             unit_id="unit-1",
             allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
-            slot_row=_slot_row(slot_type=ParkingSlotType.CAR_STANDARD.value),
+            slot_row=_slot_row(
+                slot_type=ParkingFacilitySubtype.BASEMENT.value,
+                parking_vehicle_category="four_wheeler",
+            ),
         )
 
 
@@ -311,6 +360,7 @@ async def test_allot_slot_creates_allotment_and_assigns_slot():
     )
 
     assert result.slot_code == "A-B2-002"
+    assert result.slot_code_label == "A-B2-002"
     assert result.allotted_to_unit is not None
     assert result.allotted_to_unit.code == "A-1804"
     svc.repo.insert_allotment.assert_awaited_once()

@@ -92,8 +92,10 @@ class FacilitiesRepository(BaseRepository):
         project_id: str,
         facility_types: list[str] | None = None,
         status: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """List facilities for a project with optional filters."""
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List facilities for a project with optional filters and pagination."""
         conditions = [
             "organization_id = $1::uuid",
             "project_id = $2::uuid",
@@ -110,15 +112,29 @@ class FacilitiesRepository(BaseRepository):
             values.append(status)
             idx += 1
         where_sql = " AND ".join(conditions)
+        total = await self.db_connection.fetchval(
+            f"""
+            SELECT COUNT(*)::int
+            FROM facilities
+            WHERE {where_sql}
+            """,
+            *values,
+        )
+        offset = (page - 1) * page_size
+        offset_idx = idx
+        limit_idx = idx + 1
         rows = await self.db_connection.fetch(
             f"""
             SELECT * FROM facilities
             WHERE {where_sql}
             ORDER BY sort_order, created_at
+            OFFSET ${offset_idx} LIMIT ${limit_idx}
             """,
             *values,
+            offset,
+            page_size,
         )
-        return [dict(row) for row in rows]
+        return [dict(row) for row in rows], int(total or 0)
 
     async def update_facility(
         self,

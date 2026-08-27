@@ -19,9 +19,9 @@ from apps.user_service.app.db.repositories.parking_slots_repository import (
 from apps.user_service.app.schemas.enums import (
     FacilityType,
     ParkingAllotmentBasis,
+    ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
     ParkingSlotEventType,
-    ParkingSlotType,
     ParkingUserType,
 )
 from apps.user_service.app.schemas.parking_allotment import (
@@ -39,6 +39,9 @@ from apps.user_service.app.schemas.parking_allotment import (
     UnitAllotParkingSlotRequest,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.project_setup_validation import (
+    normalize_parking_facility_subtype,
+)
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -52,10 +55,12 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.status_codes import CustomStatusCode
 
 _SLOT_TYPE_LABELS: dict[str, str] = {
-    ParkingSlotType.VISITOR.value: "Visitor",
-    ParkingSlotType.CAR_STANDARD.value: "Car — standard",
-    ParkingSlotType.EV_CHARGING.value: "EV charging",
-    ParkingSlotType.TWO_WHEELER.value: "Two-wheeler",
+    ParkingFacilitySubtype.COVERED.value: "Covered",
+    ParkingFacilitySubtype.OPEN.value: "Open",
+    ParkingFacilitySubtype.BASEMENT.value: "Basement",
+    ParkingFacilitySubtype.STILT.value: "Stilt",
+    ParkingFacilitySubtype.PODIUM.value: "Podium",
+    ParkingFacilitySubtype.EV_CHARGING.value: "EV Charging",
 }
 
 
@@ -103,6 +108,22 @@ class ParkingAllotmentService:
             floor_level=row.get("floor_level"),
             slot_number=int(row.get("slot_number") or 0),
         )
+
+    @staticmethod
+    def _build_slot_code_label(row: dict[str, Any]) -> str:
+        """Format display label as {tower}-{floor}-{slot_code}, omitting missing parts."""
+        parts: list[str] = []
+        tower = str(row.get("tower_code") or "").strip()
+        floor = str(row.get("floor_level") or "").strip()
+        if tower:
+            parts.append(tower)
+        if floor:
+            parts.append(floor)
+        slot_code = str(row.get("slot_code") or "").strip()
+        if not slot_code:
+            slot_code = f"{int(row.get('slot_number') or 0):03d}"
+        parts.append(slot_code)
+        return "-".join(parts)
 
     @staticmethod
     def _slot_type_label(slot_type: str) -> str:
@@ -177,11 +198,22 @@ class ParkingAllotmentService:
         return ["details", "history"]
 
     @staticmethod
-    def _slot_vehicle_category(slot_type: str) -> str:
-        """Map a parking slot type to two_wheeler or four_wheeler entitlement bucket."""
-        if slot_type == ParkingSlotType.TWO_WHEELER.value:
-            return ParkingSlotType.TWO_WHEELER.value
+    def _slot_vehicle_category(slot_row: dict[str, Any]) -> str:
+        """Map a slot row to two_wheeler or four_wheeler entitlement bucket."""
+        category = slot_row.get("parking_vehicle_category")
+        if isinstance(category, str) and category.lower() == "two_wheeler":
+            return "two_wheeler"
         return "four_wheeler"
+
+    @staticmethod
+    def _resolve_slot_type(row: dict[str, Any]) -> str:
+        raw = row.get("slot_type") or row.get("facility_subtype")
+        if raw is None or not str(raw).strip():
+            return ParkingFacilitySubtype.OPEN.value
+        try:
+            return normalize_parking_facility_subtype(str(raw)) or ParkingFacilitySubtype.OPEN.value
+        except ValidationException:
+            return ParkingFacilitySubtype.OPEN.value
 
     def _unit_allowed_actions(
         self,
@@ -255,9 +287,8 @@ class ParkingAllotmentService:
                 )
             return unit
 
-        slot_type = str(slot_row.get("slot_type") or ParkingSlotType.CAR_STANDARD.value)
-        vehicle_category = self._slot_vehicle_category(slot_type)
-        if vehicle_category == ParkingSlotType.TWO_WHEELER.value:
+        vehicle_category = self._slot_vehicle_category(slot_row)
+        if vehicle_category == "two_wheeler":
             if two_entitlement <= 0:
                 raise ValidationException(
                     message_key="parking_allotment.errors.no_two_wheeler_entitlement",
@@ -313,7 +344,7 @@ class ParkingAllotmentService:
     def _serialize_slot_list_item(
         self, row: dict[str, Any]
     ) -> ParkingAllotmentSlotListItemResponse:
-        slot_type = str(row.get("slot_type") or ParkingSlotType.CAR_STANDARD.value)
+        slot_type = self._resolve_slot_type(row)
         display_status = str(row.get("display_status") or ParkingSlotDisplayStatus.FREE.value)
         unit_id = row.get("unit_id")
         allotted_to_unit = None
@@ -326,9 +357,10 @@ class ParkingAllotmentService:
         return ParkingAllotmentSlotListItemResponse(
             id=str(row["id"]),
             slot_code=self._resolve_slot_code(row),
+            slot_code_label=self._build_slot_code_label(row),
             level_label=row.get("floor_level"),
             bay_label=row.get("wing") or row.get("facility_name"),
-            slot_type=ParkingSlotType(slot_type),
+            slot_type=ParkingFacilitySubtype(slot_type),
             slot_type_label=self._slot_type_label(slot_type),
             status=ParkingSlotDisplayStatus(display_status),
             allotted_to_unit=allotted_to_unit,
@@ -378,13 +410,13 @@ class ParkingAllotmentService:
         for item in self._active_allotments_from_row(row.get("active_allotments")):
             slot_id = str(item.get("slot_id") or "")
             slot_meta = (slot_rows_by_id or {}).get(slot_id, {})
-            slot_type = str(slot_meta.get("slot_type") or ParkingSlotType.CAR_STANDARD.value)
+            slot_type = self._resolve_slot_type(slot_meta)
             slots_held.append(
                 ParkingAllotmentSlotHeldResponse(
                     allotment_id=str(item.get("allotment_id") or ""),
                     slot_id=slot_id,
                     slot_code=self._resolve_slot_code(slot_meta),
-                    slot_type=ParkingSlotType(slot_type),
+                    slot_type=ParkingFacilitySubtype(slot_type),
                     slot_type_label=self._slot_type_label(slot_type),
                     effective_from=self._format_date(item.get("effective_from")) or "",
                     allotment_basis=ParkingAllotmentBasis(

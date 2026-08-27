@@ -7,12 +7,23 @@ from typing import Any
 from apps.user_service.app.schemas.enums import (
     FacilityLocationType,
     FacilityType,
+    ParkingFacilitySubtype,
     ParkingUserType,
     ParkingVehicleCategory,
     UnitNumberingPattern,
 )
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
+
+_PARKING_FACILITY_SUBTYPE_ALIASES: dict[str, str] = {
+    "covered": ParkingFacilitySubtype.COVERED.value,
+    "open": ParkingFacilitySubtype.OPEN.value,
+    "basement": ParkingFacilitySubtype.BASEMENT.value,
+    "stilt": ParkingFacilitySubtype.STILT.value,
+    "podium": ParkingFacilitySubtype.PODIUM.value,
+    "ev_charging": ParkingFacilitySubtype.EV_CHARGING.value,
+    "ev": ParkingFacilitySubtype.EV_CHARGING.value,
+}
 
 
 def normalize_facility_type(facility_type: str | FacilityType | None) -> str:
@@ -33,6 +44,30 @@ def validate_tower_numbering(
             message_key="project_setup.errors.custom_prefix_required",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
         )
+
+
+def normalize_parking_facility_subtype(
+    value: str | None,
+    *,
+    required: bool = False,
+) -> str | None:
+    """Normalize parking facility subtype labels to canonical enum values."""
+    if value is None or not str(value).strip():
+        if required:
+            raise ValidationException(
+                message_key="project_setup.errors.facility_parking_subtype_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return None
+
+    key = str(value).strip().lower().replace(" ", "_").replace("-", "_")
+    normalized = _PARKING_FACILITY_SUBTYPE_ALIASES.get(key)
+    if not normalized:
+        raise ValidationException(
+            message_key="project_setup.errors.facility_parking_subtype_invalid",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+    return normalized
 
 
 def _has_parking_numbering_fields(data: dict[str, Any]) -> bool:
@@ -107,6 +142,10 @@ def validate_facility_payload(
         validate_tower_numbering(
             numbering_pattern=str(numbering_pattern or UnitNumberingPattern.FLOOR_UNIT.value),
             custom_prefix=data.get("custom_prefix"),
+        )
+        data["facility_subtype"] = normalize_parking_facility_subtype(
+            data.get("facility_subtype"),
+            required=True,
         )
         return
 

@@ -74,11 +74,12 @@ When `facility_type = "parking"`, the request supports numbering options (same e
 | `starting_slots_number` | `1`          | First `slot_number` when provisioning        |
 | `custom_prefix`         | —            | Required when `numbering_pattern = "custom"` |
 
-Also required for parking facilities: `parking_slots` (> 0), `parking_user_type` (`resident` / `visitors`), and `parking_vehicle_category` (`two_wheeler` / `four_wheeler` / `both`).
+Also required for parking facilities: `parking_slots` (> 0), `parking_user_type` (`resident` / `visitors`), `parking_vehicle_category` (`two_wheeler` / `four_wheeler` / `both`), and `facility_subtype` (`covered` · `open` · `basement` · `stilt` · `podium` · `ev_charging`).
 
-| Field                      | Values                                  | Notes                                                                                 |
-| -------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------- |
-| `parking_vehicle_category` | `two_wheeler` · `four_wheeler` · `both` | Slot type is derived from this field (`facility_subtype` is not used for two-wheeler) |
+| Field                      | Values                                                               | Notes                                                                 |
+| -------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `facility_subtype`         | `covered` · `open` · `basement` · `stilt` · `podium` · `ev_charging` | Stored on the facility; returned as `slot_type` in allotment APIs     |
+| `parking_vehicle_category` | `two_wheeler` · `four_wheeler` · `both`                              | Used for entitlement validation when allotting (`included_with_unit`) |
 
 Unit configurations store split entitlements: `two_wheeler_parking_entitlement` and `four_wheeler_parking_entitlement`.
 
@@ -95,6 +96,7 @@ POST /v1/projects/{project_id}/facilities
   "parking_slots": 10,
   "parking_user_type": "visitors",
   "parking_vehicle_category": "four_wheeler",
+  "facility_subtype": "open",
   "numbering_pattern": "custom",
   "custom_prefix": "SLT-A",
   "starting_slots_number": 1
@@ -293,8 +295,10 @@ Computed in `parking_allotment_repository._DISPLAY_STATUS_SQL`:
 | `blocked`      | Admin-blocked                                  |
 | `visitor_pool` | Visitor facility slot, still available         |
 
-List/detail responses expose `slot_code` (stored label). Legacy rows without `slot_code` fall back
-to `{tower}-{floor}-{slot_number:03d}` formatting in `ParkingAllotmentService._resolve_slot_code`.
+List/detail responses expose:
+
+- `slot_code` — stored facility numbering label (e.g. `SLT-A-1`, `101`). Legacy rows without `slot_code` fall back to `{tower}-{floor}-{slot_number:03d}` in `_resolve_slot_code`.
+- `slot_code_label` — derived as `{tower}-{floor}-{slot_code}` (e.g. `A-B2-SLT-A-9`), omitting tower/floor when absent. Falls back to padded `slot_number` when `slot_code` is missing.
 
 ______________________________________________________________________
 

@@ -74,6 +74,7 @@ def test_validate_facility_parking_numbering_defaults():
             "parking_slots": 10,
             "parking_user_type": "visitors",
             "parking_vehicle_category": "four_wheeler",
+            "facility_subtype": "open",
             "numbering_pattern": "floor_unit",
             "starting_slots_number": 1,
         }
@@ -90,6 +91,7 @@ def test_validate_facility_parking_custom_prefix_required():
                 "parking_slots": 10,
                 "parking_user_type": "visitors",
                 "parking_vehicle_category": "four_wheeler",
+                "facility_subtype": "open",
                 "numbering_pattern": "custom",
             }
         )
@@ -106,6 +108,34 @@ def test_validate_facility_parking_vehicle_category_required():
                 "parking_user_type": "visitors",
             }
         )
+
+
+def test_validate_facility_parking_subtype_required():
+    """Parking facilities require a valid facility_subtype."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "parking",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "parking_slots": 10,
+                "parking_user_type": "visitors",
+                "parking_vehicle_category": "four_wheeler",
+            }
+        )
+
+
+def test_validate_facility_parking_subtype_normalizes_ui_label():
+    """Parking subtype labels from UI are normalized to canonical values."""
+    data = {
+        "facility_type": "parking",
+        "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+        "parking_slots": 10,
+        "parking_user_type": "visitors",
+        "parking_vehicle_category": "four_wheeler",
+        "facility_subtype": "EV Charging",
+    }
+    validate_facility_payload(data)
+    assert data["facility_subtype"] == "ev_charging"
 
 
 def test_validate_facility_numbering_not_applicable_for_non_parking():
