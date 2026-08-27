@@ -812,6 +812,44 @@ class TenantRequestsService:
             },
         )
 
+    async def sync_after_admin_move_out(
+        self,
+        *,
+        unit_id: str,
+        tenant_contact_id: str,
+        move_event_id: str,
+    ) -> None:
+        """Close the active approved tenant request after an admin move-out."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        user_id = self.user_context.user_id
+
+        existing = await self.repo.find_active_approved_for_unit_by_tenant(
+            organization_id=org_id,
+            tenant_contact_id=tenant_contact_id,
+        )
+        if not existing or str(existing.get("unit_id") or "") != unit_id:
+            return
+
+        now = datetime.now(timezone.utc)
+        await self.repo.update_request_status(
+            organization_id=org_id,
+            tenant_request_id=str(existing["id"]),
+            status=TenantRequestStatus.SUPERSEDED.value,
+            superseded_at=now,
+        )
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=str(existing["id"]),
+            event_type=TenantRequestEventType.SUPERSEDED.value,
+            actor_user_id=str(user_id) if user_id else None,
+            payload={
+                "reason": "admin_move_out",
+                "move_event_id": move_event_id,
+                "tenant_contact_id": tenant_contact_id,
+            },
+        )
+
     async def list_owner_requests(
         self,
         *,

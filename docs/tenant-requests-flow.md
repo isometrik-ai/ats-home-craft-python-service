@@ -337,6 +337,21 @@ Historical DB rows from move-ins before this sync existed: backfill migration
 `20260827140000_backfill_tenant_requests_from_move_ins.sql`. Stale household artifacts:
 `20260827150000_backfill_stale_unit_household_artifacts.sql` (no portal session revoke in SQL).
 
+### 5.5 Admin move-out close (`sync_after_admin_move_out`)
+
+When staff records **move-out** for the **active tenant** via `POST /v1/move-events`,
+`MoveEventsService` calls `TenantRequestsService.sync_after_admin_move_out()` after household
+turnover:
+
+1. Find the active approved request (`status = approved`, `superseded_at IS NULL`) for that
+   `tenant_contact_id` + `unit_id`.
+2. Set `status = superseded`, `superseded_at = now()`.
+3. Append a `superseded` event with payload `{ reason: "admin_move_out", move_event_id }`.
+
+The owner list still shows the row in **history**, but it is no longer the current approved tenant
+(mobile can treat `superseded` after move-out as “tenant moved out”). Family-only move-outs do not
+touch the tenant request.
+
 ______________________________________________________________________
 
 ## 6. Relationship to existing flows
@@ -344,7 +359,7 @@ ______________________________________________________________________
 | Existing doc                                               | Relationship                                                                  |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Owner auth context; household/invite patterns for post-approval portal        |
-| [move-events-flow.md](./move-events-flow.md)               | Admin move-in/out ledger; `sync_after_admin_move_in`; shared turnover service |
+| [move-events-flow.md](./move-events-flow.md)               | Admin move-in/out ledger; `sync_after_admin_move_in/out`; shared turnover service |
 | [project-setup-flow.md](./project-setup-flow.md)           | Units must exist from project setup                                           |
 | [passes-flow.md](./passes-flow.md)                         | Same owner JWT pattern; different domain                                      |
 | [fee-flow.md](./fee-flow.md)                               | No direct coupling in phase 1                                                 |
@@ -396,6 +411,7 @@ ______________________________________________________________________
 | Add document type                       | Migration enum + `TenantRequestDocumentType` + UI copy                           |
 | Change approval / turnover side effects | `tenant_requests_service.approve_request` + `unit_occupancy_turnover_service.py` |
 | Change move-in mirror for admin moves   | `tenant_requests_service.sync_after_admin_move_in`                               |
+| Change move-out close for admin moves   | `tenant_requests_service.sync_after_admin_move_out`                              |
 | Owner submit guards                     | `create_request` → `_assert_no_active_tenant_on_unit`                            |
 | Owner ownership rules                   | `_assert_owner_can_access_unit` in service                                       |
 | Timeline copy                           | `_derive_milestones` in service                                                  |

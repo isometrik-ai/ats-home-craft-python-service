@@ -418,6 +418,7 @@ class DailyHelpListItemResponse(BaseModel):
     phone_isd_code: str
     phone_number: str
     phone: str | None = None
+    photo_path: str | None = None
     document_count: int = 0
     household_link_count: int = 0
     status: str
