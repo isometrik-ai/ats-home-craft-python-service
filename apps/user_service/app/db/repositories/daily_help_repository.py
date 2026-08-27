@@ -711,6 +711,38 @@ class DailyHelpRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def remove_all_active_links_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        removal_reason: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Soft-remove every active daily help household link on a unit."""
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE daily_help_household_links
+            SET status = 'removed'::daily_help_household_link_status,
+                removed_at = now(),
+                removal_reason = $3,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND status = 'active'::daily_help_household_link_status
+            RETURNING
+                id::text AS id,
+                daily_help_profile_id::text AS profile_id,
+                unit_id::text AS unit_id,
+                status::text AS status,
+                removed_at,
+                removal_reason
+            """,
+            organization_id,
+            unit_id,
+            removal_reason,
+        )
+        return [dict(row) for row in rows]
+
     async def list_active_links_for_unit(
         self,
         *,

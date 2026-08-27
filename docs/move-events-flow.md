@@ -1,6 +1,6 @@
 # Move Events Flow — Context & Change Guide
 
-> **Status: Implemented (Phase 1 + 2).** This document describes the **Move Events** feature in
+> **Status: Implemented (Phase 1 + 2 + occupancy turnover).** This document describes the **Move Events** feature in
 > `user_service`, written in the same style as
 > [`passes-flow.md`](./passes-flow.md), [`contact-onboarding-flow.md`](./contact-onboarding-flow.md),
 > and [`project-setup-flow.md`](./project-setup-flow.md) so it drops straight into the codebase.
@@ -22,7 +22,9 @@ commercial units, and plots. Each event:
 1. has a **type** (`move_in` / `move_out`) — this is also the "Status" badge in the table,
 1. has an **event date** and an optional **fee** (amount + currency, default INR),
 1. may carry **inspection documents/photos** (paths only), and
-1. **syncs occupancy** on `contact_units` (activate on move-in, mark `moved_out` on move-out).
+1. **syncs occupancy** on `contact_units` (activate on move-in, mark `moved_out` on move-out), and
+1. **clears household artifacts** on turnover via `UnitOccupancyTurnoverService` (family, vehicles,
+   passes, daily help — owner preserved).
 
 The acting admin is an `organization_member` resolved via `check_permissions()` — this is a
 **staff/admin** feature (like `contacts`), so it **uses the same RBAC codes as Contacts**
@@ -52,20 +54,70 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 
 ### File map (to create)
 
-| Concern                             | File                                                           |
-| ----------------------------------- | -------------------------------------------------------------- |
-| API endpoints                       | `app/api/move_events.py`                                       |
-| Route registration                  | `app/api/routes.py` (`move_events_router`)                     |
-| Move orchestration + occupancy sync | `app/services/move_events_service.py`                          |
-| Occupancy link updates (reused)     | `app/db/repositories/contact_units_repository.py` (existing)   |
-| Move persistence                    | `app/db/repositories/move_events_repository.py`                |
-| Request/response models             | `app/schemas/move_events.py`                                   |
-| Enums (mirror Postgres)             | `app/schemas/enums.py`                                         |
-| RBAC codes                          | Reuses `contacts_management.*` (same as Contacts admin routes) |
-| i18n messages                       | `app/locales/en.json` (`move_events.*`)                        |
+| Concern                             | File                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------- |
+| API endpoints                       | `app/api/move_events.py`                                               |
+| Route registration                  | `app/api/routes.py` (`move_events_router`)                             |
+| Move orchestration + occupancy sync | `app/services/move_events_service.py`                                  |
+| Household turnover cleanup          | `app/services/unit_occupancy_turnover_service.py`                      |
+| Tenant-request mirror on move-in    | `app/services/tenant_requests_service.py` (`sync_after_admin_move_in`) |
+| Occupancy link updates (reused)     | `app/db/repositories/contact_units_repository.py` (existing)           |
+| Move persistence                    | `app/db/repositories/move_events_repository.py`                        |
+| Request/response models             | `app/schemas/move_events.py`                                           |
+| Enums (mirror Postgres)             | `app/schemas/enums.py`                                                 |
+| RBAC codes                          | Reuses `contacts_management.*` (same as Contacts admin routes)         |
+| i18n messages                       | `app/locales/en.json` (`move_events.*`)                                |
 
 `MoveEventsService` **composes** the existing `ContactUnitsRepository` to keep occupancy in sync
-rather than duplicating that logic.
+and **`UnitOccupancyTurnoverService`** to release outgoing household data on turnover (same rules
+as tenant-request approval).
+
+______________________________________________________________________
+
+## 2.1 Unit occupancy turnover (admin move-in / move-out)
+
+When a **new tenant** is recorded or the **active tenant** moves out, the service clears outgoing
+household data on the unit while **preserving the owner** (`contact_units` + `Owner` role).
+
+Implemented in `UnitOccupancyTurnoverService.release_outgoing_tenant_household()`:
+
+| Cleared on full turnover | Action                                                                                  |
+| ------------------------ | --------------------------------------------------------------------------------------- |
+| Family members           | Release non-owner `contact_units` (`relationship <> self`); end `Family` roles          |
+| Outgoing tenant          | Move out tenant primary link; end `Tenant` role                                         |
+| Vehicles                 | `VehiclesService.release_for_move_out(unit_id=...)` — all vehicles on the unit          |
+| Passes                   | Cancel active unit-scoped visitor passes (`passes` where `unit_id` + `status = active`) |
+| Daily help               | Set `daily_help_household_links.status = removed` for all active links on unit          |
+| Household invitations    | Cancel pending invites for released `contact_unit_id`s                                  |
+| Portal sessions          | Revoke sessions for outgoing tenant + family (not owner)                                |
+| Orphan family contacts   | Soft-delete contacts with zero remaining unit links (optional cleanup)                  |
+
+**Not cleared:** owner allotment, unit parking allotments (`unit_parking_allotments`), billing /
+move-event history.
+
+### When full turnover runs (`release_outgoing_tenant_household`)
+
+| Trigger                    | Timing                                                                                        |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| **Admin move-in**          | Before resolving/creating the new tenant `contact_units` link (sanitizes stale data)          |
+| **Admin move-out**         | After insert, when `contact_id` is the **active tenant** on the unit                          |
+| **Tenant request approve** | Before provisioning the new tenant (see [tenant-requests-flow.md](./tenant-requests-flow.md)) |
+
+### Single-occupant move-out
+
+When admin move-out is for a **family member** (not the active tenant),
+`release_single_occupant()` runs instead: only that contact's link, role, vehicles, passes,
+invitations, and portal session — the rest of the household stays on the unit.
+
+### Historical backfill
+
+SQL migrations (no portal session revoke — app/runtime only):
+
+- `20260827140000_backfill_tenant_requests_from_move_ins.sql` — owner-visible `tenant_requests`
+- `20260827150000_backfill_stale_unit_household_artifacts.sql` — stale family / vehicles / passes / daily help
+
+After **service deploy**, new admin move-in/out paths invoke turnover in Python (including portal
+session revoke). Backfills only repair pre-deploy data gaps.
 
 ______________________________________________________________________
 
@@ -120,17 +172,28 @@ All routes under `/v1/move-events`, authenticated + org-scoped, guarded by `cont
 }
 ```
 
-**Behavior:**
+**Behavior (`POST /v1/move-events`):**
 
 1. Resolve admin + `organization_id`; verify `unit_id` exists in the org
    (`move_events.errors.unit_not_found`) and `contact_id` exists (`move_events.errors.contact_not_found`).
 1. Derive `project_id` from the unit.
+1. **Move-in guards:** unit must be sold/allotted; no other **active Tenant** role on the unit
+   (`move_events.errors.unit_not_sold`, `move_events.errors.unit_occupied_by_other_tenant`).
+1. **Move-in turnover:** `UnitOccupancyTurnoverService.release_outgoing_tenant_household()` clears
+   stale household artifacts on the unit (owner preserved) before the new tenant is linked.
+1. **Move-out guard:** contact must have an `active`/`pending` link on the unit
+   (`move_events.errors.not_currently_occupying`).
 1. Resolve the `contact_units` link for that unit+contact (create/attach if the admin is recording a
    fresh move-in and no link exists — see §5).
 1. Insert the `move_events` row (`recorded_by_user_id = admin's auth user id`).
 1. **Sync occupancy** on `contact_units` in the same `db_uow`:
    - `move_in` → `status='active'`, `activated_at = COALESCE(activated_at, event_date)`, `moved_out_at = NULL`;
-   - `move_out` → `status='moved_out'`, `moved_out_at = event_date`.
+   - `move_out` → turnover service handles link release (no separate `sync_move_out` on the primary row).
+1. **Move-out turnover:** if `contact_id` is the active tenant → full household cleanup; else
+   `release_single_occupant()` for one family member.
+1. **Move-in only:** assign `Tenant` role when missing; call
+   `TenantRequestsService.sync_after_admin_move_in()` so the owner mobile list shows an approved
+   tenant request (mirrors ledger row — see [tenant-requests-flow.md](./tenant-requests-flow.md)).
 1. Return the created move with joined display fields (unit label, type, contact name/role).
 
 ### Example: `GET /v1/move-events?bucket=move_out&search=A-0101`
@@ -171,9 +234,11 @@ Enforced in `move_events_service.py`:
   (`move_events.errors.move_event_not_found` / `unit_not_found` / `contact_not_found`).
 - **Occupancy sync (the core rule):** recording a move **and** updating `contact_units` happen in
   **one `db_uow` transaction** so history and current state never diverge.
-  - `move_in`: link → `active`; set `activated_at` if unset; clear `moved_out_at`.
-  - `move_out`: requires the contact to currently occupy the unit (an `active` `contact_units` link),
-    else `move_events.errors.not_currently_occupying`; link → `moved_out`, set `moved_out_at`.
+  - `move_in`: pre-turnover sanitize → link → `active`; set `activated_at` if unset; clear `moved_out_at`;
+    ensure `Tenant` role; sync owner-visible `tenant_requests`.
+  - `move_out`: requires the contact to currently occupy the unit (an `active`/`pending` `contact_units`
+    link), else `move_events.errors.not_currently_occupying`; turnover releases links and clears
+    household artifacts (full household when contact is the active tenant).
 - **Fresh move-in without a link:** if no `contact_units` row exists for the unit+contact, create one
   (`relationship` defaults to `self`; `is_primary=false`) and activate it. (Alternatively require the
   link first — decide per product; default is auto-create.)
@@ -186,7 +251,8 @@ Enforced in `move_events_service.py`:
   defaults to `INR`.
 - **Edit:** `PATCH` may correct `event_date`, `fee_amount`, `fee_currency`, `notes`, `document_paths`
   only — **not** `move_type`/`unit_id`/`contact_id` (record a new event instead). Editing an
-  `event_date` re-syncs the corresponding `contact_units` timestamp.
+  `event_date` on a **move-in** re-syncs the corresponding `contact_units` `activated_at` timestamp
+  (turnover is **not** re-run on patch).
 - **Delete:** soft-void via `deleted_at` (row kept for audit); voiding the **latest** move for a
   unit+contact should re-derive occupancy from the previous move (or leave `contact_units` untouched
   with an admin note — decide per product; default: re-derive from the prior non-deleted move).
@@ -213,17 +279,18 @@ ______________________________________________________________________
 
 ## 7. How to make common changes
 
-| I want to…                         | Change here                                                                |
-| ---------------------------------- | -------------------------------------------------------------------------- |
-| Add a move type                    | `MoveEventType` enum + Postgres `move_event_type` enum                     |
-| Add/rename a move field            | new migration + `move_events_repository.py` SQL + `schemas/move_events.py` |
-| Change occupancy-sync rules        | `move_events_service.py` create/edit/delete (contact_units sync)           |
-| Change list filter / search        | `move_events_repository.py` list query + `MoveEventListBucket`             |
-| Add scheduled/completed lifecycle  | add `MoveEventStatus` enum + Postgres enum + column (additive)             |
-| Add an endpoint                    | route in `api/move_events.py` → service method → repository method         |
-| Change a user-facing message       | `app/locales/en.json` under `move_events.*`                                |
-| Change RBAC required for an action | the `check_permissions(...)` call on that endpoint                         |
-| Wire the fee to billing            | `move_events_service.py` (emit/charge) when a billing module lands         |
+| I want to…                              | Change here                                                                |
+| --------------------------------------- | -------------------------------------------------------------------------- |
+| Add a move type                         | `MoveEventType` enum + Postgres `move_event_type` enum                     |
+| Add/rename a move field                 | new migration + `move_events_repository.py` SQL + `schemas/move_events.py` |
+| Change occupancy-sync / turnover rules  | `move_events_service.py` + `unit_occupancy_turnover_service.py`            |
+| Change tenant-request mirror on move-in | `tenant_requests_service.sync_after_admin_move_in`                         |
+| Change list filter / search             | `move_events_repository.py` list query + `MoveEventListBucket`             |
+| Add scheduled/completed lifecycle       | add `MoveEventStatus` enum + Postgres enum + column (additive)             |
+| Add an endpoint                         | route in `api/move_events.py` → service method → repository method         |
+| Change a user-facing message            | `app/locales/en.json` under `move_events.*`                                |
+| Change RBAC required for an action      | the `check_permissions(...)` call on that endpoint                         |
+| Wire the fee to billing                 | `move_events_service.py` (emit/charge) when a billing module lands         |
 
 ______________________________________________________________________
 
@@ -258,7 +325,9 @@ ______________________________________________________________________
 - [x] `GET /move-events` (All / move_in / move_out bucket + search + joins)
 - [x] `GET /move-events/{id}` detail
 - [x] `PATCH /move-events/{id}`, `DELETE /move-events/{id}` (soft-void + re-derive occupancy)
-- [x] Unit tests: occupancy sync, move-out guard, fee validation, list filter/search
+- [x] Unit occupancy turnover on move-in / tenant move-out (`UnitOccupancyTurnoverService`)
+- [x] `sync_after_admin_move_in` — owner tenant-requests list stays in sync
+- [x] Unit tests: occupancy sync, move-out guard, fee validation, list filter/search, turnover hooks
 
 ### Phase 3 — Hardening (optional)
 
@@ -271,8 +340,10 @@ ______________________________________________________________________
 
 ## 10. Tests
 
-- `tests/unit/test_move_events_service.py` — occupancy sync (in/out), move-out guard, fee validation,
-  soft-delete re-derivation.
+- `tests/unit/test_move_events_service.py` — occupancy sync (in), move-out guard, fee validation,
+  soft-delete re-derivation, turnover service hooks.
+- `tests/unit/test_unit_occupancy_turnover_service.py` — household cleanup (links, vehicles, passes,
+  daily help, invitations).
 - `tests/unit/test_move_events_repository.py` — SQL generation (insert / list-by-bucket+search / get).
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`
@@ -283,5 +354,6 @@ ______________________________________________________________________
 
 - Design decision & new tables: [ADR 0005 — Move events](./adr/0005-move-events.md)
 - Occupancy link produced/synced: [contact-onboarding-flow.md](./contact-onboarding-flow.md) (`contact_units`)
+- Tenant approval + supersede (same turnover rules): [tenant-requests-flow.md](./tenant-requests-flow.md)
 - Inventory (`units`, `unit_configs`, `towers`): [project-setup-flow.md](./project-setup-flow.md)
 - Staff RBAC + `organization_member` model: [ADR 0004](./adr/0004-pass-validation-gate.md)

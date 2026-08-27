@@ -429,6 +429,78 @@ class ContactUnitsRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def release_occupant_links_excluding_contacts(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        exclude_contact_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Mark pending/active occupant links moved_out, preserving excluded contacts."""
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE contact_units cu
+            SET status = $4::contact_unit_status,
+                moved_out_at = COALESCE(cu.moved_out_at, now()),
+                is_default_login = false,
+                updated_at = now()
+            WHERE cu.organization_id = $1::uuid
+              AND cu.unit_id = $2::uuid
+              AND cu.status IN (
+                  'pending'::contact_unit_status,
+                  'active'::contact_unit_status
+              )
+              AND NOT (cu.contact_id = ANY($3::uuid[]))
+            RETURNING
+                cu.id::text AS id,
+                cu.unit_id::text AS unit_id,
+                cu.project_id::text AS project_id,
+                cu.contact_id::text AS contact_id,
+                cu.relationship::text AS relationship
+            """,
+            organization_id,
+            unit_id,
+            exclude_contact_ids,
+            ContactUnitStatus.MOVED_OUT.value,
+        )
+        return [dict(row) for row in rows]
+
+    async def release_open_links_for_contact_on_unit(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        unit_id: str,
+    ) -> list[dict[str, Any]]:
+        """Mark pending/active links for one contact on one unit as moved_out."""
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE contact_units cu
+            SET status = $4::contact_unit_status,
+                moved_out_at = COALESCE(cu.moved_out_at, now()),
+                is_default_login = false,
+                updated_at = now()
+            WHERE cu.organization_id = $1::uuid
+              AND cu.contact_id = $2::uuid
+              AND cu.unit_id = $3::uuid
+              AND cu.status IN (
+                  'pending'::contact_unit_status,
+                  'active'::contact_unit_status
+              )
+            RETURNING
+                cu.id::text AS id,
+                cu.unit_id::text AS unit_id,
+                cu.project_id::text AS project_id,
+                cu.contact_id::text AS contact_id,
+                cu.relationship::text AS relationship
+            """,
+            organization_id,
+            contact_id,
+            unit_id,
+            ContactUnitStatus.MOVED_OUT.value,
+        )
+        return [dict(row) for row in rows]
+
     async def release_unit_owner_links(
         self,
         *,
