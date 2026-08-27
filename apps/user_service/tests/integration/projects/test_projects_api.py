@@ -1418,10 +1418,12 @@ async def test_list_facilities(monkeypatch, client):
 
     _patch_projects_access(monkeypatch)
 
-    async def fake_list_facilities(_self, *, project_id: str, facility_types=None, status=None):
-        del _self, project_id, status
+    async def fake_list_facilities(
+        _self, *, project_id: str, facility_types=None, status=None, page=1, page_size=20
+    ):
+        del _self, project_id, status, page, page_size
         assert facility_types == ["sports", "events"]
-        return [_FAKE_FACILITY]
+        return {"items": [_FAKE_FACILITY], "total": 1}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
@@ -1443,10 +1445,12 @@ async def test_list_facilities_accepts_comma_separated_types(monkeypatch, client
     _patch_projects_access(monkeypatch)
     captured: dict[str, Any] = {}
 
-    async def fake_list_facilities(_self, *, project_id: str, facility_types=None, status=None):
-        del _self, project_id, status
+    async def fake_list_facilities(
+        _self, *, project_id: str, facility_types=None, status=None, page=1, page_size=20
+    ):
+        del _self, project_id, status, page, page_size
         captured["facility_types"] = facility_types
-        return [_FAKE_FACILITY]
+        return {"items": [_FAKE_FACILITY], "total": 1}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
@@ -1459,6 +1463,39 @@ async def test_list_facilities_accepts_comma_separated_types(monkeypatch, client
     )
     assert_success(res, 200)
     assert captured["facility_types"] == ["recreation", "services"]
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_pagination(monkeypatch, client):
+    """GET facilities respects page and page_size query params."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    async def fake_list_facilities(
+        _self, *, project_id: str, facility_types=None, status=None, page=1, page_size=20
+    ):
+        del _self, project_id, facility_types, status
+        captured["page"] = page
+        captured["page_size"] = page_size
+        return {"items": [_FAKE_FACILITY], "total": 15}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
+        fake_list_facilities,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/facilities",
+        params={"page": 1, "page_size": 10},
+    )
+    body = assert_success(res, 200)
+    assert captured["page"] == 1
+    assert captured["page_size"] == 10
+    assert body["total"] == 15
+    assert body["page"] == 1
+    assert body["page_size"] == 10
+    assert len(body["data"]) == 1
 
 
 @pytest.mark.asyncio

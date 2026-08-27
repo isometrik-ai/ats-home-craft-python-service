@@ -2210,9 +2210,16 @@ def get_facility_list_query(
         ),
     ] = None,
     status: FacilityStatus | None = Query(default=None, description="Filter by status."),
+    page: int = Query(default=1, ge=1, description="Page number."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
 ) -> FacilityListQuery:
     """Parse facility list filters from query params."""
-    return build_facility_list_query(facility_types=facility_types, status=status)
+    return build_facility_list_query(
+        facility_types=facility_types,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @handle_api_exceptions("list facilities")
@@ -2244,19 +2251,34 @@ async def list_facilities(
         else None
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
-    items = await service.list_facilities(
+    result = await service.list_facilities(
         project_id=project_id,
         facility_types=parsed_types,
         status=query.status.value if query.status else None,
+        page=query.page,
+        page_size=query.page_size,
     )
+    items = result["items"]
+    total = int(result["total"])
+    if not items:
+        return list_response(
+            request=request,
+            items=[],
+            total=total,
+            page=query.page,
+            page_size=query.page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
     return list_response(
         request=request,
         items=items,
-        total=len(items),
-        page=1,
-        page_size=max(len(items), 1),
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
         message_key="project_setup.success.facilities_retrieved",
-        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+        custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
     )
 

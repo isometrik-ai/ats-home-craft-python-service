@@ -19,12 +19,14 @@ TOWER_ID = "880e8400-e29b-41d4-a716-446655440003"
 class _FakeConn:
     """Minimal fake asyncpg connection with call recording."""
 
-    def __init__(self, *, rows=None, row=None, execute_result="DELETE 1"):
+    def __init__(self, *, rows=None, row=None, execute_result="DELETE 1", fetchval_result=0):
         self.rows = rows or []
         self.row = row
         self.execute_result = execute_result
+        self.fetchval_result = fetchval_result
         self.fetch_calls: list[tuple[str, tuple]] = []
         self.fetchrow_calls: list[tuple[str, tuple]] = []
+        self.fetchval_calls: list[tuple[str, tuple]] = []
         self.execute_calls: list[tuple[str, tuple]] = []
 
     async def fetch(self, query, *args):
@@ -34,6 +36,10 @@ class _FakeConn:
     async def fetchrow(self, query, *args):
         self.fetchrow_calls.append((query.strip(), args))
         return self.row
+
+    async def fetchval(self, query, *args):
+        self.fetchval_calls.append((query.strip(), args))
+        return self.fetchval_result
 
     async def execute(self, query, *args):
         self.execute_calls.append((query.strip(), args))
@@ -114,15 +120,25 @@ async def test_get_facility_found_and_not_found():
 
 @pytest.mark.asyncio
 async def test_list_facilities():
-    conn = _FakeConn(rows=[{"id": FACILITY_ID, "sort_order": 1}])
+    conn = _FakeConn(rows=[{"id": FACILITY_ID, "sort_order": 1}], fetchval_result=15)
     repo = FacilitiesRepository(db_connection=conn)
 
-    facilities = await repo.list_facilities(organization_id=ORG_ID, project_id=PROJECT_ID)
+    facilities, total = await repo.list_facilities(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        page=2,
+        page_size=10,
+    )
 
     assert len(facilities) == 1
+    assert total == 15
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "SELECT COUNT(*)::int FROM facilities" in count_query
+    assert count_args == (ORG_ID, PROJECT_ID)
     query, args = conn.fetch_calls[0]
     assert "ORDER BY sort_order, created_at" in query
-    assert args == (ORG_ID, PROJECT_ID)
+    assert "OFFSET $3 LIMIT $4" in query
+    assert args == (ORG_ID, PROJECT_ID, 10, 10)
 
 
 @pytest.mark.asyncio
