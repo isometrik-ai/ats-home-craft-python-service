@@ -268,8 +268,6 @@ async def test_list_profiles_includes_household_link_count():
     assert total == 1
     assert items[0].household_link_count == 3
     assert items[0].photo_path == "org/daily-help/photo_lakshmi.jpg"
-    assert items[0].photo_url is not None
-    assert items[0].photo_url.endswith("org/daily-help/photo_lakshmi.jpg")
 
 
 @pytest.mark.asyncio

@@ -78,7 +78,6 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
-from apps.user_service.app.utils.media_utils import public_media_url
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -580,7 +579,6 @@ class DailyHelpService:
             id=str(row["id"]),
             display_name=str(row["display_name"]),
             photo_path=row.get("photo_path"),
-            photo_url=public_media_url(row.get("photo_path")),
             initials=row.get("initials"),
             phone=DailyHelpService._format_phone(
                 isd_code=row.get("phone_isd_code"),
@@ -679,7 +677,6 @@ class DailyHelpService:
             profile_id=str(row["profile_id"]),
             display_name=str(row["display_name"]),
             photo_path=row.get("photo_path"),
-            photo_url=public_media_url(row.get("photo_path")),
             initials=row.get("initials"),
             phone=self._format_phone(
                 isd_code=row.get("phone_isd_code"),
@@ -726,7 +723,6 @@ class DailyHelpService:
                 phone_number=row.get("phone_number"),
             ),
             photo_path=row.get("photo_path"),
-            photo_url=public_media_url(row.get("photo_path")),
             document_count=int(row.get("document_count") or 0),
             household_link_count=units_linked_count,
             status=str(row["status"]),
@@ -781,7 +777,6 @@ class DailyHelpService:
             category_id=str(row["category_id"]),
             category_name=row.get("category_name"),
             photo_path=row.get("photo_path"),
-            photo_url=public_media_url(row.get("photo_path")),
             phone=phone,
             phone_masked=False,
             gate_passcode=row.get("gate_passcode"),
@@ -877,7 +872,6 @@ class DailyHelpService:
             gender=row.get("gender"),
             date_of_birth=self._format_date(row.get("date_of_birth")),
             photo_path=row.get("photo_path"),
-            photo_url=public_media_url(row.get("photo_path")),
             gate_passcode=str(row["gate_passcode"]) if row.get("gate_passcode") else None,
             status=str(row["status"]),
             open_to_work=bool(row.get("open_to_work")),
@@ -2698,6 +2692,5 @@ class DailyHelpService:
             "display_name": str(row["display_name"]),
             "category_name": row.get("category_name"),
             "photo_path": row.get("photo_path"),
-            "photo_url": public_media_url(row.get("photo_path")),
             "gate_passcode": row.get("gate_passcode"),
         }
