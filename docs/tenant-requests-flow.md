@@ -345,8 +345,8 @@ turnover:
 
 1. Find the active approved request (`status = approved`, `superseded_at IS NULL`) for that
    `tenant_contact_id` + `unit_id`.
-2. Set `status = superseded`, `superseded_at = now()`.
-3. Append a `superseded` event with payload `{ reason: "admin_move_out", move_event_id }`.
+1. Set `status = superseded`, `superseded_at = now()`.
+1. Append a `superseded` event with payload `{ reason: "admin_move_out", move_event_id }`.
 
 The owner list still shows the row in **history**, but it is no longer the current approved tenant
 (mobile can treat `superseded` after move-out as “tenant moved out”). Family-only move-outs do not
@@ -356,13 +356,13 @@ ______________________________________________________________________
 
 ## 6. Relationship to existing flows
 
-| Existing doc                                               | Relationship                                                                  |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Owner auth context; household/invite patterns for post-approval portal        |
+| Existing doc                                               | Relationship                                                                      |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Owner auth context; household/invite patterns for post-approval portal            |
 | [move-events-flow.md](./move-events-flow.md)               | Admin move-in/out ledger; `sync_after_admin_move_in/out`; shared turnover service |
-| [project-setup-flow.md](./project-setup-flow.md)           | Units must exist from project setup                                           |
-| [passes-flow.md](./passes-flow.md)                         | Same owner JWT pattern; different domain                                      |
-| [fee-flow.md](./fee-flow.md)                               | No direct coupling in phase 1                                                 |
+| [project-setup-flow.md](./project-setup-flow.md)           | Units must exist from project setup                                               |
+| [passes-flow.md](./passes-flow.md)                         | Same owner JWT pattern; different domain                                          |
+| [fee-flow.md](./fee-flow.md)                               | No direct coupling in phase 1                                                     |
 
 ### Difference from household member add
 
