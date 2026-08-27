@@ -36,8 +36,10 @@ from apps.user_service.app.services.push_notification_dispatch import (
     unit_label_from_row,
 )
 from apps.user_service.app.services.tenant_requests_service import TenantRequestsService
+from apps.user_service.app.services.unit_occupancy_turnover_service import (
+    UnitOccupancyTurnoverService,
+)
 from apps.user_service.app.services.units_service import format_contact_display_name
-from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -168,37 +170,47 @@ class MoveEventsService:
         move_type: str,
         event_date: date,
     ) -> None:
-        """Apply contact_units occupancy sync for a move type."""
-        if move_type == MoveEventType.MOVE_IN.value:
-            await self.contact_units_repo.sync_move_in(
-                organization_id=organization_id,
-                contact_unit_id=contact_unit_id,
-                event_date=event_date,
-            )
+        """Apply contact_units occupancy sync for a move-in."""
+        if move_type != MoveEventType.MOVE_IN.value:
             return
-        await self.contact_units_repo.sync_move_out(
+        await self.contact_units_repo.sync_move_in(
             organization_id=organization_id,
             contact_unit_id=contact_unit_id,
             event_date=event_date,
         )
-        vehicles_service = VehiclesService(
+
+    async def _release_occupancy_for_move_out(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        contact_id: str,
+    ) -> None:
+        """Clear household artifacts when a contact moves out of a unit."""
+        turnover_service = UnitOccupancyTurnoverService(
             db_connection=self.db_connection,
             user_context=self.user_context,
         )
-        await vehicles_service.release_for_move_out(
-            contact_id=contact_id,
-            unit_id=unit_id,
-        )
-        unit = await self.contact_units_repo.get_unit_project(
+        active_tenant_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
             organization_id=organization_id,
             unit_id=unit_id,
         )
-        if unit:
-            await self.units_repo.reconcile_unit_inventory_status(
+        if active_tenant_id and str(active_tenant_id) == str(contact_id):
+            await turnover_service.release_outgoing_tenant_household(
                 organization_id=organization_id,
-                project_id=str(unit["project_id"]),
+                project_id=project_id,
                 unit_id=unit_id,
+                reason="Admin move-out; clearing outgoing household.",
             )
+            return
+        await turnover_service.release_single_occupant(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            contact_id=contact_id,
+            reason="Admin move-out; clearing occupant.",
+        )
 
     async def _resolve_contact_unit(
         self,
@@ -336,11 +348,22 @@ class MoveEventsService:
             )
 
         move_type = body.move_type.value
+        project_id = str(unit["project_id"])
         if move_type == MoveEventType.MOVE_IN.value:
             await self._assert_move_in_allowed(
                 organization_id=organization_id,
-                project_id=str(unit["project_id"]),
+                project_id=project_id,
                 unit_id=body.unit_id,
+            )
+            turnover_service = UnitOccupancyTurnoverService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            await turnover_service.release_outgoing_tenant_household(
+                organization_id=organization_id,
+                project_id=project_id,
+                unit_id=body.unit_id,
+                reason="Admin move-in; clearing stale household.",
             )
         if move_type == MoveEventType.MOVE_OUT.value:
             has_active = await self.contact_units_repo.contact_has_active_unit(
@@ -387,6 +410,13 @@ class MoveEventsService:
             move_type=move_type,
             event_date=body.event_date,
         )
+        if move_type == MoveEventType.MOVE_OUT.value:
+            await self._release_occupancy_for_move_out(
+                organization_id=organization_id,
+                project_id=project_id,
+                unit_id=body.unit_id,
+                contact_id=str(body.contact_id),
+            )
         if move_type == MoveEventType.MOVE_IN.value:
             await self._ensure_tenant_role_for_move_in(
                 organization_id=organization_id,

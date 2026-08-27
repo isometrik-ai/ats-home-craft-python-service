@@ -57,13 +57,15 @@ from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
     unit_label_from_row,
 )
+from apps.user_service.app.services.unit_occupancy_turnover_service import (
+    UnitOccupancyTurnoverService,
+)
 from apps.user_service.app.services.units_service import (
     format_contact_display_name,
     format_primary_contact_email,
     format_primary_contact_phone,
     serialize_unit_list_item,
 )
-from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -1178,45 +1180,46 @@ class TenantRequestsService:
         assert org_id and user_id
         unit_id = str(row["unit_id"])
         now = datetime.now(timezone.utc)
+        project_id = str(row["project_id"])
 
         existing = await self.repo.find_active_approved_for_unit(
             organization_id=org_id,
             unit_id=unit_id,
         )
-        if existing and existing.get("contact_unit_id"):
-            old_contact_unit_id = str(existing["contact_unit_id"])
-            old_tenant_contact_id = existing.get("tenant_contact_id")
-            await self.contact_units_repo.sync_move_out(
-                organization_id=org_id,
-                contact_unit_id=old_contact_unit_id,
-                event_date=now.date(),
-            )
+        old_tenant_contact_id = (
+            str(existing["tenant_contact_id"])
+            if existing and existing.get("tenant_contact_id")
+            else None
+        )
+        old_contact_unit_id = (
+            str(existing["contact_unit_id"])
+            if existing and existing.get("contact_unit_id")
+            else None
+        )
+
+        turnover_service = UnitOccupancyTurnoverService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await turnover_service.release_outgoing_tenant_household(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            reason="Tenant request approved; clearing outgoing household.",
+        )
+
+        if existing and old_contact_unit_id:
             if old_tenant_contact_id:
                 await self._record_move_event_ledger(
                     organization_id=org_id,
-                    project_id=str(row["project_id"]),
+                    project_id=project_id,
                     unit_id=unit_id,
-                    contact_id=str(old_tenant_contact_id),
+                    contact_id=old_tenant_contact_id,
                     contact_unit_id=old_contact_unit_id,
                     move_type=MoveEventType.MOVE_OUT.value,
                     event_date=now.date(),
                     notes=f"Superseded by tenant request {tenant_request_id}",
                 )
-            tenant_contact_id = old_tenant_contact_id
-            if tenant_contact_id:
-                vehicles_service = VehiclesService(
-                    db_connection=self.db_connection,
-                    user_context=self.user_context,
-                )
-                await vehicles_service.release_for_move_out(
-                    contact_id=str(tenant_contact_id),
-                    unit_id=unit_id,
-                )
-            await self.contact_roles_repo.end_active_roles_for_unit(
-                organization_id=org_id,
-                unit_id=unit_id,
-                role_types=[ContactType.TENANT.value],
-            )
             await self.repo.update_request_status(
                 organization_id=org_id,
                 tenant_request_id=str(existing["id"]),

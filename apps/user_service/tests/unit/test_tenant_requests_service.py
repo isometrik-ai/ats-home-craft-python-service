@@ -45,6 +45,17 @@ DOC_ID = "aa0e8400-e29b-41d4-a716-446655440001"
 USER_ID = "bb0e8400-e29b-41d4-a716-446655440001"
 
 
+@pytest.fixture(autouse=True)
+def _mock_unit_occupancy_turnover(monkeypatch):
+    """Approve tests should not hit household turnover persistence."""
+    turnover_mock = MagicMock()
+    turnover_mock.release_outgoing_tenant_household = AsyncMock(return_value=[])
+    monkeypatch.setattr(
+        "apps.user_service.app.services.tenant_requests_service.UnitOccupancyTurnoverService",
+        MagicMock(return_value=turnover_mock),
+    )
+
+
 def _ctx(*, user_id: str = USER_ID) -> UserContext:
     """Build user context for tenant request tests."""
     return UserContext(
@@ -1150,11 +1161,11 @@ async def test_approve_request_not_ready() -> None:
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.services.tenant_requests_service.VehiclesService")
+@patch("apps.user_service.app.services.tenant_requests_service.UnitOccupancyTurnoverService")
 @patch("apps.user_service.app.services.tenant_requests_service.ContactsService")
 async def test_approve_request_supersedes_existing(
     mock_contacts_cls: MagicMock,
-    mock_vehicles_cls: MagicMock,
+    mock_turnover_cls: MagicMock,
 ) -> None:
     """Approving supersedes an existing approved tenant on the same unit."""
     repo = _FakeTenantRequestsRepo()
@@ -1169,7 +1180,9 @@ async def test_approve_request_supersedes_existing(
     mock_contacts_cls.return_value.create_contact = AsyncMock(
         return_value={"contact_id": "tenant-contact-1"}
     )
-    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_turnover_cls.return_value.release_outgoing_tenant_household = AsyncMock(
+        return_value=["old-tenant-contact"]
+    )
     svc = _service(repo=repo, move_events_repo=move_events_repo)
 
     response = await svc.approve_request(
@@ -1190,6 +1203,7 @@ async def test_approve_request_supersedes_existing(
     assert move_out["contact_unit_id"] == "old-link"
     assert move_in["move_type"] == MoveEventType.MOVE_IN.value
     assert move_in["contact_id"] == "tenant-contact-1"
+    mock_turnover_cls.return_value.release_outgoing_tenant_household.assert_awaited_once()
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,13 @@ def _mock_tenant_request_sync(monkeypatch):
         "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_in",
         AsyncMock(),
     )
+    turnover_mock = MagicMock()
+    turnover_mock.release_outgoing_tenant_household = AsyncMock(return_value=[])
+    turnover_mock.release_single_occupant = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.UnitOccupancyTurnoverService",
+        MagicMock(return_value=turnover_mock),
+    )
 
 
 def _required_move_in_documents() -> list[TenantRequestDocumentInput]:
@@ -384,20 +391,30 @@ def test_format_date_and_decimal_helpers():
 
 @pytest.mark.asyncio
 async def test_create_move_out_success_syncs_move_out(monkeypatch):
-    """Move-out inserts event, syncs move-out on contact_units, and releases vehicles."""
-    release_calls: list[dict[str, Any]] = []
+    """Move-out inserts event and clears household occupancy via turnover service."""
+    turnover_calls: list[str] = []
 
-    async def fake_release_for_move_out(_self, **kwargs):
-        release_calls.append(kwargs)
+    class _TurnoverStub:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def release_outgoing_tenant_household(self, **_kwargs):
+            turnover_calls.append("household")
+
+        async def release_single_occupant(self, **_kwargs):
+            turnover_calls.append("single")
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.move_events_service.VehiclesService.release_for_move_out",
-        fake_release_for_move_out,
+        "apps.user_service.app.services.move_events_service.UnitOccupancyTurnoverService",
+        _TurnoverStub,
     )
     move_repo = _FakeMoveEventsRepo()
     move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
     contact_units_repo = _FakeContactUnitsRepo()
     service = _service(move_repo, contact_units_repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="contact-1"
+    )
 
     result = await service.create_move_event(
         CreateMoveEventRequest(
@@ -409,8 +426,8 @@ async def test_create_move_out_success_syncs_move_out(monkeypatch):
     )
 
     assert result.move_type == MoveEventType.MOVE_OUT.value
-    assert len(contact_units_repo.sync_move_out_calls) == 1
-    assert release_calls == [{"contact_id": "contact-1", "unit_id": "unit-1"}]
+    assert turnover_calls == ["household"]
+    assert len(contact_units_repo.sync_move_out_calls) == 0
 
 
 @pytest.mark.asyncio
@@ -566,14 +583,10 @@ async def test_update_not_found_paths():
 
 
 @pytest.mark.asyncio
-async def test_update_event_date_resyncs_move_out(monkeypatch):
-    """Patching event_date on move-out re-syncs move-out occupancy."""
-    monkeypatch.setattr(
-        "apps.user_service.app.services.move_events_service.VehiclesService.release_for_move_out",
-        AsyncMock(),
-    )
+async def test_update_event_date_resyncs_move_in(monkeypatch):
+    """Patching event_date on move-in re-syncs move-in occupancy."""
     move_repo = _FakeMoveEventsRepo()
-    move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
+    move_repo.row = _move_row(move_type=MoveEventType.MOVE_IN.value)
     contact_units_repo = _FakeContactUnitsRepo()
     service = _service(move_repo, contact_units_repo)
 
@@ -582,7 +595,7 @@ async def test_update_event_date_resyncs_move_out(monkeypatch):
         UpdateMoveEventRequest(event_date=date(2026, 5, 27)),
     )
 
-    assert len(contact_units_repo.sync_move_out_calls) == 1
+    assert len(contact_units_repo.sync_move_in_calls) == 1
 
 
 @pytest.mark.asyncio

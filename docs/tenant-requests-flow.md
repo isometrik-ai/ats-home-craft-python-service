@@ -1,7 +1,7 @@
 # Tenant Requests Flow — Context & Change Guide
 
-> **Status: Phase 1 implemented (API + service + migrations).** Storage signed-upload,
-> portal invite, and move-event hooks are follow-ups. This document describes the **Tenant
+> **Status: Phase 1–2 implemented (API + service + migrations + occupancy turnover).** Storage signed-upload,
+> portal invite are follow-ups. This document describes the **Tenant
 > Requests** feature — owner submit on mobile, admin review on dashboard — in the same style as
 > [`contact-onboarding-flow.md`](./contact-onboarding-flow.md), [`move-events-flow.md`](./move-events-flow.md),
 > and [`passes-flow.md`](./passes-flow.md).
@@ -11,7 +11,8 @@
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Owner API prefix:** `/v1/contact-onboarding/tenant-requests`
 - **Admin API prefix:** `/v1/projects/{project_id}/tenant-requests`
-- **DB schema:** `ats-home-craft-supabase` (migrations `20260722150000_*`, `20260722151000_*`)
+- **DB schema:** `ats-home-craft-supabase` (migrations `20260722150000_*`, `20260722151000_*`,
+  backfills `20260827140000_*`, `20260827150000_*`)
 
 ______________________________________________________________________
 
@@ -24,20 +25,28 @@ the request.
 
 On **approval**:
 
+1. **Household turnover** — `UnitOccupancyTurnoverService.release_outgoing_tenant_household()` clears
+   outgoing tenant + family, vehicles, passes, daily help, invitations, and portal sessions (owner
+   preserved). See [move-events-flow.md §2.1](./move-events-flow.md#21-unit-occupancy-turnover-admin-move-in--move-out).
+1. If a prior approved tenant exists → supersede that request + record a **move-out** ledger row in
+   `move_events`.
 1. A real **`contacts`** row is created (identity only).
 1. A **`contact_units`** link is created (`status = active`, `relationship = self`, tenant as primary occupant).
 1. An active **`contact_roles`** row is created (`role_type = Tenant`, scoped to the unit).
+1. A **move-in** ledger row is written to `move_events`.
 1. The request moves to **`approved`** and appears in history forever.
 
 ### Business rules (must enforce)
 
-| Rule                                           | Enforcement                                             |
-| ---------------------------------------------- | ------------------------------------------------------- |
-| **One in-flight request per unit**             | Partial unique index + service check before create      |
-| **One active approved tenant per unit**        | Partial unique index; supersede previous on new approve |
-| **Past history visible**                       | Never hard-delete requests; `superseded` retains row    |
-| **Submitter must be primary occupant on unit** | `contact_units` active link with `relationship = self`  |
-| **Three documents required to submit**         | `id_proof`, `rental_agreement`, `police_verification`   |
+| Rule                                           | Enforcement                                                                 |
+| ---------------------------------------------- | --------------------------------------------------------------------------- |
+| **One in-flight request per unit**             | Partial unique index + service check before create                          |
+| **One active approved tenant per unit**        | Partial unique index; supersede previous on new approve                     |
+| **No new request while tenant is active**      | `create_request` → `tenant_requests.errors.active_tenant_exists` (422)      |
+| **Past history visible**                       | Never hard-delete requests; `superseded` retains row                        |
+| **Submitter must be primary occupant on unit** | `contact_units` active link with `relationship = self`                      |
+| **Three documents required to submit**         | `id_proof`, `rental_agreement`, `police_verification`                       |
+| **Turnover on approve**                        | Full household cleanup via `UnitOccupancyTurnoverService` before new tenant |
 
 ### Screen → capability map
 
@@ -83,6 +92,8 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | Admin API endpoints     | `app/api/tenant_requests.py`                                                        |
 | Route registration      | `app/api/routes.py`                                                                 |
 | Orchestration           | `app/services/tenant_requests_service.py`                                           |
+| Household turnover      | `app/services/unit_occupancy_turnover_service.py` (composed on approve)             |
+| Move-event ledger       | `app/db/repositories/move_events_repository.py` (approve supersede / move-in rows)  |
 | Persistence             | `app/db/repositories/tenant_requests_repository.py`                                 |
 | Request/response models | `app/schemas/tenant_requests.py`                                                    |
 | Enums (mirror Postgres) | `app/schemas/enums.py`                                                              |
@@ -167,8 +178,12 @@ ______________________________________________________________________
   `contact_units` link — product may allow co-owners later).
 - Target unit: owner has **`contact_units.status = active`** for that `unit_id`.
 - No other in-flight request on that unit.
-- If unit already has an approved tenant, owner may still submit — approval will **supersede** the
-  previous tenant (admin action).
+- **No active tenant on the unit** — if a tenant is already moved in (via admin move-in or a prior
+  approval), owner must wait for move-out before submitting (`active_tenant_exists`). Admin approval
+  with supersede still handles replacing an approved tenant when an in-flight request was opened
+  before that guard existed.
+- If unit already has an approved tenant request in flight toward supersede, admin approve will
+  **supersede** the previous tenant (turnover + new tenant).
 
 ### 4.2 Create + upload documents
 
@@ -192,7 +207,7 @@ POST /v1/contact-onboarding/tenant-requests
 
 Service:
 
-1. Validates ownership + no in-flight request.
+1. Validates ownership + no in-flight request + **no active tenant** on unit.
 1. Inserts `tenant_requests` (`status = submitted`).
 1. Inserts 3 `tenant_request_documents` rows (`status = pending`).
 1. Appends events: `created`, `submitted`.
@@ -291,26 +306,48 @@ returned on **GET** detail/list responses as a string (e.g. `"5000.00"`).
 Transactional steps:
 
 1. Assert `status = ready_to_approve`.
-1. If unit has current approved request → supersede old + `moved_out` old tenant link.
+1. Load any current approved request on the unit (for supersede ledger + events).
+1. **`UnitOccupancyTurnoverService.release_outgoing_tenant_household()`** — clear outgoing household
+   (family, vehicles, passes, daily help, invitations, portal sessions; owner preserved).
+1. If a prior approved tenant existed → mark that request `superseded` + append event; record
+   **move-out** in `move_events` for the old tenant.
 1. `ContactsService.create_contact` (identity; auth provisioned from `portal_access` on the request).
 1. `contact_units` insert (tenant, `is_primary = true`, `status = active`, `relationship = self`).
-1. `contact_roles` insert (`role_type = Tenant`, `status = active`, linked to unit + `contact_unit_id`).
+1. End prior `Tenant` roles on unit; insert new `Tenant` role.
+1. Record **move-in** in `move_events` (with document snapshot from the request).
 1. Update request: `approved`, `tenant_contact_id`, `contact_unit_id`, `approved_at`, **`move_in_date`** and **`move_in_fee`** (from request body).
-1. Append `approved` + `tenant_added` events.
+1. Append `approved` event; push notification to tenant contact.
 
 Returns created tenant summary + request snapshot.
+
+### 5.4 Admin move-in mirror (`sync_after_admin_move_in`)
+
+When staff records **move-in** via [`POST /v1/move-events`](./move-events-flow.md) instead of tenant
+request approval, `MoveEventsService` calls `TenantRequestsService.sync_after_admin_move_in()` so
+the **owner mobile list** still shows an approved row:
+
+1. Skip if an approved request already exists for the same `tenant_contact_id`.
+1. Else **approve** the newest in-flight request on the unit, if any.
+1. Else **insert** a synthetic approved request for the unit owner (tenant snapshot from `contacts`).
+
+Turnover on move-in is handled in `MoveEventsService` **before** this sync (same household cleanup
+as approve). This method only reconciles the `tenant_requests` ledger — not occupancy cleanup.
+
+Historical DB rows from move-ins before this sync existed: backfill migration
+`20260827140000_backfill_tenant_requests_from_move_ins.sql`. Stale household artifacts:
+`20260827150000_backfill_stale_unit_household_artifacts.sql` (no portal session revoke in SQL).
 
 ______________________________________________________________________
 
 ## 6. Relationship to existing flows
 
-| Existing doc                                               | Relationship                                                           |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Owner auth context; household/invite patterns for post-approval portal |
-| [move-events-flow.md](./move-events-flow.md)               | Optional auto `move_in` on approve; `moved_out` on supersede           |
-| [project-setup-flow.md](./project-setup-flow.md)           | Units must exist from project setup                                    |
-| [passes-flow.md](./passes-flow.md)                         | Same owner JWT pattern; different domain                               |
-| [fee-flow.md](./fee-flow.md)                               | No direct coupling in phase 1                                          |
+| Existing doc                                               | Relationship                                                                  |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Owner auth context; household/invite patterns for post-approval portal        |
+| [move-events-flow.md](./move-events-flow.md)               | Admin move-in/out ledger; `sync_after_admin_move_in`; shared turnover service |
+| [project-setup-flow.md](./project-setup-flow.md)           | Units must exist from project setup                                           |
+| [passes-flow.md](./passes-flow.md)                         | Same owner JWT pattern; different domain                                      |
+| [fee-flow.md](./fee-flow.md)                               | No direct coupling in phase 1                                                 |
 
 ### Difference from household member add
 
@@ -326,37 +363,52 @@ ______________________________________________________________________
 
 ## 7. Error cases (i18n keys to add)
 
-| Key                                                | When                                   |
-| -------------------------------------------------- | -------------------------------------- |
-| `tenant_requests.errors.unit_not_owned`            | Owner has no active link to unit       |
-| `tenant_requests.errors.inflight_request_exists`   | Another open request on same unit      |
-| `tenant_requests.errors.documents_incomplete`      | Submit without 3 docs                  |
-| `tenant_requests.errors.not_ready_to_approve`      | Admin approve before all docs verified |
-| `tenant_requests.errors.invalid_status_transition` | Cancel approved request, etc.          |
-| `tenant_requests.errors.document_not_rejected`     | Re-upload when doc not rejected        |
-| `tenant_requests.errors.active_tenant_exists`      | Rare — unique index race               |
+| Key                                                | When                                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------- |
+| `tenant_requests.errors.unit_not_owned`            | Owner has no active link to unit                                    |
+| `tenant_requests.errors.inflight_request_exists`   | Another open request on same unit                                   |
+| `tenant_requests.errors.active_tenant_exists`      | Owner submit while unit has active tenant (move-out required first) |
+| `tenant_requests.errors.documents_incomplete`      | Submit without 3 docs                                               |
+| `tenant_requests.errors.not_ready_to_approve`      | Admin approve before all docs verified                              |
+| `tenant_requests.errors.invalid_status_transition` | Cancel approved request, etc.                                       |
+| `tenant_requests.errors.document_not_rejected`     | Re-upload when doc not rejected                                     |
 
 ______________________________________________________________________
 
 ## 8. Implementation phases
 
-| Phase | Scope                                                                                |
-| ----- | ------------------------------------------------------------------------------------ |
-| **1** | Migrations + enums + repositories + owner create/list/detail/submit/cancel/re-upload |
-| **2** | Admin list/summary + document verify/reject + approve + supersede logic              |
-| **3** | Storage signed upload helper + audit logging on all writes                           |
-| **4** | Post-approval portal invite (SMS) + move-event integration                           |
-| **5** | RLS policies + export                                                                |
+| Phase        | Scope                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------- |
+| **1**        | Migrations + enums + repositories + owner create/list/detail/submit/cancel/re-upload    |
+| **2**        | Admin list/summary + document verify/reject + approve + supersede + turnover cleanup    |
+| **2b**       | Move-event ledger on approve; `sync_after_admin_move_in`; active-tenant submit guard    |
+| **3**        | Storage signed upload helper + audit logging on all writes                              |
+| **4**        | Post-approval portal invite (SMS)                                                       |
+| **5**        | RLS policies + export                                                                   |
+| **Backfill** | `20260827140000_*` tenant_requests mirror; `20260827150000_*` stale household artifacts |
 
 ______________________________________________________________________
 
 ## 9. Where to change things (quick reference)
 
-| Change                       | Location                                                                  |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| Add document type            | Migration enum + `TenantRequestDocumentType` + UI copy                    |
-| Change approval side effects | `tenant_requests_service.approve_request`                                 |
-| Owner ownership rules        | `_assert_owner_can_access_unit` in service                                |
-| Timeline copy                | `_derive_milestones` in service                                           |
-| Admin RBAC                   | `tenant_requests.py` — `PROJECTS_MANAGEMENT_*` (same as vehicle requests) |
-| Supersede behavior           | `approve_request` + partial unique indexes                                |
+| Change                                  | Location                                                                         |
+| --------------------------------------- | -------------------------------------------------------------------------------- |
+| Add document type                       | Migration enum + `TenantRequestDocumentType` + UI copy                           |
+| Change approval / turnover side effects | `tenant_requests_service.approve_request` + `unit_occupancy_turnover_service.py` |
+| Change move-in mirror for admin moves   | `tenant_requests_service.sync_after_admin_move_in`                               |
+| Owner submit guards                     | `create_request` → `_assert_no_active_tenant_on_unit`                            |
+| Owner ownership rules                   | `_assert_owner_can_access_unit` in service                                       |
+| Timeline copy                           | `_derive_milestones` in service                                                  |
+| Admin RBAC                              | `tenant_requests.py` — `PROJECTS_MANAGEMENT_*` (same as vehicle requests)        |
+| Supersede behavior                      | `approve_request` + partial unique indexes + move_events ledger                  |
+
+______________________________________________________________________
+
+## 10. Tests
+
+- `tests/unit/test_tenant_requests_service.py` — create/submit guards, approve + supersede,
+  `sync_after_admin_move_in`, active-tenant submit block.
+- `tests/unit/test_unit_occupancy_turnover_service.py` — shared household cleanup (with move-events).
+- `tests/integration/tenant_requests/` — API smoke tests.
+
+Run: `.venv/bin/python -m pytest apps/user_service/tests/unit/test_tenant_requests_service.py`
