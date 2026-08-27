@@ -641,6 +641,35 @@ class TenantRequestsRepository(BaseRepository):
             }
         return {key: int(row[key] or 0) for key in row.keys()}
 
+    async def find_latest_open_request_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the newest in-flight tenant request for a unit, if any."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT id::text AS id, submitted_by_contact_id::text AS submitted_by_contact_id
+            FROM tenant_requests
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+              AND status = ANY($3::tenant_request_status[])
+            ORDER BY submitted_at DESC NULLS LAST, created_at DESC
+            LIMIT 1
+            """,
+            organization_id,
+            unit_id,
+            [
+                TenantRequestStatus.DRAFT.value,
+                TenantRequestStatus.SUBMITTED.value,
+                TenantRequestStatus.PENDING_REVIEW.value,
+                TenantRequestStatus.AWAITING_RESUBMISSION.value,
+                TenantRequestStatus.READY_TO_APPROVE.value,
+            ],
+        )
+        return dict(row) if row else None
+
     async def find_active_approved_for_unit(
         self,
         *,

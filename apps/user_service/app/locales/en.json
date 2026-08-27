@@ -815,6 +815,7 @@
       "document_not_found": "The tenant request document could not be found.",
       "unit_not_owned": "You do not have an active owner assignment for this unit.",
       "inflight_request_exists": "This unit already has a tenant request in progress.",
+      "active_tenant_exists": "This unit already has an active tenant. Move out the current tenant before submitting a new request.",
       "documents_incomplete": "All required documents must be uploaded before submitting.",
       "not_ready_to_approve": "All documents must be verified before approving this request.",
       "invalid_status_transition": "This action is not allowed for the current request status.",

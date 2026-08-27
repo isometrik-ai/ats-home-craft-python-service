@@ -35,6 +35,7 @@ from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
     unit_label_from_row,
 )
+from apps.user_service.app.services.tenant_requests_service import TenantRequestsService
 from apps.user_service.app.services.units_service import format_contact_display_name
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import (
@@ -393,6 +394,19 @@ class MoveEventsService:
                 unit_id=body.unit_id,
                 contact_id=body.contact_id,
                 contact_unit_id=contact_unit_id,
+            )
+            tenant_requests_service = TenantRequestsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            await tenant_requests_service.sync_after_admin_move_in(
+                project_id=str(unit["project_id"]),
+                unit_id=body.unit_id,
+                tenant_contact_id=str(body.contact_id),
+                contact_unit_id=str(contact_unit_id),
+                move_in_date=body.event_date,
+                move_in_fee=body.fee_amount or Decimal("0"),
+                move_event_id=str(inserted["id"]),
             )
 
         row = await self.move_events_repo.get_by_id(

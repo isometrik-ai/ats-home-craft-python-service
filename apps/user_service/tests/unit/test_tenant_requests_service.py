@@ -181,6 +181,7 @@ class _FakeTenantRequestsRepo:
         }
         self.reupload_returns: dict[str, Any] | None = {"document_type": "id_proof"}
         self.active_approved: dict[str, Any] | None = None
+        self.open_request: dict[str, Any] | None = None
 
     async def insert_request(self, **kwargs):
         """Insert tenant request header."""
@@ -293,6 +294,11 @@ class _FakeTenantRequestsRepo:
         del organization_id, unit_id
         return self.active_approved
 
+    async def find_latest_open_request_for_unit(self, *, organization_id: str, unit_id: str):
+        """Return newest open request for unit."""
+        del organization_id, unit_id
+        return self.open_request
+
 
 class _FakeMoveEventsRepo:
     """Configurable fake move-events repository."""
@@ -367,10 +373,14 @@ def _service(
     service.setup_service = AsyncMock()
     service._push_dispatcher = _FakePushDispatcher()
     service.contact_roles_repo = AsyncMock()
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(return_value=None)
     service.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
     service.contact_roles_repo.insert_tenant_role = AsyncMock(return_value={"id": "role-1"})
     service.units_repo = AsyncMock()
     service.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="occupied")
+    service.units_repo.get_unit_owner_contact = AsyncMock(return_value=None)
+    service.contacts_repo = AsyncMock()
+    service.contacts_repo.get_contact_details = AsyncMock(return_value=None)
     return service
 
 
@@ -549,6 +559,20 @@ async def test_create_request_conflict() -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_request_rejects_active_tenant() -> None:
+    """Owner cannot submit while the unit still has an active tenant."""
+    svc = _service()
+    svc.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-contact-1"
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.create_request(owner_contact_id=OWNER_ID, body=_create_body())
+
+    assert exc_info.value.message_key == "tenant_requests.errors.active_tenant_exists"
+
+
+@pytest.mark.asyncio
 async def test_list_owner_requests() -> None:
     """Owner list returns serialized tenant requests."""
     svc = _service()
@@ -558,6 +582,60 @@ async def test_list_owner_requests() -> None:
     )
     assert total == 1
     assert items[0].id == REQUEST_ID
+
+
+@pytest.mark.asyncio
+async def test_sync_after_admin_move_in_approves_open_request() -> None:
+    """Admin move-in marks an in-flight owner request approved."""
+    repo = _FakeTenantRequestsRepo()
+    repo.open_request = {"id": REQUEST_ID, "submitted_by_contact_id": OWNER_ID}
+    svc = _service(repo=repo)
+
+    await svc.sync_after_admin_move_in(
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+        tenant_contact_id="tenant-contact-1",
+        contact_unit_id="link-1",
+        move_in_date=date(2026, 8, 1),
+        move_in_fee=Decimal("5000"),
+        move_event_id="move-1",
+    )
+
+    assert repo.row["status"] == TenantRequestStatus.APPROVED.value
+    assert repo.row["tenant_contact_id"] == "tenant-contact-1"
+    assert repo.row["contact_unit_id"] == "link-1"
+    assert repo.events[-1]["event_type"] == TenantRequestEventType.APPROVED.value
+
+
+@pytest.mark.asyncio
+async def test_sync_after_admin_move_in_creates_owner_visible_request() -> None:
+    """Admin-only move-in creates an approved request for the unit owner."""
+    repo = _FakeTenantRequestsRepo()
+    svc = _service(repo=repo)
+    svc.units_repo.get_unit_owner_contact = AsyncMock(return_value={"contact_id": OWNER_ID})
+    svc.contacts_repo.get_contact_details = AsyncMock(
+        return_value={
+            "first_name": "Tenant",
+            "last_name": "User",
+            "phones": [{"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}],
+            "emails": [],
+            "portal_access": False,
+        }
+    )
+
+    await svc.sync_after_admin_move_in(
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+        tenant_contact_id="tenant-contact-1",
+        contact_unit_id="link-1",
+        move_in_date=date(2026, 8, 1),
+        move_in_fee=Decimal("2500"),
+        move_event_id="move-2",
+    )
+
+    assert repo.row["status"] == TenantRequestStatus.APPROVED.value
+    assert repo.row["tenant_contact_id"] == "tenant-contact-1"
+    assert repo.events[-1]["event_type"] == TenantRequestEventType.APPROVED.value
 
 
 @pytest.mark.asyncio

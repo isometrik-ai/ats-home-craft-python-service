@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -19,6 +19,15 @@ from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentI
 from apps.user_service.app.services.move_events_service import MoveEventsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+
+@pytest.fixture(autouse=True)
+def _mock_tenant_request_sync(monkeypatch):
+    """Move-in tests should not hit tenant request persistence."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_in",
+        AsyncMock(),
+    )
 
 
 def _required_move_in_documents() -> list[TenantRequestDocumentInput]:
@@ -233,13 +242,18 @@ async def test_create_move_in_syncs_active_link():
     contact_units_repo = _FakeContactUnitsRepo()
     service = _service(move_repo, contact_units_repo)
 
-    result = await service.create_move_event(_move_in_request(fee_amount=Decimal("5000")))
+    with patch(
+        "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_in",
+        new=AsyncMock(),
+    ) as sync_mock:
+        result = await service.create_move_event(_move_in_request(fee_amount=Decimal("5000")))
 
     assert result.move_type == MoveEventType.MOVE_IN.value
     assert len(move_repo.insert_calls) == 1
     assert len(move_repo.insert_calls[0]["documents"]) == 3
     assert len(contact_units_repo.sync_move_in_calls) == 1
     service.contact_roles_repo.insert_tenant_role.assert_awaited_once()
+    sync_mock.assert_awaited_once()
 
 
 @pytest.mark.asyncio
