@@ -121,6 +121,13 @@ class ParkingAllotmentService:
         payload = parse_json_any(value, default={}) or {}
         return payload if isinstance(payload, dict) else {}
 
+    @staticmethod
+    def _active_allotments_from_row(value: Any) -> list[dict[str, Any]]:
+        raw_items = parse_json_any(value, default=[]) or []
+        if not isinstance(raw_items, list):
+            return []
+        return [item for item in raw_items if isinstance(item, dict)]
+
     async def _ensure_project(self, *, project_id: str) -> None:
         await self.setup_service.ensure_project(project_id=project_id)
 
@@ -368,9 +375,7 @@ class ParkingAllotmentService:
             entitlement_status = "met"
 
         slots_held: list[ParkingAllotmentSlotHeldResponse] = []
-        for item in row.get("active_allotments") or []:
-            if not isinstance(item, dict):
-                continue
+        for item in self._active_allotments_from_row(row.get("active_allotments")):
             slot_id = str(item.get("slot_id") or "")
             slot_meta = (slot_rows_by_id or {}).get(slot_id, {})
             slot_type = str(slot_meta.get("slot_type") or ParkingSlotType.CAR_STANDARD.value)
@@ -555,8 +560,8 @@ class ParkingAllotmentService:
     ) -> dict[str, dict[str, Any]]:
         slot_ids: set[str] = set()
         for row in rows:
-            for item in row.get("active_allotments") or []:
-                if isinstance(item, dict) and item.get("slot_id"):
+            for item in self._active_allotments_from_row(row.get("active_allotments")):
+                if item.get("slot_id"):
                     slot_ids.add(str(item["slot_id"]))
         slot_rows_by_id: dict[str, dict[str, Any]] = {}
         for slot_id in slot_ids:
