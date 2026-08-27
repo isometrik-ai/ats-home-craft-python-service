@@ -417,6 +417,15 @@ class MoveEventsService:
                 unit_id=body.unit_id,
                 contact_id=str(body.contact_id),
             )
+            tenant_requests_service = TenantRequestsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            await tenant_requests_service.sync_after_admin_move_out(
+                unit_id=body.unit_id,
+                tenant_contact_id=str(body.contact_id),
+                move_event_id=str(inserted["id"]),
+            )
         if move_type == MoveEventType.MOVE_IN.value:
             await self._ensure_tenant_role_for_move_in(
                 organization_id=organization_id,

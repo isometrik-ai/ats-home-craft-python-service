@@ -192,6 +192,7 @@ class _FakeTenantRequestsRepo:
         }
         self.reupload_returns: dict[str, Any] | None = {"document_type": "id_proof"}
         self.active_approved: dict[str, Any] | None = None
+        self.active_approved_by_tenant: dict[str, Any] | None = None
         self.open_request: dict[str, Any] | None = None
 
     async def insert_request(self, **kwargs):
@@ -304,6 +305,13 @@ class _FakeTenantRequestsRepo:
         """Return existing approved request for unit."""
         del organization_id, unit_id
         return self.active_approved
+
+    async def find_active_approved_for_unit_by_tenant(
+        self, *, organization_id: str, tenant_contact_id: str
+    ):
+        """Return existing approved request for tenant contact."""
+        del organization_id, tenant_contact_id
+        return self.active_approved_by_tenant
 
     async def find_latest_open_request_for_unit(self, *, organization_id: str, unit_id: str):
         """Return newest open request for unit."""
@@ -647,6 +655,31 @@ async def test_sync_after_admin_move_in_creates_owner_visible_request() -> None:
     assert repo.row["status"] == TenantRequestStatus.APPROVED.value
     assert repo.row["tenant_contact_id"] == "tenant-contact-1"
     assert repo.events[-1]["event_type"] == TenantRequestEventType.APPROVED.value
+
+
+@pytest.mark.asyncio
+async def test_sync_after_admin_move_out_supersedes_active_request() -> None:
+    """Admin move-out closes the active approved tenant request for that contact."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(status=TenantRequestStatus.APPROVED.value)
+    repo.active_approved_by_tenant = {
+        "id": REQUEST_ID,
+        "tenant_contact_id": "tenant-contact-1",
+        "contact_unit_id": "link-1",
+        "unit_id": UNIT_ID,
+    }
+    svc = _service(repo=repo)
+
+    await svc.sync_after_admin_move_out(
+        unit_id=UNIT_ID,
+        tenant_contact_id="tenant-contact-1",
+        move_event_id="move-out-1",
+    )
+
+    assert repo.row["status"] == TenantRequestStatus.SUPERSEDED.value
+    assert repo.row["superseded_at"] is not None
+    assert repo.events[-1]["event_type"] == TenantRequestEventType.SUPERSEDED.value
+    assert repo.events[-1]["payload"]["reason"] == "admin_move_out"
 
 
 @pytest.mark.asyncio

@@ -194,6 +194,8 @@ All routes under `/v1/move-events`, authenticated + org-scoped, guarded by `cont
 1. **Move-in only:** assign `Tenant` role when missing; call
    `TenantRequestsService.sync_after_admin_move_in()` so the owner mobile list shows an approved
    tenant request (mirrors ledger row — see [tenant-requests-flow.md](./tenant-requests-flow.md)).
+1. **Move-out only:** call `TenantRequestsService.sync_after_admin_move_out()` to mark the active
+   approved `tenant_requests` row as `superseded` (so owner history no longer shows a current tenant).
 1. Return the created move with joined display fields (unit label, type, contact name/role).
 
 ### Example: `GET /v1/move-events?bucket=move_out&search=A-0101`
@@ -285,6 +287,7 @@ ______________________________________________________________________
 | Add/rename a move field                 | new migration + `move_events_repository.py` SQL + `schemas/move_events.py` |
 | Change occupancy-sync / turnover rules  | `move_events_service.py` + `unit_occupancy_turnover_service.py`            |
 | Change tenant-request mirror on move-in | `tenant_requests_service.sync_after_admin_move_in`                         |
+| Change tenant-request close on move-out | `tenant_requests_service.sync_after_admin_move_out`                        |
 | Change list filter / search             | `move_events_repository.py` list query + `MoveEventListBucket`             |
 | Add scheduled/completed lifecycle       | add `MoveEventStatus` enum + Postgres enum + column (additive)             |
 | Add an endpoint                         | route in `api/move_events.py` → service method → repository method         |
@@ -327,6 +330,7 @@ ______________________________________________________________________
 - [x] `PATCH /move-events/{id}`, `DELETE /move-events/{id}` (soft-void + re-derive occupancy)
 - [x] Unit occupancy turnover on move-in / tenant move-out (`UnitOccupancyTurnoverService`)
 - [x] `sync_after_admin_move_in` — owner tenant-requests list stays in sync
+- [x] `sync_after_admin_move_out` — approved request closed on tenant move-out
 - [x] Unit tests: occupancy sync, move-out guard, fee validation, list filter/search, turnover hooks
 
 ### Phase 3 — Hardening (optional)

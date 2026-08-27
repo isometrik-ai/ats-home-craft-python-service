@@ -28,6 +28,10 @@ def _mock_tenant_request_sync(monkeypatch):
         "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_in",
         AsyncMock(),
     )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_out",
+        AsyncMock(),
+    )
     turnover_mock = MagicMock()
     turnover_mock.release_outgoing_tenant_household = AsyncMock(return_value=[])
     turnover_mock.release_single_occupant = AsyncMock()
@@ -391,8 +395,9 @@ def test_format_date_and_decimal_helpers():
 
 @pytest.mark.asyncio
 async def test_create_move_out_success_syncs_move_out(monkeypatch):
-    """Move-out inserts event and clears household occupancy via turnover service."""
+    """Move-out inserts event, clears household occupancy, and closes tenant request."""
     turnover_calls: list[str] = []
+    sync_move_out_calls: list[dict[str, Any]] = []
 
     class _TurnoverStub:
         def __init__(self, **_kwargs):
@@ -404,9 +409,16 @@ async def test_create_move_out_success_syncs_move_out(monkeypatch):
         async def release_single_occupant(self, **_kwargs):
             turnover_calls.append("single")
 
+    async def fake_sync_after_admin_move_out(_self, **kwargs):
+        sync_move_out_calls.append(kwargs)
+
     monkeypatch.setattr(
         "apps.user_service.app.services.move_events_service.UnitOccupancyTurnoverService",
         _TurnoverStub,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_out",
+        fake_sync_after_admin_move_out,
     )
     move_repo = _FakeMoveEventsRepo()
     move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
@@ -427,6 +439,13 @@ async def test_create_move_out_success_syncs_move_out(monkeypatch):
 
     assert result.move_type == MoveEventType.MOVE_OUT.value
     assert turnover_calls == ["household"]
+    assert sync_move_out_calls == [
+        {
+            "unit_id": "unit-1",
+            "tenant_contact_id": "contact-1",
+            "move_event_id": "move-1",
+        }
+    ]
     assert len(contact_units_repo.sync_move_out_calls) == 0
 
 
