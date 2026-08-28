@@ -1419,9 +1419,16 @@ async def test_list_facilities(monkeypatch, client):
     _patch_projects_access(monkeypatch)
 
     async def fake_list_facilities(
-        _self, *, project_id: str, facility_types=None, status=None, page=1, page_size=20
+        _self,
+        *,
+        project_id: str,
+        facility_types=None,
+        status=None,
+        search=None,
+        page=1,
+        page_size=20,
     ):
-        del _self, project_id, status, page, page_size
+        del _self, project_id, status, search, page, page_size
         assert facility_types == ["sports", "events"]
         return {"items": [_FAKE_FACILITY], "total": 1}
 
@@ -1446,7 +1453,14 @@ async def test_list_facilities_accepts_comma_separated_types(monkeypatch, client
     captured: dict[str, Any] = {}
 
     async def fake_list_facilities(
-        _self, *, project_id: str, facility_types=None, status=None, page=1, page_size=20
+        _self,
+        *,
+        project_id: str,
+        facility_types=None,
+        status=None,
+        search=None,
+        page=1,
+        page_size=20,
     ):
         del _self, project_id, status, page, page_size
         captured["facility_types"] = facility_types
@@ -1463,6 +1477,117 @@ async def test_list_facilities_accepts_comma_separated_types(monkeypatch, client
     )
     assert_success(res, 200)
     assert captured["facility_types"] == ["recreation", "services"]
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_with_search(monkeypatch, client):
+    """GET facilities forwards search query to service."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    async def fake_list_facilities(
+        _self,
+        *,
+        project_id: str,
+        facility_types=None,
+        status=None,
+        search=None,
+        page=1,
+        page_size=20,
+    ):
+        del _self, project_id, facility_types, status, page, page_size
+        captured["search"] = search
+        return {"items": [_FAKE_FACILITY], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
+        fake_list_facilities,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/facilities",
+        params={"search": "Olym"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"][0]["name"] == "Clubhouse"
+    assert captured["search"] == "Olym"
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_search_trims_whitespace(monkeypatch, client):
+    """GET facilities trims surrounding whitespace from search."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    async def fake_list_facilities(
+        _self,
+        *,
+        project_id: str,
+        facility_types=None,
+        status=None,
+        search=None,
+        page=1,
+        page_size=20,
+    ):
+        del _self, project_id, facility_types, status, page, page_size
+        captured["search"] = search
+        return {"items": [_FAKE_FACILITY], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
+        fake_list_facilities,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/facilities",
+        params={"search": "  pool  "},
+    )
+    assert_success(res, 200)
+    assert captured["search"] == "pool"
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_search_with_status_and_types(monkeypatch, client):
+    """GET facilities forwards search together with status and facility_types."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    async def fake_list_facilities(
+        _self,
+        *,
+        project_id: str,
+        facility_types=None,
+        status=None,
+        search=None,
+        page=1,
+        page_size=20,
+    ):
+        del _self, project_id, page, page_size
+        captured["facility_types"] = facility_types
+        captured["status"] = status
+        captured["search"] = search
+        return {"items": [_FAKE_FACILITY], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
+        fake_list_facilities,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/facilities",
+        params={
+            "search": "club",
+            "status": "active",
+            "facility_types": "recreation",
+        },
+    )
+    assert_success(res, 200)
+    assert captured["search"] == "club"
+    assert captured["status"] == "active"
+    assert captured["facility_types"] == ["recreation"]
 
 
 @pytest.mark.asyncio

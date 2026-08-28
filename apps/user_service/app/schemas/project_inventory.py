@@ -188,6 +188,11 @@ class FacilityListQuery(BaseModel):
         ),
     )
     status: FacilityStatus | None = None
+    search: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Case-insensitive search on facility name.",
+    )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 
@@ -202,12 +207,19 @@ def build_facility_list_query(
     *,
     facility_types: list[str] | None,
     status: FacilityStatus | None,
+    search: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> FacilityListQuery:
     """Build list query from raw query-string values."""
+    normalized_search = search.strip() if search and search.strip() else None
     if not facility_types:
-        return FacilityListQuery(status=status, page=page, page_size=page_size)
+        return FacilityListQuery(
+            status=status,
+            search=normalized_search,
+            page=page,
+            page_size=page_size,
+        )
     expanded: list[str] = []
     for item in facility_types:
         expanded.extend(part.strip() for part in item.split(",") if part.strip())
@@ -215,6 +227,7 @@ def build_facility_list_query(
     return FacilityListQuery(
         facility_types=parsed,
         status=status,
+        search=normalized_search,
         page=page,
         page_size=page_size,
     )

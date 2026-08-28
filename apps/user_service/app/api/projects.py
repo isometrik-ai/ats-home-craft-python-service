@@ -2210,6 +2210,11 @@ def get_facility_list_query(
         ),
     ] = None,
     status: FacilityStatus | None = Query(default=None, description="Filter by status."),
+    search: str | None = Query(
+        default=None,
+        min_length=1,
+        description="Case-insensitive search on facility name.",
+    ),
     page: int = Query(default=1, ge=1, description="Page number (1-based)."),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
 ) -> FacilityListQuery:
@@ -2217,6 +2222,7 @@ def get_facility_list_query(
     return build_facility_list_query(
         facility_types=facility_types,
         status=status,
+        search=search,
         page=page,
         page_size=page_size,
     )
@@ -2255,6 +2261,7 @@ async def list_facilities(
         project_id=project_id,
         facility_types=parsed_types,
         status=query.status.value if query.status else None,
+        search=query.search,
         page=query.page,
         page_size=query.page_size,
     )
