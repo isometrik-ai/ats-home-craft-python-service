@@ -288,26 +288,26 @@ ______________________________________________________________________
 
 ### 6.1 Summary
 
-| Feature          | Events | gRPC `type` / `feed_type`               | Primary API / trigger                     |
-| ---------------- | ------ | --------------------------------------- | ----------------------------------------- |
-| Walk-in          | 4      | `NOTIFICATION_TYPE_WALK_IN` / `walk_in` | `walk_ins.py`, `walk_ins_owner.py`        |
-| Visitor pass     | 2      | `NOTIFICATION_TYPE_PASS` / `pass`       | `gate_passes.py`                          |
-| Daily help       | 2      | `NOTIFICATION_TYPE_PASS` / `daily_help` | `gate_passes.py` (pass linked to profile) |
-| Tenant request   | 4      | `NOTIFICATION_TYPE_TENANT` / `tenant`   | `tenant_requests.py`, owner create API    |
-| Fee invoice      | 2      | `NOTIFICATION_TYPE_FEE` / `fee`         | `fee_invoices.py`, reminder job           |
-| Move event       | 1      | `NOTIFICATION_TYPE_MOVE` / `move`       | `move_events.py`                          |
-| Vehicle          | 3      | `NOTIFICATION_TYPE_VEHICLE` / `vehicle` | contact onboarding / admin review APIs    |
-| Community notice | 1      | `notice_published` / `notices`          | `notices.py`, scheduled publish job       |
+| Feature          | Events | gRPC `type` / `feed_type`                                                               | Primary API / trigger                  |
+| ---------------- | ------ | --------------------------------------------------------------------------------------- | -------------------------------------- |
+| Walk-in          | 4      | `NOTIFICATION_TYPE_WALK_IN` / `walk_in`                                                 | `walk_ins.py`, `walk_ins_owner.py`     |
+| Visitor pass     | 2      | `NOTIFICATION_TYPE_PASS` / `pass`                                                       | `gate_passes.py`                       |
+| Daily help       | 6      | `NOTIFICATION_TYPE_DAILY_HELP` / `daily_help` (review); `NOTIFICATION_TYPE_PASS` (gate) | `daily_help.py`, `gate_passes.py`      |
+| Tenant request   | 4      | `NOTIFICATION_TYPE_TENANT` / `tenant`                                                   | `tenant_requests.py`, owner create API |
+| Fee invoice      | 2      | `NOTIFICATION_TYPE_FEE` / `fee`                                                         | `fee_invoices.py`, reminder job        |
+| Move event       | 1      | `NOTIFICATION_TYPE_MOVE` / `move`                                                       | `move_events.py`                       |
+| Vehicle          | 3      | `NOTIFICATION_TYPE_VEHICLE` / `vehicle`                                                 | contact onboarding / admin review APIs |
+| Community notice | 1      | `notice_published` / `notices`                                                          | `notices.py`, scheduled publish job    |
 
 ### 6.2 Dispatch helpers (`PushNotificationDispatcher`)
 
-| Method                         | Used for                                                | Preference check                       |
-| ------------------------------ | ------------------------------------------------------- | -------------------------------------- |
-| `send_to_unit_residents`       | Walk-in awaiting/entered; guest pass check-in/out       | Yes (`communication_preferences.push`) |
-| `send_to_user`                 | Walk-in approve/reject → security; notices              | Per call (security: **off**)           |
-| `send_to_contact`              | Tenant docs/approve; vehicle approve/reject; move event | Yes                                    |
-| `send_to_org_members`          | Tenant submitted; vehicle submitted/resubmitted         | **No** (staff/admin)                   |
-| `send_to_contact_unit_primary` | Fee invoice issued / payment reminder                   | Yes                                    |
+| Method                         | Used for                                                                          | Preference check                       |
+| ------------------------------ | --------------------------------------------------------------------------------- | -------------------------------------- |
+| `send_to_unit_residents`       | Walk-in awaiting/entered; guest pass check-in/out                                 | Yes (`communication_preferences.push`) |
+| `send_to_user`                 | Walk-in approve/reject → security; notices                                        | Per call (security: **off**)           |
+| `send_to_contact`              | Tenant docs/approve; vehicle approve/reject; move event                           | Yes                                    |
+| `send_to_org_members`          | Tenant submitted; vehicle submitted/resubmitted; daily help submitted/resubmitted | **No** (staff/admin)                   |
+| `send_to_contact_unit_primary` | Fee invoice issued / payment reminder                                             | Yes                                    |
 
 `DailyHelpNotificationService` calls `send_to_user` directly for Owner/Tenant on linked household units.
 
@@ -339,7 +339,22 @@ ______________________________________________________________________
 
 **Skipped when:** pass `is_private == true`, failed check-in validation, or `/passes/verify` (lookup only — no push).
 
-### 6.5 Daily help (`DailyHelpNotificationService` — via `gate_passes.py`)
+### 6.5 Daily help
+
+#### Security submission review (`DailyHelpService` — `daily_help.py`)
+
+| Event       | Message key                                 | Trigger                         | Recipient                                   | API                                    |
+| ----------- | ------------------------------------------- | ------------------------------- | ------------------------------------------- | -------------------------------------- |
+| Submitted   | `notifications.push.daily_help.submitted`   | Security submits for review     | Active org members (admins)                 | `POST .../daily-help/submissions`      |
+| Resubmitted | `notifications.push.daily_help.resubmitted` | Security resubmits after reject | Active org members (admins)                 | `PATCH .../daily-help/{id}/submission` |
+| Approved    | `notifications.push.daily_help.approved`    | Admin approves pending profile  | Security submitter (`submitted_by_user_id`) | `POST .../daily-help/{id}/approve`     |
+| Rejected    | `notifications.push.daily_help.rejected`    | Admin rejects pending profile   | Security submitter                          | `POST .../daily-help/{id}/reject`      |
+
+**Params:** `{helper_name}` (profile display name).
+
+**Click actions:** `OPEN_DAILY_HELP_REVIEW` (admins), `OPEN_DAILY_HELP_SUBMISSION` (security).
+
+#### Gate check-in/out (`DailyHelpNotificationService` — via `gate_passes.py`)
 
 When the pass row has `daily_help_id`, check-in/out uses daily-help recipients instead of household pass flow.
 
@@ -420,7 +435,7 @@ All keys follow `notifications.push.{feature}.{event}.title` / `.body`:
 ```text
 walk_in.awaiting | approved | rejected | entered
 pass.checked_in | checked_out
-daily_help.checked_in | checked_out
+daily_help.submitted | resubmitted | approved | rejected | checked_in | checked_out
 tenant_request.submitted | document_verified | document_rejected | approved
 fee.invoice_issued | payment_reminder
 move.recorded

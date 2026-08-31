@@ -77,6 +77,9 @@ from apps.user_service.app.schemas.enums import (
     PassValidityType,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.push_notification_dispatch import (
+    PushNotificationDispatcher,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -105,6 +108,7 @@ class DailyHelpService:
         passes_repository: PassesRepository | None = None,
         pass_events_repository: PassEventsRepository | None = None,
         contact_units_repository: ContactUnitsRepository | None = None,
+        push_dispatcher: PushNotificationDispatcher | None = None,
     ) -> None:
         self.db_connection = db_connection
         self.user_context = user_context
@@ -117,6 +121,79 @@ class DailyHelpService:
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
             user_context=user_context,
+        )
+        self._push_dispatcher = push_dispatcher
+
+    def _push(self) -> PushNotificationDispatcher:
+        if self._push_dispatcher is None:
+            self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
+        return self._push_dispatcher
+
+    @staticmethod
+    def _helper_name_from_row(row: dict[str, Any]) -> str:
+        """Display name for daily help push copy."""
+        return str(row.get("display_name") or "").strip() or "Daily help"
+
+    async def _notify_reviewers_submission(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        helper_name: str,
+        message_key: str,
+        idempotency_suffix: str,
+    ) -> None:
+        """Notify org admins when security submits or resubmits a profile."""
+        await self._push().send_to_org_members(
+            organization_id=self.organization_id,
+            message_key=message_key,
+            notification_type="NOTIFICATION_TYPE_DAILY_HELP",
+            feed_type="daily_help",
+            params={"helper_name": helper_name},
+            data={
+                "profile_id": profile_id,
+                "project_id": project_id,
+                "screen": "daily_help_review",
+            },
+            entity={"kind": "daily_help", "id": profile_id},
+            options={
+                "click_action": "OPEN_DAILY_HELP_REVIEW",
+                "idempotency_key": f"daily_help:{profile_id}:{idempotency_suffix}",
+            },
+        )
+
+    async def _notify_submitter_review_outcome(
+        self,
+        *,
+        project_id: str,
+        profile_row: dict[str, Any],
+        message_key: str,
+        idempotency_suffix: str,
+    ) -> None:
+        """Notify the security submitter when a profile is approved or rejected."""
+        submitter_user_id = str(profile_row.get("submitted_by_user_id") or "").strip()
+        profile_id = str(profile_row.get("id") or "").strip()
+        if not submitter_user_id or not profile_id:
+            return
+        helper_name = self._helper_name_from_row(profile_row)
+        await self._push().send_to_user(
+            organization_id=self.organization_id,
+            recipient_user_id=submitter_user_id,
+            message_key=message_key,
+            notification_type="NOTIFICATION_TYPE_DAILY_HELP",
+            feed_type="daily_help",
+            params={"helper_name": helper_name},
+            data={
+                "profile_id": profile_id,
+                "project_id": project_id,
+                "screen": "daily_help_submission",
+            },
+            entity={"kind": "daily_help", "id": profile_id},
+            options={
+                "click_action": "OPEN_DAILY_HELP_SUBMISSION",
+                "idempotency_key": f"daily_help:{profile_id}:{idempotency_suffix}",
+            },
+            check_push_preference=False,
         )
 
     @property
@@ -1422,6 +1499,14 @@ class DailyHelpService:
             actor_user_id=str(user_id) if user_id else None,
         )
 
+        await self._notify_reviewers_submission(
+            project_id=project_id,
+            profile_id=profile_id,
+            helper_name=display_name,
+            message_key="notifications.push.daily_help.submitted",
+            idempotency_suffix="submitted",
+        )
+
         submitted_by_name = await self._resolve_created_by_name(user_id)
         return CreateDailyHelpResponse(
             id=profile_id,
@@ -1475,6 +1560,13 @@ class DailyHelpService:
             profile_id=profile_id,
             event_type=DailyHelpEventType.RESUBMITTED.value,
             actor_user_id=str(user_id) if user_id else None,
+        )
+        await self._notify_reviewers_submission(
+            project_id=project_id,
+            profile_id=profile_id,
+            helper_name=self._helper_name_from_row(updated),
+            message_key="notifications.push.daily_help.resubmitted",
+            idempotency_suffix="resubmitted",
         )
         return await self._serialize_detail(row=updated)
 
@@ -1536,6 +1628,12 @@ class DailyHelpService:
         )
 
         refreshed = await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        await self._notify_submitter_review_outcome(
+            project_id=project_id,
+            profile_row=refreshed,
+            message_key="notifications.push.daily_help.approved",
+            idempotency_suffix="approved",
+        )
         return await self._serialize_detail(row=refreshed)
 
     async def reject_profile(
@@ -1579,6 +1677,12 @@ class DailyHelpService:
             event_type=DailyHelpEventType.STATUS_CHANGED.value,
             actor_user_id=str(user_id) if user_id else None,
             payload={"status": DailyHelpStatus.REJECTED.value},
+        )
+        await self._notify_submitter_review_outcome(
+            project_id=project_id,
+            profile_row=updated,
+            message_key="notifications.push.daily_help.rejected",
+            idempotency_suffix="rejected",
         )
         return await self._serialize_detail(row=updated)
 
