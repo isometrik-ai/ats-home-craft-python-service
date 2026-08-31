@@ -119,6 +119,70 @@ async def test_get_facility_found_and_not_found():
 
 
 @pytest.mark.asyncio
+async def test_list_facilities_with_search():
+    conn = _FakeConn(rows=[{"id": FACILITY_ID, "name": "Olympic Pool"}], fetchval_result=1)
+    repo = FacilitiesRepository(db_connection=conn)
+
+    facilities, total = await repo.list_facilities(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        search="Olym",
+    )
+
+    assert len(facilities) == 1
+    assert total == 1
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "name ILIKE $3" in count_query
+    assert count_args == (ORG_ID, PROJECT_ID, "%Olym%")
+    query, args = conn.fetch_calls[0]
+    assert "name ILIKE $3" in query
+    assert "OFFSET $4 LIMIT $5" in query
+    assert args == (ORG_ID, PROJECT_ID, "%Olym%", 0, 20)
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_search_combined_with_status_and_types():
+    """Search stacks with facility_types and status filters."""
+    conn = _FakeConn(rows=[], fetchval_result=0)
+    repo = FacilitiesRepository(db_connection=conn)
+
+    await repo.list_facilities(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        facility_types=["recreation"],
+        status="active",
+        search="pool",
+        page=2,
+        page_size=5,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "LOWER(facility_type) = ANY($3::text[])" in count_query
+    assert "status = $4::facility_status" in count_query
+    assert "name ILIKE $5" in count_query
+    assert count_args == (ORG_ID, PROJECT_ID, ["recreation"], "active", "%pool%")
+    _, list_args = conn.fetch_calls[0]
+    assert list_args == (ORG_ID, PROJECT_ID, ["recreation"], "active", "%pool%", 5, 5)
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_whitespace_only_search_is_ignored():
+    """Whitespace-only search does not add a name filter."""
+    conn = _FakeConn(rows=[{"id": FACILITY_ID}], fetchval_result=1)
+    repo = FacilitiesRepository(db_connection=conn)
+
+    await repo.list_facilities(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        search="   ",
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "name ILIKE" not in count_query
+    assert count_args == (ORG_ID, PROJECT_ID)
+
+
+@pytest.mark.asyncio
 async def test_list_facilities():
     conn = _FakeConn(rows=[{"id": FACILITY_ID, "sort_order": 1}], fetchval_result=1)
     repo = FacilitiesRepository(db_connection=conn)
