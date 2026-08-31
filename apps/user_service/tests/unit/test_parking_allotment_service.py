@@ -11,6 +11,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingAllotmentBasis,
     ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
+    ParkingVehicleCategory,
 )
 from apps.user_service.app.schemas.parking_allotment import AllotParkingSlotRequest
 from apps.user_service.app.services.parking_allotment_service import (
@@ -365,5 +366,6 @@ async def test_allot_slot_creates_allotment_and_assigns_slot():
     assert result.slot_code_label == "A-B2-002"
     assert result.allotted_to_unit is not None
     assert result.allotted_to_unit.code == "A-1804"
+    assert result.parking_vehicle_category == ParkingVehicleCategory.FOUR_WHEELER
     svc.repo.insert_allotment.assert_awaited_once()
     svc.slots_repo.assign_slot.assert_awaited_once()

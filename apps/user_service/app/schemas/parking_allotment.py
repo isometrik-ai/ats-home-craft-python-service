@@ -11,6 +11,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
     ParkingSlotEventType,
+    ParkingVehicleCategory,
 )
 
 
@@ -48,6 +49,7 @@ class ParkingAllotmentSlotListItemResponse(BaseModel):
     bay_label: str | None = None
     slot_type: ParkingFacilitySubtype
     slot_type_label: str
+    parking_vehicle_category: ParkingVehicleCategory
     status: ParkingSlotDisplayStatus
     allotted_to_unit: ParkingAllotmentUnitRefResponse | None = None
     allotted_since: str | None = None

@@ -291,6 +291,22 @@ class UpdateFacilityRequest(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
 
 
+class FacilityListItemResponse(BaseModel):
+    """Facility row returned by GET /projects/{project_id}/facilities."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    project_id: str
+    name: str
+    facility_type: FacilityType | str
+    location_type: FacilityLocationType | str
+    status: FacilityStatus | str
+    parking_vehicle_category: ParkingVehicleCategory | None = None
+    parking_user_type: ParkingUserType | None = None
+    facility_subtype: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Units + parking zones
 # ---------------------------------------------------------------------------

@@ -449,6 +449,27 @@ async def test_list_live_notices_for_resident_with_filters():
 
 
 @pytest.mark.asyncio
+async def test_list_live_notices_for_resident_category_filter():
+    conn = _FakeConn(row={"total": 1}, rows=[_notice_row()])
+    repo = NoticesRepository(db_connection=conn)
+    items, total = await repo.list_live_notices_for_resident(
+        organization_id=ORG,
+        project_id=PROJECT,
+        notice_ids=[NOTICE],
+        category="maintenance",
+        limit=5,
+        offset=0,
+    )
+    assert total == 1
+    count_query, count_args = conn.fetchrow_calls[0]
+    assert "n.category = $4::notice_category" in count_query
+    assert count_args == (ORG, PROJECT, [NOTICE], "maintenance")
+    list_query, list_args = conn.fetch_calls[0]
+    assert "n.category = $4::notice_category" in list_query
+    assert list_args[:4] == (ORG, PROJECT, [NOTICE], "maintenance")
+
+
+@pytest.mark.asyncio
 async def test_soft_delete_and_fetch_by_id_only():
     conn = _FakeConn(row={"id": NOTICE, "status": "deleted"})
     repo = NoticesRepository(db_connection=conn)

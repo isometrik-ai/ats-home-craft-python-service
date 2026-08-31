@@ -42,7 +42,17 @@ def _service() -> FacilitiesService:
         return_value={"id": FACILITY_ID, "name": "Pool", "facility_type": "recreation"}
     )
     svc.facilities_repo.list_facilities = AsyncMock(
-        return_value=([{"id": FACILITY_ID, "name": "Pool"}], 1)
+        return_value=(
+            [
+                {
+                    "id": FACILITY_ID,
+                    "name": "Visitor Parking",
+                    "facility_type": "parking",
+                    "parking_vehicle_category": "four_wheeler",
+                }
+            ],
+            1,
+        )
     )
     svc.facilities_repo.get_facility = AsyncMock(
         return_value={"id": FACILITY_ID, "name": "Pool", "facility_type": "recreation"}
@@ -182,6 +192,7 @@ async def test_list_facilities_returns_serialized_rows():
 
     assert len(result["items"]) == 1
     assert result["total"] == 1
+    assert result["items"][0]["parking_vehicle_category"] == "four_wheeler"
     svc.setup_service.ensure_project.assert_awaited_once()
 
 

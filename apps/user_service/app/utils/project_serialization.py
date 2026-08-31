@@ -41,3 +41,18 @@ def serialize_value(value: Any) -> Any:
 def serialize_row(row: dict[str, Any]) -> dict[str, Any]:
     """Serialize an entire DB row dict for API responses."""
     return {key: serialize_value(val) for key, val in row.items()}
+
+
+def serialize_facility_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Serialize a facility row with normalized parking enum fields."""
+    out = serialize_row(row)
+    for key in ("parking_vehicle_category", "parking_user_type"):
+        raw = row.get(key)
+        if raw is None:
+            out[key] = None
+            continue
+        if hasattr(raw, "value"):
+            out[key] = str(raw.value)
+        else:
+            out[key] = str(raw)
+    return out

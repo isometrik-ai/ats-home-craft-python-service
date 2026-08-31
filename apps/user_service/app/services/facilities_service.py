@@ -29,7 +29,10 @@ from apps.user_service.app.services.project_setup_validation import (
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.parking_slot_numbering import build_parking_slot_pairs
-from apps.user_service.app.utils.project_serialization import serialize_row
+from apps.user_service.app.utils.project_serialization import (
+    serialize_facility_row,
+    serialize_row,
+)
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -201,7 +204,7 @@ class FacilitiesService:
                 facility_data=data,
                 slot_count=body.parking_slots,
             )
-        return serialize_row(inserted)
+        return serialize_facility_row(inserted)
 
     async def list_facilities(
         self,
@@ -224,7 +227,7 @@ class FacilitiesService:
             page=page,
             page_size=page_size,
         )
-        items = [serialize_row(row) for row in rows]
+        items = [serialize_facility_row(row) for row in rows]
         return {"items": items, "total": total}
 
     async def list_parking_slots(
@@ -262,7 +265,7 @@ class FacilitiesService:
             facility_id=facility_id,
             update_data=patch,
         )
-        return serialize_row(updated or {})
+        return serialize_facility_row(updated or {})
 
     async def delete_facility(self, *, project_id: str, facility_id: str) -> dict[str, Any]:
         """Delete a facility and its parking slots."""
@@ -277,7 +280,7 @@ class FacilitiesService:
             project_id=project_id,
             facility_id=facility_id,
         )
-        return {"old_data": serialize_row(current), "new_data": None}
+        return {"old_data": serialize_facility_row(current), "new_data": None}
 
     async def complete_facilities(self, *, project_id: str) -> dict[str, Any]:
         """Mark the facilities step complete."""

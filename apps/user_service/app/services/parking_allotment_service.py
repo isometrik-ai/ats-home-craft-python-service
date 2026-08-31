@@ -23,6 +23,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingSlotDisplayStatus,
     ParkingSlotEventType,
     ParkingUserType,
+    ParkingVehicleCategory,
 )
 from apps.user_service.app.schemas.parking_allotment import (
     AllotParkingSlotRequest,
@@ -206,6 +207,17 @@ class ParkingAllotmentService:
         return "four_wheeler"
 
     @staticmethod
+    def _resolve_parking_vehicle_category(row: dict[str, Any]) -> ParkingVehicleCategory:
+        """Return the facility vehicle category stored on the slot row."""
+        raw = row.get("parking_vehicle_category")
+        if isinstance(raw, str):
+            key = raw.strip().lower()
+            for category in ParkingVehicleCategory:
+                if category.value == key:
+                    return category
+        return ParkingVehicleCategory.FOUR_WHEELER
+
+    @staticmethod
     def _resolve_slot_type(row: dict[str, Any]) -> str:
         raw = row.get("slot_type") or row.get("facility_subtype")
         if raw is None or not str(raw).strip():
@@ -362,6 +374,7 @@ class ParkingAllotmentService:
             bay_label=row.get("wing") or row.get("facility_name"),
             slot_type=ParkingFacilitySubtype(slot_type),
             slot_type_label=self._slot_type_label(slot_type),
+            parking_vehicle_category=self._resolve_parking_vehicle_category(row),
             status=ParkingSlotDisplayStatus(display_status),
             allotted_to_unit=allotted_to_unit,
             allotted_since=self._format_date(allotted_since),

@@ -39,7 +39,21 @@ CASE
 END
 """
 
-_SLOT_SUBTYPE_SQL = "COALESCE(NULLIF(TRIM(f.facility_subtype), ''), 'open')"
+_SLOT_SUBTYPE_KEY_SQL = (
+    "LOWER(REPLACE(REPLACE(TRIM(COALESCE(f.facility_subtype, '')), ' ', '_'), '-', '_'))"
+)
+
+# Match ParkingAllotmentService._resolve_slot_type / normalize_parking_facility_subtype.
+_SLOT_SUBTYPE_SQL = f"""
+CASE
+  WHEN TRIM(COALESCE(f.facility_subtype, '')) = '' THEN 'open'
+  WHEN {_SLOT_SUBTYPE_KEY_SQL} = 'ev' THEN 'ev_charging'
+  WHEN {_SLOT_SUBTYPE_KEY_SQL} IN (
+    'covered', 'open', 'basement', 'stilt', 'podium', 'ev_charging'
+  ) THEN {_SLOT_SUBTYPE_KEY_SQL}
+  ELSE 'open'
+END
+"""
 
 
 class ParkingAllotmentRepository(BaseRepository):

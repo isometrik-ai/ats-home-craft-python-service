@@ -976,6 +976,7 @@ class NoticesRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         notice_ids: list[str] | None,
+        category: str | None = None,
         search: str | None = None,
         limit: int,
         offset: int,
@@ -994,6 +995,10 @@ class NoticesRepository(BaseRepository):
         if notice_ids is not None:
             conditions.append(f"n.id = ANY(${idx}::uuid[])")
             values.append(notice_ids)
+            idx += 1
+        if category:
+            conditions.append(f"n.category = ${idx}::notice_category")
+            values.append(category)
             idx += 1
         if search:
             conditions.append(f"n.title ILIKE ${idx}")
