@@ -65,6 +65,7 @@ class ParkingAllotmentSlotHeldResponse(BaseModel):
     allotment_id: str
     slot_id: str
     slot_code: str
+    slot_code_label: str
     slot_type: ParkingFacilitySubtype
     slot_type_label: str
     effective_from: str

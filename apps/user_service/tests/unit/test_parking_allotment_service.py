@@ -204,6 +204,7 @@ async def test_get_unit_returns_slots_held():
     assert result.slots_assigned == 1
     assert len(result.slots_held) == 1
     assert result.slots_held[0].slot_code == "SLT-A-1"
+    assert result.slots_held[0].slot_code_label == "A-B2-SLT-A-1"
 
 
 @pytest.mark.asyncio
@@ -237,6 +238,7 @@ async def test_get_unit_parses_json_string_active_allotments():
     assert len(result.slots_held) == 1
     assert result.slots_held[0].slot_id == "slot-1"
     assert result.slots_held[0].slot_code == "SLT-A-1"
+    assert result.slots_held[0].slot_code_label == "A-B2-SLT-A-1"
 
 
 @pytest.mark.asyncio

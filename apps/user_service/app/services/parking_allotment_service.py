@@ -416,6 +416,7 @@ class ParkingAllotmentService:
                     allotment_id=str(item.get("allotment_id") or ""),
                     slot_id=slot_id,
                     slot_code=self._resolve_slot_code(slot_meta),
+                    slot_code_label=self._build_slot_code_label(slot_meta),
                     slot_type=ParkingFacilitySubtype(slot_type),
                     slot_type_label=self._slot_type_label(slot_type),
                     effective_from=self._format_date(item.get("effective_from")) or "",
