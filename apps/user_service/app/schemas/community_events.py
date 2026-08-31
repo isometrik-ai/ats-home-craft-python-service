@@ -213,6 +213,7 @@ class CommunityEventListItemResponse(BaseModel):
     publish_status: str
     record_status: str
     booking_state: str
+    cover_image_path: str | None = None
 
 
 class CommunityEventDetailResponse(BaseModel):
