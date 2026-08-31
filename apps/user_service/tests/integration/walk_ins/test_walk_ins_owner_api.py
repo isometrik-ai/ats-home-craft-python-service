@@ -188,13 +188,11 @@ async def test_approve_visit_unit(monkeypatch, client):
         contact_id: str,
         walk_in_entry_id: str,
         visit_unit_id: str,
-        actor_label=None,
     ):
         del _self
         assert contact_id == CONTACT_ID
         assert walk_in_entry_id == ENTRY_ID
         assert visit_unit_id == VISIT_UNIT_ID
-        assert actor_label == "Mr Resident Owner"
         return _fake_detail(status="approved", approved_flats_count=1)
 
     monkeypatch.setattr(f"{_SERVICE}.approve_visit_unit", fake_approve_visit_unit)
@@ -217,14 +215,12 @@ async def test_reject_visit_unit(monkeypatch, client):
         walk_in_entry_id: str,
         visit_unit_id: str,
         body,
-        actor_label=None,
     ):
         del _self
         assert contact_id == CONTACT_ID
         assert walk_in_entry_id == ENTRY_ID
         assert visit_unit_id == VISIT_UNIT_ID
         assert body.rejection_reason == "Not expecting anyone"
-        assert actor_label == "Mr Resident Owner"
         return _fake_detail(status="awaiting", approved_flats_count=0)
 
     monkeypatch.setattr(f"{_SERVICE}.reject_visit_unit", fake_reject_visit_unit)

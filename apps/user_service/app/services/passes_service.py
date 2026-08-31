@@ -28,6 +28,9 @@ from apps.user_service.app.schemas.passes import (
     UpdatePassRequest,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.pass_event_actor_labels import (
+    enrich_pass_event_actor_labels,
+)
 from apps.user_service.app.utils.pass_validity import (
     is_pass_expired_by_day,
     is_pass_too_early_by_day,
@@ -117,6 +120,23 @@ class PassesService:
             message_key="passes.errors.code_generation_failed",
             custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
         )
+
+    async def _normalize_events(
+        self,
+        event_rows: list[dict[str, Any]],
+        *,
+        created_by: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Map pass_events rows to API shape with resolved actor labels."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        enriched = await enrich_pass_event_actor_labels(
+            db_connection=self.db_connection,
+            organization_id=org_id,
+            events=event_rows,
+            created_by=created_by,
+        )
+        return [self._normalize_event(row) for row in enriched]
 
     def _normalize_event(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a pass_events row to API shape."""
@@ -438,7 +458,7 @@ class PassesService:
                 organization_id=org_id,
                 pass_id=pass_id,
             )
-            events = [self._normalize_event(event_row) for event_row in event_rows]
+            events = await self._normalize_events(event_rows)
         return self._normalize_pass(row, events=events, include_events=include_events)
 
     async def update_pass(
@@ -515,4 +535,4 @@ class PassesService:
             organization_id=org_id,
             pass_id=pass_id,
         )
-        return [self._normalize_event(row) for row in rows]
+        return await self._normalize_events(rows)

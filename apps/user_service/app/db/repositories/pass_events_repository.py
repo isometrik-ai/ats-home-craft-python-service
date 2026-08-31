@@ -17,15 +17,15 @@ class PassEventsRepository(BaseRepository):
             """
             INSERT INTO pass_events (
                 organization_id, pass_id, event_type,
-                gate_id, actor_type, actor_user_id, actor_label,
+                gate_id, actor_type, actor_user_id,
                 occurred_at, notes, metadata,
                 entry_method, access_status
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::pass_event_type,
-                $4::uuid, $5::pass_actor_type, $6::uuid, $7,
-                COALESCE($8, now()), $9, COALESCE($10::jsonb, '{}'::jsonb),
-                $11::pass_entry_method, $12::pass_access_status
+                $4::uuid, $5::pass_actor_type, $6::uuid,
+                COALESCE($7, now()), $8, COALESCE($9::jsonb, '{}'::jsonb),
+                $10::pass_entry_method, $11::pass_access_status
             )
             RETURNING
               id::text AS id,
@@ -34,7 +34,6 @@ class PassEventsRepository(BaseRepository):
               gate_id::text AS gate_id,
               actor_type::text AS actor_type,
               actor_user_id::text AS actor_user_id,
-              actor_label,
               occurred_at,
               notes,
               metadata,
@@ -47,7 +46,6 @@ class PassEventsRepository(BaseRepository):
             data.get("gate_id"),
             data.get("actor_type"),
             data.get("actor_user_id"),
-            data.get("actor_label"),
             data.get("occurred_at"),
             data.get("notes"),
             data.get("metadata"),
@@ -72,7 +70,6 @@ class PassEventsRepository(BaseRepository):
               gate_id::text AS gate_id,
               actor_type::text AS actor_type,
               actor_user_id::text AS actor_user_id,
-              actor_label,
               occurred_at,
               notes,
               metadata,
@@ -182,7 +179,6 @@ class PassEventsRepository(BaseRepository):
               gate_id::text AS gate_id,
               actor_type::text AS actor_type,
               actor_user_id::text AS actor_user_id,
-              actor_label,
               occurred_at,
               notes,
               metadata,

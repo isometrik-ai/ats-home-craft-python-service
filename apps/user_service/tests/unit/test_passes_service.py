@@ -522,8 +522,16 @@ async def test_cancel_pass_repo_failure():
 
 
 @pytest.mark.asyncio
-async def test_list_events_returns_normalized_timeline():
+async def test_list_events_returns_normalized_timeline(monkeypatch):
     """List events returns normalized pass timeline entries."""
+
+    async def fake_enrich(**kwargs):
+        return [{**event, "actor_label": None} for event in kwargs["events"]]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.passes_service.enrich_pass_event_actor_labels",
+        fake_enrich,
+    )
     passes_repo = _FakePassesRepo()
     events_repo = _FakeEventsRepo()
     events_repo.events = [

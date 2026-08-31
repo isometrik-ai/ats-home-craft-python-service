@@ -272,7 +272,6 @@ class WalkInService:
         entry_row: dict[str, Any],
         visit_unit: dict[str, Any],
         contact_id: str,
-        actor_label: str | None,
         message_key: str,
         idempotency_suffix: str,
     ) -> None:
@@ -286,9 +285,7 @@ class WalkInService:
             contact_id=contact_id,
             organization_id=org_id,
         )
-        actor_name = (actor_label or "").strip()
-        if not actor_name and contact:
-            actor_name = contact_display_name(contact) or ""
+        actor_name = contact_display_name(contact) if contact else ""
         actor_name = actor_name or "A resident"
         actor_user_id = str((contact or {}).get("user_id") or self.user_context.user_id or "")
         visit_unit_id = str(visit_unit.get("id") or "")
@@ -332,6 +329,58 @@ class WalkInService:
             return name
         email = str(profile.get("email") or "").strip()
         return email or None
+
+    async def _enrich_event_actor_labels(
+        self,
+        *,
+        organization_id: str,
+        events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Resolve actor_label at read time from org members or contacts."""
+        staff_user_ids: set[str] = set()
+        resident_contact_ids: set[str] = set()
+        for event in events:
+            actor_type = str(event.get("actor_type") or "")
+            if actor_type in {
+                WalkInActorType.STAFF.value,
+                WalkInActorType.SYSTEM.value,
+            }:
+                user_id = str(event.get("actor_user_id") or "").strip()
+                if user_id:
+                    staff_user_ids.add(user_id)
+            elif actor_type == WalkInActorType.RESIDENT.value:
+                contact_id = str(event.get("actor_contact_id") or "").strip()
+                if contact_id:
+                    resident_contact_ids.add(contact_id)
+
+        staff_names = await self.repo.fetch_staff_display_names(
+            organization_id=organization_id,
+            user_ids=sorted(staff_user_ids),
+        )
+        contact_names = await self.repo.fetch_contact_display_names(
+            organization_id=organization_id,
+            contact_ids=sorted(resident_contact_ids),
+        )
+
+        enriched: list[dict[str, Any]] = []
+        for event in events:
+            item = dict(event)
+            actor_type = str(item.get("actor_type") or "")
+            label: str | None = None
+            if actor_type in {
+                WalkInActorType.STAFF.value,
+                WalkInActorType.SYSTEM.value,
+            }:
+                user_id = str(item.get("actor_user_id") or "").strip()
+                label = staff_names.get(user_id) if user_id else None
+                if not label and actor_type == WalkInActorType.SYSTEM.value:
+                    label = "System"
+            elif actor_type == WalkInActorType.RESIDENT.value:
+                contact_id = str(item.get("actor_contact_id") or "").strip()
+                label = contact_names.get(contact_id) if contact_id else None
+            item["actor_label"] = label
+            enriched.append(item)
+        return enriched
 
     async def _resolve_requested_by(
         self,
@@ -495,7 +544,11 @@ class WalkInService:
             organization_id=org_id,
             walk_in_entry_id=entry_id,
         )
-        serialized_events = [self._serialize_event(event) for event in events]
+        enriched_events = await self._enrich_event_actor_labels(
+            organization_id=org_id,
+            events=events,
+        )
+        serialized_events = [self._serialize_event(event) for event in enriched_events]
         summary = self._serialize_summary({**row, "primary_unit_label": None})
         if visit_units:
             first = visit_units[0]
@@ -811,7 +864,6 @@ class WalkInService:
         contact_id: str,
         walk_in_entry_id: str,
         visit_unit_id: str,
-        actor_label: str | None = None,
     ) -> dict[str, Any]:
         """Resident approves walk-in for their flat."""
         org_id = self.user_context.organization_id
@@ -860,7 +912,6 @@ class WalkInService:
             event_type=WalkInEventType.VISIT_UNIT_APPROVED.value,
             actor_type=WalkInActorType.RESIDENT.value,
             actor_contact_id=contact_id,
-            actor_label=actor_label,
             payload={
                 "tower_id": visit_unit.get("tower_id"),
                 "unit_id": visit_unit.get("unit_id"),
@@ -874,7 +925,6 @@ class WalkInService:
             entry_row=row,
             visit_unit=visit_unit,
             contact_id=contact_id,
-            actor_label=actor_label,
             message_key="notifications.push.walk_in.approved",
             idempotency_suffix="approved",
         )
@@ -887,7 +937,6 @@ class WalkInService:
         walk_in_entry_id: str,
         visit_unit_id: str,
         body: RejectWalkInVisitUnitRequest,
-        actor_label: str | None = None,
     ) -> dict[str, Any]:
         """Resident rejects walk-in for their flat."""
         org_id = self.user_context.organization_id
@@ -937,7 +986,6 @@ class WalkInService:
             event_type=WalkInEventType.VISIT_UNIT_REJECTED.value,
             actor_type=WalkInActorType.RESIDENT.value,
             actor_contact_id=contact_id,
-            actor_label=actor_label,
             payload={
                 "tower_id": visit_unit.get("tower_id"),
                 "unit_id": visit_unit.get("unit_id"),
@@ -952,7 +1000,6 @@ class WalkInService:
             entry_row=row,
             visit_unit=visit_unit,
             contact_id=contact_id,
-            actor_label=actor_label,
             message_key="notifications.push.walk_in.rejected",
             idempotency_suffix="rejected",
         )

@@ -31,6 +31,9 @@ from apps.user_service.app.services.push_notification_dispatch import (
     recipient_language_from_contact,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.pass_event_actor_labels import (
+    enrich_pass_event_actor_labels,
+)
 from apps.user_service.app.utils.pass_validity import (
     is_pass_expired_by_day,
     is_pass_too_early_by_day,
@@ -267,6 +270,17 @@ class PassVerificationService:
             payload["daily_help_profile"] = daily_help_profile
         return payload
 
+    async def _normalize_event_with_label(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Map a pass event row and resolve actor_label at read time."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        enriched = await enrich_pass_event_actor_labels(
+            db_connection=self.db_connection,
+            organization_id=org_id,
+            events=[row],
+        )
+        return self._normalize_event(enriched[0])
+
     def _normalize_event(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a pass_events row to gate API shape."""
         return {
@@ -429,7 +443,7 @@ class PassVerificationService:
                 idempotency_suffix="checked_in",
             )
         return {
-            "event": self._normalize_event(event),
+            "event": await self._normalize_event_with_label(event),
             "entry_count": int(
                 (updated or {}).get("entry_count") or refreshed.get("entry_count") or 0
             ),
@@ -496,6 +510,6 @@ class PassVerificationService:
                 idempotency_suffix="checked_out",
             )
         return {
-            "event": self._normalize_event(event),
+            "event": await self._normalize_event_with_label(event),
             "pass_status": str(refreshed.get("status") or ""),
         }

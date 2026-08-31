@@ -180,7 +180,59 @@ async def test_insert_event_serializes_payload():
     assert row["event_type"] == "requested"
     query, args = conn.fetchrow_calls[0]
     assert "::jsonb" in query
+    assert "actor_label" not in query
     assert args[-1] == '{"flats_count": 1}'
+
+
+@pytest.mark.asyncio
+async def test_fetch_staff_display_names():
+    conn = _FakeConn(
+        rows=[
+            {
+                "user_id": CONTACT_ID,
+                "salutation": "Mr",
+                "first_name": "Ajay",
+                "last_name": "Guard",
+                "email": "guard@example.com",
+            }
+        ]
+    )
+    repo = WalkInRepository(db_connection=conn)
+
+    names = await repo.fetch_staff_display_names(
+        organization_id=ORG_ID,
+        user_ids=[CONTACT_ID],
+    )
+
+    assert names == {CONTACT_ID: "Mr Ajay Guard"}
+    query, args = conn.fetch_calls[0]
+    assert "FROM organization_members om" in query
+    assert args == (ORG_ID, [CONTACT_ID])
+
+
+@pytest.mark.asyncio
+async def test_fetch_contact_display_names():
+    conn = _FakeConn(
+        rows=[
+            {
+                "contact_id": CONTACT_ID,
+                "prefix": "Mr",
+                "first_name": "Resident",
+                "last_name": "Owner",
+            }
+        ]
+    )
+    repo = WalkInRepository(db_connection=conn)
+
+    names = await repo.fetch_contact_display_names(
+        organization_id=ORG_ID,
+        contact_ids=[CONTACT_ID],
+    )
+
+    assert names == {CONTACT_ID: "Mr Resident Owner"}
+    query, args = conn.fetch_calls[0]
+    assert "FROM contacts ct" in query
+    assert args == (ORG_ID, [CONTACT_ID])
 
 
 @pytest.mark.asyncio

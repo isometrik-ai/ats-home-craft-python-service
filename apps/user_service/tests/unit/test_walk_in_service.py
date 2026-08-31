@@ -132,6 +132,12 @@ class _FakeWalkInRepo:
     async def list_events(self, **_kwargs) -> list[dict[str, Any]]:
         return self.events
 
+    async def fetch_staff_display_names(self, **_kwargs) -> dict[str, str]:
+        return {}
+
+    async def fetch_contact_display_names(self, **_kwargs) -> dict[str, str]:
+        return {}
+
     async def get_visit_unit(self, **_kwargs) -> dict[str, Any] | None:
         return self.visit_units[0]
 
@@ -671,3 +677,52 @@ def test_format_contact_name():
         == "Mr Resident Owner"
     )
     assert WalkInService._format_contact_name({"first_name": "", "last_name": ""}) is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_event_actor_labels_resolves_staff_resident_and_system():
+    """Timeline actor labels are resolved at read time from actor ids."""
+    repo = _FakeWalkInRepo()
+    repo.events = [
+        {
+            "id": "event-1",
+            "event_type": WalkInEventType.REQUESTED.value,
+            "actor_type": "staff",
+            "actor_user_id": "staff-user",
+        },
+        {
+            "id": "event-2",
+            "event_type": WalkInEventType.VISIT_UNIT_APPROVED.value,
+            "actor_type": "resident",
+            "actor_contact_id": CONTACT_ID,
+        },
+        {
+            "id": "event-3",
+            "event_type": WalkInEventType.CANCELLED.value,
+            "actor_type": "system",
+        },
+    ]
+    repo.fetch_staff_display_names = AsyncMock(  # type: ignore[method-assign]
+        return_value={"staff-user": "Mr Ajay Guard"}
+    )
+    repo.fetch_contact_display_names = AsyncMock(  # type: ignore[method-assign]
+        return_value={CONTACT_ID: "Mr Resident Owner"}
+    )
+    service = _service(repo=repo)
+
+    enriched = await service._enrich_event_actor_labels(
+        organization_id=ORG_ID,
+        events=repo.events,
+    )
+
+    assert enriched[0]["actor_label"] == "Mr Ajay Guard"
+    assert enriched[1]["actor_label"] == "Mr Resident Owner"
+    assert enriched[2]["actor_label"] == "System"
+    repo.fetch_staff_display_names.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        user_ids=["staff-user"],
+    )
+    repo.fetch_contact_display_names.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        contact_ids=[CONTACT_ID],
+    )
