@@ -30,6 +30,7 @@ from apps.user_service.app.schemas.community_events import (
     CommunityEventBookingListQuery,
     CommunityEventDetailResponse,
     CommunityEventExportQuery,
+    CommunityEventListItemResponse,
     CommunityEventListQuery,
     CommunityEventSummaryResponse,
     CreateCommunityEventRequest,
@@ -195,6 +196,48 @@ async def test_event_read_endpoints(mock_service_cls, mock_access):
             current_user={"sub": "staff-1"},
         )
     ).status_code == 200
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.api.community_events.ensure_staff_project_access", new_callable=AsyncMock
+)
+@patch("apps.user_service.app.api.community_events.CommunityEventsService")
+async def test_list_community_events_includes_cover_image_path(mock_service_cls, mock_access):
+    mock_access.return_value = _user_context()
+    today = date.today()
+    list_item = CommunityEventListItemResponse(
+        id=EVENT_ID,
+        display_code="EVT-1",
+        title="Summer fest",
+        category=CommunityEventCategory.SOCIAL.value,
+        category_label="Social",
+        start_date=today,
+        end_date=today,
+        is_multi_day=False,
+        event_type=CommunityEventType.FREE.value,
+        bookings_count=0,
+        tickets_booked=0,
+        paid_bookings_count=0,
+        revenue_collected_minor=0,
+        publish_status=CommunityEventPublishStatus.PUBLISHED.value,
+        record_status="active",
+        booking_state="open",
+        cover_image_path="projects/org-1/events/cover.jpg",
+    )
+    mock_service_cls.return_value.list_events = AsyncMock(return_value=([list_item], 1))
+
+    response = await list_community_events(
+        request=_request(),
+        project_id=PROJECT_ID,
+        query=CommunityEventListQuery(),
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.body.decode()
+    assert '"cover_image_path":"projects/org-1/events/cover.jpg"' in body
 
 
 @pytest.mark.asyncio

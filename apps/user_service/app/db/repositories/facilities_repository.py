@@ -92,6 +92,7 @@ class FacilitiesRepository(BaseRepository):
         project_id: str,
         facility_types: list[str] | None = None,
         status: str | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -111,6 +112,12 @@ class FacilitiesRepository(BaseRepository):
             conditions.append(f"status = ${idx}::facility_status")
             values.append(status)
             idx += 1
+        if search:
+            trimmed = search.strip()
+            if trimmed:
+                conditions.append(f"name ILIKE ${idx}")
+                values.append(f"%{trimmed}%")
+                idx += 1
         where_sql = " AND ".join(conditions)
         total = await self.db_connection.fetchval(
             f"""

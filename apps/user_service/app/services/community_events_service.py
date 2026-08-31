@@ -166,6 +166,7 @@ class CommunityEventsService:
             publish_status=str(row.get("publish_status") or ""),
             record_status=str(row.get("record_status") or ""),
             booking_state=self._derive_booking_state(row),
+            cover_image_path=row.get("cover_image_path"),
         )
 
     async def _serialize_detail(

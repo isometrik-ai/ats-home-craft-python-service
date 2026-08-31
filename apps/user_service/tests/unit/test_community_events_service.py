@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from apps.user_service.app.schemas.community_events import (
+    CommunityEventListItemResponse,
     CommunityEventListQuery,
     CommunityEventMediaInput,
 )
@@ -212,6 +213,7 @@ async def test_list_events_and_serialize():
                     "revenue_collected_minor": 1000,
                     "ticket_breakdown_adult": 8,
                     "ticket_breakdown_child": 2,
+                    "cover_image_path": "projects/org-1/cover.jpg",
                 }
             ],
             1,
@@ -223,6 +225,67 @@ async def test_list_events_and_serialize():
     )
     assert total == 1
     assert items[0].booking_state == "open"
+    assert items[0].cover_image_path == "projects/org-1/cover.jpg"
+
+
+def test_serialize_list_item_cover_image_path_null() -> None:
+    svc = _service()
+    item = svc._serialize_list_item(
+        {
+            "id": EVENT_ID,
+            "display_code": "EVT-1",
+            "title": "Fest",
+            "category": "social",
+            "start_date": date.today(),
+            "end_date": date.today(),
+            "is_multi_day": False,
+            "event_type": "free",
+            "publish_status": "published",
+            "record_status": "active",
+            "tickets_booked": 0,
+            "bookings_count": 0,
+            "paid_bookings_count": 0,
+            "revenue_collected_minor": 0,
+            "ticket_breakdown_adult": 0,
+            "ticket_breakdown_child": 0,
+        }
+    )
+    assert isinstance(item, CommunityEventListItemResponse)
+    assert item.cover_image_path is None
+
+
+@pytest.mark.asyncio
+async def test_create_event_persists_cover_image_path():
+    from apps.user_service.app.schemas.community_events import (
+        CreateCommunityEventRequest,
+    )
+    from apps.user_service.app.schemas.enums import CommunityEventPublishMode
+
+    svc = _service()
+    cover_path = "projects/org-1/events/cover.jpg"
+    row_with_cover = _event_row(cover_image_path=cover_path)
+    svc.repo.allocate_event_sequence = AsyncMock(return_value=1)
+    svc.repo.insert_event = AsyncMock(return_value=row_with_cover)
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=row_with_cover)
+    svc.repo.list_gallery = AsyncMock(return_value=[])
+    svc.repo.insert_audit_log = AsyncMock()
+    svc._validate_facility = AsyncMock()
+    svc._dispatch_publish_push = AsyncMock()
+
+    detail = await svc.create_event(
+        project_id=PROJECT_ID,
+        body=CreateCommunityEventRequest(
+            title="Fest",
+            start_date=date.today(),
+            end_date=date.today(),
+            cover_image_path=cover_path,
+            publish_mode=CommunityEventPublishMode.DRAFT,
+        ),
+    )
+
+    insert_payload = svc.repo.insert_event.await_args.kwargs["data"]
+    assert insert_payload["cover_image_path"] == cover_path
+    assert detail.cover_image_path == cover_path
 
 
 @pytest.mark.asyncio
