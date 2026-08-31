@@ -319,19 +319,11 @@ async def test_enter_succeeds_when_flat_approved():
         approved_flats_count=1,
     )
     service = _service(repo=repo)
-    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=_guard_profile())
 
     result = await service.enter_walk_in(project_id=PROJECT_ID, walk_in_entry_id=ENTRY_ID)
 
     assert result["status"] == WalkInStatus.ENTERED.value
-    entered = next(
-        event for event in repo.events if event.get("event_type") == WalkInEventType.ENTERED.value
-    )
-    assert entered["actor_label"] == "Mr. Ajay Guard"
-    entered_event = next(
-        event for event in result["events"] if event["event_type"] == WalkInEventType.ENTERED.value
-    )
-    assert entered_event["actor_label"] == "Mr. Ajay Guard"
+    assert any(event.get("event_type") == WalkInEventType.ENTERED.value for event in repo.events)
 
 
 @pytest.mark.asyncio

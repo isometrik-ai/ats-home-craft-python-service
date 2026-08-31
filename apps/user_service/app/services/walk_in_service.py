@@ -372,32 +372,24 @@ class WalkInService:
             phone_number=profile.get("phone_number"),
         ).model_dump()
 
-    async def _enrich_event_actor_labels(
-        self,
+    @staticmethod
+    def _apply_creator_label_to_requested_event(
         *,
-        organization_id: str,
-        serialized_events: list[dict[str, Any]],
-        raw_events: list[dict[str, Any]],
+        events: list[dict[str, Any]],
+        creator_display_name: str | None,
     ) -> list[dict[str, Any]]:
-        """Resolve missing actor_label values from actor_user_id at read time."""
-        raw_by_id = {str(row["id"]): row for row in raw_events}
-        enriched: list[dict[str, Any]] = []
-        for event in serialized_events:
-            item = dict(event)
-            if str(item.get("actor_label") or "").strip():
-                enriched.append(item)
+        """Set actor_label on the requested event from the walk-in creator."""
+        creator_name = str(creator_display_name or "").strip()
+        if not creator_name:
+            return events
+        for item in events:
+            if item.get("event_type") != WalkInEventType.REQUESTED.value:
                 continue
-            raw = raw_by_id.get(str(item.get("id") or ""))
-            user_id = str(raw.get("actor_user_id") or "") if raw else ""
-            if user_id:
-                name = await self._staff_display_name_for_user(
-                    user_id=user_id,
-                    organization_id=organization_id,
-                )
-                if name:
-                    item["actor_label"] = name
-            enriched.append(item)
-        return enriched
+            if str(item.get("actor_label") or "").strip():
+                break
+            item["actor_label"] = creator_name
+            break
+        return events
 
     @staticmethod
     def _serialize_visit_unit(row: dict[str, Any]) -> dict[str, Any]:
@@ -539,11 +531,11 @@ class WalkInService:
             organization_id=org_id,
             walk_in_entry_id=entry_id,
         )
+        requested_by = await self._resolve_requested_by(row.get("requested_by_user_id"))
         serialized_events = [self._serialize_event(event) for event in events]
-        serialized_events = await self._enrich_event_actor_labels(
-            organization_id=org_id,
-            serialized_events=serialized_events,
-            raw_events=events,
+        serialized_events = self._apply_creator_label_to_requested_event(
+            events=serialized_events,
+            creator_display_name=(requested_by or {}).get("display_name"),
         )
         summary = self._serialize_summary({**row, "primary_unit_label": None})
         if visit_units:
@@ -555,7 +547,7 @@ class WalkInService:
             visit_units=[self._serialize_visit_unit(unit) for unit in visit_units],
             events=serialized_events,
             milestones=self._derive_milestones(row=row, events=events),
-            requested_by=await self._resolve_requested_by(row.get("requested_by_user_id")),
+            requested_by=requested_by,
         )
         return detail.model_dump()
 
@@ -745,17 +737,12 @@ class WalkInService:
             status=WalkInStatus.ENTERED.value,
             entered_at=now,
         )
-        guard_label = await self._staff_display_name_for_user(
-            user_id=str(user_id),
-            organization_id=org_id,
-        )
         await self.repo.insert_event(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
             event_type=WalkInEventType.ENTERED.value,
             actor_type=WalkInActorType.STAFF.value,
             actor_user_id=str(user_id),
-            actor_label=guard_label,
         )
         await self._notify_walk_in_entered(
             organization_id=org_id,
@@ -790,17 +777,12 @@ class WalkInService:
             status=WalkInStatus.EXITED.value,
             exited_at=now,
         )
-        guard_label = await self._staff_display_name_for_user(
-            user_id=str(user_id),
-            organization_id=org_id,
-        )
         await self.repo.insert_event(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
             event_type=WalkInEventType.EXITED.value,
             actor_type=WalkInActorType.STAFF.value,
             actor_user_id=str(user_id),
-            actor_label=guard_label,
         )
         return await self._serialize_detail(updated or row)
 
