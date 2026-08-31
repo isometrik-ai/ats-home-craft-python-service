@@ -895,6 +895,22 @@
         "checked_out": {
           "title": "Daily help checked out",
           "body": "{helper_name} checked out at the gate"
+        },
+        "submitted": {
+          "title": "Daily help pending review",
+          "body": "{helper_name} was submitted for admin approval"
+        },
+        "resubmitted": {
+          "title": "Daily help resubmitted",
+          "body": "{helper_name} was resubmitted for admin approval"
+        },
+        "approved": {
+          "title": "Daily help approved",
+          "body": "Your submission for {helper_name} was approved"
+        },
+        "rejected": {
+          "title": "Daily help rejected",
+          "body": "Your submission for {helper_name} was rejected"
         }
       },
       "tenant_request": {

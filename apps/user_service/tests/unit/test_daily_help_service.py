@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -33,6 +34,20 @@ def _user_context() -> UserContext:
         email="staff@example.com",
         organization_id="org-1",
     )
+
+
+class _FakePushDispatcher:
+    def __init__(self) -> None:
+        self.org_calls: list[dict[str, Any]] = []
+        self.user_calls: list[dict[str, Any]] = []
+
+    async def send_to_org_members(self, **kwargs):
+        self.org_calls.append(kwargs)
+        return 1
+
+    async def send_to_user(self, **kwargs):
+        self.user_calls.append(kwargs)
+        return None
 
 
 def test_build_display_name_includes_initials_and_parts():
@@ -870,9 +885,44 @@ def _stub_category_lookup(svc: DailyHelpService) -> None:
 
 
 @pytest.mark.asyncio
+async def test_submit_profile_notifies_reviewers():
+    """Security submit notifies org admins for review."""
+    push = _FakePushDispatcher()
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=push,
+    )
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.insert_profile = AsyncMock(
+        return_value={
+            "id": "profile-pending",
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
+    svc.repo.insert_document = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+    svc.passes_repo = MagicMock()
+    svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
+
+    await svc.submit_profile(project_id="project-1", body=_create_body())
+
+    assert len(push.org_calls) == 1
+    call = push.org_calls[0]
+    assert call["message_key"] == "notifications.push.daily_help.submitted"
+    assert call["params"] == {"helper_name": "Mrs. Lakshmi Devi"}
+    assert call["data"]["profile_id"] == "profile-pending"
+
+
+@pytest.mark.asyncio
 async def test_submit_profile_does_not_issue_pass():
     """Security submit creates pending profile without pass or passcode."""
-    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=_FakePushDispatcher(),
+    )
     _stub_category_lookup(svc)
     svc.repo = MagicMock()
     svc.repo.insert_profile = AsyncMock(
@@ -899,9 +949,64 @@ async def test_submit_profile_does_not_issue_pass():
 
 
 @pytest.mark.asyncio
+async def test_approve_profile_notifies_submitter():
+    """Admin approve notifies the security submitter."""
+    push = _FakePushDispatcher()
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=push,
+    )
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        side_effect=[
+            _detail_row(id="profile-pending", status=DailyHelpStatus.PENDING_APPROVAL.value),
+            _detail_row(
+                id="profile-pending",
+                status=DailyHelpStatus.ACTIVE.value,
+                gate_passcode="4821",
+                linked_pass_id="pass-1",
+                submitted_by_user_id="staff-1",
+            ),
+        ]
+    )
+    svc.repo.generate_unique_passcode = AsyncMock(return_value="4821")
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-pending",
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="4821",
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.link_pass_id = AsyncMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
+    svc._resolve_created_by_name = AsyncMock(return_value="Admin User")
+
+    await svc.approve_profile(project_id="project-1", profile_id="profile-pending")
+
+    assert len(push.user_calls) == 1
+    call = push.user_calls[0]
+    assert call["recipient_user_id"] == "staff-1"
+    assert call["message_key"] == "notifications.push.daily_help.approved"
+    assert call["params"] == {"helper_name": "Mrs. Lakshmi Devi"}
+
+
+@pytest.mark.asyncio
 async def test_approve_profile_issues_pass_for_pending_submission():
     """Admin approve activates pending profile and issues gate pass."""
-    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=_FakePushDispatcher(),
+    )
     _stub_category_lookup(svc)
     svc.repo = MagicMock()
     svc.repo.get_profile = AsyncMock(
@@ -942,11 +1047,63 @@ async def test_approve_profile_issues_pass_for_pending_submission():
 
 
 @pytest.mark.asyncio
+async def test_reject_profile_notifies_submitter():
+    """Admin reject notifies the security submitter."""
+    from apps.user_service.app.schemas.daily_help import RejectDailyHelpRequest
+
+    push = _FakePushDispatcher()
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=push,
+    )
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-pending",
+            status=DailyHelpStatus.PENDING_APPROVAL.value,
+            submitted_by_user_id="staff-1",
+        )
+    )
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-pending",
+            status=DailyHelpStatus.REJECTED.value,
+            rejection_reason="Incomplete documents",
+            submitted_by_user_id="staff-1",
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc._resolve_created_by_name = AsyncMock(return_value=None)
+
+    await svc.reject_profile(
+        project_id="project-1",
+        profile_id="profile-pending",
+        body=RejectDailyHelpRequest(rejection_reason="Incomplete documents"),
+    )
+
+    assert len(push.user_calls) == 1
+    call = push.user_calls[0]
+    assert call["recipient_user_id"] == "staff-1"
+    assert call["message_key"] == "notifications.push.daily_help.rejected"
+
+
+@pytest.mark.asyncio
 async def test_reject_profile_sets_rejected_status():
     """Admin reject marks pending profile as rejected."""
     from apps.user_service.app.schemas.daily_help import RejectDailyHelpRequest
 
-    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=_FakePushDispatcher(),
+    )
     _stub_category_lookup(svc)
     svc.repo = MagicMock()
     svc.repo.get_profile = AsyncMock(
@@ -981,9 +1138,55 @@ async def test_reject_profile_sets_rejected_status():
 
 
 @pytest.mark.asyncio
+async def test_resubmit_profile_notifies_reviewers():
+    """Security resubmit notifies org admins for review."""
+    push = _FakePushDispatcher()
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=push,
+    )
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-rejected",
+            status=DailyHelpStatus.REJECTED.value,
+        )
+    )
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-rejected",
+            status=DailyHelpStatus.PENDING_APPROVAL.value,
+        )
+    )
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
+
+    await svc.resubmit_profile(
+        project_id="project-1",
+        profile_id="profile-rejected",
+        body=_create_body(),
+    )
+
+    assert len(push.org_calls) == 1
+    call = push.org_calls[0]
+    assert call["message_key"] == "notifications.push.daily_help.resubmitted"
+
+
+@pytest.mark.asyncio
 async def test_resubmit_profile_moves_rejected_back_to_pending():
     """Security resubmit clears rejection and returns profile to pending review."""
-    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=_FakePushDispatcher(),
+    )
     _stub_category_lookup(svc)
     svc.repo = MagicMock()
     svc.repo.get_profile = AsyncMock(
