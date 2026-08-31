@@ -663,7 +663,7 @@ async def test_create_contact_vehicle(monkeypatch, client):
         fake_get_details,
     )
     monkeypatch.setattr(
-        "apps.user_service.app.services.vehicles_service.VehiclesService.create_vehicle",
+        "apps.user_service.app.services.vehicles_service.VehiclesService.create_vehicle_admin",
         fake_create_vehicle,
     )
 

@@ -18,6 +18,7 @@ from apps.user_service.app.db.repositories.parking_slots_repository import (
 )
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
+    AdminCreateVehicleRequest,
     CreateVehicleRequest,
     ResubmitVehicleRequest,
     ReviewVehicleRequest,
@@ -28,6 +29,9 @@ from apps.user_service.app.schemas.enums import (
     VehicleFuelType,
     VehicleStatus,
     VehicleType,
+)
+from apps.user_service.app.services.parking_allotment_service import (
+    ParkingAllotmentService,
 )
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
@@ -366,14 +370,82 @@ class VehiclesService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-    async def _validate_vehicle_parking_slot(
+    async def _validate_vehicle_type_entitlement(
         self,
         *,
         project_id: str,
         unit_id: str,
-        parking_slot_id: str,
+        vehicle_type: str,
+        additional_consuming: int = 0,
     ) -> None:
-        """Ensure the slot exists and is actively allotted to the vehicle's unit."""
+        """Ensure the unit still has room for another vehicle of this type."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await self.parking_allotment_repo.get_unit_allotment_context(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        if not unit:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_not_found",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        if vehicle_type == VehicleType.TWO_WHEELER.value:
+            entitlement = int(unit.get("two_wheeler_parking_entitlement") or 0)
+            message_key = "contact_onboarding.errors.vehicle_two_wheeler_entitlement_exceeded"
+        elif vehicle_type == VehicleType.FOUR_WHEELER.value:
+            entitlement = int(unit.get("four_wheeler_parking_entitlement") or 0)
+            message_key = "contact_onboarding.errors.vehicle_four_wheeler_entitlement_exceeded"
+        else:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.invalid_vehicle_type",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        consuming_count = await self.repo.count_entitlement_consuming_by_unit_and_type(
+            organization_id=org_id,
+            unit_id=unit_id,
+            vehicle_type=vehicle_type,
+        )
+        if consuming_count + additional_consuming > entitlement:
+            raise ValidationException(
+                message_key=message_key,
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"entitlement": entitlement},
+            )
+
+    @staticmethod
+    def _validate_vehicle_slot_category_match(
+        *,
+        vehicle_type: str,
+        slot_row: dict[str, Any],
+    ) -> None:
+        """Ensure the parking slot category matches the vehicle type."""
+        slot_category = str(slot_row.get("parking_vehicle_category") or "four_wheeler").lower()
+        if vehicle_type == VehicleType.TWO_WHEELER.value and slot_category != "two_wheeler":
+            raise ValidationException(
+                message_key="contact_onboarding.errors.vehicle_slot_category_mismatch",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if vehicle_type == VehicleType.FOUR_WHEELER.value and slot_category == "two_wheeler":
+            raise ValidationException(
+                message_key="contact_onboarding.errors.vehicle_slot_category_mismatch",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _ensure_parking_slot_for_vehicle_review(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+        vehicle_id: str,
+        vehicle_type: str,
+        parking_slot_id: str,
+        additional_entitlement_consuming: int = 0,
+    ) -> None:
+        """Validate slot linkage and auto-allot to the unit when entitlement allows."""
         org_id = self.user_context.organization_id
         assert org_id
         slot = await self.parking_slots_repo.get_slot(
@@ -386,16 +458,63 @@ class VehiclesService:
                 message_key="contact_onboarding.errors.parking_slot_unavailable",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+
         allotment = await self.parking_allotment_repo.get_active_allotment_by_slot(
             organization_id=org_id,
             project_id=project_id,
             slot_id=parking_slot_id,
         )
-        if not allotment or str(allotment.get("unit_id")) != unit_id:
+        if allotment:
+            if str(allotment.get("unit_id")) != unit_id:
+                raise ValidationException(
+                    message_key="contact_onboarding.errors.parking_slot_not_allotted_to_unit",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            return
+
+        await self._validate_vehicle_type_entitlement(
+            project_id=project_id,
+            unit_id=unit_id,
+            vehicle_type=vehicle_type,
+            additional_consuming=additional_entitlement_consuming,
+        )
+        slot_row = await self.parking_allotment_repo.get_slot_row(
+            organization_id=org_id,
+            project_id=project_id,
+            slot_id=parking_slot_id,
+        )
+        if not slot_row:
             raise ValidationException(
-                message_key="contact_onboarding.errors.parking_slot_not_allotted_to_unit",
+                message_key="contact_onboarding.errors.parking_slot_unavailable",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        self._validate_vehicle_slot_category_match(
+            vehicle_type=vehicle_type,
+            slot_row=slot_row,
+        )
+
+        allotment_service = ParkingAllotmentService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        try:
+            await allotment_service.allot_slot_for_vehicle_review(
+                project_id=project_id,
+                unit_id=unit_id,
+                slot_id=parking_slot_id,
+            )
+        except ValidationException:
+            raise
+        except NotFoundException:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_slot_unavailable",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            ) from None
+        except ConflictException:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_slot_unavailable",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            ) from None
 
     async def release_for_move_out(
         self,
@@ -586,6 +705,84 @@ class VehiclesService:
             options={
                 "click_action": "OPEN_VEHICLE_REQUEST",
                 "idempotency_key": f"vehicle:{normalized.get('id')}:submitted",
+            },
+        )
+        return normalized
+
+    async def create_vehicle_admin(
+        self,
+        *,
+        contact_id: str,
+        body: AdminCreateVehicleRequest,
+    ) -> dict[str, Any]:
+        """Create an approved vehicle for a contact (admin)."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        reviewer_user_id = self.user_context.user_id
+        unit = await self._validate_unit_for_contact(
+            contact_id=contact_id,
+            unit_id=body.unit_id,
+        )
+        await self._assert_primary_occupant_for_unit(
+            contact_id=contact_id,
+            unit_id=body.unit_id,
+        )
+        project_id = str(unit["project_id"])
+        vehicle_type = body.vehicle_type.value
+        parking_slot_id = body.parking_slot_id
+        if parking_slot_id:
+            await self._ensure_parking_slot_for_vehicle_review(
+                project_id=project_id,
+                unit_id=body.unit_id,
+                vehicle_id="",
+                vehicle_type=vehicle_type,
+                parking_slot_id=parking_slot_id,
+                additional_entitlement_consuming=1,
+            )
+        try:
+            row = await self.repo.create(
+                organization_id=org_id,
+                project_id=project_id,
+                contact_id=contact_id,
+                unit_id=body.unit_id,
+                vehicle_type=vehicle_type,
+                registration_number=body.registration_number.strip().upper(),
+                make=body.make,
+                model=body.model,
+                color=body.color,
+                photo_paths=body.photo_paths,
+                fuel_type=body.fuel_type.value if body.fuel_type else None,
+                status=VehicleStatus.APPROVED.value,
+                parking_slot_id=parking_slot_id,
+                approved_by_user_id=reviewer_user_id,
+            )
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="contact_onboarding.errors.vehicle_registration_duplicate",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        detail = await self.repo.get_detail_by_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+            vehicle_id=str(row["id"]),
+        )
+        normalized = self._serialize_admin_vehicle(detail or row)
+        await self._push().send_to_contact(
+            organization_id=org_id,
+            contact_id=contact_id,
+            message_key="notifications.push.vehicle.approved",
+            notification_type="NOTIFICATION_TYPE_VEHICLE",
+            feed_type="vehicle",
+            params={"registration_number": normalized.get("registration_number") or ""},
+            data={
+                "vehicle_id": normalized.get("id"),
+                "project_id": project_id,
+                "screen": "vehicle_detail",
+            },
+            entity={"kind": "vehicle", "id": str(normalized.get("id") or "")},
+            options={
+                "click_action": "OPEN_VEHICLE",
+                "idempotency_key": f"vehicle:{normalized.get('id')}:approved",
             },
         )
         return normalized
@@ -963,9 +1160,11 @@ class VehiclesService:
                 )
             parking_slot_id = body.parking_slot_id
             if parking_slot_id:
-                await self._validate_vehicle_parking_slot(
+                await self._ensure_parking_slot_for_vehicle_review(
                     project_id=project_id,
                     unit_id=unit_id,
+                    vehicle_id=vehicle_id,
+                    vehicle_type=str(vehicle.get("vehicle_type") or ""),
                     parking_slot_id=parking_slot_id,
                 )
             row = await self.repo.update_by_project(

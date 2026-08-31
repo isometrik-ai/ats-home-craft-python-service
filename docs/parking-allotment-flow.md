@@ -225,10 +225,15 @@ ______________________________________________________________________
 }
 ```
 
-Validation (`vehicles_service._validate_vehicle_parking_slot`):
+Validation (`vehicles_service._validate_vehicle_parking_slot` → `_ensure_parking_slot_for_vehicle_review`):
 
 - Slot exists in the project.
-- Active `unit_parking_allotments` row exists for `(unit_id, parking_slot_id)`.
+- If slot is **already allotted to the unit** → link vehicle only (unchanged).
+- If slot is **not allotted**:
+  - Count pending + approved vehicles on the unit for the same `vehicle_type`.
+  - Compare against `two_wheeler_parking_entitlement` / `four_wheeler_parking_entitlement`.
+  - Ensure slot `parking_vehicle_category` matches the vehicle type.
+  - Auto-create `included_with_unit` allotment and assign the slot, then approve.
 
 Reject:
 
