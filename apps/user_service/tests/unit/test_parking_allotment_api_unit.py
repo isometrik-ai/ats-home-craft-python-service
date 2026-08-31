@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingAllotmentBasis,
     ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
+    ParkingVehicleCategory,
 )
 from apps.user_service.app.schemas.parking_allotment import (
     AllotParkingSlotRequest,
@@ -154,6 +155,7 @@ async def test_allot_parking_slot_to_unit(mock_service_cls, mock_access):
             bay_label="Bay B",
             slot_type=ParkingFacilitySubtype.BASEMENT,
             slot_type_label="Basement",
+            parking_vehicle_category=ParkingVehicleCategory.FOUR_WHEELER,
             status=ParkingSlotDisplayStatus.ALLOTTED,
             facility_id="facility-1",
             slot_number=2,
