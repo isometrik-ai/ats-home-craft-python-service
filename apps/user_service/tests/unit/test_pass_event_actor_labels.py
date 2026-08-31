@@ -7,7 +7,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from apps.user_service.app.schemas.enums import PassActorType, PassEventType
-from apps.user_service.app.utils.pass_event_actor_labels import enrich_pass_event_actor_labels
+from apps.user_service.app.utils.pass_event_actor_labels import (
+    enrich_pass_event_actor_labels,
+)
 
 
 @pytest.mark.asyncio

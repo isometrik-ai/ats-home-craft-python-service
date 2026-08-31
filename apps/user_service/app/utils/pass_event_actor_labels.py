@@ -56,11 +56,7 @@ async def enrich_pass_event_actor_labels(
             label = staff_names.get(user_id)
         elif actor_type == PassActorType.SYSTEM.value:
             label = "System"
-        if (
-            not label
-            and item.get("event_type") == PassEventType.CREATED.value
-            and created_by
-        ):
+        if not label and item.get("event_type") == PassEventType.CREATED.value and created_by:
             label = created_by
         item["actor_label"] = label
         enriched.append(item)
