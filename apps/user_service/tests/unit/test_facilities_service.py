@@ -158,6 +158,23 @@ async def test_create_facility_non_parking_skips_slots():
 
 
 @pytest.mark.asyncio
+async def test_list_facilities_forwards_search_to_repository():
+    """list_facilities passes search through to the repository."""
+    svc = _service()
+    await svc.list_facilities(project_id=PROJECT_ID, search="Gym")
+
+    svc.facilities_repo.list_facilities.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id=PROJECT_ID,
+        facility_types=None,
+        status=None,
+        search="Gym",
+        page=1,
+        page_size=20,
+    )
+
+
+@pytest.mark.asyncio
 async def test_list_facilities_returns_serialized_rows():
     """list_facilities ensures project scope and serializes rows."""
     svc = _service()

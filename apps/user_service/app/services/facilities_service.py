@@ -209,6 +209,7 @@ class FacilitiesService:
         project_id: str,
         facility_types: list[str] | None = None,
         status: str | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict[str, Any]:
@@ -219,6 +220,7 @@ class FacilitiesService:
             project_id=project_id,
             facility_types=facility_types,
             status=status,
+            search=search,
             page=page,
             page_size=page_size,
         )
