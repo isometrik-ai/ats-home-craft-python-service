@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from apps.user_service.app.schemas.enums import NoticeCategory
 from apps.user_service.app.schemas.notices import (
     ResidentBannerQuery,
     ResidentNoticeListQuery,
@@ -112,7 +113,41 @@ async def test_list_notices_passes_search_to_repository():
         organization_id="org-1",
         project_id="project-1",
         notice_ids=["notice-1"],
+        category=None,
         search="water",
+        limit=20,
+        offset=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_notices_passes_category_to_repository():
+    """Category filter is forwarded to the repository after visibility filtering."""
+    svc = _service()
+    svc.repo = MagicMock()
+    svc.recipient_service = MagicMock()
+    svc.repo.list_live_notice_ids_for_project = AsyncMock(return_value=["notice-1"])
+    svc.recipient_service.load_notice_contexts = AsyncMock(return_value=[])
+    svc.recipient_service.filter_visible_notice_ids = AsyncMock(return_value=["notice-1"])
+    svc.repo.list_live_notices_for_resident = AsyncMock(return_value=([], 0))
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.repo.contact_has_liked = AsyncMock(return_value=False)
+
+    await svc.list_notices(
+        contact_id="contact-1",
+        contact_user_id="user-1",
+        query=ResidentNoticeListQuery(
+            project_id="project-1",
+            category=NoticeCategory.MAINTENANCE,
+        ),
+    )
+
+    svc.repo.list_live_notices_for_resident.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="project-1",
+        notice_ids=["notice-1"],
+        category="maintenance",
+        search=None,
         limit=20,
         offset=0,
     )
