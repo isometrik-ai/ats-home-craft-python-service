@@ -3732,8 +3732,10 @@ async def list_project_vehicle_requests(
     status_code=http_status.HTTP_200_OK,
     summary="Approve or reject a vehicle request",
     description=(
-        "On approval, optionally links the vehicle to a parking slot already allotted "
-        "to the unit via parking allotment (does not change slot status). "
+        "On approval, optionally links the vehicle to a parking slot. If the slot is already "
+        "allotted to the unit, it is linked as today. If not, the service validates the unit's "
+        "two-wheeler/four-wheeler vehicle entitlement, auto-allots the slot when allowed, then "
+        "approves the request. "
         "On rejection, stores rejection_reason. Response includes nested "
         "`approved_by` / `rejected_by` org-member summaries when applicable."
     ),

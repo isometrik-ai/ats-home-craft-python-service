@@ -406,6 +406,9 @@ class VehiclesRepository(BaseRepository):
         color: str | None,
         photo_paths: list[str],
         fuel_type: str | None,
+        status: str = "pending",
+        parking_slot_id: str | None = None,
+        approved_by_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Insert a vehicle."""
         row = await self.db_connection.fetchrow(
@@ -413,12 +416,14 @@ class VehiclesRepository(BaseRepository):
             INSERT INTO vehicles (
                 organization_id, project_id, contact_id, unit_id,
                 vehicle_type, registration_number, make, model, color,
-                photo_paths, fuel_type, status_updated_at
+                photo_paths, fuel_type, status, parking_slot_id,
+                approved_by_user_id, status_updated_at
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::uuid, $4::uuid,
                 $5::vehicle_type, $6, $7, $8, $9,
-                $10::text[], $11::vehicle_fuel_type, now()
+                $10::text[], $11::vehicle_fuel_type, $12::vehicle_status,
+                $13::uuid, $14::uuid, now()
             )
             RETURNING
               {self._VEHICLE_RETURNING_COLUMNS}
@@ -434,6 +439,9 @@ class VehiclesRepository(BaseRepository):
             color,
             photo_paths,
             fuel_type,
+            status,
+            parking_slot_id,
+            approved_by_user_id,
         )
         return dict(row)
 
@@ -762,5 +770,41 @@ class VehiclesRepository(BaseRepository):
               {exclude_sql}
             """,
             *args,
+        )
+        return int(count or 0)
+
+    async def count_entitlement_consuming_by_unit_and_type(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        vehicle_type: str,
+    ) -> int:
+        """Count pending and approved vehicles of one type that consume unit entitlement."""
+        count = await self.db_connection.fetchval(
+            f"""
+            SELECT COUNT(*)
+            FROM vehicles v
+            WHERE v.organization_id = $1::uuid
+              AND v.unit_id = $2::uuid
+              AND v.vehicle_type = $3::vehicle_type
+              AND {_ACTIVE_VEHICLE_FILTER}
+              AND v.status = ANY($4::vehicle_status[])
+              AND EXISTS (
+                  SELECT 1
+                  FROM contact_units cu
+                  WHERE cu.organization_id = v.organization_id
+                    AND cu.contact_id = v.contact_id
+                    AND cu.unit_id = v.unit_id
+                    AND cu.status IN (
+                        'pending'::contact_unit_status,
+                        'active'::contact_unit_status
+                    )
+              )
+            """,
+            organization_id,
+            unit_id,
+            vehicle_type,
+            [VehicleStatus.PENDING.value, VehicleStatus.APPROVED.value],
         )
         return int(count or 0)

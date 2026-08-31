@@ -688,6 +688,24 @@ class ParkingAllotmentService:
         )
         return await self.get_slot_detail(project_id=project_id, slot_id=slot_id)
 
+    async def allot_slot_for_vehicle_review(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+        slot_id: str,
+    ) -> None:
+        """Allot a free resident slot to a unit while approving a vehicle request."""
+        await self._ensure_project(project_id=project_id)
+        await self._create_allotment(
+            project_id=project_id,
+            slot_id=slot_id,
+            unit_id=unit_id,
+            effective_from=date.today(),
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+            payload={"source": "vehicle_review"},
+        )
+
     async def allot_slot(
         self,
         *,

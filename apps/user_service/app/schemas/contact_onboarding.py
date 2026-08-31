@@ -226,6 +226,12 @@ class CreateVehicleRequest(BaseModel):
         return photo_paths
 
 
+class AdminCreateVehicleRequest(CreateVehicleRequest):
+    """Admin registers an approved vehicle for a contact."""
+
+    parking_slot_id: str | None = None
+
+
 class UpdateVehicleRequest(BaseModel):
     """Patch a vehicle."""
 

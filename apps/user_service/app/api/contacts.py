@@ -27,8 +27,8 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.contact_onboarding import (
     AdminAssignUnitRequest,
+    AdminCreateVehicleRequest,
     CreateHouseholdMemberRequest,
-    CreateVehicleRequest,
 )
 from apps.user_service.app.schemas.contacts import (
     ContactDetailsResponse,
@@ -965,8 +965,12 @@ async def list_contact_vehicles(
 @router.post(
     "/{contact_id}/vehicles",
     status_code=http_status.HTTP_201_CREATED,
-    summary="Register a vehicle for a contact",
-    description="Admin creates a vehicle linked to one of the contact's assigned units.",
+    summary="Register an approved vehicle for a contact",
+    description=(
+        "Admin creates an approved vehicle linked to one of the contact's assigned units. "
+        "Optional `parking_slot_id` links the vehicle to a slot; if the slot is not yet "
+        "allotted to the unit, it is auto-allotted when entitlement allows."
+    ),
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("30/minute")
@@ -982,9 +986,9 @@ async def create_contact_vehicle(
     contact_id: str = Path(..., description="Contact identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
-    body: CreateVehicleRequest = Body(...),
+    body: AdminCreateVehicleRequest = Body(...),
 ):
-    """Register a vehicle for a contact (admin)."""
+    """Register an approved vehicle for a contact (admin)."""
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -1000,7 +1004,7 @@ async def create_contact_vehicle(
         db_connection=db_connection,
         user_context=user_context,
     )
-    data = await vehicles_service.create_vehicle(contact_id=contact_id, body=body)
+    data = await vehicles_service.create_vehicle_admin(contact_id=contact_id, body=body)
     set_audit_context(
         request,
         user_context,
