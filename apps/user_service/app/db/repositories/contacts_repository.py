@@ -308,6 +308,45 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
                 out[uid] = cid
         return out
 
+    async def fetch_display_names_by_user_ids(
+        self,
+        *,
+        organization_id: str,
+        user_ids: list[str],
+    ) -> dict[str, str]:
+        """Return resident display names keyed by auth user id."""
+        normed = [uid for uid in (user_ids or []) if str(uid or "").strip()]
+        if not normed:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              ct.user_id::text AS user_id,
+              ct.prefix,
+              ct.first_name,
+              ct.last_name
+            FROM contacts ct
+            WHERE ct.organization_id = $1::uuid
+              AND ct.status != $2::text
+              AND ct.user_id = ANY($3::uuid[])
+            """,
+            organization_id,
+            ClientStatus.DELETED.value,
+            normed,
+        )
+        names: dict[str, str] = {}
+        for row in rows:
+            parts = [
+                str(row.get("prefix") or "").strip(),
+                str(row.get("first_name") or "").strip(),
+                str(row.get("last_name") or "").strip(),
+            ]
+            name = " ".join(part for part in parts if part)
+            user_id = str(row.get("user_id") or "").strip()
+            if name and user_id and user_id not in names:
+                names[user_id] = name
+        return names
+
     async def create_contact_with_optional_company_link(
         self,
         *,

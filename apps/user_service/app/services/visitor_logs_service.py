@@ -33,6 +33,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.pass_event_actor_labels import (
+    enrich_pass_event_actor_labels,
+)
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -138,8 +141,6 @@ class VisitorLogsService:
                 user_id=str(guard_user_id),
                 organization_id=organization_id,
             )
-        if not guard_name:
-            guard_name = str(event.get("actor_label") or "").strip() or None
         if not guard_user_id and not guard_name:
             return None, None
         return (str(guard_user_id) if guard_user_id else None, guard_name)
@@ -151,23 +152,13 @@ class VisitorLogsService:
         events: list[dict[str, Any]],
         created_by: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Resolve missing actor_label values from actor_user_id at read time."""
-        enriched: list[dict[str, Any]] = []
-        for event in events:
-            item = dict(event)
-            if str(item.get("actor_label") or "").strip():
-                enriched.append(item)
-                continue
-            _, name = await self._resolve_guard_from_gate_event(
-                event=item,
-                organization_id=organization_id,
-            )
-            if name:
-                item["actor_label"] = name
-            elif item.get("event_type") == PassEventType.CREATED.value and created_by:
-                item["actor_label"] = created_by
-            enriched.append(item)
-        return enriched
+        """Resolve actor_label values from actor ids at read time."""
+        return await enrich_pass_event_actor_labels(
+            db_connection=self.db_connection,
+            organization_id=organization_id,
+            events=events,
+            created_by=created_by,
+        )
 
     async def _guard_from_pass_events(
         self,
@@ -738,10 +729,8 @@ class VisitorLogsService:
                 organization_id=org_id,
                 pass_id=pass_id,
             )
-            events = [self._passes_service._normalize_event(event_row) for event_row in event_rows]
-            events = await self._enrich_timeline_actor_labels(
-                organization_id=org_id,
-                events=events,
+            events = await self._passes_service._normalize_events(
+                event_rows,
                 created_by=self._contact_created_by(row),
             )
             detail = self._passes_service._normalize_pass(

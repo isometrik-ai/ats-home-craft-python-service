@@ -374,11 +374,21 @@ async def test_get_log_detail_returns_pass_timeline():
         }
     )
     svc = _service(passes_repo=passes_repo, events_repo=events_repo, units_repo=units_repo)
+
+    async def _normalize_events(event_rows, created_by=None):
+        return [
+            {**row, "normalized": True, "actor_label": created_by}
+            if row.get("event_type") == PassEventType.CREATED.value
+            else {**row, "normalized": True, "actor_label": "Mr Ajay Guard"}
+            for row in event_rows
+        ]
+
     svc._passes_service = type(
         "Passes",
         (),
         {
             "_normalize_event": staticmethod(lambda row: {**row, "normalized": True}),
+            "_normalize_events": staticmethod(_normalize_events),
             "_normalize_pass": staticmethod(
                 lambda row, events=None, include_events=False: {
                     **row,
@@ -517,8 +527,8 @@ async def test_get_log_detail_returns_walk_in_when_pass_missing():
 
 
 @pytest.mark.asyncio
-async def test_get_log_detail_guard_name_from_actor_label_when_user_id_missing():
-    """Detail guard fields should fall back to actor_label like the list API."""
+async def test_get_log_detail_guard_name_missing_without_user_id():
+    """Detail guard fields stay empty when check-in has no actor user id."""
     pass_row = {
         "id": "pass-1",
         "unit_id": "unit-1",
@@ -530,18 +540,22 @@ async def test_get_log_detail_guard_name_from_actor_label_when_user_id_missing()
         {
             "id": "evt-1",
             "event_type": PassEventType.CHECKED_IN.value,
-            "actor_label": "Gate Guard Sharma",
             "occurred_at": datetime(2026, 6, 9, 9, 0, tzinfo=timezone.utc),
         },
     ]
     passes_repo = _FakePassesRepo(row=pass_row)
     events_repo = _FakeEventsRepo(events=events)
     svc = _service(passes_repo=passes_repo, events_repo=events_repo)
+
+    async def _normalize_events(event_rows, created_by=None):
+        return [{**row, "actor_label": None} for row in event_rows]
+
     svc._passes_service = type(
         "Passes",
         (),
         {
             "_normalize_event": staticmethod(lambda row: row),
+            "_normalize_events": staticmethod(_normalize_events),
             "_normalize_pass": staticmethod(
                 lambda row, events=None, include_events=False: {**row, "events": events or []}
             ),
@@ -549,7 +563,7 @@ async def test_get_log_detail_guard_name_from_actor_label_when_user_id_missing()
     )()
     detail = await svc.get_log_detail(pass_id="pass-1")
     assert detail["guard_user_id"] is None
-    assert detail["guard_name"] == "Gate Guard Sharma"
+    assert detail["guard_name"] is None
 
 
 def test_pass_visit_status_exited_with_check_in_and_out():
@@ -611,11 +625,16 @@ async def test_get_log_detail_shows_creator_without_unit_role():
         names_by_id={"rasika-contact": "Rasika Bharati"},
     )
     svc = _service(passes_repo=passes_repo, events_repo=events_repo, units_repo=units_repo)
+
+    async def _normalize_events(event_rows, created_by=None):
+        return list(event_rows)
+
     svc._passes_service = type(
         "Passes",
         (),
         {
             "_normalize_event": staticmethod(lambda row: row),
+            "_normalize_events": staticmethod(_normalize_events),
             "_normalize_pass": staticmethod(
                 lambda row, events=None, include_events=False: {
                     **row,

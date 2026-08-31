@@ -35,17 +35,6 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 }
 
 
-def _actor_label(contact: dict) -> str | None:
-    """Build resident display name for timeline events."""
-    parts = [
-        str(contact.get("prefix") or "").strip(),
-        str(contact.get("first_name") or "").strip(),
-        str(contact.get("last_name") or "").strip(),
-    ]
-    name = " ".join(part for part in parts if part)
-    return name or None
-
-
 @handle_api_exceptions("list resident walk-in visit units")
 @router.get(
     "/visit-units",
@@ -143,7 +132,6 @@ async def approve_visit_unit(
         contact_id=str(contact["id"]),
         walk_in_entry_id=walk_in_id,
         visit_unit_id=visit_unit_id,
-        actor_label=_actor_label(contact),
     )
     set_audit_context(
         request,
@@ -194,7 +182,6 @@ async def reject_visit_unit(
         walk_in_entry_id=walk_in_id,
         visit_unit_id=visit_unit_id,
         body=body,
-        actor_label=_actor_label(contact),
     )
     set_audit_context(
         request,

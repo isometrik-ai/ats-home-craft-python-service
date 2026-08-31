@@ -47,7 +47,6 @@ async def test_insert_event_casts_enums_and_returns_row():
             "gate_id": GATE_ID,
             "actor_type": "staff",
             "actor_user_id": USER_ID,
-            "actor_label": "Gate A",
             "occurred_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
             "notes": "Entry",
             "metadata": {},
@@ -65,7 +64,6 @@ async def test_insert_event_casts_enums_and_returns_row():
             "gate_id": GATE_ID,
             "actor_type": "staff",
             "actor_user_id": USER_ID,
-            "actor_label": "Gate A",
             "occurred_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
             "notes": "Entry",
             "metadata": {"lane": 1},
@@ -77,6 +75,7 @@ async def test_insert_event_casts_enums_and_returns_row():
     assert inserted["event_type"] == PassEventType.CHECKED_IN.value
     query, args = conn.fetchrow_calls[0]
     assert "INSERT INTO pass_events" in query
+    assert "actor_label" not in query
     assert "::pass_event_type" in query
     assert "::pass_actor_type" in query
     assert args[0] == ORG_ID

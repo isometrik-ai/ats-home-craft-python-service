@@ -437,7 +437,7 @@ TRIM(
               guard_om.salutation AS guard_salutation,
               guard_om.first_name AS guard_first_name,
               guard_om.last_name AS guard_last_name,
-              ci.actor_label AS guard_name_fallback,
+              NULL::text AS guard_name_fallback,
               ci.access_status::text AS access_status,
               CASE
                 WHEN ci.occurred_at IS NOT NULL AND co.occurred_at IS NOT NULL THEN '{exited}'
@@ -476,8 +476,7 @@ TRIM(
                   pe.occurred_at,
                   pe.entry_method,
                   pe.access_status,
-                  pe.actor_user_id,
-                  pe.actor_label
+                  pe.actor_user_id
                 FROM pass_events pe
                 WHERE pe.organization_id = p.organization_id
                   AND pe.pass_id = p.id
@@ -570,7 +569,7 @@ TRIM(
               guard_om.salutation AS guard_salutation,
               guard_om.first_name AS guard_first_name,
               guard_om.last_name AS guard_last_name,
-              wi_enter.actor_label AS guard_name_fallback,
+              NULL::text AS guard_name_fallback,
               '{PassAccessStatus.GRANTED.value}'::text AS access_status,
               CASE w.status::text
                 WHEN '{wi_awaiting}' THEN '{awaiting}'
@@ -598,8 +597,7 @@ TRIM(
              AND requester.status <> 'deleted'
             LEFT JOIN LATERAL (
                 SELECT
-                  we.actor_user_id,
-                  we.actor_label
+                  we.actor_user_id
                 FROM walk_in_events we
                 WHERE we.organization_id = w.organization_id
                   AND we.walk_in_entry_id = w.id

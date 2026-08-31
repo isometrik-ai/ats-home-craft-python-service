@@ -143,7 +143,6 @@ class WalkInRepository(BaseRepository):
         actor_type: str | None = None,
         actor_user_id: str | None = None,
         actor_contact_id: str | None = None,
-        actor_label: str | None = None,
         walk_in_visit_unit_id: str | None = None,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -158,7 +157,6 @@ class WalkInRepository(BaseRepository):
                 actor_type,
                 actor_user_id,
                 actor_contact_id,
-                actor_label,
                 payload
             )
             VALUES (
@@ -169,8 +167,7 @@ class WalkInRepository(BaseRepository):
                 $5::walk_in_actor_type,
                 $6::uuid,
                 $7::uuid,
-                $8,
-                $9::jsonb
+                $8::jsonb
             )
             RETURNING *
             """,
@@ -181,10 +178,84 @@ class WalkInRepository(BaseRepository):
             actor_type,
             actor_user_id,
             actor_contact_id,
-            actor_label,
             serialize_jsonb_param("payload", payload or {}, frozenset({"payload"})),
         )
         return dict(row)
+
+    async def fetch_staff_display_names(
+        self,
+        *,
+        organization_id: str,
+        user_ids: list[str],
+    ) -> dict[str, str]:
+        """Resolve staff display names from organization_members."""
+        if not user_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              om.user_id::text AS user_id,
+              om.salutation,
+              om.first_name,
+              om.last_name,
+              om.email
+            FROM organization_members om
+            WHERE om.organization_id = $1::uuid
+              AND om.user_id = ANY($2::uuid[])
+              AND om.status <> 'deleted'
+            """,
+            organization_id,
+            user_ids,
+        )
+        names: dict[str, str] = {}
+        for row in rows:
+            parts = [
+                str(row.get("salutation") or "").strip(),
+                str(row.get("first_name") or "").strip(),
+                str(row.get("last_name") or "").strip(),
+            ]
+            name = " ".join(part for part in parts if part)
+            if not name:
+                name = str(row.get("email") or "").strip()
+            if name:
+                names[str(row["user_id"])] = name
+        return names
+
+    async def fetch_contact_display_names(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> dict[str, str]:
+        """Resolve resident display names from contacts."""
+        if not contact_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              ct.id::text AS contact_id,
+              ct.prefix,
+              ct.first_name,
+              ct.last_name
+            FROM contacts ct
+            WHERE ct.organization_id = $1::uuid
+              AND ct.id = ANY($2::uuid[])
+              AND ct.status <> 'deleted'
+            """,
+            organization_id,
+            contact_ids,
+        )
+        names: dict[str, str] = {}
+        for row in rows:
+            parts = [
+                str(row.get("prefix") or "").strip(),
+                str(row.get("first_name") or "").strip(),
+                str(row.get("last_name") or "").strip(),
+            ]
+            name = " ".join(part for part in parts if part)
+            if name:
+                names[str(row["contact_id"])] = name
+        return names
 
     async def get_entry(
         self,

@@ -275,6 +275,46 @@ class OrganizationMemberRepository:
 
         return dict(row) if row else None
 
+    async def fetch_display_names_by_user_ids(
+        self,
+        *,
+        organization_id: str,
+        user_ids: list[str],
+    ) -> dict[str, str]:
+        """Return staff display names keyed by auth user id."""
+        if not user_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              om.user_id::text AS user_id,
+              om.salutation,
+              om.first_name,
+              om.last_name,
+              om.email
+            FROM organization_members om
+            WHERE om.organization_id = $1::uuid
+              AND om.user_id = ANY($2::uuid[])
+              AND om.status <> $3
+            """,
+            organization_id,
+            user_ids,
+            OrganizationMemberStatus.DELETED.value,
+        )
+        names: dict[str, str] = {}
+        for row in rows:
+            parts = [
+                str(row.get("salutation") or "").strip(),
+                str(row.get("first_name") or "").strip(),
+                str(row.get("last_name") or "").strip(),
+            ]
+            name = " ".join(part for part in parts if part)
+            if not name:
+                name = str(row.get("email") or "").strip()
+            if name:
+                names[str(row["user_id"])] = name
+        return names
+
     async def fetch_context_for_member_role_change(
         self,
         organization_id: str,

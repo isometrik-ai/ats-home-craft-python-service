@@ -26,6 +26,19 @@ from libs.shared_utils.http_exceptions import (
 )
 
 
+@pytest.fixture(autouse=True)
+def patch_pass_event_actor_enrichment(monkeypatch):
+    """Avoid DB lookups when resolving pass event actor labels in unit tests."""
+
+    async def fake_enrich(**kwargs):
+        return [{**event, "actor_label": "Test Guard"} for event in kwargs["events"]]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pass_verification_service.enrich_pass_event_actor_labels",
+        fake_enrich,
+    )
+
+
 def _user_context() -> UserContext:
     """Build a staff user context for gate tests."""
     return UserContext(
