@@ -96,7 +96,7 @@ def _ensure_utc(value: datetime) -> datetime:
     """Normalize a datetime to UTC."""
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
-    return value
+    return value.astimezone(timezone.utc)
 
 
 class VisitorLogDateRangeQuery(BaseModel):

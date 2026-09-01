@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -279,6 +279,15 @@ class TestVisitorLogsSchemaValidators:
         )
         assert query.start_at.tzinfo == timezone.utc
         assert query.end_at.tzinfo == timezone.utc
+
+    def test_date_range_converts_offset_datetimes_to_utc(self) -> None:
+        ist = timezone(timedelta(hours=5, minutes=30))
+        query = VisitorLogDateRangeQuery(
+            start_at=datetime(2026, 9, 1, 0, 0, tzinfo=ist),
+            end_at=datetime(2026, 9, 30, 23, 59, 59, tzinfo=ist),
+        )
+        assert query.start_at == datetime(2026, 8, 31, 18, 30, tzinfo=timezone.utc)
+        assert query.end_at == datetime(2026, 9, 30, 18, 29, 59, tzinfo=timezone.utc)
 
 
 class TestCommonSchemaValidators:

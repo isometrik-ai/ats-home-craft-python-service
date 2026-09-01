@@ -61,11 +61,10 @@ async def test_list_logs_date_range_bounds():
         page_size=20,
     )
     count_query, count_args = conn.fetchval_calls[0]
-    assert "ci.occurred_at >= $2" in count_query
-    assert "ci.occurred_at < $3" in count_query
-    assert "w.entered_at >= $2" in count_query
-    assert "w.requested_at >= $2" in count_query
-    assert "p.valid_from < $3" in count_query
+    assert "COALESCE(ci.occurred_at, p.valid_from) >= $2" in count_query
+    assert "COALESCE(ci.occurred_at, p.valid_from) < $3" in count_query
+    assert "COALESCE(w.entered_at, w.requested_at) >= $2" in count_query
+    assert "COALESCE(w.entered_at, w.requested_at) < $3" in count_query
     assert "UNION ALL" in count_query
     assert count_args[0] == "org-1"
     assert count_args[1] == start_at
