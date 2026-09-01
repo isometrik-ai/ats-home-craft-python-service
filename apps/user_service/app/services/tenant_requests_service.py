@@ -332,6 +332,18 @@ class TenantRequestsService:
             TenantRequestStatus.APPROVED.value,
             TenantRequestStatus.SUPERSEDED.value,
         }
+        superseded_at = format_iso_datetime(row.get("superseded_at"))
+        move_out_at = superseded_at or next(
+            (
+                format_iso_datetime(event.get("occurred_at"))
+                for event in events
+                if event.get("event_type") == TenantRequestEventType.SUPERSEDED.value
+            ),
+            None,
+        )
+        tenant_moved_out = row.get("status") == TenantRequestStatus.SUPERSEDED.value and bool(
+            move_out_at
+        )
         return [
             TenantRequestMilestoneResponse(
                 key="submitted",
@@ -354,6 +366,12 @@ class TenantRequestsService:
                     TenantRequestStatus.SUPERSEDED.value,
                 },
                 occurred_at=approved_at,
+            ),
+            TenantRequestMilestoneResponse(
+                key="tenant_moved_out",
+                label="Tenant moved out",
+                completed=tenant_moved_out,
+                occurred_at=move_out_at if tenant_moved_out else None,
             ),
         ]
 

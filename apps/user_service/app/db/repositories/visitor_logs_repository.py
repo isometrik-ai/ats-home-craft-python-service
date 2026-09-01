@@ -101,8 +101,16 @@ class VisitorLogsRepository(BaseRepository):
             return cls._current_month_bounds()
         if start_at is None or end_at is None:
             raise ValueError("start_at and end_at must be provided together")
-        start = start_at if start_at.tzinfo else start_at.replace(tzinfo=timezone.utc)
-        end = end_at if end_at.tzinfo else end_at.replace(tzinfo=timezone.utc)
+        start = (
+            start_at.astimezone(timezone.utc)
+            if start_at.tzinfo
+            else start_at.replace(tzinfo=timezone.utc)
+        )
+        end = (
+            end_at.astimezone(timezone.utc)
+            if end_at.tzinfo
+            else end_at.replace(tzinfo=timezone.utc)
+        )
         if end <= start:
             raise ValueError("end_at must be after start_at")
         return start, end
@@ -498,14 +506,8 @@ TRIM(
                 LIMIT 1
             ) co ON true
             WHERE p.organization_id = $1::uuid
-              AND (
-                (ci.occurred_at IS NOT NULL AND ci.occurred_at >= $2 AND ci.occurred_at < $3)
-                OR (
-                  ci.occurred_at IS NULL
-                  AND p.valid_from < $3
-                  AND (p.valid_until IS NULL OR p.valid_until >= $2)
-                )
-              )
+              AND COALESCE(ci.occurred_at, p.valid_from) >= $2
+              AND COALESCE(ci.occurred_at, p.valid_from) < $3
               {filter_sql}
         """
 
@@ -610,14 +612,8 @@ TRIM(
              AND guard_om.user_id = wi_enter.actor_user_id
              AND guard_om.status <> 'deleted'
             WHERE w.organization_id = $1::uuid
-              AND (
-                (w.entered_at IS NOT NULL AND w.entered_at >= $2 AND w.entered_at < $3)
-                OR (
-                  w.entered_at IS NULL
-                  AND w.requested_at >= $2
-                  AND w.requested_at < $3
-                )
-              )
+              AND COALESCE(w.entered_at, w.requested_at) >= $2
+              AND COALESCE(w.entered_at, w.requested_at) < $3
               {filter_sql}
         """
 

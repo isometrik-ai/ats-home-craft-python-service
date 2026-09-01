@@ -514,6 +514,32 @@ def test_derive_milestones_approved() -> None:
     )
     assert milestones[0].completed is True
     assert milestones[2].completed is True
+    assert milestones[3].key == "tenant_moved_out"
+    assert milestones[3].completed is False
+
+
+def test_derive_milestones_superseded_after_move_out() -> None:
+    """Superseded requests include tenant_moved_out milestone from superseded_at."""
+    superseded_at = datetime(2026, 8, 27, 10, 43, 20, tzinfo=timezone.utc)
+    milestones = TenantRequestsService._derive_milestones(
+        row=_request_row(
+            status=TenantRequestStatus.SUPERSEDED.value,
+            approved_at=datetime(2026, 8, 27, 10, 18, 51, tzinfo=timezone.utc),
+            superseded_at=superseded_at,
+        ),
+        events=[
+            {
+                "event_type": TenantRequestEventType.SUPERSEDED.value,
+                "occurred_at": superseded_at,
+                "payload": {"reason": "admin_move_out"},
+            }
+        ],
+    )
+    assert milestones[2].key == "tenant_added"
+    assert milestones[2].completed is True
+    assert milestones[3].key == "tenant_moved_out"
+    assert milestones[3].completed is True
+    assert milestones[3].occurred_at == "2026-08-27T10:43:20+00:00"
 
 
 def test_bucket_to_statuses() -> None:
