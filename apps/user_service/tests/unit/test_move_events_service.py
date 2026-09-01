@@ -212,7 +212,32 @@ class _FakeContactUnitsRepo:
         return {"id": kwargs["contact_unit_id"], "status": "moved_out"}
 
 
+class _FakeContactsRepo:
+    def __init__(self, contacts: dict[str, dict[str, object]] | None = None) -> None:
+        self.contacts = contacts or {
+            "contact-1": {"user_id": "user-tenant", "additional_data": {}},
+            "owner-1": {"user_id": "user-owner", "additional_data": {}},
+        }
+
+    async def get_contact_for_update(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+    ) -> dict[str, object] | None:
+        del organization_id
+        return self.contacts.get(contact_id)
+
+
 class _FakePushDispatcher:
+    def __init__(self, contacts_repo: _FakeContactsRepo | None = None) -> None:
+        self.user_calls: list[dict[str, object]] = []
+        self.contacts_repo = contacts_repo or _FakeContactsRepo()
+
+    async def send_to_user(self, **kwargs):
+        self.user_calls.append(kwargs)
+        return None
+
     async def send_to_contact(self, **kwargs):
         del kwargs
         return None
@@ -237,6 +262,14 @@ def _service(
     service.units_repo.get_unit_owner_contact = AsyncMock(
         return_value={"contact_id": "owner-1", "contact_unit_id": "cu-owner"}
     )
+    service.units_repo.get_unit_role_occupants_batch = AsyncMock(
+        return_value={
+            "unit-1": {
+                "owner": {"contact_id": "owner-1"},
+                "tenant": None,
+            }
+        }
+    )
     service.contact_roles_repo = MagicMock()
     service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(return_value=None)
     service.contact_roles_repo.list_active_roles_for_contact = AsyncMock(return_value=[])
@@ -244,6 +277,57 @@ def _service(
     service.contact_roles_repo.insert_tenant_role = AsyncMock(return_value={"id": "role-1"})
     service._push_dispatcher = _FakePushDispatcher()
     return service
+
+
+@pytest.mark.asyncio
+async def test_create_move_in_notifies_moving_contact_and_owner():
+    """Move-in push goes to the moving contact and the unit owner."""
+    push = _FakePushDispatcher()
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo)
+    service._push_dispatcher = push
+
+    with patch(
+        "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_in",
+        new=AsyncMock(),
+    ):
+        await service.create_move_event(_move_in_request())
+
+    recipient_user_ids = {call["recipient_user_id"] for call in push.user_calls}
+    assert recipient_user_ids == {"user-tenant", "user-owner"}
+    assert all(
+        call["message_key"] == "notifications.push.move.recorded" for call in push.user_calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_move_in_notifies_owner_only_when_same_as_moving_contact():
+    """Owner who is moving in receives a single push."""
+    contacts = {
+        "contact-1": {"user_id": "user-owner", "additional_data": {}},
+        "owner-1": {"user_id": "user-owner", "additional_data": {}},
+    }
+    push = _FakePushDispatcher(contacts_repo=_FakeContactsRepo(contacts))
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo)
+    service._push_dispatcher = push
+    service.units_repo.get_unit_role_occupants_batch = AsyncMock(
+        return_value={
+            "unit-1": {
+                "owner": {"contact_id": "owner-1"},
+                "tenant": None,
+            }
+        }
+    )
+
+    with patch(
+        "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_in",
+        new=AsyncMock(),
+    ):
+        await service.create_move_event(_move_in_request())
+
+    assert len(push.user_calls) == 1
+    assert push.user_calls[0]["recipient_user_id"] == "user-owner"
 
 
 @pytest.mark.asyncio

@@ -393,9 +393,9 @@ When the pass row has `daily_help_id`, check-in/out uses daily-help recipients i
 
 ### 6.8 Move events (`MoveEventsService`)
 
-| Event         | Message key                        | Trigger                      | Recipient                 | API                 |
-| ------------- | ---------------------------------- | ---------------------------- | ------------------------- | ------------------- |
-| Move recorded | `notifications.push.move.recorded` | Move-in or move-out recorded | Contact on the move event | `POST /move-events` |
+| Event         | Message key                        | Trigger                      | Recipient                                     | API                 |
+| ------------- | ---------------------------------- | ---------------------------- | --------------------------------------------- | ------------------- |
+| Move recorded | `notifications.push.move.recorded` | Move-in or move-out recorded | Moving contact + unit Owner (deduped by user) | `POST /move-events` |
 
 **Params:** `{move_type}`, `{unit_label}`.
 
