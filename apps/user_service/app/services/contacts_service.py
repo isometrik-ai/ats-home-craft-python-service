@@ -104,6 +104,9 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
     serialize_jsonb_param,
 )
+from apps.user_service.app.utils.contact_notice_utils import (
+    purge_contact_notice_likes,
+)
 from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
 )
@@ -2631,6 +2634,11 @@ class ContactsService:
         )
         updated = await self.contacts_repo.soft_delete_contact(
             contact_id=contact_id, organization_id=org_id
+        )
+        await purge_contact_notice_likes(
+            db_connection=self.db_connection,
+            organization_id=str(org_id),
+            contact_id=contact_id,
         )
         await revoke_contact_portal_sessions(
             db_connection=self.db_connection,

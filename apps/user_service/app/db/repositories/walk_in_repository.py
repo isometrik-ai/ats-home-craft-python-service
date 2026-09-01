@@ -454,6 +454,49 @@ class WalkInRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def reject_open_visit_units_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        rejection_reason: str,
+    ) -> list[dict[str, Any]]:
+        """Reject awaiting/approved visit units on open walk-ins for a vacated unit."""
+        now = datetime.now(timezone.utc)
+        rows = await self.db_connection.fetch(
+            """
+            UPDATE walk_in_visit_units vu
+            SET status = 'rejected'::walk_in_visit_unit_status,
+                rejection_reason = $3,
+                rejected_at = $4::timestamptz,
+                updated_at = $4::timestamptz
+            FROM walk_in_entries e
+            WHERE vu.organization_id = $1::uuid
+              AND vu.unit_id = $2::uuid
+              AND vu.walk_in_entry_id = e.id
+              AND e.organization_id = vu.organization_id
+              AND vu.status IN (
+                  'awaiting'::walk_in_visit_unit_status,
+                  'approved'::walk_in_visit_unit_status
+              )
+              AND e.status IN (
+                  'awaiting'::walk_in_status,
+                  'approved'::walk_in_status
+              )
+            RETURNING
+                vu.id::text AS id,
+                vu.walk_in_entry_id::text AS walk_in_entry_id,
+                vu.unit_id::text AS unit_id,
+                vu.tower_id::text AS tower_id,
+                vu.status::text AS status
+            """,
+            organization_id,
+            unit_id,
+            rejection_reason,
+            now,
+        )
+        return [dict(row) for row in rows]
+
     async def update_visit_unit_status(
         self,
         *,

@@ -421,7 +421,8 @@ class ContactUnitsRepository(BaseRepository):
                 cu.id::text AS id,
                 cu.unit_id::text AS unit_id,
                 cu.project_id::text AS project_id,
-                cu.contact_id::text AS contact_id
+                cu.contact_id::text AS contact_id,
+                cu.relationship::text AS relationship
             """,
             organization_id,
             unit_id,

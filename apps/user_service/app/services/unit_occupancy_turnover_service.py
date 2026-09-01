@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from typing import Any
+
 import asyncpg
 
 from apps.user_service.app.db.repositories.contact_roles_repository import (
@@ -21,6 +24,9 @@ from apps.user_service.app.db.repositories.pass_events_repository import (
     PassEventsRepository,
 )
 from apps.user_service.app.db.repositories.passes_repository import PassesRepository
+from apps.user_service.app.db.repositories.tenant_requests_repository import (
+    TenantRequestsRepository,
+)
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import (
     ClientStatus,
@@ -28,12 +34,20 @@ from apps.user_service.app.schemas.enums import (
     ContactUnitRelationship,
     PassActorType,
     PassEventType,
+    TenantRequestEventType,
+    TenantRequestStatus,
 )
 from apps.user_service.app.services.vehicles_service import VehiclesService
+from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.contact_notice_utils import (
+    purge_contact_notice_likes,
+)
 from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
 )
+from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 
 class UnitOccupancyTurnoverService:
@@ -55,6 +69,94 @@ class UnitOccupancyTurnoverService:
         self.pass_events_repo = PassEventsRepository(db_connection)
         self.household_invitations_repo = HouseholdInvitationsRepository(db_connection)
         self.daily_help_repo = DailyHelpRepository(db_connection)
+        self.tenant_requests_repo = TenantRequestsRepository(db_connection)
+
+    async def vacate_unit_completely(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        reason: str,
+        supersede_reason: str,
+        require_open_links: bool = False,
+        tenant_already_moved_out: bool = False,
+    ) -> dict[str, Any]:
+        """Vacate a unit: move out all occupants and clear household artifacts."""
+        owner = await self.units_repo.get_unit_owner_contact(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        previous_contact_id = (
+            str(owner["contact_id"]) if owner and owner.get("contact_id") else None
+        )
+
+        if not tenant_already_moved_out:
+            await self._supersede_approved_tenant_for_unit(
+                organization_id=organization_id,
+                unit_id=unit_id,
+                reason=supersede_reason,
+            )
+            await self._clear_unit_scoped_assets(
+                organization_id=organization_id,
+                unit_id=unit_id,
+                pass_cancel_notes=reason,
+            )
+        released = await self.contact_units_repo.release_all_open_links_for_unit(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if require_open_links and not released:
+            raise NotFoundException(
+                message_key="project_setup.errors.unit_owner_not_assigned",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        if released:
+            await self._cancel_household_invitations(
+                organization_id=organization_id,
+                contact_unit_ids=[str(row["id"]) for row in released if row.get("id")],
+            )
+            await self.contact_roles_repo.end_active_roles_for_unit(
+                organization_id=organization_id,
+                unit_id=unit_id,
+            )
+            released_contact_ids = {
+                str(row["contact_id"]) for row in released if row.get("contact_id")
+            }
+            family_contact_ids = {
+                str(row["contact_id"])
+                for row in released
+                if row.get("contact_id")
+                and str(row.get("relationship") or "") != ContactUnitRelationship.SELF.value
+            }
+            await self._revoke_sessions_without_remaining_links(
+                organization_id=organization_id,
+                contact_ids=released_contact_ids - family_contact_ids,
+            )
+            await self._soft_delete_orphaned_household_contacts(
+                organization_id=organization_id,
+                contact_ids=family_contact_ids,
+            )
+            if not previous_contact_id:
+                for row in released:
+                    if str(row.get("relationship") or "") == ContactUnitRelationship.SELF.value:
+                        previous_contact_id = str(row["contact_id"])
+                        break
+                if not previous_contact_id and released:
+                    previous_contact_id = str(released[0]["contact_id"])
+
+        unit_status = await self.units_repo.reconcile_unit_inventory_status(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        return {
+            "released": released,
+            "released_contact_unit_ids": [str(row["id"]) for row in released if row.get("id")],
+            "previous_contact_id": previous_contact_id,
+            "unit_status": unit_status or "vacant",
+        }
 
     async def release_outgoing_tenant_household(
         self,
@@ -238,6 +340,15 @@ class UnitOccupancyTurnoverService:
             removal_reason=pass_cancel_notes,
         )
 
+        walk_in_service = WalkInService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await walk_in_service.release_open_visit_units_for_unit_turnover(
+            unit_id=unit_id,
+            reason=pass_cancel_notes,
+        )
+
     async def _cancel_pass(
         self,
         *,
@@ -276,6 +387,68 @@ class UnitOccupancyTurnoverService:
             await self.household_invitations_repo.cancel_by_contact_unit(
                 organization_id=organization_id,
                 contact_unit_id=contact_unit_id,
+            )
+
+    async def _supersede_approved_tenant_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        reason: str,
+    ) -> None:
+        """Supersede the active approved tenant request on a unit, if any."""
+        existing = await self.tenant_requests_repo.find_active_approved_for_unit(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if not existing:
+            return
+        now = datetime.now(timezone.utc)
+        contact_unit_id = existing.get("contact_unit_id")
+        if contact_unit_id:
+            await self.contact_units_repo.sync_move_out(
+                organization_id=organization_id,
+                contact_unit_id=str(contact_unit_id),
+                event_date=now,
+            )
+        await self.tenant_requests_repo.update_request_status(
+            organization_id=organization_id,
+            tenant_request_id=str(existing["id"]),
+            status=TenantRequestStatus.SUPERSEDED.value,
+            superseded_at=now,
+        )
+        await self.tenant_requests_repo.insert_event(
+            organization_id=organization_id,
+            tenant_request_id=str(existing["id"]),
+            event_type=TenantRequestEventType.SUPERSEDED.value,
+            actor_user_id=str(self.user_context.user_id) if self.user_context.user_id else None,
+            payload={"reason": reason},
+        )
+
+    async def _revoke_sessions_without_remaining_links(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: set[str],
+    ) -> None:
+        """Revoke portal sessions for contacts with no remaining unit links."""
+        for contact_id in contact_ids:
+            remaining_links = await self.contact_units_repo.list_open_links_for_contact(
+                organization_id=organization_id,
+                contact_id=contact_id,
+            )
+            if remaining_links:
+                continue
+            contact = await self.contacts_repo.get_contact_for_update(
+                contact_id=contact_id,
+                organization_id=organization_id,
+            )
+            if not contact or not contact.get("user_id"):
+                continue
+            await revoke_contact_portal_sessions(
+                db_connection=self.db_connection,
+                organization_id=organization_id,
+                user_id=contact.get("user_id"),
             )
 
     async def _revoke_portal_sessions(
@@ -323,6 +496,11 @@ class UnitOccupancyTurnoverService:
             await self.contacts_repo.soft_delete_contact(
                 contact_id=household_contact_id,
                 organization_id=organization_id,
+            )
+            await purge_contact_notice_likes(
+                db_connection=self.db_connection,
+                organization_id=organization_id,
+                contact_id=household_contact_id,
             )
             await revoke_contact_portal_sessions(
                 db_connection=self.db_connection,

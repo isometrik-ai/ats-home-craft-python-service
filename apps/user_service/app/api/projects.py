@@ -2749,8 +2749,10 @@ async def list_unit_passes(
     status_code=http_status.HTTP_200_OK,
     summary="Unassign owner from a unit",
     description=(
-        "Marks pending/active contact_units allotment links as moved_out and sets "
-        "the unit inventory status to vacant."
+        "Vacates a unit when ownership ends: moves out all occupants, ends all unit "
+        "roles, cancels passes, daily help, and open walk-ins, cancels household "
+        "invitations, revokes portal sessions for contacts with no remaining units, "
+        "soft-deletes orphaned family contacts, and sets unit inventory to vacant."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -2803,6 +2805,8 @@ async def unassign_unit_owner(
     summary="Reassign unit owner",
     description=(
         "Replaces the current unit assignee with another contact in one step. "
+        "Vacates the unit first (roles, passes, daily help, walk-ins, household links) "
+        "then creates a pending allotment for the new owner. "
         "Works for pending or active allotments and sets the unit to occupied. "
         "Requires assign_date (YYYY-MM-DD)."
     ),

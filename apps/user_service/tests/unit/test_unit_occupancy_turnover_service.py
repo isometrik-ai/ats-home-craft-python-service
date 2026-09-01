@@ -58,6 +58,10 @@ def _service() -> UnitOccupancyTurnoverService:
     svc.pass_events_repo.insert_event = AsyncMock()
     svc.daily_help_repo = MagicMock()
     svc.daily_help_repo.remove_all_active_links_for_unit = AsyncMock(return_value=[])
+    svc.tenant_requests_repo = MagicMock()
+    svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(return_value=None)
+    svc.tenant_requests_repo.update_request_status = AsyncMock()
+    svc.tenant_requests_repo.insert_event = AsyncMock()
     svc.contacts_repo = MagicMock()
     svc.contacts_repo.get_contact_for_update = AsyncMock(
         return_value={"user_id": "user-family-1", "status": "active"}
@@ -67,6 +71,46 @@ def _service() -> UnitOccupancyTurnoverService:
 
 
 @pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
+async def test_vacate_unit_completely_skips_tenant_cleanup_when_already_moved_out(
+    mock_vehicles_cls: MagicMock,
+    mock_walk_in_cls: MagicMock,
+    _mock_revoke: AsyncMock,
+) -> None:
+    """When tenant move-out already ran, vacate only releases the owner."""
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    svc = _service()
+    svc.contact_units_repo.release_all_open_links_for_unit = AsyncMock(
+        return_value=[{"id": "cu-owner", "contact_id": "owner-1", "relationship": "self"}]
+    )
+    svc.contact_units_repo.list_open_links_for_contact = AsyncMock(return_value=[])
+
+    await svc.vacate_unit_completely(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        reason="Unit owner unassigned",
+        supersede_reason="owner_unassigned",
+        tenant_already_moved_out=True,
+    )
+
+    svc.tenant_requests_repo.find_active_approved_for_unit.assert_not_awaited()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover.assert_not_awaited()
+    svc.contact_units_repo.release_all_open_links_for_unit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
 @patch(
     "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
@@ -75,9 +119,12 @@ def _service() -> UnitOccupancyTurnoverService:
 async def test_release_outgoing_tenant_household_clears_unit_artifacts(
     mock_revoke: AsyncMock,
     mock_vehicles_cls: MagicMock,
+    mock_walk_in_cls: MagicMock,
+    _mock_purge_likes: AsyncMock,
 ) -> None:
     """Household turnover preserves owner and clears unit-scoped artifacts."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
     svc = _service()
 
     released = await svc.release_outgoing_tenant_household(
@@ -101,6 +148,10 @@ async def test_release_outgoing_tenant_household_clears_unit_artifacts(
         unit_id="unit-1",
         removal_reason="Tenant turnover",
     )
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover.assert_awaited_once_with(
+        unit_id="unit-1",
+        reason="Tenant turnover",
+    )
     svc.contacts_repo.soft_delete_contact.assert_awaited_once_with(
         contact_id="family-1",
         organization_id="org-1",
@@ -109,6 +160,97 @@ async def test_release_outgoing_tenant_household_clears_unit_artifacts(
 
 
 @pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+async def test_vacate_unit_completely_clears_all_artifacts(
+    _mock_revoke: AsyncMock,
+    mock_vehicles_cls: MagicMock,
+    mock_walk_in_cls: MagicMock,
+    _mock_purge_likes: AsyncMock,
+) -> None:
+    """Full unit vacate clears occupants, roles, assets, and reconciles inventory."""
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    svc = _service()
+    svc.units_repo.get_unit_owner_contact = AsyncMock(return_value={"contact_id": "owner-1"})
+    svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(return_value=None)
+    svc.contact_units_repo.release_all_open_links_for_unit = AsyncMock(
+        return_value=[
+            {
+                "id": "cu-owner",
+                "contact_id": "owner-1",
+                "relationship": "self",
+            },
+            {
+                "id": "cu-family",
+                "contact_id": "family-1",
+                "relationship": "spouse",
+            },
+        ]
+    )
+    svc.contact_units_repo.list_open_links_for_contact = AsyncMock(return_value=[])
+    svc.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="vacant")
+
+    result = await svc.vacate_unit_completely(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        reason="Unit owner unassigned",
+        supersede_reason="owner_unassigned",
+        require_open_links=True,
+    )
+
+    assert result["previous_contact_id"] == "owner-1"
+    assert result["unit_status"] == "vacant"
+    svc.contact_roles_repo.end_active_roles_for_unit.assert_awaited_once_with(
+        organization_id="org-1",
+        unit_id="unit-1",
+    )
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover.assert_awaited_once()
+    svc.daily_help_repo.remove_all_active_links_for_unit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
+async def test_vacate_unit_completely_requires_open_links(
+    mock_vehicles_cls: MagicMock,
+    mock_walk_in_cls: MagicMock,
+) -> None:
+    """Full unit vacate returns 404 when no open occupant links exist."""
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    svc = _service()
+    svc.units_repo.get_unit_owner_contact = AsyncMock(return_value=None)
+    svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(return_value=None)
+    svc.contact_units_repo.release_all_open_links_for_unit = AsyncMock(return_value=[])
+
+    with pytest.raises(NotFoundException):
+        await svc.vacate_unit_completely(
+            organization_id="org-1",
+            project_id="project-1",
+            unit_id="unit-1",
+            reason="Unit owner unassigned",
+            supersede_reason="owner_unassigned",
+            require_open_links=True,
+        )
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
+    new_callable=AsyncMock,
+)
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
 @patch(
     "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
@@ -117,6 +259,7 @@ async def test_release_outgoing_tenant_household_clears_unit_artifacts(
 async def test_release_single_occupant_scopes_to_one_contact(
     mock_revoke: AsyncMock,
     mock_vehicles_cls: MagicMock,
+    _mock_purge_likes: AsyncMock,
 ) -> None:
     """Single occupant move-out only clears that contact on the unit."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()

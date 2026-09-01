@@ -59,6 +59,7 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | API endpoints                       | `app/api/move_events.py`                                               |
 | Route registration                  | `app/api/routes.py` (`move_events_router`)                             |
 | Move orchestration + occupancy sync | `app/services/move_events_service.py`                                  |
+| Owner-change tenant move-out hook   | `MoveEventsService.record_tenant_move_out_for_owner_change`            |
 | Household turnover cleanup          | `app/services/unit_occupancy_turnover_service.py`                      |
 | Tenant-request mirror on move-in    | `app/services/tenant_requests_service.py` (`sync_after_admin_move_in`) |
 | Occupancy link updates (reused)     | `app/db/repositories/contact_units_repository.py` (existing)           |
@@ -88,6 +89,7 @@ Implemented in `UnitOccupancyTurnoverService.release_outgoing_tenant_household()
 | Vehicles                 | `VehiclesService.release_for_move_out(unit_id=...)` — all vehicles on the unit          |
 | Passes                   | Cancel active unit-scoped visitor passes (`passes` where `unit_id` + `status = active`) |
 | Daily help               | Set `daily_help_household_links.status = removed` for all active links on unit          |
+| Walk-ins                 | Reject open `walk_in_visit_units` on awaiting/approved entries for the unit             |
 | Household invitations    | Cancel pending invites for released `contact_unit_id`s                                  |
 | Portal sessions          | Revoke sessions for outgoing tenant + family (not owner)                                |
 | Orphan family contacts   | Soft-delete contacts with zero remaining unit links (optional cleanup)                  |
@@ -102,6 +104,44 @@ move-event history.
 | **Admin move-in**          | Before resolving/creating the new tenant `contact_units` link (sanitizes stale data)          |
 | **Admin move-out**         | After insert, when `contact_id` is the **active tenant** on the unit                          |
 | **Tenant request approve** | Before provisioning the new tenant (see [tenant-requests-flow.md](./tenant-requests-flow.md)) |
+| **Owner contact deleted**  | Before `vacate_unit_completely`, when the unit has an active tenant (see below)               |
+| **Owner unassigned**       | Before `vacate_unit_completely`, when the unit has an active tenant (see below)               |
+| **Owner reassigned**       | Before `vacate_unit_completely`, when the unit has an active tenant (see below)               |
+
+### Owner-change tenant move-out (system-triggered)
+
+When an **owner** is removed from a unit but an **active tenant** still occupies it, the service
+records a proper admin move-out for the tenant **before** vacating the owner. This keeps the
+`move_events` ledger and `tenant_requests` history aligned with manual `POST /move-events` move-outs.
+
+Implemented in `MoveEventsService.record_tenant_move_out_for_owner_change()` (called from
+`ContactUnitsService._vacate_unit_for_owner_change` and
+`ContactDeleteCascadeService._release_primary_holdings`):
+
+| Step | Action                                                                                                         |
+| ---- | -------------------------------------------------------------------------------------------------------------- |
+| 1    | Detect active tenant via `contact_roles.get_active_tenant_contact_for_unit` + active `contact_units` link      |
+| 2    | Insert `move_events` row (`move_type=move_out`, `event_date=today`, system notes)                              |
+| 3    | `_release_occupancy_for_move_out` → `release_outgoing_tenant_household` (owner preserved)                      |
+| 4    | `TenantRequestsService.sync_after_admin_move_out` (supersedes approved request with `move_event_id`)           |
+| 5    | `UnitOccupancyTurnoverService.vacate_unit_completely(..., tenant_already_moved_out=True)` — owner-only release |
+
+System notes on the move event:
+
+| Owner change   | `move_events.notes`                                               |
+| -------------- | ----------------------------------------------------------------- |
+| Contact delete | `Tenant move-out recorded because the unit owner was deleted.`    |
+| Unassign       | `Tenant move-out recorded because the unit owner was unassigned.` |
+| Reassign       | `Tenant move-out recorded because the unit owner was reassigned.` |
+
+**Differences from manual `POST /move-events` move-out:**
+
+- No push notification to the tenant (owner change is staff-initiated).
+- `vacate_unit_completely` skips duplicate tenant supersede and unit-scoped asset cleanup when
+  `tenant_already_moved_out=True` (steps 3–4 already ran).
+- Owner contact row is **not** deleted on unassign/reassign (only on contact delete).
+
+**When no tenant exists:** owner vacate runs `vacate_unit_completely` with full cleanup as before.
 
 ### Single-occupant move-out
 
@@ -281,19 +321,20 @@ ______________________________________________________________________
 
 ## 7. How to make common changes
 
-| I want to…                              | Change here                                                                |
-| --------------------------------------- | -------------------------------------------------------------------------- |
-| Add a move type                         | `MoveEventType` enum + Postgres `move_event_type` enum                     |
-| Add/rename a move field                 | new migration + `move_events_repository.py` SQL + `schemas/move_events.py` |
-| Change occupancy-sync / turnover rules  | `move_events_service.py` + `unit_occupancy_turnover_service.py`            |
-| Change tenant-request mirror on move-in | `tenant_requests_service.sync_after_admin_move_in`                         |
-| Change tenant-request close on move-out | `tenant_requests_service.sync_after_admin_move_out`                        |
-| Change list filter / search             | `move_events_repository.py` list query + `MoveEventListBucket`             |
-| Add scheduled/completed lifecycle       | add `MoveEventStatus` enum + Postgres enum + column (additive)             |
-| Add an endpoint                         | route in `api/move_events.py` → service method → repository method         |
-| Change a user-facing message            | `app/locales/en.json` under `move_events.*`                                |
-| Change RBAC required for an action      | the `check_permissions(...)` call on that endpoint                         |
-| Wire the fee to billing                 | `move_events_service.py` (emit/charge) when a billing module lands         |
+| I want to…                              | Change here                                                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Add a move type                         | `MoveEventType` enum + Postgres `move_event_type` enum                                                                                     |
+| Add/rename a move field                 | new migration + `move_events_repository.py` SQL + `schemas/move_events.py`                                                                 |
+| Change occupancy-sync / turnover rules  | `move_events_service.py` + `unit_occupancy_turnover_service.py`                                                                            |
+| Change tenant-request mirror on move-in | `tenant_requests_service.sync_after_admin_move_in`                                                                                         |
+| Change tenant-request close on move-out | `tenant_requests_service.sync_after_admin_move_out`                                                                                        |
+| Change owner-change tenant move-out     | `move_events_service.record_tenant_move_out_for_owner_change` + callers in `contact_units_service.py`, `contact_delete_cascade_service.py` |
+| Change list filter / search             | `move_events_repository.py` list query + `MoveEventListBucket`                                                                             |
+| Add scheduled/completed lifecycle       | add `MoveEventStatus` enum + Postgres enum + column (additive)                                                                             |
+| Add an endpoint                         | route in `api/move_events.py` → service method → repository method                                                                         |
+| Change a user-facing message            | `app/locales/en.json` under `move_events.*`                                                                                                |
+| Change RBAC required for an action      | the `check_permissions(...)` call on that endpoint                                                                                         |
+| Wire the fee to billing                 | `move_events_service.py` (emit/charge) when a billing module lands                                                                         |
 
 ______________________________________________________________________
 

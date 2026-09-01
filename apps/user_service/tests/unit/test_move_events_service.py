@@ -450,6 +450,75 @@ async def test_create_move_out_success_syncs_move_out(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_record_tenant_move_out_for_owner_change_runs_admin_move_out(monkeypatch):
+    """Owner-change hook records tenant move-out and closes the tenant request."""
+    turnover_calls: list[str] = []
+    sync_move_out_calls: list[dict[str, Any]] = []
+
+    class _TurnoverStub:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def release_outgoing_tenant_household(self, **_kwargs):
+            turnover_calls.append("household")
+
+        async def release_single_occupant(self, **_kwargs):
+            turnover_calls.append("single")
+
+    async def fake_sync_after_admin_move_out(_self, **kwargs):
+        sync_move_out_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.UnitOccupancyTurnoverService",
+        _TurnoverStub,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.move_events_service.TenantRequestsService.sync_after_admin_move_out",
+        fake_sync_after_admin_move_out,
+    )
+    move_repo = _FakeMoveEventsRepo()
+    move_repo.row = _move_row(move_type=MoveEventType.MOVE_OUT.value)
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+
+    move_event_id = await service.record_tenant_move_out_for_owner_change(
+        unit_id="unit-1",
+        project_id="project-1",
+        notes="Tenant move-out recorded because the unit owner was unassigned.",
+    )
+
+    assert move_event_id == "move-1"
+    assert turnover_calls == ["household"]
+    assert sync_move_out_calls == [
+        {
+            "unit_id": "unit-1",
+            "tenant_contact_id": "tenant-1",
+            "move_event_id": "move-1",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_record_tenant_move_out_for_owner_change_skips_without_tenant():
+    """Owner-change hook is a no-op when the unit has no active tenant."""
+    move_repo = _FakeMoveEventsRepo()
+    service = _service(move_repo, _FakeContactUnitsRepo())
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(return_value=None)
+
+    move_event_id = await service.record_tenant_move_out_for_owner_change(
+        unit_id="unit-1",
+        project_id="project-1",
+        notes="Tenant move-out recorded because the unit owner was unassigned.",
+    )
+
+    assert move_event_id is None
+    assert len(move_repo.insert_calls) == 0
+
+
+@pytest.mark.asyncio
 async def test_create_move_in_rejects_unsold_unit():
     """Move-in is blocked when the unit is vacant without an owner allotment."""
     move_repo = _FakeMoveEventsRepo()

@@ -881,6 +881,39 @@ class NoticesRepository(BaseRepository):
         )
         return True
 
+    async def delete_all_likes_for_contact(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> int:
+        """Remove every notice like for a contact and fix denormalized like counts."""
+        rows = await self.db_connection.fetch(
+            """
+            WITH removed AS (
+                DELETE FROM notice_likes
+                WHERE organization_id = $1::uuid
+                  AND contact_id = $2::uuid
+                RETURNING notice_id
+            ),
+            counts AS (
+                SELECT notice_id, COUNT(*)::int AS removed_count
+                FROM removed
+                GROUP BY notice_id
+            )
+            UPDATE notices n
+            SET like_count = GREATEST(n.like_count - counts.removed_count, 0),
+                updated_at = now()
+            FROM counts
+            WHERE n.organization_id = $1::uuid
+              AND n.id = counts.notice_id
+            RETURNING counts.removed_count
+            """,
+            organization_id,
+            contact_id,
+        )
+        return sum(int(row["removed_count"]) for row in rows)
+
     async def delete_like(
         self,
         *,

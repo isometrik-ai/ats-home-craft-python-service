@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -324,6 +324,135 @@ class MoveEventsService:
             contact_unit_id=contact_unit_id,
         )
 
+    async def _record_move_out(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        contact_id: str,
+        event_date: date,
+        notes: str | None = None,
+        fee_amount: Decimal | None = None,
+        fee_currency: str = "INR",
+        send_notification: bool = True,
+    ) -> dict[str, Any]:
+        """Insert a move-out ledger row and run turnover + tenant-request sync."""
+        contact_unit_id = await self._resolve_contact_unit(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            contact_id=contact_id,
+            move_type=MoveEventType.MOVE_OUT.value,
+        )
+
+        inserted = await self.move_events_repo.insert(
+            {
+                "organization_id": organization_id,
+                "project_id": project_id,
+                "unit_id": unit_id,
+                "contact_id": contact_id,
+                "contact_unit_id": contact_unit_id,
+                "move_type": MoveEventType.MOVE_OUT.value,
+                "event_date": event_date,
+                "fee_amount": fee_amount,
+                "fee_currency": fee_currency,
+                "notes": notes,
+                "documents": [],
+                "recorded_by_user_id": self.user_context.user_id,
+            }
+        )
+
+        await self._release_occupancy_for_move_out(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            contact_id=str(contact_id),
+        )
+        tenant_requests_service = TenantRequestsService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await tenant_requests_service.sync_after_admin_move_out(
+            unit_id=unit_id,
+            tenant_contact_id=str(contact_id),
+            move_event_id=str(inserted["id"]),
+        )
+
+        if send_notification:
+            row = await self.move_events_repo.get_by_id(
+                organization_id=organization_id,
+                move_event_id=inserted["id"],
+            )
+            if row:
+                await self._push().send_to_contact(
+                    organization_id=organization_id,
+                    contact_id=str(contact_id),
+                    message_key="notifications.push.move.recorded",
+                    notification_type="NOTIFICATION_TYPE_MOVE",
+                    feed_type="move",
+                    params={
+                        "move_type": MoveEventType.MOVE_OUT.value.replace("_", " "),
+                        "unit_label": unit_label_from_row(
+                            {
+                                "unit_id": unit_id,
+                                "unit_label": row.get("unit_label"),
+                                "unit_code": row.get("unit_code"),
+                            }
+                        ),
+                    },
+                    data={
+                        "move_event_id": str(row.get("id") or inserted["id"]),
+                        "project_id": str(project_id),
+                        "unit_id": unit_id,
+                        "screen": "move_event_detail",
+                    },
+                    entity={"kind": "move_event", "id": str(row.get("id") or inserted["id"])},
+                    options={
+                        "click_action": "OPEN_MOVE",
+                        "idempotency_key": f"move:{row.get('id') or inserted['id']}:recorded",
+                    },
+                )
+        return inserted
+
+    async def record_tenant_move_out_for_owner_change(
+        self,
+        *,
+        unit_id: str,
+        project_id: str,
+        notes: str,
+    ) -> str | None:
+        """Record admin move-out for the active tenant when owner occupancy changes."""
+        organization_id = self.user_context.organization_id
+        assert organization_id
+
+        tenant_contact_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if not tenant_contact_id:
+            return None
+
+        tenant_contact_id = str(tenant_contact_id)
+        has_active = await self.contact_units_repo.contact_has_active_unit(
+            organization_id=organization_id,
+            contact_id=tenant_contact_id,
+            unit_id=unit_id,
+        )
+        if not has_active:
+            return None
+
+        inserted = await self._record_move_out(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            contact_id=tenant_contact_id,
+            event_date=datetime.now(timezone.utc).date(),
+            notes=notes,
+            send_notification=False,
+        )
+        return str(inserted["id"])
+
     async def create_move_event(self, body: CreateMoveEventRequest) -> MoveEventResponse:
         """Record a move-in or move-out and sync occupancy."""
         organization_id = self.user_context.organization_id
@@ -385,22 +514,35 @@ class MoveEventsService:
             move_type=move_type,
         )
 
-        inserted = await self.move_events_repo.insert(
-            {
-                "organization_id": organization_id,
-                "project_id": unit["project_id"],
-                "unit_id": body.unit_id,
-                "contact_id": body.contact_id,
-                "contact_unit_id": contact_unit_id,
-                "move_type": move_type,
-                "event_date": body.event_date,
-                "fee_amount": body.fee_amount,
-                "fee_currency": body.fee_currency,
-                "notes": body.notes,
-                "documents": self._documents_to_json(body.documents),
-                "recorded_by_user_id": self.user_context.user_id,
-            }
-        )
+        if move_type == MoveEventType.MOVE_OUT.value:
+            inserted = await self._record_move_out(
+                organization_id=organization_id,
+                project_id=project_id,
+                unit_id=body.unit_id,
+                contact_id=body.contact_id,
+                event_date=body.event_date,
+                notes=body.notes,
+                fee_amount=body.fee_amount,
+                fee_currency=body.fee_currency,
+                send_notification=False,
+            )
+        else:
+            inserted = await self.move_events_repo.insert(
+                {
+                    "organization_id": organization_id,
+                    "project_id": unit["project_id"],
+                    "unit_id": body.unit_id,
+                    "contact_id": body.contact_id,
+                    "contact_unit_id": contact_unit_id,
+                    "move_type": move_type,
+                    "event_date": body.event_date,
+                    "fee_amount": body.fee_amount,
+                    "fee_currency": body.fee_currency,
+                    "notes": body.notes,
+                    "documents": self._documents_to_json(body.documents),
+                    "recorded_by_user_id": self.user_context.user_id,
+                }
+            )
 
         await self._sync_occupancy_for_move(
             organization_id=organization_id,
@@ -410,22 +552,6 @@ class MoveEventsService:
             move_type=move_type,
             event_date=body.event_date,
         )
-        if move_type == MoveEventType.MOVE_OUT.value:
-            await self._release_occupancy_for_move_out(
-                organization_id=organization_id,
-                project_id=project_id,
-                unit_id=body.unit_id,
-                contact_id=str(body.contact_id),
-            )
-            tenant_requests_service = TenantRequestsService(
-                db_connection=self.db_connection,
-                user_context=self.user_context,
-            )
-            await tenant_requests_service.sync_after_admin_move_out(
-                unit_id=body.unit_id,
-                tenant_contact_id=str(body.contact_id),
-                move_event_id=str(inserted["id"]),
-            )
         if move_type == MoveEventType.MOVE_IN.value:
             await self._ensure_tenant_role_for_move_in(
                 organization_id=organization_id,

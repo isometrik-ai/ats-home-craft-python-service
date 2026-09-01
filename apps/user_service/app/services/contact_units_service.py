@@ -26,7 +26,9 @@ from apps.user_service.app.schemas.enums import (
     ContactUnitRelationship,
     ContactUnitStatus,
 )
-from apps.user_service.app.services.vehicles_service import VehiclesService
+from apps.user_service.app.services.unit_occupancy_turnover_service import (
+    UnitOccupancyTurnoverService,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -467,6 +469,48 @@ class ContactUnitsService:
         )
         return row
 
+    async def _vacate_unit_for_owner_change(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+        reason: str,
+        supersede_reason: str,
+        tenant_move_out_notes: str,
+        require_open_links: bool,
+    ) -> dict[str, Any]:
+        """Vacate a unit, recording tenant move-out first when an active tenant exists."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
+        resolved_project_id = str(unit["project_id"])
+
+        from apps.user_service.app.services.move_events_service import MoveEventsService
+
+        move_events_service = MoveEventsService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        tenant_move_event_id = await move_events_service.record_tenant_move_out_for_owner_change(
+            unit_id=unit_id,
+            project_id=resolved_project_id,
+            notes=tenant_move_out_notes,
+        )
+
+        turnover_service = UnitOccupancyTurnoverService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        return await turnover_service.vacate_unit_completely(
+            organization_id=org_id,
+            project_id=resolved_project_id,
+            unit_id=unit_id,
+            reason=reason,
+            supersede_reason=supersede_reason,
+            require_open_links=require_open_links,
+            tenant_already_moved_out=tenant_move_event_id is not None,
+        )
+
     async def unassign_unit_owner(
         self,
         *,
@@ -476,39 +520,22 @@ class ContactUnitsService:
         """Remove the current unit allotment and mark the unit vacant."""
         org_id = self.user_context.organization_id
         assert org_id
-        unit = await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
 
         async with self.db_connection.transaction():
-            released = await self.repo.release_unit_owner_links(
-                organization_id=org_id,
+            result = await self._vacate_unit_for_owner_change(
+                project_id=project_id,
                 unit_id=unit_id,
+                reason="Unit owner unassigned; clearing household artifacts.",
+                supersede_reason="owner_unassigned",
+                tenant_move_out_notes=(
+                    "Tenant move-out recorded because the unit owner was unassigned."
+                ),
+                require_open_links=True,
             )
-            if not released:
-                raise NotFoundException(
-                    message_key="project_setup.errors.unit_owner_not_assigned",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
-            vehicles_service = VehiclesService(
-                db_connection=self.db_connection,
-                user_context=self.user_context,
-            )
-            await vehicles_service.release_for_move_out(unit_id=unit_id)
-            await self.contact_roles_repo.end_active_roles_for_unit(
-                organization_id=org_id,
-                unit_id=unit_id,
-                role_types=[ContactType.OWNER.value, ContactType.TENANT.value],
-            )
-
-            await self.units_repo.reconcile_unit_inventory_status(
-                organization_id=org_id,
-                project_id=str(unit["project_id"]),
-                unit_id=unit_id,
-            )
-        previous = released[0]
         return {
-            "released_contact_unit_ids": [row["id"] for row in released],
-            "previous_contact_id": previous.get("contact_id"),
-            "unit_status": "vacant",
+            "released_contact_unit_ids": result["released_contact_unit_ids"],
+            "previous_contact_id": result.get("previous_contact_id"),
+            "unit_status": result.get("unit_status") or "vacant",
         }
 
     async def reassign_unit_owner(
@@ -527,16 +554,16 @@ class ContactUnitsService:
         await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
 
         async with self.db_connection.transaction():
-            released = await self.repo.release_unit_owner_links(
-                organization_id=org_id,
+            vacate_result = await self._vacate_unit_for_owner_change(
+                project_id=project_id,
                 unit_id=unit_id,
+                reason="Unit owner reassigned; clearing household artifacts.",
+                supersede_reason="owner_reassigned",
+                tenant_move_out_notes=(
+                    "Tenant move-out recorded because the unit owner was reassigned."
+                ),
+                require_open_links=False,
             )
-            if released:
-                vehicles_service = VehiclesService(
-                    db_connection=self.db_connection,
-                    user_context=self.user_context,
-                )
-                await vehicles_service.release_for_move_out(unit_id=unit_id)
             row = await self._create_unit_allotment(
                 project_id=project_id,
                 unit_id=unit_id,
@@ -562,8 +589,8 @@ class ContactUnitsService:
             "id": row["id"],
             "status": row["status"],
             "contact_id": contact_id,
-            "previous_contact_id": released[0]["contact_id"] if released else None,
-            "released_contact_unit_ids": [item["id"] for item in released],
+            "previous_contact_id": vacate_result.get("previous_contact_id"),
+            "released_contact_unit_ids": vacate_result["released_contact_unit_ids"],
             "unit_status": unit_status,
             "assign_date": normalized.get("assign_date"),
         }

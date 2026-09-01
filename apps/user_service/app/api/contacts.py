@@ -1203,10 +1203,12 @@ async def assign_unit_to_contact(
     summary="Delete a contact (soft delete)",
     description=(
         "Soft-deletes a contact and cascades cleanup based on contact type.\n\n"
-        "Owner: vacates owned units, soft-deletes household family, removes unit "
+        "Owner: vacates owned units, ends all unit roles, removes daily help links, "
+        "cancels open walk-ins, soft-deletes household family, removes unit "
         "vehicles/passes, and revokes portal sessions.\n"
-        "Family: moves out the member only (unit assets stay with owner).\n"
-        "Tenant: moves out the tenant and revokes their portal sessions.\n\n"
+        "Family: single-occupant move-out turnover (roles, vehicles, passes for that member).\n"
+        "Tenant: outgoing household turnover (clears tenant household while preserving owner).\n\n"
+        "Side effects also purge notice likes for deleted contacts.\n\n"
         "Side effects:\n"
         "- Revokes org-scoped login sessions when the contact has portal access\n"
         "- Emits a DELETED lifecycle event\n"

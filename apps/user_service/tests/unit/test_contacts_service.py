@@ -539,11 +539,20 @@ async def test_soft_delete_contact_success():
             "apps.user_service.app.services.contacts_service.revoke_contact_portal_sessions",
             new=AsyncMock(),
         ) as revoke_sessions,
+        patch(
+            "apps.user_service.app.services.contacts_service.purge_contact_notice_likes",
+            new=AsyncMock(),
+        ) as purge_notice_likes,
     ):
         cascade_cls.return_value.cascade_before_soft_delete = AsyncMock()
         result = await svc.soft_delete_contact(contact_id=CONTACT_ID)
 
     cascade_cls.return_value.cascade_before_soft_delete.assert_awaited_once()
+    purge_notice_likes.assert_awaited_once_with(
+        db_connection=svc.db_connection,
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+    )
     revoke_sessions.assert_awaited_once()
     assert result["old_data"]["status"] == ClientStatus.ACTIVE.value
     assert result["new_data"]["status"] == ClientStatus.DELETED.value

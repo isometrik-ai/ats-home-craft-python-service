@@ -1229,7 +1229,13 @@ async def external_delete_company(
     description=(
         "Soft-delete a person-type client (contact). The client is scoped to the "
         "organization resolved from Isometrik credentials (`licenseKey`/`appSecret`). "
-        "If the ID exists but is not a contact, this returns 404."
+        "If the ID exists but is not a contact, this returns 404.\n\n"
+        "Cascade cleanup mirrors admin contact delete / move-out turnover:\n"
+        "Owner: vacates owned units, ends all unit roles, removes daily help links, "
+        "cancels open walk-ins, soft-deletes household family, removes unit vehicles/passes, and revokes portal sessions.\n"
+        "Family: single-occupant move-out turnover (roles, vehicles, passes for that member).\n"
+        "Tenant: outgoing household turnover (clears tenant household while preserving owner).\n\n"
+        "Side effects also purge notice likes for deleted contacts."
     ),
     responses={
         http_status.HTTP_200_OK: {"description": "Contact deleted successfully"},
