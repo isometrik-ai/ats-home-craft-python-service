@@ -145,6 +145,10 @@ class _FakeWalkInRepo:
         self.visit_units[0] = _visit_unit_row(status=WalkInVisitUnitStatus.APPROVED.value)
         return self.visit_units[0]
 
+    async def reject_open_visit_units_for_unit(self, **_kwargs) -> list[dict[str, Any]]:
+        self.visit_units[0] = _visit_unit_row(status=WalkInVisitUnitStatus.REJECTED.value)
+        return [self.visit_units[0]]
+
     async def count_visit_units_by_status(self, **_kwargs) -> dict[str, int]:
         return {"approved_count": 1, "awaiting_count": 0, "rejected_count": 0}
 
@@ -364,6 +368,28 @@ async def test_reject_visit_unit():
         walk_in_entry_id=ENTRY_ID,
         visit_unit_id=VISIT_UNIT_ID,
         body=RejectWalkInVisitUnitRequest(rejection_reason="Not expecting anyone"),
+    )
+
+    assert repo.entry["status"] == WalkInStatus.CANCELLED.value
+    assert any(
+        event.get("event_type") == WalkInEventType.VISIT_UNIT_REJECTED.value
+        for event in repo.events
+    )
+    assert any(event.get("event_type") == WalkInEventType.CANCELLED.value for event in repo.events)
+
+
+@pytest.mark.asyncio
+async def test_release_open_visit_units_for_unit_turnover():
+    """Unit turnover rejects open flats and cancels the walk-in when all flats are closed."""
+    repo = _FakeWalkInRepo()
+    repo.count_visit_units_by_status = AsyncMock(  # type: ignore[method-assign]
+        return_value={"approved_count": 0, "awaiting_count": 0, "rejected_count": 1}
+    )
+    service = _service(repo=repo)
+
+    await service.release_open_visit_units_for_unit_turnover(
+        unit_id=UNIT_ID,
+        reason="Unit vacated",
     )
 
     assert repo.entry["status"] == WalkInStatus.CANCELLED.value

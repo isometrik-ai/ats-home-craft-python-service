@@ -410,6 +410,37 @@ async def test_update_entry_header():
 
 
 @pytest.mark.asyncio
+async def test_reject_open_visit_units_for_unit():
+    """Turnover reject query scopes to open visit units on awaiting/approved entries."""
+    conn = _FakeConn(
+        rows=[
+            {
+                "id": VISIT_UNIT_ID,
+                "walk_in_entry_id": ENTRY_ID,
+                "unit_id": UNIT_ID,
+                "tower_id": TOWER_ID,
+                "status": "rejected",
+            }
+        ]
+    )
+    repo = WalkInRepository(db_connection=conn)
+
+    rows = await repo.reject_open_visit_units_for_unit(
+        organization_id=ORG_ID,
+        unit_id=UNIT_ID,
+        rejection_reason="Unit vacated",
+    )
+
+    assert rows[0]["walk_in_entry_id"] == ENTRY_ID
+    query, args = conn.fetch_calls[0]
+    assert "walk_in_visit_units vu" in query
+    assert "walk_in_entries e" in query
+    assert args[0] == ORG_ID
+    assert args[1] == UNIT_ID
+    assert args[2] == "Unit vacated"
+
+
+@pytest.mark.asyncio
 async def test_resident_can_act_on_unit():
     conn = _FakeConn(fetchval=1)
     repo = WalkInRepository(db_connection=conn)

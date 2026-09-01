@@ -592,7 +592,10 @@ class WalkInService:
             if current_status == WalkInStatus.AWAITING.value:
                 new_status = WalkInStatus.APPROVED.value
         elif awaiting_count == 0 and rejected_count > 0:
-            if current_status == WalkInStatus.AWAITING.value:
+            if current_status in {
+                WalkInStatus.AWAITING.value,
+                WalkInStatus.APPROVED.value,
+            }:
                 new_status = WalkInStatus.CANCELLED.value
 
         await self.repo.update_entry_header(
@@ -609,6 +612,46 @@ class WalkInService:
                 event_type=WalkInEventType.CANCELLED.value,
                 actor_type=WalkInActorType.SYSTEM.value,
                 payload={"reason": "all_visit_units_rejected"},
+            )
+
+    async def release_open_visit_units_for_unit_turnover(
+        self,
+        *,
+        unit_id: str,
+        reason: str,
+    ) -> None:
+        """Reject open walk-in flats on a unit when occupancy ends."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        rejected = await self.repo.reject_open_visit_units_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+            rejection_reason=reason,
+        )
+        if not rejected:
+            return
+
+        affected_entry_ids: set[str] = set()
+        for row in rejected:
+            walk_in_entry_id = str(row["walk_in_entry_id"])
+            affected_entry_ids.add(walk_in_entry_id)
+            await self.repo.insert_event(
+                organization_id=org_id,
+                walk_in_entry_id=walk_in_entry_id,
+                walk_in_visit_unit_id=str(row["id"]),
+                event_type=WalkInEventType.VISIT_UNIT_REJECTED.value,
+                actor_type=WalkInActorType.SYSTEM.value,
+                actor_user_id=str(self.user_context.user_id) if self.user_context.user_id else None,
+                payload={
+                    "reason": reason,
+                    "unit_id": row.get("unit_id"),
+                    "tower_id": row.get("tower_id"),
+                },
+            )
+
+        for walk_in_entry_id in affected_entry_ids:
+            await self._recompute_header_after_visit_unit_action(
+                walk_in_entry_id=walk_in_entry_id,
             )
 
     async def create_walk_in(

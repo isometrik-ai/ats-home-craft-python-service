@@ -21,7 +21,6 @@ from apps.user_service.app.db.repositories.passes_repository import PassesReposi
 from apps.user_service.app.db.repositories.tenant_requests_repository import (
     TenantRequestsRepository,
 )
-from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import (
     ClientStatus,
     ContactUnitRelationship,
@@ -30,10 +29,16 @@ from apps.user_service.app.schemas.enums import (
     TenantRequestEventType,
     TenantRequestStatus,
 )
+from apps.user_service.app.services.unit_occupancy_turnover_service import (
+    UnitOccupancyTurnoverService,
+)
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
+)
+from apps.user_service.app.utils.contact_notice_utils import (
+    purge_contact_notice_likes,
 )
 
 
@@ -50,7 +55,6 @@ class ContactDeleteCascadeService:
         self.user_context = user_context
         self.contacts_repo = ContactsRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
-        self.units_repo = UnitsRepository(db_connection)
         self.passes_repo = PassesRepository(db_connection)
         self.pass_events_repo = PassEventsRepository(db_connection)
         self.tenant_requests_repo = TenantRequestsRepository(db_connection)
@@ -102,22 +106,19 @@ class ContactDeleteCascadeService:
                 submitted_by_contact_id=contact_id,
             )
         elif primary_links and is_approved_tenant:
-            await self._release_occupant_scoped_assets(
+            await self._release_outgoing_tenant_households(
                 organization_id=org_id,
-                contact_id=contact_id,
+                primary_links=primary_links,
             )
             await self._supersede_approved_tenant_requests(
                 organization_id=org_id,
                 tenant_contact_id=contact_id,
             )
         elif household_links:
-            released = await self.contact_units_repo.release_open_links_for_contact(
+            await self._release_household_members(
                 organization_id=org_id,
                 contact_id=contact_id,
-            )
-            await self._cancel_household_invitations(
-                organization_id=org_id,
-                contact_unit_ids=[row["id"] for row in released],
+                household_links=household_links,
             )
         else:
             await self._release_occupant_scoped_assets(
@@ -141,6 +142,56 @@ class ContactDeleteCascadeService:
             tenant_contact_id=contact_id,
         )
         return existing is not None
+
+    async def _release_outgoing_tenant_households(
+        self,
+        *,
+        organization_id: str,
+        primary_links: list[dict[str, Any]],
+    ) -> None:
+        """Mirror admin tenant move-out turnover for each unit the tenant occupies."""
+        turnover_service = UnitOccupancyTurnoverService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        seen_unit_ids: set[str] = set()
+        for link in primary_links:
+            unit_id = str(link["unit_id"])
+            if unit_id in seen_unit_ids:
+                continue
+            seen_unit_ids.add(unit_id)
+            await turnover_service.release_outgoing_tenant_household(
+                organization_id=organization_id,
+                project_id=str(link["project_id"]),
+                unit_id=unit_id,
+                reason="Contact deleted; clearing outgoing household.",
+            )
+
+    async def _release_household_members(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        household_links: list[dict[str, Any]],
+    ) -> None:
+        """Mirror admin single-occupant move-out for each household link."""
+        turnover_service = UnitOccupancyTurnoverService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        seen_unit_ids: set[str] = set()
+        for link in household_links:
+            unit_id = str(link["unit_id"])
+            if unit_id in seen_unit_ids:
+                continue
+            seen_unit_ids.add(unit_id)
+            await turnover_service.release_single_occupant(
+                organization_id=organization_id,
+                project_id=str(link["project_id"]),
+                unit_id=unit_id,
+                contact_id=contact_id,
+                reason="Contact deleted; clearing occupant.",
+            )
 
     async def _release_occupant_scoped_assets(
         self,
@@ -168,20 +219,6 @@ class ContactDeleteCascadeService:
         )
         await vehicles_service.release_for_move_out(contact_id=contact_id)
 
-    async def _release_vehicles_for_unit(
-        self,
-        *,
-        organization_id: str,
-        unit_id: str,
-    ) -> None:
-        """Withdraw all vehicles registered against a unit (any household member)."""
-        del organization_id
-        vehicles_service = VehiclesService(
-            db_connection=self.db_connection,
-            user_context=self.user_context,
-        )
-        await vehicles_service.release_for_move_out(unit_id=unit_id)
-
     async def _cancel_passes(self, *, organization_id: str, contact_id: str) -> None:
         """Cancel active visitor passes hosted by the contact."""
         pass_ids = await self.passes_repo.list_active_ids_for_host(
@@ -194,25 +231,6 @@ class ContactDeleteCascadeService:
                 host_contact_id=contact_id,
                 pass_id=pass_id,
                 notes="Cancelled because the host contact was deleted.",
-            )
-
-    async def _cancel_passes_for_unit(
-        self,
-        *,
-        organization_id: str,
-        unit_id: str,
-    ) -> None:
-        """Cancel all active visitor passes for a unit (any household member)."""
-        passes = await self.passes_repo.list_active_for_unit(
-            organization_id=organization_id,
-            unit_id=unit_id,
-        )
-        for row in passes:
-            await self._cancel_pass(
-                organization_id=organization_id,
-                host_contact_id=str(row["host_contact_id"]),
-                pass_id=str(row["id"]),
-                notes="Cancelled because the unit owner was deleted.",
             )
 
     async def _cancel_pass(
@@ -324,30 +342,16 @@ class ContactDeleteCascadeService:
             unit_projects[str(link["unit_id"])] = str(link["project_id"])
 
         for unit_id, project_id in unit_projects.items():
-            await self._supersede_approved_tenant_for_unit(
-                organization_id=organization_id,
-                unit_id=unit_id,
+            turnover_service = UnitOccupancyTurnoverService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
             )
-            await self._release_vehicles_for_unit(
-                organization_id=organization_id,
-                unit_id=unit_id,
-            )
-            await self._cancel_passes_for_unit(
-                organization_id=organization_id,
-                unit_id=unit_id,
-            )
-            released = await self.contact_units_repo.release_all_open_links_for_unit(
-                organization_id=organization_id,
-                unit_id=unit_id,
-            )
-            await self._cancel_household_invitations(
-                organization_id=organization_id,
-                contact_unit_ids=[row["id"] for row in released],
-            )
-            await self.units_repo.reconcile_unit_inventory_status(
+            await turnover_service.vacate_unit_completely(
                 organization_id=organization_id,
                 project_id=project_id,
                 unit_id=unit_id,
+                reason="Cancelled because the unit owner was deleted.",
+                supersede_reason="owner_contact_deleted",
             )
 
         await self._soft_delete_orphaned_household_contacts(
@@ -381,46 +385,16 @@ class ContactDeleteCascadeService:
                 contact_id=household_contact_id,
                 organization_id=organization_id,
             )
+            await purge_contact_notice_likes(
+                db_connection=self.db_connection,
+                organization_id=organization_id,
+                contact_id=household_contact_id,
+            )
             await revoke_contact_portal_sessions(
                 db_connection=self.db_connection,
                 organization_id=organization_id,
                 user_id=contact.get("user_id"),
             )
-
-    async def _supersede_approved_tenant_for_unit(
-        self,
-        *,
-        organization_id: str,
-        unit_id: str,
-    ) -> None:
-        """Supersede the active approved tenant request on a unit, if any."""
-        existing = await self.tenant_requests_repo.find_active_approved_for_unit(
-            organization_id=organization_id,
-            unit_id=unit_id,
-        )
-        if not existing:
-            return
-        now = datetime.now(timezone.utc)
-        contact_unit_id = existing.get("contact_unit_id")
-        if contact_unit_id:
-            await self.contact_units_repo.sync_move_out(
-                organization_id=organization_id,
-                contact_unit_id=str(contact_unit_id),
-                event_date=now,
-            )
-        await self.tenant_requests_repo.update_request_status(
-            organization_id=organization_id,
-            tenant_request_id=str(existing["id"]),
-            status=TenantRequestStatus.SUPERSEDED.value,
-            superseded_at=now,
-        )
-        await self.tenant_requests_repo.insert_event(
-            organization_id=organization_id,
-            tenant_request_id=str(existing["id"]),
-            event_type=TenantRequestEventType.SUPERSEDED.value,
-            actor_user_id=str(self.user_context.user_id) if self.user_context.user_id else None,
-            payload={"reason": "owner_contact_deleted"},
-        )
 
     async def _cancel_household_invitations(
         self,

@@ -407,6 +407,24 @@ async def test_like_operations_contact_and_user():
 
 
 @pytest.mark.asyncio
+async def test_delete_all_likes_for_contact():
+    """Bulk delete removes likes for a contact and reconciles counts."""
+    conn = _FakeConn(rows=[{"removed_count": 2}, {"removed_count": 1}])
+    repo = NoticesRepository(db_connection=conn)
+
+    removed = await repo.delete_all_likes_for_contact(
+        organization_id=ORG,
+        contact_id="contact-1",
+    )
+
+    assert removed == 3
+    query, args = conn.fetch_calls[0]
+    assert "DELETE FROM notice_likes" in query
+    assert "UPDATE notices n" in query
+    assert args == (ORG, "contact-1")
+
+
+@pytest.mark.asyncio
 async def test_upsert_like_noop_when_already_liked():
     conn = _FakeConn(row=None)
     repo = NoticesRepository(db_connection=conn)

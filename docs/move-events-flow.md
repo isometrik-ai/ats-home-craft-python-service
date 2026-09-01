@@ -88,6 +88,7 @@ Implemented in `UnitOccupancyTurnoverService.release_outgoing_tenant_household()
 | Vehicles                 | `VehiclesService.release_for_move_out(unit_id=...)` — all vehicles on the unit          |
 | Passes                   | Cancel active unit-scoped visitor passes (`passes` where `unit_id` + `status = active`) |
 | Daily help               | Set `daily_help_household_links.status = removed` for all active links on unit          |
+| Walk-ins                 | Reject open `walk_in_visit_units` on awaiting/approved entries for the unit             |
 | Household invitations    | Cancel pending invites for released `contact_unit_id`s                                  |
 | Portal sessions          | Revoke sessions for outgoing tenant + family (not owner)                                |
 | Orphan family contacts   | Soft-delete contacts with zero remaining unit links (optional cleanup)                  |
