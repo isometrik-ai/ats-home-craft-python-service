@@ -40,11 +40,11 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.common_utils import UserContext
-from apps.user_service.app.utils.contact_session_utils import (
-    revoke_contact_portal_sessions,
-)
 from apps.user_service.app.utils.contact_notice_utils import (
     purge_contact_notice_likes,
+)
+from apps.user_service.app.utils.contact_session_utils import (
+    revoke_contact_portal_sessions,
 )
 from libs.shared_utils.http_exceptions import NotFoundException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -80,6 +80,7 @@ class UnitOccupancyTurnoverService:
         reason: str,
         supersede_reason: str,
         require_open_links: bool = False,
+        tenant_already_moved_out: bool = False,
     ) -> dict[str, Any]:
         """Vacate a unit: move out all occupants and clear household artifacts."""
         owner = await self.units_repo.get_unit_owner_contact(
@@ -90,16 +91,17 @@ class UnitOccupancyTurnoverService:
             str(owner["contact_id"]) if owner and owner.get("contact_id") else None
         )
 
-        await self._supersede_approved_tenant_for_unit(
-            organization_id=organization_id,
-            unit_id=unit_id,
-            reason=supersede_reason,
-        )
-        await self._clear_unit_scoped_assets(
-            organization_id=organization_id,
-            unit_id=unit_id,
-            pass_cancel_notes=reason,
-        )
+        if not tenant_already_moved_out:
+            await self._supersede_approved_tenant_for_unit(
+                organization_id=organization_id,
+                unit_id=unit_id,
+                reason=supersede_reason,
+            )
+            await self._clear_unit_scoped_assets(
+                organization_id=organization_id,
+                unit_id=unit_id,
+                pass_cancel_notes=reason,
+            )
         released = await self.contact_units_repo.release_all_open_links_for_unit(
             organization_id=organization_id,
             unit_id=unit_id,

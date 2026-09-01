@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -385,11 +384,13 @@ async def test_admin_assign_unit_creates_pending_allotment():
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService"
-)
-async def test_unassign_unit_owner_marks_vacant(mock_turnover_cls):
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService")
+async def test_unassign_unit_owner_marks_vacant(mock_turnover_cls, mock_move_events_cls):
     """Unassign vacates the unit through turnover service."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
     mock_turnover = MagicMock()
     mock_turnover.vacate_unit_completely = AsyncMock(
         return_value={
@@ -405,6 +406,11 @@ async def test_unassign_unit_owner_marks_vacant(mock_turnover_cls):
 
     result = await svc.unassign_unit_owner(project_id="proj-1", unit_id="unit-1")
 
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change.assert_awaited_once_with(
+        unit_id="unit-1",
+        project_id="proj-1",
+        notes="Tenant move-out recorded because the unit owner was unassigned.",
+    )
     mock_turnover.vacate_unit_completely.assert_awaited_once_with(
         organization_id="org-1",
         project_id="proj-1",
@@ -412,19 +418,56 @@ async def test_unassign_unit_owner_marks_vacant(mock_turnover_cls):
         reason="Unit owner unassigned; clearing household artifacts.",
         supersede_reason="owner_unassigned",
         require_open_links=True,
+        tenant_already_moved_out=False,
     )
     assert result["unit_status"] == "vacant"
     assert result["previous_contact_id"] == "contact-1"
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService"
-)
-async def test_unassign_unit_owner_not_found(mock_turnover_cls):
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService")
+async def test_unassign_unit_owner_records_tenant_move_out_first(
+    mock_turnover_cls, mock_move_events_cls
+):
+    """Unassign records tenant move-out before vacating when a tenant is active."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value="move-tenant-1"
+    )
+    mock_turnover_cls.return_value.vacate_unit_completely = AsyncMock(
+        return_value={
+            "released_contact_unit_ids": ["cu-owner"],
+            "previous_contact_id": "owner-1",
+            "unit_status": "vacant",
+        }
+    )
+    svc = _service()
+    _mock_transaction(svc)
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+
+    await svc.unassign_unit_owner(project_id="proj-1", unit_id="unit-1")
+
+    mock_turnover_cls.return_value.vacate_unit_completely.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="proj-1",
+        unit_id="unit-1",
+        reason="Unit owner unassigned; clearing household artifacts.",
+        supersede_reason="owner_unassigned",
+        require_open_links=True,
+        tenant_already_moved_out=True,
+    )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService")
+async def test_unassign_unit_owner_not_found(mock_turnover_cls, mock_move_events_cls):
     """Unassign fails when the unit has no owner allotment."""
     from libs.shared_utils.http_exceptions import NotFoundException as HttpNotFound
 
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
     mock_turnover = MagicMock()
     mock_turnover.vacate_unit_completely = AsyncMock(
         side_effect=HttpNotFound(
@@ -442,11 +485,13 @@ async def test_unassign_unit_owner_not_found(mock_turnover_cls):
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService"
-)
-async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls):
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService")
+async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls, mock_move_events_cls):
     """Reassign vacates the unit through turnover service then creates a new allotment."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
     mock_turnover = MagicMock()
     mock_turnover.vacate_unit_completely = AsyncMock(
         return_value={
@@ -494,6 +539,7 @@ async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls):
         reason="Unit owner reassigned; clearing household artifacts.",
         supersede_reason="owner_reassigned",
         require_open_links=False,
+        tenant_already_moved_out=False,
     )
     svc.repo.insert_allotment.assert_awaited_once_with(
         organization_id="org-1",

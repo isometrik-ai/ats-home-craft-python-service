@@ -26,11 +26,10 @@ from apps.user_service.app.schemas.enums import (
     ContactUnitRelationship,
     ContactUnitStatus,
 )
-from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.services.unit_occupancy_turnover_service import (
     UnitOccupancyTurnoverService,
 )
-from apps.user_service.app.utils.common_utils import format_iso_datetime
+from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -470,6 +469,48 @@ class ContactUnitsService:
         )
         return row
 
+    async def _vacate_unit_for_owner_change(
+        self,
+        *,
+        project_id: str,
+        unit_id: str,
+        reason: str,
+        supersede_reason: str,
+        tenant_move_out_notes: str,
+        require_open_links: bool,
+    ) -> dict[str, Any]:
+        """Vacate a unit, recording tenant move-out first when an active tenant exists."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
+        resolved_project_id = str(unit["project_id"])
+
+        from apps.user_service.app.services.move_events_service import MoveEventsService
+
+        move_events_service = MoveEventsService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        tenant_move_event_id = await move_events_service.record_tenant_move_out_for_owner_change(
+            unit_id=unit_id,
+            project_id=resolved_project_id,
+            notes=tenant_move_out_notes,
+        )
+
+        turnover_service = UnitOccupancyTurnoverService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        return await turnover_service.vacate_unit_completely(
+            organization_id=org_id,
+            project_id=resolved_project_id,
+            unit_id=unit_id,
+            reason=reason,
+            supersede_reason=supersede_reason,
+            require_open_links=require_open_links,
+            tenant_already_moved_out=tenant_move_event_id is not None,
+        )
+
     async def unassign_unit_owner(
         self,
         *,
@@ -479,19 +520,16 @@ class ContactUnitsService:
         """Remove the current unit allotment and mark the unit vacant."""
         org_id = self.user_context.organization_id
         assert org_id
-        unit = await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
 
         async with self.db_connection.transaction():
-            turnover_service = UnitOccupancyTurnoverService(
-                db_connection=self.db_connection,
-                user_context=self.user_context,
-            )
-            result = await turnover_service.vacate_unit_completely(
-                organization_id=org_id,
-                project_id=str(unit["project_id"]),
+            result = await self._vacate_unit_for_owner_change(
+                project_id=project_id,
                 unit_id=unit_id,
                 reason="Unit owner unassigned; clearing household artifacts.",
                 supersede_reason="owner_unassigned",
+                tenant_move_out_notes=(
+                    "Tenant move-out recorded because the unit owner was unassigned."
+                ),
                 require_open_links=True,
             )
         return {
@@ -513,19 +551,17 @@ class ContactUnitsService:
         """Replace the current unit assignee with a new contact."""
         org_id = self.user_context.organization_id
         assert org_id
-        unit = await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
+        await self._ensure_project_unit(project_id=project_id, unit_id=unit_id)
 
         async with self.db_connection.transaction():
-            turnover_service = UnitOccupancyTurnoverService(
-                db_connection=self.db_connection,
-                user_context=self.user_context,
-            )
-            vacate_result = await turnover_service.vacate_unit_completely(
-                organization_id=org_id,
-                project_id=str(unit["project_id"]),
+            vacate_result = await self._vacate_unit_for_owner_change(
+                project_id=project_id,
                 unit_id=unit_id,
                 reason="Unit owner reassigned; clearing household artifacts.",
                 supersede_reason="owner_reassigned",
+                tenant_move_out_notes=(
+                    "Tenant move-out recorded because the unit owner was reassigned."
+                ),
                 require_open_links=False,
             )
             row = await self._create_unit_allotment(

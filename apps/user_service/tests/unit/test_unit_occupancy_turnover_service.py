@@ -72,6 +72,41 @@ def _service() -> UnitOccupancyTurnoverService:
 
 @pytest.mark.asyncio
 @patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
+async def test_vacate_unit_completely_skips_tenant_cleanup_when_already_moved_out(
+    mock_vehicles_cls: MagicMock,
+    mock_walk_in_cls: MagicMock,
+    _mock_revoke: AsyncMock,
+) -> None:
+    """When tenant move-out already ran, vacate only releases the owner."""
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    svc = _service()
+    svc.contact_units_repo.release_all_open_links_for_unit = AsyncMock(
+        return_value=[{"id": "cu-owner", "contact_id": "owner-1", "relationship": "self"}]
+    )
+    svc.contact_units_repo.list_open_links_for_contact = AsyncMock(return_value=[])
+
+    await svc.vacate_unit_completely(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        reason="Unit owner unassigned",
+        supersede_reason="owner_unassigned",
+        tenant_already_moved_out=True,
+    )
+
+    svc.tenant_requests_repo.find_active_approved_for_unit.assert_not_awaited()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover.assert_not_awaited()
+    svc.contact_units_repo.release_all_open_links_for_unit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch(
     "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
     new_callable=AsyncMock,
 )

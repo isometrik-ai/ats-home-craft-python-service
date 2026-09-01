@@ -34,11 +34,11 @@ from apps.user_service.app.services.unit_occupancy_turnover_service import (
 )
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.common_utils import UserContext
-from apps.user_service.app.utils.contact_session_utils import (
-    revoke_contact_portal_sessions,
-)
 from apps.user_service.app.utils.contact_notice_utils import (
     purge_contact_notice_likes,
+)
+from apps.user_service.app.utils.contact_session_utils import (
+    revoke_contact_portal_sessions,
 )
 
 
@@ -342,6 +342,21 @@ class ContactDeleteCascadeService:
             unit_projects[str(link["unit_id"])] = str(link["project_id"])
 
         for unit_id, project_id in unit_projects.items():
+            from apps.user_service.app.services.move_events_service import (
+                MoveEventsService,
+            )
+
+            move_events_service = MoveEventsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+            )
+            tenant_move_event_id = (
+                await move_events_service.record_tenant_move_out_for_owner_change(
+                    unit_id=unit_id,
+                    project_id=project_id,
+                    notes="Tenant move-out recorded because the unit owner was deleted.",
+                )
+            )
             turnover_service = UnitOccupancyTurnoverService(
                 db_connection=self.db_connection,
                 user_context=self.user_context,
@@ -352,6 +367,7 @@ class ContactDeleteCascadeService:
                 unit_id=unit_id,
                 reason="Cancelled because the unit owner was deleted.",
                 supersede_reason="owner_contact_deleted",
+                tenant_already_moved_out=tenant_move_event_id is not None,
             )
 
         await self._soft_delete_orphaned_household_contacts(

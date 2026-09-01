@@ -49,13 +49,16 @@ def _service() -> ContactDeleteCascadeService:
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
 async def test_primary_occupant_delete_vacates_units_and_cancels_open_requests(
     mock_turnover_cls,
+    mock_move_events_cls,
 ):
     """Primary occupant delete vacates each owned unit via turnover service."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
     mock_turnover = MagicMock()
     mock_turnover.vacate_unit_completely = AsyncMock()
     mock_turnover_cls.return_value = mock_turnover
@@ -83,43 +86,63 @@ async def test_primary_occupant_delete_vacates_units_and_cancels_open_requests(
         unit_id="unit-1",
         reason="Cancelled because the unit owner was deleted.",
         supersede_reason="owner_contact_deleted",
+        tenant_already_moved_out=False,
     )
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
-async def test_primary_occupant_delete_cancels_open_walk_ins(mock_turnover_cls):
-    """Primary occupant delete vacates units through turnover service."""
-    mock_turnover_cls.return_value.vacate_unit_completely = AsyncMock()
-    svc = _service()
-    svc.contact_units_repo.list_open_links_for_contact.return_value = [
-        {
-            "id": "cu-owner",
-            "unit_id": "unit-1",
-            "project_id": "project-1",
-            "status": "active",
-            "relationship": "self",
-        }
-    ]
-
-    await svc.cascade_before_soft_delete(
-        contact_id="owner-1",
-        contact={},
-    )
-
-    mock_turnover_cls.return_value.vacate_unit_completely.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
-async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes(
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+async def test_primary_occupant_delete_records_tenant_move_out_before_vacate(
+    mock_move_events_cls,
     mock_turnover_cls,
 ):
-    """Primary occupant delete delegates full unit cleanup to turnover service."""
+    """Owner delete records tenant move-out before vacating when a tenant is active."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value="move-tenant-1"
+    )
+    mock_turnover_cls.return_value.vacate_unit_completely = AsyncMock()
+    svc = _service()
+    svc.contact_units_repo.list_open_links_for_contact.return_value = [
+        {
+            "id": "cu-owner",
+            "unit_id": "unit-1",
+            "project_id": "project-1",
+            "status": "active",
+            "relationship": "self",
+        }
+    ]
+
+    await svc.cascade_before_soft_delete(
+        contact_id="owner-1",
+        contact={},
+    )
+
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change.assert_awaited_once_with(
+        unit_id="unit-1",
+        project_id="project-1",
+        notes="Tenant move-out recorded because the unit owner was deleted.",
+    )
+    mock_turnover_cls.return_value.vacate_unit_completely.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        reason="Cancelled because the unit owner was deleted.",
+        supersede_reason="owner_contact_deleted",
+        tenant_already_moved_out=True,
+    )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
+async def test_primary_occupant_delete_cancels_open_walk_ins(
+    mock_turnover_cls, mock_move_events_cls
+):
+    """Primary occupant delete vacates units through turnover service."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
     mock_turnover_cls.return_value.vacate_unit_completely = AsyncMock()
     svc = _service()
     svc.contact_units_repo.list_open_links_for_contact.return_value = [
@@ -141,15 +164,49 @@ async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes(
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
+async def test_primary_occupant_delete_cleans_all_unit_vehicles_and_passes(
+    mock_turnover_cls,
+    mock_move_events_cls,
+):
+    """Primary occupant delete delegates full unit cleanup to turnover service."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
+    mock_turnover_cls.return_value.vacate_unit_completely = AsyncMock()
+    svc = _service()
+    svc.contact_units_repo.list_open_links_for_contact.return_value = [
+        {
+            "id": "cu-owner",
+            "unit_id": "unit-1",
+            "project_id": "project-1",
+            "status": "active",
+            "relationship": "self",
+        }
+    ]
+
+    await svc.cascade_before_soft_delete(
+        contact_id="owner-1",
+        contact={},
+    )
+
+    mock_turnover_cls.return_value.vacate_unit_completely.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
 @patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
 async def test_primary_occupant_delete_soft_deletes_household_without_remaining_links(
     mock_vehicles_cls,
     mock_turnover_cls,
+    mock_move_events_cls,
 ):
     """Primary occupant delete soft-deletes household contacts with no other unit links."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
     mock_vehicles = MagicMock()
     mock_vehicles.release_for_move_out = AsyncMock()
     mock_vehicles_cls.return_value = mock_vehicles
@@ -176,13 +233,16 @@ async def test_primary_occupant_delete_soft_deletes_household_without_remaining_
         "user_id": "family-user-1",
     }
 
-    with patch(
-        "apps.user_service.app.services.contact_delete_cascade_service.revoke_contact_portal_sessions",
-        new=AsyncMock(),
-    ) as revoke_sessions, patch(
-        "apps.user_service.app.services.contact_delete_cascade_service.purge_contact_notice_likes",
-        new=AsyncMock(),
-    ) as purge_notice_likes:
+    with (
+        patch(
+            "apps.user_service.app.services.contact_delete_cascade_service.revoke_contact_portal_sessions",
+            new=AsyncMock(),
+        ) as revoke_sessions,
+        patch(
+            "apps.user_service.app.services.contact_delete_cascade_service.purge_contact_notice_likes",
+            new=AsyncMock(),
+        ) as purge_notice_likes,
+    ):
         await svc.cascade_before_soft_delete(
             contact_id="owner-1",
             contact={},
@@ -205,13 +265,16 @@ async def test_primary_occupant_delete_soft_deletes_household_without_remaining_
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
+@patch("apps.user_service.app.services.move_events_service.MoveEventsService")
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
 async def test_primary_occupant_delete_keeps_household_with_remaining_unit_links(
     mock_turnover_cls,
+    mock_move_events_cls,
 ):
     """Primary occupant delete skips household contacts that still belong to another unit."""
+    mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change = AsyncMock(
+        return_value=None
+    )
     mock_turnover_cls.return_value.vacate_unit_completely = AsyncMock()
     svc = _service()
     svc.contact_units_repo.list_household_by_primary.return_value = [{"contact_id": "family-abc"}]
@@ -251,9 +314,7 @@ async def test_primary_occupant_delete_keeps_household_with_remaining_unit_links
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
 async def test_household_delete_uses_single_occupant_turnover(mock_turnover_cls):
     """Household delete mirrors admin single-occupant move-out turnover."""
     mock_turnover = MagicMock()
@@ -286,9 +347,7 @@ async def test_household_delete_uses_single_occupant_turnover(mock_turnover_cls)
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
 async def test_tenant_delete_uses_outgoing_household_turnover(mock_turnover_cls):
     """Approved tenant delete mirrors admin tenant move-out turnover."""
     mock_turnover = MagicMock()
@@ -325,9 +384,7 @@ async def test_tenant_delete_uses_outgoing_household_turnover(mock_turnover_cls)
 
 
 @pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService"
-)
+@patch("apps.user_service.app.services.contact_delete_cascade_service.UnitOccupancyTurnoverService")
 async def test_tenant_delete_supersedes_tenant_request(mock_turnover_cls):
     """Approved tenant delete still supersedes the active tenant request."""
     mock_turnover = MagicMock()
@@ -463,7 +520,9 @@ async def test_tenant_delete_executes_real_turnover_household_cleanup(
 
     await cascade.cascade_before_soft_delete(contact_id="tenant-1", contact={})
 
-    turnover_repos["contact_units"].release_occupant_links_excluding_contacts.assert_awaited_once_with(
+    turnover_repos[
+        "contact_units"
+    ].release_occupant_links_excluding_contacts.assert_awaited_once_with(
         organization_id="org-1",
         unit_id="unit-1",
         exclude_contact_ids=["owner-1"],

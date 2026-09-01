@@ -104,11 +104,11 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_field,
     serialize_jsonb_param,
 )
-from apps.user_service.app.utils.contact_session_utils import (
-    revoke_contact_portal_sessions,
-)
 from apps.user_service.app.utils.contact_notice_utils import (
     purge_contact_notice_likes,
+)
+from apps.user_service.app.utils.contact_session_utils import (
+    revoke_contact_portal_sessions,
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
