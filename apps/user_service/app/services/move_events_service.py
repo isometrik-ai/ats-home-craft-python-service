@@ -33,6 +33,7 @@ from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentI
 from apps.user_service.app.services.inventory_service import resolve_is_sold
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
+    recipient_language_from_contact,
     unit_label_from_row,
 )
 from apps.user_service.app.services.tenant_requests_service import TenantRequestsService
@@ -73,6 +74,74 @@ class MoveEventsService:
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
+
+    async def _notify_move_recorded(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        move_event_id: str,
+        move_type: str,
+        moving_contact_id: str,
+        unit_label: str,
+    ) -> None:
+        """Notify the moving contact and the unit Owner; dedupe by linked user_id."""
+        contact_ids: list[str] = [moving_contact_id]
+        occupants_by_unit = await self.units_repo.get_unit_role_occupants_batch(
+            organization_id=organization_id,
+            unit_ids=[unit_id],
+        )
+        owner = (occupants_by_unit.get(unit_id) or {}).get("owner")
+        if owner and owner.get("contact_id"):
+            contact_ids.append(str(owner["contact_id"]))
+
+        unique_contact_ids = list(
+            dict.fromkeys(contact_id for contact_id in contact_ids if contact_id)
+        )
+        if not unique_contact_ids:
+            return
+
+        params = {
+            "move_type": move_type.replace("_", " "),
+            "unit_label": unit_label,
+        }
+        data = {
+            "move_event_id": move_event_id,
+            "project_id": project_id,
+            "unit_id": unit_id,
+            "screen": "move_event_detail",
+        }
+        options = {
+            "click_action": "OPEN_MOVE",
+            "idempotency_key": f"move:{move_event_id}:recorded",
+        }
+        contacts_repo = self._push().contacts_repo
+        user_ids_seen: set[str] = set()
+        for contact_id in unique_contact_ids:
+            contact = await contacts_repo.get_contact_for_update(
+                contact_id=contact_id,
+                organization_id=organization_id,
+            )
+            if not contact:
+                continue
+            recipient_user_id = str(contact.get("user_id") or "").strip()
+            if not recipient_user_id or recipient_user_id in user_ids_seen:
+                continue
+            user_ids_seen.add(recipient_user_id)
+            await self._push().send_to_user(
+                organization_id=organization_id,
+                recipient_user_id=recipient_user_id,
+                message_key="notifications.push.move.recorded",
+                notification_type="NOTIFICATION_TYPE_MOVE",
+                feed_type="move",
+                language=recipient_language_from_contact(contact.get("additional_data")),
+                params=params,
+                data=data,
+                entity={"kind": "move_event", "id": move_event_id},
+                options=options,
+                check_push_preference=True,
+            )
 
     @staticmethod
     def _format_date(value: Any) -> str:
@@ -385,33 +454,20 @@ class MoveEventsService:
                 move_event_id=inserted["id"],
             )
             if row:
-                await self._push().send_to_contact(
+                await self._notify_move_recorded(
                     organization_id=organization_id,
-                    contact_id=str(contact_id),
-                    message_key="notifications.push.move.recorded",
-                    notification_type="NOTIFICATION_TYPE_MOVE",
-                    feed_type="move",
-                    params={
-                        "move_type": MoveEventType.MOVE_OUT.value.replace("_", " "),
-                        "unit_label": unit_label_from_row(
-                            {
-                                "unit_id": unit_id,
-                                "unit_label": row.get("unit_label"),
-                                "unit_code": row.get("unit_code"),
-                            }
-                        ),
-                    },
-                    data={
-                        "move_event_id": str(row.get("id") or inserted["id"]),
-                        "project_id": str(project_id),
-                        "unit_id": unit_id,
-                        "screen": "move_event_detail",
-                    },
-                    entity={"kind": "move_event", "id": str(row.get("id") or inserted["id"])},
-                    options={
-                        "click_action": "OPEN_MOVE",
-                        "idempotency_key": f"move:{row.get('id') or inserted['id']}:recorded",
-                    },
+                    project_id=project_id,
+                    unit_id=unit_id,
+                    move_event_id=str(row.get("id") or inserted["id"]),
+                    move_type=MoveEventType.MOVE_OUT.value,
+                    moving_contact_id=str(contact_id),
+                    unit_label=unit_label_from_row(
+                        {
+                            "unit_id": unit_id,
+                            "unit_label": row.get("unit_label"),
+                            "unit_code": row.get("unit_code"),
+                        }
+                    ),
                 )
         return inserted
 
@@ -583,33 +639,20 @@ class MoveEventsService:
                 message_key="move_events.errors.move_event_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        await self._push().send_to_contact(
+        await self._notify_move_recorded(
             organization_id=organization_id,
-            contact_id=str(body.contact_id),
-            message_key="notifications.push.move.recorded",
-            notification_type="NOTIFICATION_TYPE_MOVE",
-            feed_type="move",
-            params={
-                "move_type": move_type.replace("_", " "),
-                "unit_label": unit_label_from_row(
-                    {
-                        "unit_id": body.unit_id,
-                        "unit_label": row.get("unit_label"),
-                        "unit_code": row.get("unit_code"),
-                    }
-                ),
-            },
-            data={
-                "move_event_id": str(row.get("id") or inserted["id"]),
-                "project_id": str(unit["project_id"]),
-                "unit_id": body.unit_id,
-                "screen": "move_event_detail",
-            },
-            entity={"kind": "move_event", "id": str(row.get("id") or inserted["id"])},
-            options={
-                "click_action": "OPEN_MOVE",
-                "idempotency_key": f"move:{row.get('id') or inserted['id']}:recorded",
-            },
+            project_id=str(unit["project_id"]),
+            unit_id=body.unit_id,
+            move_event_id=str(row.get("id") or inserted["id"]),
+            move_type=move_type,
+            moving_contact_id=str(body.contact_id),
+            unit_label=unit_label_from_row(
+                {
+                    "unit_id": body.unit_id,
+                    "unit_label": row.get("unit_label"),
+                    "unit_code": row.get("unit_code"),
+                }
+            ),
         )
         return self._serialize_row(row)
 
