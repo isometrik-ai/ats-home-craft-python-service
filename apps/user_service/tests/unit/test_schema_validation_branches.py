@@ -40,7 +40,10 @@ from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
     UpdateMoveEventRequest,
 )
-from apps.user_service.app.schemas.visitor_logs import VisitorLogDateRangeQuery
+from apps.user_service.app.schemas.visitor_logs import (
+    VisitorLogDateRangeQuery,
+    VisitorLogMonthlyReportQuery,
+)
 from libs.shared_utils.http_exceptions import ValidationException
 
 
@@ -288,6 +291,18 @@ class TestVisitorLogsSchemaValidators:
         )
         assert query.start_at == datetime(2026, 8, 31, 18, 30, tzinfo=timezone.utc)
         assert query.end_at == datetime(2026, 9, 30, 18, 29, 59, tzinfo=timezone.utc)
+
+    def test_monthly_report_accepts_valid_month(self) -> None:
+        query = VisitorLogMonthlyReportQuery(project_id="project-1", month="2026-09")
+        assert query.month == "2026-09"
+
+    def test_monthly_report_rejects_invalid_month(self) -> None:
+        with pytest.raises(ValidationError):
+            VisitorLogMonthlyReportQuery(project_id="project-1", month="2026-13")
+
+    def test_monthly_report_rejects_invalid_format(self) -> None:
+        with pytest.raises(ValidationError):
+            VisitorLogMonthlyReportQuery(project_id="project-1", format="pdf")
 
 
 class TestCommonSchemaValidators:

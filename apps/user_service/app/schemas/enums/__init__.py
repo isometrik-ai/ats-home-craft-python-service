@@ -95,6 +95,7 @@ __all__ = [
     "COMMUNITY_EVENT_ALLOWED_MEDIA_MIMES",
     "COMMUNITY_EVENT_EXPORT_MAX_ROWS",
     "CONTACTS_EXPORT_MAX_ROWS",
+    "VISITOR_LOGS_EXPORT_MAX_ROWS",
     "ClientType",
     "ContactStatus",
     "ClientStatus",
