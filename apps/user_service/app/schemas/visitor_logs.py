@@ -153,6 +153,43 @@ class VisitorLogOverviewQuery(VisitorLogDateRangeQuery):
     unit_id: str | None = None
 
 
+class VisitorLogExportQuery(VisitorLogDateRangeQuery):
+    """Export filters aligned with GET /visitor-logs (without pagination)."""
+
+    search: str | None = Field(None, max_length=200)
+    bucket: VisitorLogBucket = Field(
+        default=VisitorLogBucket.ALL,
+        description="Tab filter: all, awaiting_approval, inside_now, completed, denied_expired.",
+    )
+    visitor_type: VisitorType | None = Field(
+        None,
+        description='High-level visitor category: "guest" or "visitor".',
+    )
+    pass_type: PassType | None = None
+    entry_method: PassEntryMethod | None = None
+    access_status: PassAccessStatus | None = None
+    tower_id: str | None = None
+    guard_user_id: str | None = None
+    project_id: str = Field(..., description="Project identifier (UUID string).")
+    unit_id: str | None = None
+    format: str = Field("csv", pattern="^(csv|xlsx)$")
+
+
+class VisitorLogMonthlyReportQuery(BaseModel):
+    """Query params for GET /visitor-logs/monthly-report."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(..., description="Project identifier (UUID string).")
+    unit_id: str | None = None
+    month: str | None = Field(
+        None,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="Calendar month in YYYY-MM format. Defaults to the current month.",
+    )
+    format: str = Field("csv", pattern="^(csv|xlsx)$")
+
+
 class VisitorLogResidentResponse(BaseModel):
     """Flat resident who requested or approved the visit."""
 

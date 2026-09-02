@@ -753,3 +753,118 @@ def test_public_media_url_keeps_absolute_urls():
     """Absolute URLs should pass through unchanged."""
     url = VisitorLogsService._public_media_url("https://cdn.example.com/photo.jpg")
     assert url == "https://cdn.example.com/photo.jpg"
+
+
+@pytest.mark.asyncio
+async def test_export_entry_exit_csv_writes_rows():
+    """Export writes filtered visitor log rows as CSV."""
+    from apps.user_service.app.schemas.visitor_logs import VisitorLogExportQuery
+
+    svc = _service()
+    svc.logs_repo = _FakeLogsRepo()
+    svc.logs_repo.list_result = (
+        [
+            {
+                "source": "pass",
+                "pass_id": "pass-1",
+                "pass_type": "guest",
+                "guest_name": "Ajay t",
+                "visitor_phone_isd_code": "+91",
+                "visitor_phone_number": "9876543210",
+                "unit_label": "301",
+                "tower_name": "Tower A",
+                "resident_contact_id": "resident-1",
+                "resident_person_name": "Ms. Swati W",
+                "resident_role": "Owner",
+                "created_by": "Ms. Swati W",
+                "scheduled_from": datetime(2026, 9, 1, 9, 0, tzinfo=timezone.utc),
+                "scheduled_until": datetime(2026, 9, 1, 18, 0, tzinfo=timezone.utc),
+                "validity_type": "one_time",
+                "entry_method": "code",
+                "guard_user_id": "guard-1",
+                "guard_salutation": "Ms.",
+                "guard_first_name": "Kavita",
+                "guard_last_name": "K",
+                "access_status": "approved",
+                "visit_status": "exited",
+                "pass_code": "4821",
+                "is_private": False,
+                "in_time": datetime(2026, 9, 1, 9, 12, tzinfo=timezone.utc),
+                "out_time": datetime(2026, 9, 1, 9, 18, tzinfo=timezone.utc),
+            }
+        ],
+        1,
+    )
+
+    csv_text = await svc.export_entry_exit_csv(
+        query=VisitorLogExportQuery(project_id="project-1", format="csv"),
+    )
+    assert "visitor_name,visitor_phone,visitor_type,pass_type,flat" in csv_text.replace("\n", ",")
+    assert "Ajay t" in csv_text
+    assert "+91 9876543210" in csv_text
+    assert "Ms. Swati W" in csv_text
+    assert "Owner" in csv_text
+
+
+@pytest.mark.asyncio
+async def test_export_entry_exit_csv_rejects_unsupported_format():
+    """Export raises when format is not CSV."""
+    from apps.user_service.app.schemas.visitor_logs import VisitorLogExportQuery
+    from libs.shared_utils.http_exceptions import ValidationException
+
+    svc = _service()
+    with pytest.raises(ValidationException):
+        await svc.export_entry_exit_csv(
+            query=VisitorLogExportQuery(project_id="project-1", format="xlsx"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_export_monthly_report_csv_writes_summary():
+    """Monthly report export writes overview metrics as CSV."""
+    from apps.user_service.app.schemas.visitor_logs import VisitorLogMonthlyReportQuery
+
+    svc = _service()
+    svc.logs_repo = _FakeLogsRepo()
+    svc.logs_repo.overview_result = {
+        "start_at": datetime(2026, 9, 1, tzinfo=timezone.utc),
+        "end_at": datetime(2026, 10, 1, tzinfo=timezone.utc),
+        "total_entries": 5,
+        "inside_now": 0,
+        "awaiting_approval": 1,
+        "walk_ins": 1,
+        "exited": 1,
+        "denied_expired": 3,
+    }
+
+    csv_text = await svc.export_monthly_report_csv(
+        query=VisitorLogMonthlyReportQuery(project_id="project-1", month="2026-09"),
+    )
+    assert "metric,value" in csv_text
+    assert "month,2026-09" in csv_text
+    assert "total_entries,5" in csv_text
+    assert "denied_expired,3" in csv_text
+
+
+@pytest.mark.asyncio
+async def test_export_monthly_report_csv_rejects_unsupported_format():
+    """Monthly report export raises when format is not CSV."""
+    from apps.user_service.app.schemas.visitor_logs import VisitorLogMonthlyReportQuery
+    from libs.shared_utils.http_exceptions import ValidationException
+
+    svc = _service()
+    with pytest.raises(ValidationException):
+        await svc.export_monthly_report_csv(
+            query=VisitorLogMonthlyReportQuery(
+                project_id="project-1",
+                month="2026-09",
+                format="xlsx",
+            ),
+        )
+
+
+def test_month_to_range():
+    """Month helper returns UTC [start, end) bounds."""
+    start, end = VisitorLogsService._month_to_range("2026-09")
+    assert start == datetime(2026, 9, 1, tzinfo=timezone.utc)
+    assert end == datetime(2026, 10, 1, tzinfo=timezone.utc)

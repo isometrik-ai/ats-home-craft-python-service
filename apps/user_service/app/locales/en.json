@@ -759,12 +759,15 @@
     "errors": {
       "invalid_month": "The month filter must be in YYYY-MM format.",
       "invalid_date_range": "Provide start_at and end_at together, with end_at after start_at.",
-      "pass_not_found": "The visitor pass could not be found."
+      "pass_not_found": "The visitor pass could not be found.",
+      "unsupported_export_format": "Only CSV export is supported."
     },
     "success": {
       "list_retrieved": "Visitor logs retrieved successfully.",
       "overview_retrieved": "Visitor log overview retrieved successfully.",
-      "detail_retrieved": "Visitor log detail retrieved successfully."
+      "detail_retrieved": "Visitor log detail retrieved successfully.",
+      "export_generated": "Visitor log entry/exit report generated successfully.",
+      "monthly_report_generated": "Visitor log monthly report generated successfully."
     }
   },
   "move_events": {

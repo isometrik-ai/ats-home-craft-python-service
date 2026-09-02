@@ -160,3 +160,79 @@ async def test_get_visitor_log_detail(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"]["id"] == PASS_ID
     assert body["data"]["events"][0]["event_type"] == "check_in"
+
+
+@pytest.mark.asyncio
+async def test_export_visitor_logs_entry_exit_report(monkeypatch, client):
+    """GET visitor-logs/export returns CSV attachment."""
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.visitor_logs")
+
+    async def fake_export_entry_exit_csv(_self, *, query):
+        del _self
+        assert query.project_id == PROJECT_ID
+        assert query.format == "csv"
+        return "visitor_name,visitor_phone,visit_status\nAjay t,+91 9876543210,exited\n"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.visitor_logs_service.VisitorLogsService.export_entry_exit_csv",
+        fake_export_entry_exit_csv,
+    )
+
+    res = await client.get(
+        "/v1/visitor-logs/export",
+        params={"project_id": PROJECT_ID},
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment" in res.headers.get("content-disposition", "")
+    assert "visitor-logs-entry-exit" in res.headers.get("content-disposition", "")
+    assert "Ajay t,+91 9876543210,exited" in res.text
+
+
+@pytest.mark.asyncio
+async def test_export_visitor_logs_monthly_report(monkeypatch, client):
+    """GET visitor-logs/monthly-report returns CSV attachment."""
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.visitor_logs")
+
+    async def fake_export_monthly_report_csv(_self, *, query):
+        del _self
+        assert query.project_id == PROJECT_ID
+        assert query.month == "2026-09"
+        return "metric,value\nmonth,2026-09\ntotal_entries,5\n"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.visitor_logs_service.VisitorLogsService.export_monthly_report_csv",
+        fake_export_monthly_report_csv,
+    )
+
+    res = await client.get(
+        "/v1/visitor-logs/monthly-report",
+        params={"project_id": PROJECT_ID, "month": "2026-09"},
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment" in res.headers.get("content-disposition", "")
+    assert "visitor-logs-monthly-2026-09" in res.headers.get("content-disposition", "")
+    assert "total_entries,5" in res.text
+
+
+@pytest.mark.asyncio
+async def test_export_visitor_logs_rejects_invalid_month(client):
+    """GET visitor-logs/monthly-report rejects invalid month format."""
+    res = await client.get(
+        "/v1/visitor-logs/monthly-report",
+        params={"project_id": PROJECT_ID, "month": "2026-13"},
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_export_visitor_logs_rejects_unsupported_format(monkeypatch, client):
+    """GET visitor-logs/export rejects unsupported xlsx format."""
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.visitor_logs")
+
+    res = await client.get(
+        "/v1/visitor-logs/export",
+        params={"project_id": PROJECT_ID, "format": "xlsx"},
+    )
+    assert res.status_code == 422
