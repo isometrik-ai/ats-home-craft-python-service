@@ -122,8 +122,8 @@ async def test_create_contact_links_existing_company() -> None:
     service.org_repo = _FakeOrgRepo()
     service.companies_repo.by_name = {"appscrip": "co-existing"}
 
-    async def _fake_provision_identity(**_kwargs: Any) -> tuple[str, str | None, str | None]:
-        return ("u-1", None, None)
+    async def _fake_provision_identity(**_kwargs: Any) -> tuple[str, str | None, str | None, None]:
+        return ("u-1", None, None, None)
 
     async def _fake_validate_custom_fields_for_create(_payload: Any) -> list[dict[str, Any]]:
         return []
@@ -150,8 +150,8 @@ async def test_create_contact_creates_company_when_missing() -> None:
     service.org_repo = _FakeOrgRepo()
     service.companies_repo.by_name = {}
 
-    async def _fake_provision_identity(**_kwargs: Any) -> tuple[str, str | None, str | None]:
-        return ("u-1", None, None)
+    async def _fake_provision_identity(**_kwargs: Any) -> tuple[str, str | None, str | None, None]:
+        return ("u-1", None, None, None)
 
     async def _fake_validate_custom_fields_for_create(_payload: Any) -> list[dict[str, Any]]:
         return []

@@ -244,6 +244,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             "profile_photo_url",
             "external_contact_id",
             "phones",
+            "emails",
             "tags",
             "notes",
             "custom_fields",

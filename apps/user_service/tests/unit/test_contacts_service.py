@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -85,6 +86,7 @@ class _FakeContactsRepo:
         contact_phones: list[dict[str, Any]] | None = None,
         address_rows_created: list[dict[str, Any]] | None = None,
         address_update_results: dict[str, dict[str, Any]] | None = None,
+        contact_ids_by_user: dict[str, str] | None = None,
         create_raises: Exception | None = None,
         echo_update: bool = False,
     ) -> None:
@@ -96,6 +98,7 @@ class _FakeContactsRepo:
         self.contact_for_update = contact_for_update
         self.soft_deleted = soft_deleted
         self.contact_id_by_email = contact_id_by_email
+        self.contact_ids_by_user = contact_ids_by_user or {}
         self.create_result = create_result or {
             "contact_id": CONTACT_ID,
             "company_id": None,
@@ -129,6 +132,11 @@ class _FakeContactsRepo:
         """Return configured contact id for email lookup."""
         del organization_id, email
         return self.contact_id_by_email
+
+    async def get_contact_ids_by_user_ids(self, *, organization_id: str, user_ids: list[str]):
+        """Return configured contact ids keyed by auth user id."""
+        del organization_id, user_ids
+        return dict(self.contact_ids_by_user)
 
     async def list_contacts(self, **kwargs):
         """Return paginated contacts."""
@@ -323,8 +331,8 @@ def _patch_create_identity(
 ) -> None:
     """Stub identity provisioning for create_contact tests."""
 
-    async def _fake_provision_identity(**_kwargs: Any) -> tuple[str, str | None, str | None]:
-        return (USER_ID, "iso-new", "temp-pass")
+    async def _fake_provision_identity(**_kwargs: Any) -> tuple[str, str | None, str | None, None]:
+        return (USER_ID, "iso-new", "temp-pass", None)
 
     async def _fake_validate_custom_fields(_payload: Any) -> list[dict[str, Any]]:
         return validated_custom_fields if validated_custom_fields is not None else []
@@ -2406,6 +2414,206 @@ async def test_create_contact_with_phones_and_emails(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_contact_reuses_auth_user_and_syncs_primary_email(monkeypatch):
+    """Reused auth identity should drive contact primary email, not body-only email."""
+    repo = _FakeContactsRepo()
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    svc.contacts_repo = repo  # type: ignore[assignment]
+    svc.companies_repo = _FakeCompaniesRepo()  # type: ignore[assignment]
+    svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
+    monkeypatch.setattr(
+        svc,
+        "_validate_custom_fields_for_create",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"projectId": "p1"},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.create_isometrik_user",
+        AsyncMock(return_value={"userId": "iso-reuse"}),
+    )
+    mock_user_repo = MagicMock()
+    mock_user_repo.get_auth_users_by_phone_or_email = AsyncMock(
+        return_value=[
+            {
+                "id": "auth-existing",
+                "email": "xyz@gmail.com",
+                "phone": "919090120011",
+            }
+        ]
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.UserRepository",
+        lambda db_connection: mock_user_repo,
+    )
+
+    await svc.create_contact(
+        CreateContactRequest(
+            first_name="Jane",
+            last_name="Doe",
+            phones=[
+                Phone(
+                    phone_number="9090120011",
+                    phone_isd_code="+91",
+                    label="Personal",
+                    is_primary=True,
+                )
+            ],
+            emails=[
+                Email(
+                    email="winsonnates@yopmail.com",
+                    label="Personal",
+                    is_primary=True,
+                )
+            ],
+        )
+    )
+
+    contact_data = repo.last_create_kwargs["contact_data"]
+    assert contact_data["user_id"] == "auth-existing"
+    assert contact_data["email"] == "xyz@gmail.com"
+    emails = json.loads(contact_data["emails"])
+    assert emails[0]["email"] == "xyz@gmail.com"
+    assert emails[0]["is_primary"] is True
+    assert any(
+        item["email"] == "winsonnates@yopmail.com" and item["is_primary"] is False
+        for item in emails
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_contact_reused_auth_user_does_not_recheck_auth_login_email(monkeypatch):
+    """Merged auth login email must not trigger a second org email uniqueness check."""
+    repo = _FakeContactsRepo()
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    svc.contacts_repo = repo  # type: ignore[assignment]
+    svc.companies_repo = _FakeCompaniesRepo()  # type: ignore[assignment]
+    svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
+    monkeypatch.setattr(
+        svc,
+        "_validate_custom_fields_for_create",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"projectId": "p1"},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.create_isometrik_user",
+        AsyncMock(return_value={"userId": "iso-reuse"}),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.UserRepository",
+        lambda db_connection: MagicMock(
+            get_auth_users_by_phone_or_email=AsyncMock(
+                return_value=[
+                    {
+                        "id": "auth-existing",
+                        "email": "xyz@gmail.com",
+                        "phone": "919090120011",
+                    }
+                ]
+            )
+        ),
+    )
+    checked_emails: list[str] = []
+
+    async def _track_assert(
+        *, organization_id: str, email: str, exclude_contact_id: str | None = None
+    ):
+        del organization_id, exclude_contact_id
+        checked_emails.append(email)
+
+    svc._assert_contact_email_unique = _track_assert  # type: ignore[method-assign]
+
+    await svc.create_contact(
+        CreateContactRequest(
+            first_name="Jane",
+            phones=[Phone(phone_number="9090120011", phone_isd_code="+91", is_primary=True)],
+            emails=[Email(email="winsonnates@yopmail.com", is_primary=True)],
+        )
+    )
+
+    assert checked_emails == ["winsonnates@yopmail.com"]
+
+
+@pytest.mark.asyncio
+async def test_create_contact_reused_auth_user_updates_existing_contact(monkeypatch):
+    """When auth is reused and org contact already exists, update instead of insert."""
+    repo = _FakeContactsRepo(
+        contact_for_update={
+            "id": CONTACT_ID,
+            "emails": [{"email": "xyz@gmail.com", "is_primary": True}],
+        },
+        updated_row={"id": CONTACT_ID, "email": "xyz@gmail.com"},
+        contact_ids_by_user={"auth-existing": CONTACT_ID},
+    )
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    svc.contacts_repo = repo  # type: ignore[assignment]
+    svc.companies_repo = _FakeCompaniesRepo()  # type: ignore[assignment]
+    svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
+    svc.cc_repo = MagicMock()
+    svc.cc_repo.apply_companies_update_delta = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        svc,
+        "_validate_custom_fields_for_create",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"projectId": "p1"},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.create_isometrik_user",
+        AsyncMock(return_value={"userId": "iso-reuse"}),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.UserRepository",
+        lambda db_connection: MagicMock(
+            get_auth_users_by_phone_or_email=AsyncMock(
+                return_value=[
+                    {
+                        "id": "auth-existing",
+                        "email": "xyz@gmail.com",
+                        "phone": "919090120011",
+                    }
+                ]
+            )
+        ),
+    )
+
+    result = await svc.create_contact(
+        CreateContactRequest(
+            first_name="Jane",
+            phones=[Phone(phone_number="9090120011", phone_isd_code="+91", is_primary=True)],
+            emails=[Email(email="winsonnates@yopmail.com", is_primary=True)],
+        )
+    )
+
+    assert result["contact_id"] == CONTACT_ID
+    assert result["reused_existing"] is True
+    assert repo.last_create_kwargs is None
+    assert repo.last_update_kwargs is not None
+    assert repo.last_update_kwargs["update_data"]["user_id"] == "auth-existing"
+    emails = json.loads(repo.last_update_kwargs["update_data"]["emails"])
+    assert emails[0]["email"] == "xyz@gmail.com"
+
+
+@pytest.mark.asyncio
 async def test_create_contact_requires_email_or_phone():
     """Create contact requires email, primary emails entry, or phones."""
     with pytest.raises(ValidationException):
@@ -2550,7 +2758,7 @@ async def test_provision_contact_auth_identity_creates_user(
     )
     svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
 
-    user_id, iso_id, password = await svc._provision_contact_auth_identity(
+    user_id, iso_id, password, _ = await svc._provision_contact_auth_identity(
         contact_id=CONTACT_ID,
         phone="+919876543210",
         email="jane@example.com",
@@ -2589,7 +2797,7 @@ async def test_provision_contact_auth_identity_reuses_existing(
     )
     svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
 
-    user_id, iso_id, password = await svc._provision_contact_auth_identity(
+    user_id, iso_id, password, reused_auth_user = await svc._provision_contact_auth_identity(
         contact_id=CONTACT_ID,
         phone="+919876543210",
         email="jane@example.com",
@@ -2601,6 +2809,7 @@ async def test_provision_contact_auth_identity_reuses_existing(
     assert user_id == "auth-existing"
     assert iso_id == "iso-reuse"
     assert password is None
+    assert reused_auth_user == {"id": "auth-existing"}
     mock_create_iso.assert_awaited_once()
 
 

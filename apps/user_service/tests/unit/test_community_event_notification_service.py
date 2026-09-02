@@ -127,3 +127,13 @@ async def test_other_notification_wrappers():
         event=event,
     )
     svc.push_dispatcher.send_to_user.assert_awaited_once()
+
+    svc.push_dispatcher.send_to_user.reset_mock()
+    await svc.notify_event_cancelled(
+        organization_id=ORG,
+        contact_id="contact-1",
+        event=event,
+    )
+    svc.push_dispatcher.send_to_user.assert_awaited_once()
+    call_kwargs = svc.push_dispatcher.send_to_user.await_args.kwargs
+    assert call_kwargs["message_key"] == "notifications.push.community_events.cancelled"

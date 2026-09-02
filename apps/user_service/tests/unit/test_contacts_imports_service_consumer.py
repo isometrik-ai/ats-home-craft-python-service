@@ -21,6 +21,7 @@ from apps.user_service.app.services.contacts_imports_service import (
     ContactsImportService,
     _ContactsImportTotals,
 )
+from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.utils.common_utils import UserContext
 
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
@@ -219,9 +220,9 @@ class _FakeContactsService:
         self.provision_calls: list[dict[str, Any]] = []
         self.email_calls: list[dict[str, Any]] = []
 
-    async def _provision_contact_auth_identity(self, **kwargs) -> tuple[str, str, str | None]:
+    async def _provision_contact_auth_identity(self, **kwargs) -> tuple[str, str, str | None, None]:
         self.provision_calls.append(kwargs)
-        return ("user-1", "iso-1", "temp-pass")
+        return ("user-1", "iso-1", "temp-pass", None)
 
     def _maybe_send_contact_creation_email(self, **kwargs) -> None:
         self.email_calls.append(kwargs)
@@ -476,10 +477,10 @@ def test_attach_identity_and_company() -> None:
             {"row_number": 1, "company_name": "Acme"},
             {"row_number": 2, "company_name": "Unknown"},
         ],
-        identity_results={1: ("u1", "i1", None), 2: ("u2", "i2", "pw")},
+        identity_results={1: ("u1", "i1", None, None), 2: ("u2", "i2", "pw", None)},
         company_cache={"acme": "co-1"},
     )
-    assert rows[0]["identity"] == ("u1", "i1", None)
+    assert rows[0]["identity"] == ("u1", "i1", None, None)
     assert rows[0]["company_id"] == "co-1"
     assert rows[1].get("company_id") is None
     assert nums == [1, 2]
@@ -625,7 +626,7 @@ async def test_mark_validation_errors_and_collect_valid(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_provision_identities_sequential_success(monkeypatch) -> None:
     """Successful identity provisioning returns row_number -> identity map."""
-    _patch_consumer_deps(monkeypatch)
+    _patch_repos_only(monkeypatch)
     svc = ContactsImportService(db_connection=MagicMock())
     contacts_service = _FakeContactsService()
     rows_repo = _FakeRowsRepo(db_connection=MagicMock())
@@ -643,6 +644,37 @@ async def test_provision_identities_sequential_success(monkeypatch) -> None:
     assert 1 in results
     assert results[1][0] == "user-1"
     assert len(contacts_service.provision_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_provision_identities_sequential_passes_primary_phone(monkeypatch) -> None:
+    """Identity provisioning forwards normalized primary phone for auth lookup."""
+    _patch_repos_only(monkeypatch)
+    svc = ContactsImportService(db_connection=MagicMock())
+    contacts_service = _FakeContactsService()
+    rows_repo = _FakeRowsRepo(db_connection=MagicMock())
+    totals = _ContactsImportTotals()
+    model = _contact_model(
+        "a@example.com",
+        phones=[
+            {
+                "phone_number": "9090120011",
+                "phone_isd_code": "+91",
+                "is_primary": True,
+            }
+        ],
+    )
+
+    await svc._provision_identities_sequential(
+        organization_id=ORG_ID,
+        job_internal_id="internal-1",
+        rows_repo=rows_repo,
+        contacts_service=contacts_service,
+        claimed=[{"row_number": 1, "contact_model": model, "raw_row": {}}],
+        totals=totals,
+    )
+
+    assert contacts_service.provision_calls[0]["phone"] == "919090120011"
 
 
 @pytest.mark.asyncio
@@ -753,9 +785,10 @@ async def test_build_contacts_insert_payloads(monkeypatch) -> None:
         {
             "row_number": 1,
             "contact_model": model,
-            "identity": ("uid-1", "iso-1", "pw-1"),
+            "identity": ("uid-1", "iso-1", "pw-1", None),
         }
     ]
+    contacts_service = _FakeContactsService()
 
     (
         rows_to_insert,
@@ -767,6 +800,7 @@ async def test_build_contacts_insert_payloads(monkeypatch) -> None:
         event=_import_event(),
         valid_rows=valid_rows,
         custom_fields_by_row={1: []},
+        contacts_service=contacts_service,
     )
 
     assert len(rows_to_insert) == 1
@@ -775,6 +809,63 @@ async def test_build_contacts_insert_payloads(monkeypatch) -> None:
     assert password_by_row[1] == "pw-1"
     assert portal_by_row[1] is True
     assert email_by_row[1] == "lead@example.com"
+
+
+@pytest.mark.asyncio
+async def test_build_contacts_insert_payloads_reuses_auth_email(monkeypatch) -> None:
+    """Imported contacts align primary email with reused auth user identity."""
+    import json
+
+    _patch_repos_only(monkeypatch)
+    svc = ContactsImportService(db_connection=MagicMock())
+    contacts_service = ContactsService(
+        db_connection=MagicMock(),
+        user_context=UserContext(user_id="u1", email="", organization_id=ORG_ID),
+        supabase_client=MagicMock(),
+    )
+    model = CreateContactRequest.model_validate(
+        {
+            "email": "winsonnates@yopmail.com",
+            "phones": [
+                {
+                    "phone_number": "9090120011",
+                    "phone_isd_code": "+91",
+                    "is_primary": True,
+                }
+            ],
+            "emails": [
+                {"email": "winsonnates@yopmail.com", "is_primary": True},
+            ],
+        }
+    )
+    reused_auth_user = {
+        "id": "auth-existing",
+        "email": "xyz@gmail.com",
+        "phone": "919090120011",
+    }
+    valid_rows = [
+        {
+            "row_number": 1,
+            "contact_model": model,
+            "identity": ("auth-existing", "iso-1", None, reused_auth_user),
+        }
+    ]
+
+    rows_to_insert, _, _, _, email_by_row = await svc._build_contacts_insert_payloads(
+        event=_import_event(),
+        valid_rows=valid_rows,
+        custom_fields_by_row={1: []},
+        contacts_service=contacts_service,
+    )
+
+    emails = json.loads(rows_to_insert[0]["emails"])
+    assert email_by_row[1] == "xyz@gmail.com"
+    assert emails[0]["email"] == "xyz@gmail.com"
+    assert emails[0]["is_primary"] is True
+    assert any(
+        item["email"] == "winsonnates@yopmail.com" and item["is_primary"] is False
+        for item in emails
+    )
 
 
 @pytest.mark.asyncio
@@ -845,7 +936,7 @@ async def test_persist_contacts_for_rows_impl_happy_path(monkeypatch) -> None:
         {
             "row_number": 1,
             "contact_model": model,
-            "identity": ("uid-1", "iso-1", "pw-1"),
+            "identity": ("uid-1", "iso-1", "pw-1", None),
         }
     ]
 
@@ -910,7 +1001,7 @@ async def test_persist_contacts_for_rows_impl_lead_errors(monkeypatch) -> None:
         {
             "row_number": 1,
             "contact_model": model,
-            "identity": ("uid-1", "iso-1", None),
+            "identity": ("uid-1", "iso-1", None, None),
             "contact_id": "contact-1",
         }
     ]
@@ -1435,7 +1526,7 @@ async def test_process_event_batches_running_log(monkeypatch) -> None:
     monkeypatch.setattr(
         svc,
         "_provision_identities_sequential",
-        AsyncMock(return_value={1: ("u1", "i1", None)}),
+        AsyncMock(return_value={1: ("u1", "i1", None, None)}),
     )
     monkeypatch.setattr(svc, "_persist_contacts_for_rows", AsyncMock())
 

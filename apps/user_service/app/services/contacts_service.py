@@ -550,6 +550,80 @@ class ContactsService:
             )
         return isometrik_user_id
 
+    @staticmethod
+    def _extract_reused_auth_user_login_identity(
+        auth_user: dict[str, Any],
+    ) -> tuple[str | None, str | None]:
+        """Return auth login email and digits-only phone from auth.users columns."""
+        email = (str(auth_user.get("email") or "")).strip().lower() or None
+        raw_phone = str(auth_user.get("phone") or "").strip()
+        phone_digits = re.sub(r"\D", "", raw_phone) if raw_phone else None
+        return email, phone_digits
+
+    def _merge_reused_auth_user_contact_payloads(
+        self,
+        *,
+        reused_auth_user: dict[str, Any],
+        email_norm: str,
+        emails_payload: list[dict[str, Any]],
+        phones_payload: list[dict[str, Any]],
+    ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+        """Align contact primary email/phone with a reused auth user identity."""
+        # pylint: disable=too-complex
+        auth_email, auth_phone_digits = self._extract_reused_auth_user_login_identity(
+            reused_auth_user
+        )
+
+        if auth_email:
+            email_norm = auth_email
+            merged_emails: list[dict[str, Any]] = []
+            seen_emails: set[str] = set()
+            primary_email_entry: dict[str, Any] = {"email": auth_email, "is_primary": True}
+            for item in emails_payload:
+                item_email = str(item.get("email") or "").strip().lower()
+                if item_email == auth_email and item.get("label"):
+                    primary_email_entry["label"] = item["label"]
+                    break
+            merged_emails.append(primary_email_entry)
+            seen_emails.add(auth_email)
+
+            for item in emails_payload:
+                item_email = str(item.get("email") or "").strip().lower()
+                if not item_email or item_email in seen_emails:
+                    continue
+                merged_emails.append({**item, "email": item_email, "is_primary": False})
+                seen_emails.add(item_email)
+            emails_payload = merged_emails
+
+        if auth_phone_digits:
+            primary_phone_entry: dict[str, Any] | None = None
+            merged_phones: list[dict[str, Any]] = []
+            seen_phones: set[str] = set()
+
+            for item in phones_payload:
+                item_full_phone = self._normalize_full_phone_from_parts(
+                    phone_isd_code=item.get("phone_isd_code"),
+                    phone_number=str(item.get("phone_number") or ""),
+                )
+                if item_full_phone == auth_phone_digits and primary_phone_entry is None:
+                    primary_phone_entry = {**item, "is_primary": True}
+                    seen_phones.add(item_full_phone)
+
+            if primary_phone_entry is not None:
+                merged_phones.append(primary_phone_entry)
+                for item in phones_payload:
+                    item_full_phone = self._normalize_full_phone_from_parts(
+                        phone_isd_code=item.get("phone_isd_code"),
+                        phone_number=str(item.get("phone_number") or ""),
+                    )
+                    if not item_full_phone or item_full_phone in seen_phones:
+                        continue
+                    merged_phones.append({**item, "is_primary": False})
+                    seen_phones.add(item_full_phone)
+                phones_payload = merged_phones
+
+        return email_norm, emails_payload, phones_payload
+
     async def _provision_contact_auth_identity(
         self,
         *,
@@ -561,11 +635,11 @@ class ContactsService:
         email: str | None = None,
         password: str | None = None,
         existing_isometrik_user_id: str | None = None,
-    ) -> tuple[str, str, str | None]:
+    ) -> tuple[str, str, str | None, dict[str, Any] | None]:
         """Create/reuse Supabase auth user and create Isometrik user for a contact.
 
         Returns:
-            (user_id, isometrik_user_id, password_if_created)
+            (user_id, isometrik_user_id, password_if_created, reused_auth_user)
         """
         if not self.supabase_client:
             raise ServiceUnavailableException(
@@ -605,8 +679,13 @@ class ContactsService:
             )
 
         created_password: str | None = None
+        reused_auth_user: dict[str, Any] | None = None
         if len(matched_user_ids) == 1:
             user_id = next(iter(matched_user_ids))
+            reused_auth_user = next(
+                (match for match in auth_matches if str(match.get("id")) == user_id),
+                None,
+            )
         else:
             auth_password = password or generate_random_password()
             created_password = auth_password
@@ -650,7 +729,7 @@ class ContactsService:
             isometrik_credentials=isometrik_credentials,
             existing_isometrik_user_id=existing_isometrik_user_id,
         )
-        return user_id, isometrik_user_id, created_password
+        return user_id, isometrik_user_id, created_password, reused_auth_user
 
     async def _sync_contact_auth_phone(self, *, user_id: str, phone: Phone) -> None:
         """Update linked Supabase auth user when the contact primary phone changes."""
@@ -1001,11 +1080,11 @@ class ContactsService:
         prefix: str | None,
         phone: str | None = None,
         password: str | None = None,
-    ) -> tuple[str, str, str | None]:
+    ) -> tuple[str, str, str | None, dict[str, Any] | None]:
         """Provision (or reuse) auth identity for a contact.
 
         Returns:
-            ``(user_id, isometrik_user_id, password_if_created)``.
+            ``(user_id, isometrik_user_id, password_if_created, reused_auth_user)``.
         """
         return await self._provision_contact_auth_identity(
             contact_id=contact_id,
@@ -1173,12 +1252,17 @@ class ContactsService:
         except UniqueViolationError as exc:
             constraint = getattr(exc, "constraint_name", None)
             if constraint == "uq_contacts_user_org":
+                existing_by_user = await self.contacts_repo.get_contact_ids_by_user_ids(
+                    organization_id=organization_id,
+                    user_ids=[user_id],
+                )
                 raise ConflictException(
                     message_key="contacts.errors.contact_user_already_exists",
                     custom_code=CustomStatusCode.CONFLICT,
                     params={
                         "organization_id": organization_id,
                         "user_id": user_id,
+                        "client_id": existing_by_user.get(user_id),
                     },
                 ) from exc
             if constraint == "uq_contacts_org_external_contact_id":
@@ -1187,6 +1271,71 @@ class ContactsService:
                     custom_code=CustomStatusCode.CONFLICT,
                 ) from exc
             raise
+
+    async def _link_company_on_contact_reuse(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        company_id: str | None,
+        company_data: dict[str, Any] | None,
+        make_primary: bool,
+    ) -> str | None:
+        """Link or create a company association when reusing an existing contact."""
+        if not company_id and not company_data:
+            return company_id
+
+        created_company_id = await self.cc_repo.apply_companies_update_delta(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            remove_company_ids=[],
+            add_company_ids=[str(company_id)] if company_id else [],
+            set_primary_company_ids=[str(company_id)] if make_primary and company_id else [],
+            unset_primary_company_ids=[],
+            create_company_name=(company_data or {}).get("name") if company_data else None,
+            create_is_primary=bool(make_primary and company_data),
+        )
+        return str(created_company_id or company_id or "") or None
+
+    async def _reuse_existing_contact_for_auth_user(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        user_id: str,
+        isometrik_user_id: str | None,
+        contact_payload: dict[str, Any],
+        company_id: str | None,
+        company_data: dict[str, Any] | None,
+        make_primary: bool,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
+        """Update an existing org contact when auth identity was reused."""
+        old_contact_row = await self.contacts_repo.get_contact_for_update(
+            contact_id=contact_id,
+            organization_id=organization_id,
+        )
+        update_data = {
+            key: value
+            for key, value in contact_payload.items()
+            if key not in {"id", "created_by", "email"}
+        }
+        update_data["user_id"] = user_id
+        if isometrik_user_id:
+            update_data["isometrik_user_id"] = isometrik_user_id
+
+        contact_row = await self.contacts_repo.update_contact(
+            contact_id=contact_id,
+            organization_id=organization_id,
+            update_data=update_data,
+        )
+        resolved_company_id = await self._link_company_on_contact_reuse(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            company_id=company_id,
+            company_data=company_data,
+            make_primary=make_primary,
+        )
+        return old_contact_row, contact_row, resolved_company_id
 
     @staticmethod
     def _resolve_create_email(body: CreateContactRequest) -> str:
@@ -1209,7 +1358,7 @@ class ContactsService:
         body: CreateContactRequest,
     ) -> dict[str, Any]:
         """Create a contact with optional company link (and optional primary designation)."""
-        # pylint: disable=too-complex
+        # pylint: disable=too-complex, too-many-branches
         org_id = self.user_context.organization_id
         (
             company_id,
@@ -1264,7 +1413,12 @@ class ContactsService:
             if primary_phone is not None
             else None
         )
-        user_id, isometrik_user_id, created_password = await self._provision_identity(
+        (
+            user_id,
+            isometrik_user_id,
+            created_password,
+            reused_auth_user,
+        ) = await self._provision_identity(
             contact_id=contact_id,
             email=email_norm or None,
             phone=full_phone or None,
@@ -1295,6 +1449,16 @@ class ContactsService:
         ]
         if not emails_payload and email_norm:
             emails_payload = [{"email": email_norm, "is_primary": True}]
+
+        if reused_auth_user:
+            email_norm, emails_payload, phones_payload = (
+                self._merge_reused_auth_user_contact_payloads(
+                    reused_auth_user=reused_auth_user,
+                    email_norm=email_norm,
+                    emails_payload=emails_payload,
+                    phones_payload=phones_payload,
+                )
+            )
 
         # Persist intake_stage on the contact when provided (for downstream indexing/filters).
         additional_data_payload = dict(body.additional_data or {})
@@ -1332,52 +1496,90 @@ class ContactsService:
         social_pages_jsonb = jsonb_params["social_pages"]
         communication_preferences_jsonb = jsonb_params["communication_preferences"]
 
-        created = await self._create_contact_with_company_link_or_conflict(
-            organization_id=org_id,
-            user_id=user_id,
-            isometrik_user_id=isometrik_user_id,
-            contact_payload={
-                "id": contact_id,
-                "status": ClientStatus.ACTIVE.value,
-                "created_by": self.user_context.user_id or None,
-                "portal_access": body.portal_access,
-                "prefix": body.prefix,
-                "first_name": body.first_name,
-                "middle_name": body.middle_name,
-                "last_name": body.last_name,
-                "title": body.title,
-                "date_of_birth": body.date_of_birth,
-                "gender": body.gender.value if body.gender else None,
-                "blood_group": body.blood_group.value if body.blood_group else None,
-                "communication_preferences": communication_preferences_jsonb,
-                "profile_photo_url": body.profile_photo_url,
-                "external_contact_id": self._normalize_external_contact_id(
-                    body.external_contact_id
-                ),
-                "email": email_norm,
-                "phones": phones_jsonb,
-                "emails": emails_jsonb,
-                "tags": body.tags,
-                "notes": notes_jsonb,
-                "custom_fields": custom_fields_jsonb,
-                "additional_data": additional_data_jsonb,
-                "social_pages": social_pages_jsonb,
-            },
-            company_id=company_id,
-            company_data=company_data,
-            company_addresses=company_addresses,
-            make_primary=make_primary,
-        )
-        contact_id = created.get("contact_id") or contact_id
-        company_id = created.get("company_id")
-        contact_row = created.get("contact")
+        contact_payload = {
+            "id": contact_id,
+            "status": ClientStatus.ACTIVE.value,
+            "created_by": self.user_context.user_id or None,
+            "portal_access": body.portal_access,
+            "prefix": body.prefix,
+            "first_name": body.first_name,
+            "middle_name": body.middle_name,
+            "last_name": body.last_name,
+            "title": body.title,
+            "date_of_birth": body.date_of_birth,
+            "gender": body.gender.value if body.gender else None,
+            "blood_group": body.blood_group.value if body.blood_group else None,
+            "communication_preferences": communication_preferences_jsonb,
+            "profile_photo_url": body.profile_photo_url,
+            "external_contact_id": self._normalize_external_contact_id(body.external_contact_id),
+            "email": email_norm,
+            "phones": phones_jsonb,
+            "emails": emails_jsonb,
+            "tags": body.tags,
+            "notes": notes_jsonb,
+            "custom_fields": custom_fields_jsonb,
+            "additional_data": additional_data_jsonb,
+            "social_pages": social_pages_jsonb,
+        }
+
+        existing_contact_id: str | None = None
+        if reused_auth_user and user_id:
+            existing_contact_id = (
+                await self.contacts_repo.get_contact_ids_by_user_ids(
+                    organization_id=org_id,
+                    user_ids=[user_id],
+                )
+            ).get(user_id)
+
+        old_contact_row: dict[str, Any] | None = None
+        reused_existing_contact = False
+        if existing_contact_id:
+            contact_id = existing_contact_id
+            reused_existing_contact = True
+            (
+                old_contact_row,
+                contact_row,
+                resolved_company_id,
+            ) = await self._reuse_existing_contact_for_auth_user(
+                organization_id=org_id,
+                contact_id=contact_id,
+                user_id=user_id,
+                isometrik_user_id=isometrik_user_id,
+                contact_payload=contact_payload,
+                company_id=company_id,
+                company_data=company_data,
+                make_primary=make_primary,
+            )
+            company_id = resolved_company_id or company_id
+            created = {
+                "contact_id": contact_id,
+                "company_id": company_id,
+                "contact": contact_row,
+            }
+        else:
+            created = await self._create_contact_with_company_link_or_conflict(
+                organization_id=org_id,
+                user_id=user_id,
+                isometrik_user_id=isometrik_user_id,
+                contact_payload=contact_payload,
+                company_id=company_id,
+                company_data=company_data,
+                company_addresses=company_addresses,
+                make_primary=make_primary,
+            )
+            contact_id = created.get("contact_id") or contact_id
+            company_id = created.get("company_id")
+            contact_row = created.get("contact")
         if not contact_id:
             raise ValidationException(
                 message_key="contacts.errors.contact_creation_failed",
                 custom_code=CustomStatusCode.SERVICE_UNAVAILABLE,
             )
 
-        if body.contact_type in {ContactType.VENDOR, ContactType.STAFF}:
+        if (
+            body.contact_type in {ContactType.VENDOR, ContactType.STAFF}
+            and not reused_existing_contact
+        ):
             await self.contact_roles_repo.insert_role(
                 organization_id=org_id,
                 contact_id=str(contact_id),
@@ -1442,7 +1644,7 @@ class ContactsService:
             portal_access=bool(body.portal_access),
             email=email_norm,
             organization_name=org_name,
-            password=created_password,
+            password=created_password if not reused_existing_contact else None,
         )
 
         if body.unit_assignment is not None:
@@ -1481,13 +1683,16 @@ class ContactsService:
             created_new_company=created_new_company,
             company_id=company_id,
         )
+        if reused_existing_contact and created_entities:
+            created_entities[0]["action"] = "update"
 
         return {
             "contact_id": contact_id,
             "company_id": company_id,
             "created_lead_id": created_lead_id,
-            "old_data": None,
+            "old_data": old_contact_row,
             "new_data": contact_row,
+            "reused_existing": reused_existing_contact,
             "enrichment_targets": enrichment_targets,
             "created_entities": created_entities,
         }
@@ -2784,7 +2989,7 @@ class ContactsService:
         existing_isometrik_user_id = (
             str(current["isometrik_user_id"]) if current.get("isometrik_user_id") else None
         )
-        user_id, isometrik_user_id, _ = await self._provision_contact_auth_identity(
+        user_id, isometrik_user_id, _, _ = await self._provision_contact_auth_identity(
             contact_id=contact_id,
             phone=self._normalize_full_phone(
                 primary_phone["phone_isd_code"],

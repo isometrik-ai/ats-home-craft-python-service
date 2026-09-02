@@ -197,3 +197,23 @@ class CommunityEventNotificationService:
                 "title": params["title"],
             },
         )
+
+    async def notify_event_cancelled(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        event: dict[str, Any],
+    ) -> None:
+        """Notify resident when an event they booked is cancelled."""
+        params = _event_title_params(event)
+        await self._send_to_contact(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            message_key="notifications.push.community_events.cancelled",
+            params=params,
+            data={
+                "event_id": str(event["id"]),
+                "title": params["title"],
+            },
+        )
