@@ -746,7 +746,7 @@ class VisitorLogsService:
         unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Return all visitor log rows matching export filters."""
-        items, _total = await self.list_logs(
+        items, _ = await self.list_logs(
             start_at=start_at,
             end_at=end_at,
             search=search,
