@@ -1062,6 +1062,33 @@ class CommunityEventsRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def list_active_bookers_for_notification(
+        self,
+        *,
+        organization_id: str,
+        event_id: str,
+    ) -> list[dict[str, Any]]:
+        """Contacts with confirmed or waitlisted bookings for event push."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT
+              b.contact_id::text AS contact_id,
+              c.user_id::text AS user_id
+            FROM community_event_bookings b
+            JOIN contacts c ON c.id = b.contact_id
+            WHERE b.organization_id = $1::uuid
+              AND b.event_id = $2::uuid
+              AND b.booking_status IN (
+                'confirmed'::community_event_booking_status,
+                'waitlisted'::community_event_booking_status
+              )
+              AND c.user_id IS NOT NULL
+            """,
+            organization_id,
+            event_id,
+        )
+        return [dict(row) for row in rows]
+
     async def list_events_due_for_reminder(self, *, hours_ahead: int = 24) -> list[dict[str, Any]]:
         """Published events starting within the reminder window (default 24h)."""
         rows = await self.db_connection.fetch(

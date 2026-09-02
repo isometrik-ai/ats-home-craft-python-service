@@ -994,6 +994,10 @@
         "reminder": {
           "title": "Event tomorrow",
           "body": "Reminder: {title} is coming up soon"
+        },
+        "cancelled": {
+          "title": "Event cancelled",
+          "body": "{title} has been cancelled"
         }
       }
     }
