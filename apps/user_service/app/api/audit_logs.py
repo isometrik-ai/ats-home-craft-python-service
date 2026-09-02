@@ -51,6 +51,7 @@ router = APIRouter(prefix="/audit-logs", tags=["Audit Logs Management"])
 )
 @limiter.limit("100/minute")
 async def get_audit_logs(
+    *,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),

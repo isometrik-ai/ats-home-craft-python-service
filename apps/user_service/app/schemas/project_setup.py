@@ -370,7 +370,9 @@ class CreateTowerGateBulkItem(CreateTowerGateRequest):
     wing_client_key: str | None = Field(
         default=None,
         max_length=32,
-        description="Optional wing reference (matches wing `code` or `name` from the same request).",
+        description=(
+            "Optional wing reference (matches wing `code` or `name` from the same request)."
+        ),
     )
 
     @model_validator(mode="after")
@@ -416,7 +418,9 @@ class CreateFloorBulkItem(CreateFloorRequest):
     wing_client_key: str | None = Field(
         default=None,
         max_length=32,
-        description="Optional wing reference (matches wing `code` or `name` from the same request).",
+        description=(
+            "Optional wing reference (matches wing `code` or `name` from the same request)."
+        ),
     )
 
     @model_validator(mode="after")

@@ -65,10 +65,12 @@ class NoticesService:
 
     @property
     def organization_id(self) -> str:
+        """Organization id from context."""
         return self.user_context.organization_id
 
     @property
     def user_id(self) -> str | None:
+        """Authenticated user id from context."""
         return self.user_context.user_id
 
     async def get_summary(self, *, project_id: str) -> NoticeSummaryResponse:
@@ -272,7 +274,7 @@ class NoticesService:
                 recipient_groups=recipient_groups,
                 scope_type=scope_type,
                 tower_ids=tower_ids,
-                current_status=str(existing["status"]),
+                _current_status=str(existing["status"]),
             )
             fields["status"] = status
             fields["publish_at"] = publish_at
@@ -683,6 +685,7 @@ class NoticesService:
             )
 
     async def _attachments_from_db(self, notice_id: str) -> list[NoticeAttachmentInput]:
+        """Load notice attachments from the database."""
         rows = await self.repo.list_attachments(
             organization_id=self.organization_id,
             notice_id=notice_id,
@@ -699,6 +702,7 @@ class NoticesService:
         ]
 
     async def _to_detail(self, row: dict[str, Any]) -> NoticeDetailResponse:
+        """Map a notice row to admin detail."""
         notice_id = str(row["id"])
         recipient_groups = await self.repo.list_recipient_groups(
             organization_id=self.organization_id,
@@ -756,6 +760,7 @@ class NoticesService:
         *,
         attachments: list[dict[str, Any]] | None = None,
     ) -> NoticeListItemResponse:
+        """Map a notice row to admin list item."""
         status = NoticeStatus(str(row["status"]))
         category = str(row["category"])
         scope_type = NoticeScopeType(str(row["scope_type"]))
@@ -791,6 +796,7 @@ class NoticesService:
         scope_type: NoticeScopeType,
         towers: list[dict[str, Any]],
     ) -> str | None:
+        """Return a human-readable scope label for a notice."""
         if scope_type == NoticeScopeType.WHOLE_SOCIETY:
             return "Whole society"
         if not towers:
@@ -805,8 +811,9 @@ class NoticesService:
         recipient_groups: list[str],
         scope_type: NoticeScopeType,
         tower_ids: list[str],
-        current_status: str | None = None,
+        _current_status: str | None = None,
     ) -> tuple[str, datetime | None, datetime | None]:
+        """Resolve notice status and publish timestamps from publish mode."""
         if publish_mode == NoticePublishMode.DRAFT:
             return NoticeStatus.DRAFT.value, None, None
         self._validate_publish_requirements(
@@ -825,6 +832,7 @@ class NoticesService:
         return NoticeStatus.SCHEDULED.value, publish_at, None
 
     def _validate_content(self, title: str, description: str) -> None:
+        """Validate notice title and description length limits."""
         if len(title) > 70:
             raise ValidationException(
                 message_key="notices.errors.title_too_long",
@@ -837,6 +845,7 @@ class NoticesService:
             )
 
     def _validate_attachments(self, attachments: list[NoticeAttachmentInput] | None) -> None:
+        """Validate notice attachment count, mime types, and paths."""
         if not attachments:
             return
         if len(attachments) > NOTICE_MAX_ATTACHMENTS:
@@ -872,6 +881,7 @@ class NoticesService:
         scope_type: NoticeScopeType,
         tower_ids: list[str],
     ) -> None:
+        """Ensure recipients and tower scope are set for publish."""
         if not recipient_groups:
             raise ValidationException(
                 message_key="notices.errors.recipients_required",
@@ -884,6 +894,7 @@ class NoticesService:
             )
 
     def _validate_schedule(self, publish_at: datetime) -> None:
+        """Ensure scheduled publish date is within allowed window."""
         now = datetime.now(timezone.utc)
         if publish_at.tzinfo is None:
             publish_at = publish_at.replace(tzinfo=timezone.utc)
@@ -895,6 +906,7 @@ class NoticesService:
             )
 
     def _assert_editable(self, status: str) -> None:
+        """Raise if notice status does not allow editing."""
         if status not in {NoticeStatus.DRAFT.value, NoticeStatus.SCHEDULED.value}:
             raise ConflictException(
                 message_key="notices.errors.not_editable",
@@ -902,6 +914,7 @@ class NoticesService:
             )
 
     def _assert_duplicatable(self, status: str) -> None:
+        """Raise if notice status does not allow duplication."""
         if status == NoticeStatus.LIVE.value:
             raise ConflictException(
                 message_key="notices.errors.duplicate_live_forbidden",
@@ -915,12 +928,14 @@ class NoticesService:
 
     @staticmethod
     def _groups_to_values(groups: list | None) -> list[str]:
+        """Convert recipient group enums to string values."""
         if not groups:
             return []
         return [g.value if hasattr(g, "value") else str(g) for g in groups]
 
     @staticmethod
     def _pin_expires_at(pin_duration: NoticePinDuration) -> datetime | None:
+        """Return pin expiry time for a banner pin duration."""
         now = datetime.now(timezone.utc)
         if pin_duration == NoticePinDuration.HOURS_24:
             return now + timedelta(hours=24)

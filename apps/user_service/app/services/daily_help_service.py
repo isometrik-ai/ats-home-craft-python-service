@@ -1,5 +1,7 @@
 """Daily help registry business logic."""
 
+# pylint: disable=too-many-lines, too-many-public-methods
+
 from __future__ import annotations
 
 import calendar
@@ -125,6 +127,7 @@ class DailyHelpService:
         self._push_dispatcher = push_dispatcher
 
     def _push(self) -> PushNotificationDispatcher:
+        """Return the push dispatcher, creating it on first use."""
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
@@ -198,6 +201,7 @@ class DailyHelpService:
 
     @property
     def organization_id(self) -> str:
+        """Organization id from context."""
         org_id = self.user_context.organization_id
         assert org_id
         return org_id
@@ -1535,7 +1539,7 @@ class DailyHelpService:
             project_id=project_id,
             category_id=body.category_id,
         )
-        display_name, identity = self._profile_identity_from_create_body(body)
+        _, identity = self._profile_identity_from_create_body(body)
         user_id = self.user_context.user_id
 
         updated = await self.repo.update_profile(
@@ -1998,7 +2002,7 @@ class DailyHelpService:
                 message_key="daily_help.errors.unsupported_export_format",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        rows, _total = await self.repo.list_profiles(
+        rows, _ = await self.repo.list_profiles(
             organization_id=self.organization_id,
             project_id=project_id,
             status=query.status.value if query.status else None,
@@ -2068,7 +2072,7 @@ class DailyHelpService:
 
         for category in categories:
             category_id = str(category["id"])
-            rows, _total = await self.repo.list_profiles(
+            rows, _ = await self.repo.list_profiles(
                 organization_id=self.organization_id,
                 project_id=project_id,
                 status=DailyHelpStatus.ACTIVE.value,

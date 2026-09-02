@@ -70,6 +70,7 @@ class VehiclesService:
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
+        """Return the push dispatcher, creating it on first use."""
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
@@ -440,7 +441,7 @@ class VehiclesService:
         *,
         project_id: str,
         unit_id: str,
-        vehicle_id: str,
+        _vehicle_id: str,
         vehicle_type: str,
         parking_slot_id: str,
         additional_entitlement_consuming: int = 0,
@@ -503,8 +504,6 @@ class VehiclesService:
                 unit_id=unit_id,
                 slot_id=parking_slot_id,
             )
-        except ValidationException:
-            raise
         except NotFoundException:
             raise ValidationException(
                 message_key="contact_onboarding.errors.parking_slot_unavailable",
@@ -734,7 +733,7 @@ class VehiclesService:
             await self._ensure_parking_slot_for_vehicle_review(
                 project_id=project_id,
                 unit_id=body.unit_id,
-                vehicle_id="",
+                _vehicle_id="",
                 vehicle_type=vehicle_type,
                 parking_slot_id=parking_slot_id,
                 additional_entitlement_consuming=1,
@@ -1163,7 +1162,7 @@ class VehiclesService:
                 await self._ensure_parking_slot_for_vehicle_review(
                     project_id=project_id,
                     unit_id=unit_id,
-                    vehicle_id=vehicle_id,
+                    _vehicle_id=vehicle_id,
                     vehicle_type=str(vehicle.get("vehicle_type") or ""),
                     parking_slot_id=parking_slot_id,
                 )

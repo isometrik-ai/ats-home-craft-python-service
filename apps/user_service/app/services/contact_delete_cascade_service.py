@@ -200,7 +200,7 @@ class ContactDeleteCascadeService:
         contact_id: str,
     ) -> None:
         """Release vehicles, passes, and unit links scoped to one occupant."""
-        await self._release_vehicles(organization_id=organization_id, contact_id=contact_id)
+        await self._release_vehicles(_organization_id=organization_id, contact_id=contact_id)
         await self._cancel_passes(organization_id=organization_id, contact_id=contact_id)
         released = await self.contact_units_repo.release_open_links_for_contact(
             organization_id=organization_id,
@@ -211,7 +211,7 @@ class ContactDeleteCascadeService:
             contact_unit_ids=[row["id"] for row in released],
         )
 
-    async def _release_vehicles(self, *, organization_id: str, contact_id: str) -> None:
+    async def _release_vehicles(self, *, _organization_id: str, contact_id: str) -> None:
         """Withdraw pending vehicles and soft-remove approved ones with slot release."""
         vehicles_service = VehiclesService(
             db_connection=self.db_connection,

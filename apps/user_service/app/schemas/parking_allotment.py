@@ -169,7 +169,10 @@ class ParkingAllotmentSlotListQuery(ParkingAllotmentListQuery):
     floor_level: str | None = Field(default=None, max_length=50)
     slot_type: ParkingFacilitySubtype | None = Field(
         default=None,
-        description="Filter by parking facility subtype: covered | open | basement | stilt | podium | ev_charging",
+        description=(
+            "Filter by parking facility subtype: covered | open | basement | "
+            "stilt | podium | ev_charging"
+        ),
     )
     status: ParkingSlotDisplayStatus | None = None
 
@@ -191,6 +194,8 @@ class ParkingAllotmentSummaryQuery(BaseModel):
 
 
 class ParkingAllotmentSummaryApiResponse(BaseModel):
+    """API envelope for parking allotment summary."""
+
     status: str
     message: str
     statusCode: int
@@ -199,6 +204,8 @@ class ParkingAllotmentSummaryApiResponse(BaseModel):
 
 
 class ParkingAllotmentSlotListApiResponse(BaseModel):
+    """API envelope for paginated parking slot list."""
+
     status: str
     message: str
     statusCode: int
@@ -210,6 +217,8 @@ class ParkingAllotmentSlotListApiResponse(BaseModel):
 
 
 class ParkingAllotmentUnitListApiResponse(BaseModel):
+    """API envelope for paginated unit allotment list."""
+
     status: str
     message: str
     statusCode: int
@@ -221,6 +230,8 @@ class ParkingAllotmentUnitListApiResponse(BaseModel):
 
 
 class ParkingAllotmentUnitDetailApiResponse(BaseModel):
+    """API envelope for unit allotment detail."""
+
     status: str
     message: str
     statusCode: int
@@ -229,6 +240,8 @@ class ParkingAllotmentUnitDetailApiResponse(BaseModel):
 
 
 class ParkingAllotmentSlotDetailApiResponse(BaseModel):
+    """API envelope for parking slot detail."""
+
     status: str
     message: str
     statusCode: int
@@ -237,6 +250,8 @@ class ParkingAllotmentSlotDetailApiResponse(BaseModel):
 
 
 class ParkingAllotmentSlotHistoryApiResponse(BaseModel):
+    """API envelope for parking slot history."""
+
     status: str
     message: str
     statusCode: int
@@ -245,6 +260,8 @@ class ParkingAllotmentSlotHistoryApiResponse(BaseModel):
 
 
 class ParkingAllotmentSlotMutationApiResponse(BaseModel):
+    """API envelope for parking slot mutation."""
+
     status: str
     message: str
     statusCode: int

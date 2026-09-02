@@ -81,7 +81,7 @@ class CommunityEventsResidentService:
         return "open"
 
     @staticmethod
-    def _cta(row: dict[str, Any], booking_state: str) -> str:
+    def _cta(_row: dict[str, Any], booking_state: str) -> str:
         """Derive CTA button."""
         if booking_state == "booked":
             return "view_tickets"

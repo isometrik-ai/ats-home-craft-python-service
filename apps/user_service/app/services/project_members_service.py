@@ -54,6 +54,7 @@ class ProjectMembersService:
         )
 
     async def _ensure_can_view_members(self, *, project_id: str) -> None:
+        """Ensure caller may view project members."""
         await ensure_staff_project_access_for_context(
             user_context=self.user_context,
             db_connection=self.db_connection,
@@ -65,6 +66,7 @@ class ProjectMembersService:
         )
 
     async def _ensure_can_manage_members(self, *, project_id: str) -> None:
+        """Ensure caller may manage project members."""
         await ensure_staff_project_access_for_context(
             user_context=self.user_context,
             db_connection=self.db_connection,
@@ -73,6 +75,7 @@ class ProjectMembersService:
         )
 
     async def _ensure_assignee_is_org_member(self, *, user_id: str) -> None:
+        """Ensure assignee is an active organization member."""
         org_id = self.user_context.organization_id
         assert org_id
         is_member = await self.org_member_repo.check_user_membership_by_user_id(
@@ -88,6 +91,7 @@ class ProjectMembersService:
 
     @staticmethod
     def _to_response(row: dict[str, Any]) -> ProjectMemberResponse:
+        """Map a project member row to API response."""
         payload = dict(row)
         for key in ("id", "organization_id", "project_id", "user_id", "org_role_id"):
             if payload.get(key) is not None:
@@ -193,7 +197,6 @@ class ProjectMembersService:
         next_status = body.status.value if body.status else str(current.get("status"))
         await self._ensure_not_last_community_admin(
             project_id=project_id,
-            user_id=user_id,
             current=current,
             next_role=next_role,
             next_status=next_status,
@@ -238,7 +241,6 @@ class ProjectMembersService:
 
         await self._ensure_not_last_community_admin(
             project_id=project_id,
-            user_id=user_id,
             current=current,
             next_role=str(current.get("role")),
             next_status=ProjectMemberStatus.SUSPENDED.value,
@@ -259,7 +261,6 @@ class ProjectMembersService:
         self,
         *,
         project_id: str,
-        user_id: str,
         current: dict[str, Any],
         next_role: str,
         next_status: str,

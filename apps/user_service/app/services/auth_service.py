@@ -959,7 +959,7 @@ class AuthService:
         try:
             org_member_repo = OrganizationMemberRepository(db_connection=self.db_connection)
             (
-                _is_member,
+                _,
                 org_member_isometrik_user_id,
             ) = await org_member_repo.get_active_membership_isometrik_user_id(
                 user_id=user_id,

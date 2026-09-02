@@ -15,6 +15,11 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
 
 
+def _document_types(documents: list[TenantRequestDocumentInput]) -> set[str]:
+    """Collect document_type values from uploaded document rows."""
+    return {item.document_type for item in documents}
+
+
 class MoveEventDocumentResponse(BaseModel):
     """Typed document stored on a move event."""
 
@@ -43,20 +48,21 @@ class CreateMoveEventRequest(BaseModel):
     @model_validator(mode="after")
     def validate_documents_for_move_type(self) -> CreateMoveEventRequest:
         """Require typed documents on move-in only."""
+        documents = self.documents
         if self.move_type == MoveEventType.MOVE_IN:
-            if not self.documents:
+            if not documents:
                 raise ValueError(
                     "documents are required for move_in and must include "
                     "id_proof, rental_agreement, and police_verification"
                 )
-            provided = {item.document_type for item in self.documents}
+            provided = _document_types(documents)
             required = set(TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES)
             if provided != required:
                 raise ValueError(
                     "documents must include id_proof, rental_agreement, and police_verification"
                 )
             return self
-        if self.documents:
+        if documents:
             raise ValueError("documents may only be supplied for move_in")
         return self
 
@@ -75,9 +81,10 @@ class UpdateMoveEventRequest(BaseModel):
     @model_validator(mode="after")
     def validate_documents_when_present(self) -> UpdateMoveEventRequest:
         """When documents are patched, require the full move-in document set."""
-        if self.documents is None:
+        documents = self.documents
+        if documents is None:
             return self
-        provided = {item.document_type for item in self.documents}
+        provided = _document_types(documents)
         required = set(TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES)
         if provided != required:
             raise ValueError(

@@ -39,6 +39,7 @@ class NoticesResidentService:
 
     @property
     def organization_id(self) -> str:
+        """Organization id from context."""
         return self.user_context.organization_id
 
     async def list_notices(
@@ -215,6 +216,7 @@ class NoticesResidentService:
         contact_id: str | None,
         contact_user_id: str | None,
     ) -> list[str]:
+        """Return notice IDs visible to the resident contact."""
         notice_ids = await self.repo.list_live_notice_ids_for_project(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -253,6 +255,7 @@ class NoticesResidentService:
         contact_id: str | None,
         contact_user_id: str | None,
     ) -> bool:
+        """Return whether the resident has liked the notice."""
         if contact_id:
             return await self.repo.contact_has_liked(
                 organization_id=self.organization_id,
@@ -274,6 +277,7 @@ class NoticesResidentService:
         contact_id: str | None,
         contact_user_id: str | None,
     ) -> ResidentNoticeListItemResponse:
+        """Map a notice row to a resident list item."""
         notice_id = str(row["id"])
         attachments = await self.repo.list_attachments(
             organization_id=self.organization_id,
@@ -311,6 +315,7 @@ class NoticesResidentService:
         contact_id: str | None,
         contact_user_id: str | None,
     ) -> ResidentNoticeDetailResponse:
+        """Map a notice row to resident detail."""
         notice_id = str(row["id"])
         attachments = await self.repo.list_attachments(
             organization_id=self.organization_id,

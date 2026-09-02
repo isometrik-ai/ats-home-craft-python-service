@@ -642,7 +642,7 @@ class VisitorLogsService:
             "visitor_type": self._visitor_type_from_row(row),
             "daily_help_category_name": row.get("daily_help_category_name"),
             "pass_code": row.get("pass_code"),
-            "is_private": bool(row.get("is_private") or False),
+            "is_private": bool(row.get("is_private")),
             "in_time": format_iso_datetime(in_time),
             "out_time": format_iso_datetime(out_time),
             "time_spent_minutes": self._time_spent_minutes(in_time, out_time),

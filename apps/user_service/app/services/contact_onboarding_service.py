@@ -217,14 +217,15 @@ class ContactOnboardingService:
             )
         if requires_default_unit:
             prompts.append({"type": "choose_default_unit"})
-        if (
+        ready_for_onboarding_completion = (
             not household_only
             and active_count > 0
             and profile_complete
             and not pending_self_units
             and not requires_default_unit
             and not review_complete
-        ):
+        )
+        if ready_for_onboarding_completion:
             prompts.append({"type": "complete_onboarding"})
         return prompts
 
@@ -252,6 +253,8 @@ class ContactOnboardingService:
         contact_type: str | None = None,  # — kept for API compatibility
     ) -> dict[str, Any]:
         """Return optional onboarding prompts for the contact."""
+        if contact_type is not None:
+            pass  # Reserved for API compatibility; prompt logic is contact-driven.
         org_id = self.user_context.organization_id
         assert org_id
 

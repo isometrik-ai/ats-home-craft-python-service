@@ -71,6 +71,7 @@ class MoveEventsService:
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
+        """Return the push dispatcher, creating it on first use."""
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
@@ -234,8 +235,8 @@ class MoveEventsService:
         *,
         organization_id: str,
         contact_unit_id: str,
-        contact_id: str,
-        unit_id: str,
+        _contact_id: str,
+        _unit_id: str,
         move_type: str,
         event_date: date,
     ) -> None:
@@ -603,8 +604,8 @@ class MoveEventsService:
         await self._sync_occupancy_for_move(
             organization_id=organization_id,
             contact_unit_id=contact_unit_id,
-            contact_id=body.contact_id,
-            unit_id=body.unit_id,
+            _contact_id=body.contact_id,
+            _unit_id=body.unit_id,
             move_type=move_type,
             event_date=body.event_date,
         )
@@ -738,8 +739,8 @@ class MoveEventsService:
             await self._sync_occupancy_for_move(
                 organization_id=organization_id,
                 contact_unit_id=existing["contact_unit_id"],
-                contact_id=str(existing["contact_id"]),
-                unit_id=str(existing["unit_id"]),
+                _contact_id=str(existing["contact_id"]),
+                _unit_id=str(existing["unit_id"]),
                 move_type=existing["move_type"],
                 event_date=update_data["event_date"],
             )
@@ -779,8 +780,8 @@ class MoveEventsService:
             await self._sync_occupancy_for_move(
                 organization_id=organization_id,
                 contact_unit_id=contact_unit_id,
-                contact_id=str(existing["contact_id"]),
-                unit_id=str(existing["unit_id"]),
+                _contact_id=str(existing["contact_id"]),
+                _unit_id=str(existing["unit_id"]),
                 move_type=latest["move_type"],
                 event_date=latest["event_date"],
             )

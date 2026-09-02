@@ -21,6 +21,8 @@ logger = get_logger("notification_grpc_client")
 
 @dataclass(frozen=True)
 class _GrpcBinding:
+    """Cached gRPC channel and stub callables for a target."""
+
     channel: grpc.aio.Channel
     send_notification: Callable[..., Awaitable[Any]]
     notification_request: type
@@ -33,6 +35,7 @@ class NotificationGrpcClient:
         self._bindings: dict[str, _GrpcBinding] = {}
 
     async def _get_binding(self) -> _GrpcBinding:
+        """Return cached gRPC binding for the configured notification target."""
         target = shared_settings.notification.grpc_target.strip()
         if not target:
             raise ValueError("NOTIFICATION_GRPC_TARGET is not configured")

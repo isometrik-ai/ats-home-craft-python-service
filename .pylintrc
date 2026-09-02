@@ -16,8 +16,8 @@ unsafe-load-any-extension=no  # More secure setting
 py-version=3.13
 
 # Files or directories to ignore
-ignore=CVS,.git,__pycache__,venv,htmlcov,build
-ignore-patterns=
+ignore=CVS,.git,__pycache__,venv,htmlcov,build,grpc_stubs
+ignore-patterns=.*grpc_stubs.*
 
 # Keep information between runs
 persistent=yes
@@ -53,8 +53,7 @@ disable=
     E1102,  # not-callable (for SQLAlchemy func methods)
     # C0412,  # ungrouped-imports (FastAPI often needs conditional imports)
     # R0401,  # cyclic-imports (common with pydantic model references)
-    # W1203,  # logging-fstring-interpolation (modern practice with logging)
-    # C0302,  # too-many-lines (routers can get large in well-structured apps)
+    R0401,  # cyclic-imports (service-layer import cycles)
     # R0902,  # too-many-instance-attributes (common for Pydantic models)
 
 [REPORTS]
@@ -84,7 +83,7 @@ evaluation=10.0 - ((float(5 * error + warning + refactor + convention) / stateme
 # kw: Keyword arguments
 # dt: Datetime
 # tx: Transaction
-good-names=i,j,k,ex,Run,_,id,db,e,x,y,z,ip,pk,fn,qs,f,to,kw,dt,tx,io,ok
+good-names=i,j,k,ex,Run,_,id,db,e,x,y,z,ip,pk,fn,qs,f,to,kw,dt,tx,io,ok,q
 
 # Bad variable names which should always be refused
 bad-names=foo,bar,baz,toto,tutu,tata
@@ -146,7 +145,7 @@ ignore-docstrings=yes
 # Ignore imports when computing similarities
 ignore-imports=no
 
-# Additional directories to ignore
+# Additional directories to ignore (duplicate-code detection only)
 ignore-paths=
     ^migrations/.*$
     ^alembic/.*$

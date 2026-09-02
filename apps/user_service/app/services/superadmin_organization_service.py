@@ -284,7 +284,7 @@ class SuperadminOrganizationService:
                 db_connection=self._org_repo.db_connection
             )
             (
-                _is_member,
+                _,
                 org_member_isometrik_user_id,
             ) = await org_member_repo.get_active_membership_isometrik_user_id(
                 user_id=user_id,
