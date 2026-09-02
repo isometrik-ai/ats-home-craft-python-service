@@ -40,13 +40,12 @@ repos:
     rev: v2.3.1
     hooks:
       - id: autoflake
-        args:
-          [
-            --remove-all-unused-imports,
-            --remove-unused-variables,
-            --in-place,
-            --recursive,
-          ]
+        args: [
+          --remove-all-unused-imports,
+          --remove-unused-variables,
+          --in-place,
+          --recursive,
+        ]
         exclude: ^(docs/|migrations/)
 
   - repo: https://github.com/pycqa/isort
@@ -79,32 +78,31 @@ repos:
         entry: pylint
         language: python
         types: [python]
-        args:
-          [
-            "--rcfile=.pylintrc",
-            "--output-format=colorized",
-            "--fail-under=9.5",
-            "apps",
-            "libs",
-            "--disable=E0401",
-          ]
-        exclude: ^(docs/|migrations/|alembic/)
-        additional_dependencies:
-          [
-            "fastapi==0.115.12",
-            "sqlalchemy==2.0.40",
-            "pydantic==2.11.3",
-            "pydantic-settings==2.8.1",
-            "uvicorn==0.34.1",
-            "aiokafka>=0.12.0",
-            "aiohttp==3.11.18",
-            "redis",
-            "slowapi",
-            "alembic",
-            "starlette",
-            "anyio",
-            "python-dotenv",
-          ]
+        pass_filenames: false
+        args: [
+          "--rcfile=.pylintrc",
+          "--output-format=colorized",
+          "apps",
+          "libs",
+          "--disable=E0401"
+        ]
+        # Exclude generated gRPC/protobuf stubs (pylint: long lines, generated servicer stubs).
+        exclude: ^(docs/|migrations/|alembic/)|grpc_stubs/
+        additional_dependencies: [
+          "fastapi==0.115.12",
+          "sqlalchemy==2.0.40",
+          "pydantic==2.11.3",
+          "pydantic-settings==2.8.1",
+          "uvicorn==0.34.1",
+          "aiokafka>=0.12.0",
+          "aiohttp==3.11.18",
+          "redis",
+          "slowapi",
+          "alembic",
+          "starlette",
+          "anyio",
+          "python-dotenv"
+        ]
 
   - repo: https://github.com/executablebooks/mdformat
     rev: 0.7.22

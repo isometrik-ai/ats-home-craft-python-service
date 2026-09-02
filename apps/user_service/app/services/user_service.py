@@ -1338,6 +1338,8 @@ class UserService:  # pylint: disable=too-many-public-methods
         Returns:
             tuple[dict[str, Any], dict[str, Any]]: Update data and metadata update
         """
+        # pylint: disable=too-complex
+
         update_data: dict[str, Any] = {}
         metadata_update: dict[str, Any] = {}
 

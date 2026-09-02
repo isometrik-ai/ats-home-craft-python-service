@@ -128,10 +128,12 @@ class ParkingAllotmentService:
 
     @staticmethod
     def _slot_type_label(slot_type: str) -> str:
+        """Return display label for a parking slot type."""
         return _SLOT_TYPE_LABELS.get(slot_type, slot_type.replace("_", " ").title())
 
     @staticmethod
     def _format_date(value: Any) -> str | None:
+        """Format a date value as ISO string."""
         if value is None:
             return None
         if isinstance(value, date):
@@ -140,17 +142,20 @@ class ParkingAllotmentService:
 
     @staticmethod
     def _normalize_event_payload(value: Any) -> dict[str, Any]:
+        """Parse slot event payload JSON into a dict."""
         payload = parse_json_any(value, default={}) or {}
         return payload if isinstance(payload, dict) else {}
 
     @staticmethod
     def _active_allotments_from_row(value: Any) -> list[dict[str, Any]]:
+        """Extract active allotment dicts from a unit row JSON field."""
         raw_items = parse_json_any(value, default=[]) or []
         if not isinstance(raw_items, list):
             return []
         return [item for item in raw_items if isinstance(item, dict)]
 
     async def _ensure_project(self, *, project_id: str) -> None:
+        """Ensure project exists and caller has access."""
         await self.setup_service.ensure_project(project_id=project_id)
 
     async def _resolve_list_scope(
@@ -188,6 +193,7 @@ class ParkingAllotmentService:
         return tower_id or facility_tower_id, facility_id
 
     def _slot_allowed_actions(self, *, display_status: str) -> list[str]:
+        """Return allowed UI actions for a slot display status."""
         if display_status == ParkingSlotDisplayStatus.VISITOR_POOL.value:
             return ["details", "history"]
         if display_status == ParkingSlotDisplayStatus.FREE.value:
@@ -219,6 +225,7 @@ class ParkingAllotmentService:
 
     @staticmethod
     def _resolve_slot_type(row: dict[str, Any]) -> str:
+        """Resolve parking slot type from row metadata."""
         raw = row.get("slot_type") or row.get("facility_subtype")
         if raw is None or not str(raw).strip():
             return ParkingFacilitySubtype.OPEN.value
@@ -236,6 +243,7 @@ class ParkingAllotmentService:
         included_four_wheeler_slots_assigned: int,
         slots_assigned: int,
     ) -> list[str]:
+        """Return allowed UI actions for a unit allotment row."""
         actions: list[str] = []
         total_entitlement = two_wheeler_parking_entitlement + four_wheeler_parking_entitlement
         if total_entitlement <= 0:
@@ -261,6 +269,8 @@ class ParkingAllotmentService:
         allotment_basis: ParkingAllotmentBasis,
         slot_row: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Validate unit eligibility and entitlement for allotment."""
+        # pylint: disable=too-complex
         unit = await self.repo.get_unit_allotment_context(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -330,6 +340,7 @@ class ParkingAllotmentService:
         project_id: str,
         slot_id: str,
     ) -> dict[str, Any]:
+        """Load and validate a free resident slot for allotment."""
         row = await self.repo.get_slot_row(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -356,6 +367,7 @@ class ParkingAllotmentService:
     def _serialize_slot_list_item(
         self, row: dict[str, Any]
     ) -> ParkingAllotmentSlotListItemResponse:
+        """Map a slot row to list item response."""
         slot_type = self._resolve_slot_type(row)
         display_status = str(row.get("display_status") or ParkingSlotDisplayStatus.FREE.value)
         unit_id = row.get("unit_id")
@@ -385,6 +397,7 @@ class ParkingAllotmentService:
         )
 
     def _serialize_slot_detail(self, row: dict[str, Any]) -> ParkingAllotmentSlotDetailResponse:
+        """Map a slot row to detail response."""
         base = self._serialize_slot_list_item(row)
         basis = row.get("allotment_basis")
         return ParkingAllotmentSlotDetailResponse(
@@ -402,6 +415,7 @@ class ParkingAllotmentService:
         *,
         slot_rows_by_id: dict[str, dict[str, Any]] | None = None,
     ) -> ParkingAllotmentUnitListItemResponse:
+        """Map a unit row to allotment list item response."""
         two_entitlement = int(row.get("two_wheeler_parking_entitlement") or 0)
         four_entitlement = int(row.get("four_wheeler_parking_entitlement") or 0)
         assigned = int(row.get("slots_assigned") or 0)
@@ -468,6 +482,7 @@ class ParkingAllotmentService:
         tower_id: str | None = None,
         facility_id: str | None = None,
     ) -> ParkingAllotmentSummaryResponse:
+        """Return parking allotment dashboard summary."""
         await self._ensure_project(project_id=project_id)
         scoped_tower_id, scoped_facility_id = await self._resolve_list_scope(
             project_id=project_id,
@@ -495,6 +510,7 @@ class ParkingAllotmentService:
         page: int,
         page_size: int,
     ) -> tuple[list[ParkingAllotmentSlotListItemResponse], int]:
+        """Return paginated parking slots for allotment admin."""
         await self._ensure_project(project_id=project_id)
         scoped_tower_id, scoped_facility_id = await self._resolve_list_scope(
             project_id=project_id,
@@ -521,6 +537,7 @@ class ParkingAllotmentService:
         project_id: str,
         slot_id: str,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Return detail for a single parking slot."""
         await self._ensure_project(project_id=project_id)
         row = await self.repo.get_slot_row(
             organization_id=self.organization_id,
@@ -540,6 +557,7 @@ class ParkingAllotmentService:
         project_id: str,
         slot_id: str,
     ) -> list[ParkingAllotmentSlotEventResponse]:
+        """Return allotment history events for a slot."""
         await self._ensure_project(project_id=project_id)
         if not await self.repo.get_slot_row(
             organization_id=self.organization_id,
@@ -579,6 +597,7 @@ class ParkingAllotmentService:
         page: int,
         page_size: int,
     ) -> tuple[list[ParkingAllotmentUnitListItemResponse], int]:
+        """Return paginated units with parking entitlement status."""
         await self._ensure_project(project_id=project_id)
         rows, total = await self.repo.list_units(
             organization_id=self.organization_id,
@@ -604,6 +623,7 @@ class ParkingAllotmentService:
         project_id: str,
         rows: list[dict[str, Any]],
     ) -> dict[str, dict[str, Any]]:
+        """Load slot rows referenced by unit active allotments."""
         slot_ids: set[str] = set()
         for row in rows:
             for item in self._active_allotments_from_row(row.get("active_allotments")):
@@ -626,6 +646,7 @@ class ParkingAllotmentService:
         project_id: str,
         unit_id: str,
     ) -> ParkingAllotmentUnitListItemResponse:
+        """Return allotment view for a single unit."""
         await self._ensure_project(project_id=project_id)
         row = await self.repo.get_unit_for_allotment_view(
             organization_id=self.organization_id,
@@ -654,6 +675,7 @@ class ParkingAllotmentService:
         event_type: ParkingSlotEventType = ParkingSlotEventType.ALLOTTED,
         payload: dict[str, Any] | None = None,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Create allotment records and return updated slot detail."""
         slot_row = await self._validate_slot_for_allotment(
             project_id=project_id,
             slot_id=slot_id,
@@ -727,6 +749,7 @@ class ParkingAllotmentService:
         slot_id: str,
         body: AllotParkingSlotRequest,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Allot a free slot to a unit."""
         await self._ensure_project(project_id=project_id)
         return await self._create_allotment(
             project_id=project_id,
@@ -743,6 +766,7 @@ class ParkingAllotmentService:
         unit_id: str,
         body: UnitAllotParkingSlotRequest,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Allot a slot to a unit from the unit-centric endpoint."""
         await self._ensure_project(project_id=project_id)
         return await self._create_allotment(
             project_id=project_id,
@@ -759,6 +783,7 @@ class ParkingAllotmentService:
         slot_id: str,
         body: ReassignParkingSlotRequest,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Reassign an allotted slot to a different unit."""
         await self._ensure_project(project_id=project_id)
         row = await self.repo.get_slot_row(
             organization_id=self.organization_id,
@@ -870,6 +895,7 @@ class ParkingAllotmentService:
         slot_id: str,
         body: ReleaseParkingSlotRequest,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Release an active slot allotment."""
         await self._ensure_project(project_id=project_id)
         allotment = await self.repo.get_active_allotment_by_slot(
             organization_id=self.organization_id,
@@ -923,6 +949,7 @@ class ParkingAllotmentService:
         slot_id: str,
         body: BlockParkingSlotRequest,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Block a free slot from allotment."""
         await self._ensure_project(project_id=project_id)
         row = await self.repo.get_slot_row(
             organization_id=self.organization_id,
@@ -966,6 +993,7 @@ class ParkingAllotmentService:
         project_id: str,
         slot_id: str,
     ) -> ParkingAllotmentSlotDetailResponse:
+        """Unblock a blocked slot."""
         await self._ensure_project(project_id=project_id)
         row = await self.repo.get_slot_row(
             organization_id=self.organization_id,

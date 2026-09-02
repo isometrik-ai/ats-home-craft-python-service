@@ -150,7 +150,7 @@ async def verify_community_event_booking(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Security gate QR verification for a project."""
-    user_context, _contact = await extract_onboarding_contact_context(
+    user_context, _ = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
     booking_service = CommunityEventBookingService(

@@ -39,6 +39,7 @@ class DailyHelpNotificationService:
         self._push_dispatcher = push_dispatcher
 
     def _push(self) -> PushNotificationDispatcher:
+        """Return the push dispatcher, creating it on first use."""
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
@@ -56,6 +57,7 @@ class DailyHelpNotificationService:
         project_id: str | None = None,
     ) -> int:
         """Push to Owner/Tenant on each active household link; dedupe by user_id."""
+        # pylint: disable=too-complex
         links = await self.daily_help_repo.list_active_links_for_profile(
             organization_id=organization_id,
             profile_id=profile_id,

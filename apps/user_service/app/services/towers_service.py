@@ -1,5 +1,6 @@
 """Towers service: towers, wings, gates, lifts, floors, and step completion."""
 
+# pylint: disable=too-many-public-methods
 from __future__ import annotations
 
 from typing import Any
@@ -290,6 +291,7 @@ class TowersService:
         self, *, project_id: str, tower_id: str, body: UpdateTowerRequest
     ) -> dict[str, Any]:
         """Patch a tower and optionally upsert nested wings, gates, lifts, and floors."""
+        # pylint: disable=too-complex
         await self._ensure_tower(project_id=project_id, tower_id=tower_id)
         nested_fields = body.model_fields_set & _NESTED_TOWER_KEYS
         patch = body.model_dump(exclude_unset=True, exclude_none=True, exclude=_NESTED_TOWER_KEYS)

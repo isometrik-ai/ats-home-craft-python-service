@@ -122,6 +122,7 @@ class TenantRequestsService:
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
+        """Return the push dispatcher, creating it on first use."""
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
@@ -591,7 +592,7 @@ class TenantRequestsService:
         owner_contact_id: str,
         unit_id: str,
     ) -> dict[str, Any]:
-        """Ensure the contact has an active primary-occupant link to the unit and return metadata."""
+        """Ensure active primary-occupant link to the unit and return metadata."""
         org_id = self.user_context.organization_id
         assert org_id
         is_primary_occupant = await self.contact_units_repo.owner_has_active_unit(

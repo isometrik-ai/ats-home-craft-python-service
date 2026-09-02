@@ -181,6 +181,7 @@ async def list_teams_endpoint(
         page: Page number for pagination (1-indexed, minimum 1)
         page_size: Number of teams per page (minimum 1, maximum 100)
         search: Optional search term for team name filtering
+        project_id: Optional project UUID to filter project-scoped ops teams
 
     Returns:
         TeamsListResponse: List of teams and total filtered count

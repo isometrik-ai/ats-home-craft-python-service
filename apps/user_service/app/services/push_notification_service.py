@@ -120,6 +120,7 @@ class PushNotificationService:
         check_push_preference: bool = True,
     ) -> PushNotificationSendResult:
         """Resolve copy, load tokens, and send push notification payload."""
+        # pylint: disable=too-complex
         org_id = (organization_id or "").strip()
         user_id = (recipient_user_id or "").strip()
         if not org_id or not user_id:

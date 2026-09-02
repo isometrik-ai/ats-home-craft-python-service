@@ -447,6 +447,7 @@ async def search_contacts(
         status: Optional status filter applied to the search.
         page: 1-based page number.
         page_size: Hits per page (max 100).
+        project_id: Optional project filter for contacts linked via contact_units.
 
     Returns:
         Paginated list response envelope containing raw Typesense hits and total count.
@@ -558,6 +559,7 @@ async def export_contacts(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Export filtered contacts as a CSV attachment."""
+    _ = request  # Required by slowapi rate limiter; response is a raw CSV attachment.
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -670,6 +672,7 @@ async def update_contact(
         contact_id: Contact identifier.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims extracted from JWT.
+        sb_client: Supabase client for storage side effects on document fields.
         body: Partial update payload. Only provided fields are updated.
 
     Returns:

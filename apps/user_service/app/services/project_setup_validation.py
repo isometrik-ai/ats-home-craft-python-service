@@ -84,6 +84,7 @@ def validate_facility_payload(
     tower_has_wings: bool | None = None,
 ) -> None:
     """Validate conditional facility fields based on type and location."""
+    # pylint: disable=too-complex
     facility_type = normalize_facility_type(data.get("facility_type"))
     location_type = data.get("location_type")
     if isinstance(location_type, FacilityLocationType):

@@ -855,7 +855,8 @@ async def list_towers(
     status_code=http_status.HTTP_200_OK,
     summary="Get tower detail",
     description=(
-        "Returns a tower with nested `wings`, `gates`, `lifts`, and `floors` for the builder edit page."
+        "Returns a tower with nested `wings`, `gates`, `lifts`, and `floors` "
+        "for the builder edit page."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -2551,7 +2552,8 @@ async def bulk_create_units(
     summary="List units",
     description=(
         "Returns paginated non-parking units for the unit registry table. "
-        "Each item includes `two_wheeler_parking_entitlement` and `four_wheeler_parking_entitlement` from the unit config. "
+        "Each item includes `two_wheeler_parking_entitlement` and "
+        "`four_wheeler_parking_entitlement` from the unit config. "
         "Supports search by unit code/label/owner name and filters for property type, "
         "tower, config, and unit status."
     ),

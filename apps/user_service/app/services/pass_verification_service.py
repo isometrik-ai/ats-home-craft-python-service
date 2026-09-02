@@ -68,6 +68,7 @@ class PassVerificationService:
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
+        """Return the push dispatcher, creating it on first use."""
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
@@ -80,6 +81,7 @@ class PassVerificationService:
         idempotency_suffix: str,
     ) -> None:
         """Notify pass host plus Owner/Tenant on the unit when entry is not private."""
+        # pylint: disable=too-complex
         if bool(pass_row.get("is_private")):
             return
         org_id = self.user_context.organization_id

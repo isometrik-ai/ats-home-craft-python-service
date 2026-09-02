@@ -61,6 +61,7 @@ def _ok_response(
     *,
     status_code: int = http_status.HTTP_200_OK,
 ) -> dict[int | str, dict]:
+    """Build OpenAPI responses for a successful JSON envelope."""
     return {
         **COMMON_ERROR_RESPONSES,
         status_code: {"model": model, "description": description},

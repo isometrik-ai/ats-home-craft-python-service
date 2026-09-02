@@ -1855,7 +1855,7 @@ class ContactsService:
         This consolidates field updates + ADR section 3 association changes into one call
         so the API can expose a single PATCH endpoint.
         """
-        # pylint: disable=too-complex
+        # pylint: disable=too-complex, too-many-branches
         org_id = self.user_context.organization_id
 
         current = await self.contacts_repo.get_contact_for_update(
