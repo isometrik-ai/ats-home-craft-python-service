@@ -925,7 +925,7 @@ async def test_process_event_in_file_dupes(monkeypatch) -> None:
 
     monkeypatch.setattr(svc, "_persist_contacts_for_rows", _noop_persist)
     monkeypatch.setattr(
-        svc, "_provision_identities_sequential", AsyncMock(return_value={1: ("u", "i", None)})
+        svc, "_provision_identities_sequential", AsyncMock(return_value={1: ("u", "i", None, None)})
     )
 
     await svc.process_job_event(event=_import_event())

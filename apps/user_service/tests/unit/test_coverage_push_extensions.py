@@ -426,7 +426,7 @@ async def test_provision_auth_for_existing_contact_updates_contact(monkeypatch):
     monkeypatch.setattr(
         service,
         "_provision_contact_auth_identity",
-        AsyncMock(return_value=("auth-1", "iso-1", "pass")),
+        AsyncMock(return_value=("auth-1", "iso-1", "pass", None)),
     )
 
     updated = await service.provision_auth_for_existing_contact(
@@ -487,7 +487,7 @@ async def test_companies_provision_contact_identity_with_email(monkeypatch):
     """_provision_contact_identity delegates identity provisioning to ContactsService."""
     svc = _companies_service()
     contacts_service = MagicMock()
-    contacts_service._provision_identity = AsyncMock(return_value=("u1", "iso-1", "pass"))
+    contacts_service._provision_identity = AsyncMock(return_value=("u1", "iso-1", "pass", None))
     monkeypatch.setattr(svc, "_contacts_service", lambda: contacts_service)
 
     email, user_id, iso_id, password = await svc._provision_contact_identity(
@@ -575,7 +575,9 @@ async def test_create_contact_omits_contact_type_from_payload(monkeypatch):
         )
 
     monkeypatch.setattr(svc, "_apply_inferred_company_assoc_on_create", _echo_inference)
-    monkeypatch.setattr(svc, "_provision_identity", AsyncMock(return_value=(None, None, None)))
+    monkeypatch.setattr(
+        svc, "_provision_identity", AsyncMock(return_value=(None, None, None, None))
+    )
     captured: dict[str, Any] = {}
 
     async def _fake_create(**kwargs):
@@ -627,7 +629,7 @@ async def test_provision_identity_reuses_existing_auth_user(monkeypatch):
         AsyncMock(return_value="iso-1"),
     )
 
-    user_id, iso_id, password = await service._provision_identity(
+    user_id, iso_id, password, reused_auth_user = await service._provision_identity(
         contact_id=CONTACT_ID,
         first_name="Jane",
         last_name="Doe",
@@ -639,6 +641,7 @@ async def test_provision_identity_reuses_existing_auth_user(monkeypatch):
     assert user_id == "auth-existing"
     assert iso_id == "iso-1"
     assert password is None
+    assert reused_auth_user == {"id": "auth-existing"}
 
 
 @pytest.mark.asyncio
@@ -739,7 +742,7 @@ async def test_provision_identity_creates_new_auth_user(monkeypatch):
         AsyncMock(return_value="iso-new"),
     )
 
-    user_id, iso_id, password = await service._provision_identity(
+    user_id, iso_id, password, _ = await service._provision_identity(
         contact_id=CONTACT_ID,
         first_name="Jane",
         last_name="Doe",

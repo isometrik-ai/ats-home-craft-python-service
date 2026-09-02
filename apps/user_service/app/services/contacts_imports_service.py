@@ -734,10 +734,10 @@ class ContactsImportService:
         contacts_service: ContactsService,
         claimed: list[dict[str, Any]],
         totals: _ContactsImportTotals,
-    ) -> dict[int, tuple[str, str, str | None]]:
+    ) -> dict[int, tuple[str, str, str | None, dict[str, Any] | None]]:
         """Provision auth identities for claimed rows (sequential on a single DB connection)."""
         identity_errors: list[tuple[int, str, str, dict[str, Any] | None]] = []
-        identity_results: dict[int, tuple[str, str, str | None]] = {}
+        identity_results: dict[int, tuple[str, str, str | None, dict[str, Any] | None]] = {}
 
         for item in claimed:
             if not item.get("contact_model"):
@@ -749,18 +749,35 @@ class ContactsImportService:
                 if not contact_id:
                     contact_id = str(uuid.uuid4())
                     item["contact_id"] = contact_id
+                email_norm = ContactsService._resolve_create_email(model) or None
+                primary_phone = ContactsService._select_primary_phone(model.phones)
+                full_phone = (
+                    ContactsService._normalize_full_phone_from_parts(
+                        phone_isd_code=primary_phone.phone_isd_code,
+                        phone_number=primary_phone.phone_number,
+                    )
+                    if primary_phone is not None
+                    else None
+                )
                 (
                     user_id,
                     isometrik_user_id,
                     created_password,
+                    reused_auth_user,
                 ) = await contacts_service._provision_contact_auth_identity(
                     contact_id=contact_id,
-                    email=str(model.email or "").strip().lower(),
+                    email=email_norm,
+                    phone=full_phone,
                     first_name=model.first_name,
                     last_name=model.last_name,
                     prefix=model.prefix,
                 )
-                identity_results[row_number] = (user_id, isometrik_user_id, created_password)
+                identity_results[row_number] = (
+                    user_id,
+                    isometrik_user_id,
+                    created_password,
+                    reused_auth_user,
+                )
             except Exception as exc:
                 identity_errors.append(
                     self._build_mark_error_tuple(
@@ -840,7 +857,7 @@ class ContactsImportService:
     def _attach_identity_and_company_to_rows(
         *,
         provisioned_claimed: list[dict[str, Any]],
-        identity_results: dict[int, tuple[str, str, str | None]],
+        identity_results: dict[int, tuple[str, str, str | None, dict[str, Any] | None]],
         company_cache: dict[str, str],
     ) -> tuple[list[dict[str, Any]], list[int]]:
         """Attach identity+company_id fields and return (valid_rows, valid_row_numbers)."""
@@ -973,6 +990,7 @@ class ContactsImportService:
         event: ContactsImportEventPayload,
         valid_rows: list[dict[str, Any]],
         custom_fields_by_row: dict[int, list[dict[str, Any]]],
+        contacts_service: ContactsService,
     ) -> tuple[
         list[dict[str, Any]],
         dict[int, str],
@@ -990,7 +1008,7 @@ class ContactsImportService:
         for item in valid_rows:
             row_number = int(item["row_number"])
             model = item["contact_model"]
-            user_id, isometrik_user_id, created_password = item["identity"]
+            user_id, isometrik_user_id, created_password, reused_auth_user = item["identity"]
             contact_id = str(item.get("contact_id") or "").strip() or str(uuid.uuid4())
             item["contact_id"] = contact_id
 
@@ -1004,6 +1022,23 @@ class ContactsImportService:
                 [w.model_dump(mode="json", exclude_none=True) for w in model.websites]
             )
 
+            email_norm = ContactsService._resolve_create_email(model)
+            emails_payload = [
+                email.model_dump(mode="json", exclude_none=True) for email in (model.emails or [])
+            ]
+            if not emails_payload and email_norm:
+                emails_payload = [{"email": email_norm, "is_primary": True}]
+
+            if reused_auth_user:
+                email_norm, emails_payload, phones_payload = (
+                    contacts_service._merge_reused_auth_user_contact_payloads(
+                        reused_auth_user=reused_auth_user,
+                        email_norm=email_norm,
+                        emails_payload=emails_payload,
+                        phones_payload=phones_payload,
+                    )
+                )
+
             additional_data_payload = dict(model.additional_data or {})
             lead_payload = getattr(model, "lead", None)
             if lead_payload is not None and getattr(lead_payload, "intake_stage", None) is not None:
@@ -1015,6 +1050,7 @@ class ContactsImportService:
 
             jsonb_inputs: dict[str, Any] = {
                 "phones": phones_payload,
+                "emails": emails_payload,
                 "custom_fields": custom_fields_by_row.get(row_number, []),
                 "additional_data": additional_data_payload,
                 "social_pages": social_pages_payload,
@@ -1045,6 +1081,7 @@ class ContactsImportService:
                     model.external_contact_id
                 ),
                 "phones": jsonb_params["phones"],
+                "emails": jsonb_params["emails"],
                 "tags": model.tags,
                 "custom_fields": jsonb_params["custom_fields"],
                 "additional_data": jsonb_params["additional_data"],
@@ -1054,7 +1091,7 @@ class ContactsImportService:
             user_id_by_row[row_number] = user_id
             password_by_row[row_number] = created_password
             portal_by_row[row_number] = bool(model.portal_access)
-            email_by_row[row_number] = str(model.email or "").strip().lower()
+            email_by_row[row_number] = email_norm
 
         return rows_to_insert, user_id_by_row, password_by_row, portal_by_row, email_by_row
 
@@ -1186,6 +1223,7 @@ class ContactsImportService:
             event=event,
             valid_rows=valid_rows,
             custom_fields_by_row=custom_fields_by_row,
+            contacts_service=contacts_service,
         )
 
         await contacts_repo.create_contacts(rows_to_insert)

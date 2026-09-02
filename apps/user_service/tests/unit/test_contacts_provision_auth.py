@@ -124,7 +124,7 @@ async def test_provision_passes_existing_isometrik_id(
     mock_provision: AsyncMock,
 ) -> None:
     """Forward stored isometrik_user_id into auth identity provisioning."""
-    mock_provision.return_value = ("auth-user-2", "iso-2", None)
+    mock_provision.return_value = ("auth-user-2", "iso-2", None, None)
     repo = _FakeContactsRepo(
         {
             "id": CONTACT_ID,

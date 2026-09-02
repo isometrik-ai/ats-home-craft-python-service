@@ -1036,6 +1036,7 @@ class CompaniesService:
             user_id,
             isometrik_user_id,
             created_password,
+            _,
         ) = await contacts_service._provision_identity(
             contact_id=contact_id,
             email=email_norm,
