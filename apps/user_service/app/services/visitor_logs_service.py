@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import datetime, timezone
 from typing import Any
 
@@ -20,6 +22,7 @@ from apps.user_service.app.db.repositories.visitor_logs_repository import (
     VisitorLogsRepository,
 )
 from apps.user_service.app.schemas.enums import (
+    VISITOR_LOGS_EXPORT_MAX_ROWS,
     ContactType,
     PassEntryMethod,
     PassEventType,
@@ -30,13 +33,17 @@ from apps.user_service.app.schemas.enums import (
     WalkInEventType,
     WalkInStatus,
 )
+from apps.user_service.app.schemas.visitor_logs import (
+    VisitorLogExportQuery,
+    VisitorLogMonthlyReportQuery,
+)
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.pass_event_actor_labels import (
     enrich_pass_event_actor_labels,
 )
-from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -688,6 +695,190 @@ class VisitorLogsService:
             page_size=page_size,
         )
         return [self._normalize_list_item(row) for row in rows], total
+
+    @staticmethod
+    def _format_export_phone(*, isd_code: str | None, phone_number: str | None) -> str:
+        """Build a single phone string for CSV export."""
+        number = str(phone_number or "").strip()
+        isd = str(isd_code or "").strip()
+        if number and isd:
+            return f"{isd} {number}"
+        return number or isd
+
+    @staticmethod
+    def _month_to_range(month: str) -> tuple[datetime, datetime]:
+        """Convert YYYY-MM to UTC [start, end) bounds."""
+        year = int(month[:4])
+        mon = int(month[5:7])
+        start = datetime(year, mon, 1, tzinfo=timezone.utc)
+        if mon == 12:
+            end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        else:
+            end = datetime(year, mon + 1, 1, tzinfo=timezone.utc)
+        return start, end
+
+    @classmethod
+    def _current_month(cls) -> str:
+        """Return the current UTC month as YYYY-MM."""
+        now = datetime.now(timezone.utc)
+        return f"{now.year:04d}-{now.month:02d}"
+
+    @classmethod
+    def _resolve_monthly_range(cls, *, month: str | None) -> tuple[datetime, datetime]:
+        """Resolve monthly report bounds from an optional month string."""
+        resolved_month = month or cls._current_month()
+        return cls._month_to_range(resolved_month)
+
+    async def _list_logs_for_export(
+        self,
+        *,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+        search: str | None = None,
+        bucket: str | None = None,
+        visitor_type: str | None = None,
+        pass_type: str | None = None,
+        entry_method: str | None = None,
+        access_status: str | None = None,
+        tower_id: str | None = None,
+        guard_user_id: str | None = None,
+        project_id: str | None = None,
+        unit_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return all visitor log rows matching export filters."""
+        items, _ = await self.list_logs(
+            start_at=start_at,
+            end_at=end_at,
+            search=search,
+            bucket=bucket,
+            visitor_type=visitor_type,
+            pass_type=pass_type,
+            entry_method=entry_method,
+            access_status=access_status,
+            tower_id=tower_id,
+            guard_user_id=guard_user_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            page=1,
+            page_size=VISITOR_LOGS_EXPORT_MAX_ROWS,
+        )
+        return items
+
+    async def export_entry_exit_csv(self, *, query: VisitorLogExportQuery) -> str:
+        """Export filtered visitor log rows as CSV text."""
+        if query.format != "csv":
+            raise ValidationException(
+                message_key="visitor_logs.errors.unsupported_export_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        items = await self._list_logs_for_export(
+            start_at=query.start_at,
+            end_at=query.end_at,
+            search=query.search,
+            bucket=query.bucket.value if query.bucket else None,
+            visitor_type=query.visitor_type.value if query.visitor_type else None,
+            pass_type=query.pass_type.value if query.pass_type else None,
+            entry_method=query.entry_method.value if query.entry_method else None,
+            access_status=query.access_status.value if query.access_status else None,
+            tower_id=query.tower_id,
+            guard_user_id=query.guard_user_id,
+            project_id=query.project_id,
+            unit_id=query.unit_id,
+        )
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "source",
+                "visitor_name",
+                "visitor_phone",
+                "visitor_type",
+                "pass_type",
+                "flat",
+                "tower",
+                "host_resident",
+                "host_resident_role",
+                "created_by",
+                "scheduled_from",
+                "scheduled_until",
+                "entry_method",
+                "guard",
+                "access_status",
+                "visit_status",
+                "pass_code",
+                "in_time",
+                "out_time",
+                "time_spent_minutes",
+            ]
+        )
+        for row in items:
+            resident = row.get("resident") or {}
+            writer.writerow(
+                [
+                    row.get("source") or "",
+                    row.get("guest_name") or "",
+                    self._format_export_phone(
+                        isd_code=row.get("visitor_phone_isd_code"),
+                        phone_number=row.get("visitor_phone_number"),
+                    ),
+                    row.get("visitor_type") or "",
+                    row.get("pass_type") or "",
+                    row.get("unit_label") or "",
+                    row.get("tower_name") or "",
+                    resident.get("person_name") or "",
+                    resident.get("role") or "",
+                    row.get("created_by") or "",
+                    row.get("scheduled_from") or "",
+                    row.get("scheduled_until") or "",
+                    row.get("entry_method") or "",
+                    row.get("guard_name") or "",
+                    row.get("access_status") or "",
+                    row.get("visit_status") or "",
+                    row.get("pass_code") or "",
+                    row.get("in_time") or "",
+                    row.get("out_time") or "",
+                    row.get("time_spent_minutes")
+                    if row.get("time_spent_minutes") is not None
+                    else "",
+                ]
+            )
+        return buffer.getvalue()
+
+    async def export_monthly_report_csv(self, *, query: VisitorLogMonthlyReportQuery) -> str:
+        """Export monthly overview summary as CSV text."""
+        if query.format != "csv":
+            raise ValidationException(
+                message_key="visitor_logs.errors.unsupported_export_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        start_at, end_at = self._resolve_monthly_range(month=query.month)
+        overview = await self.get_overview(
+            start_at=start_at,
+            end_at=end_at,
+            project_id=query.project_id,
+            unit_id=query.unit_id,
+        )
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["metric", "value"])
+        writer.writerow(["month", query.month or self._current_month()])
+        for key in (
+            "start_at",
+            "end_at",
+            "total_entries",
+            "inside_now",
+            "awaiting_approval",
+            "walk_ins",
+            "exited",
+            "denied_expired",
+        ):
+            value = overview.get(key)
+            writer.writerow([key, value if value is not None else ""])
+        return buffer.getvalue()
 
     async def get_overview(
         self,
