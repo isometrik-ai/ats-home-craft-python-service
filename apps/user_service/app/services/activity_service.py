@@ -204,12 +204,10 @@ class ActivityService:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Get flattened activity items for a contact id.
+        """Get activity items for a contact id.
 
-        Mirrors `get_lead_activity` behavior:
-        - `limit` / `offset` paginate audit log rows in SQL (newest first)
-        - returned `items` are flattened lines, often one per changed field
-        - `total` is the number of audit log rows for this contact
+        `limit` / `offset` paginate audit log rows in SQL (newest first).
+        Each audit row maps to one timeline item.
         """
         rows, total = await self.audit_log_repository.get_activity_logs_for_record_with_actor_names(
             organization_id=self.user_context.organization_id,
@@ -461,9 +459,7 @@ class ActivityService:
         record_id: str,
         custom_field_name_map: dict[str, str] | None = None,
     ) -> list[ActivityItem]:
-        """Flatten one contact audit record into multiple `ActivityItem`s.
-        Emits one item per changed field where applicable.
-        """
+        """Map one contact audit record to one timeline item."""
         first = safe_str(audit_row.actor_first_name).strip()
         last = safe_str(audit_row.actor_last_name).strip()
         name = (f"{first} {last}").strip() or (audit_row.user_email or "Unknown user")
@@ -501,8 +497,8 @@ class ActivityService:
                 )
             ]
 
-        items: list[ActivityItem] = []
-        for field_path in changed_fields:
+        if len(changed_fields) == 1:
+            field_path = changed_fields[0]
             old_val = extract_audit_data_value(old_values_blob, field_path)
             new_val = extract_audit_data_value(new_values_blob, field_path)
 
@@ -520,7 +516,7 @@ class ActivityService:
                 field_path=field_path,
                 audit_row=audit_row,
             )
-            items.append(
+            return [
                 ActivityItem(
                     id=f"{audit_row.id}:{field_path}",
                     audit_log_id=audit_row.id,
@@ -535,8 +531,19 @@ class ActivityService:
                     old_display_value=old_display,
                     new_display_value=new_display,
                 )
+            ]
+
+        return [
+            ActivityItem(
+                id=f"{audit_row.id}:summary",
+                audit_log_id=audit_row.id,
+                timestamp=audit_row.timestamp,
+                table_name=audit_row.table_name,
+                record_id=record_id,
+                action_type=audit_row.action_type,
+                actor=actor,
             )
-        return items
+        ]
 
     def _flatten_company_audit_row(
         self,
