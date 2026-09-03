@@ -94,6 +94,25 @@ LEFT JOIN auth.users creator_au
   ON creator_au.id = ct.created_by
 """
 
+_CONTACT_PRIMARY_EMAIL_SQL = """
+(
+    SELECT NULLIF(trim(p.email->>'email'), '')
+    FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) WITH ORDINALITY AS p(email, ord)
+    ORDER BY
+        CASE WHEN COALESCE((p.email->>'is_primary')::boolean, false) THEN 0 ELSE 1 END,
+        p.ord
+    LIMIT 1
+)
+"""
+
+_CONTACT_EMAIL_EXISTS_SQL = """
+EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) AS e(email)
+    WHERE LOWER(COALESCE(e.email->>'email', '')) = {email_param}
+)
+"""
+
 CONTACT_DETAIL_JSONB_LIST_FIELDS: tuple[str, ...] = (
     "phones",
     "emails",
@@ -136,14 +155,12 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if not email_norm:
             return None
         fetched_row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT ct.id::text AS id
             FROM contacts ct
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
             WHERE ct.organization_id = $1::uuid
               AND ct.status != $2
-              AND LOWER(COALESCE(au.email::text, '')) = $3
+              AND {_CONTACT_EMAIL_EXISTS_SQL.format(email_param="$3")}
             LIMIT 1
             """,
             organization_id,
@@ -169,14 +186,13 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         rows = await self.db_connection.fetch(
             """
             SELECT
-              LOWER(COALESCE(au.email::text, '')) AS email_norm,
+              LOWER(COALESCE(e.email->>'email', '')) AS email_norm,
               ct.id::text AS id
             FROM contacts ct
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) AS e(email)
             WHERE ct.organization_id = $1::uuid
               AND ct.status != $2::text
-              AND LOWER(COALESCE(au.email::text, '')) = ANY($3::text[])
+              AND LOWER(COALESCE(e.email->>'email', '')) = ANY($3::text[])
             """,
             organization_id,
             ClientStatus.DELETED.value,
@@ -680,15 +696,13 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             f"""
             SELECT
               ct.*,
-              NULLIF(au.email::text, '') AS email,
+              {_CONTACT_PRIMARY_EMAIL_SQL} AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
               COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
               COALESCE(roles.roles, '[]'::jsonb) AS roles,
               {_CONTACT_CREATED_BY_NAME_SQL}
             FROM contacts ct
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
             {_CONTACT_CREATED_BY_JOINS_SQL}
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
@@ -948,15 +962,13 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             f"""
             SELECT
               ct.*,
-              NULLIF(au.email::text, '') AS email,
+              {_CONTACT_PRIMARY_EMAIL_SQL} AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
               COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
               COALESCE(roles.roles, '[]'::jsonb) AS roles,
               {_CONTACT_CREATED_BY_NAME_SQL}
             FROM contacts ct
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
             {_CONTACT_CREATED_BY_JOINS_SQL}
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
@@ -1064,15 +1076,13 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             f"""
             SELECT
               ct.*,
-              NULLIF(au.email::text, '') AS email,
+              {_CONTACT_PRIMARY_EMAIL_SQL} AS email,
               COALESCE(companies.companies, '[]'::jsonb) AS companies,
               COALESCE(leads.leads, '[]'::jsonb) AS leads,
               COALESCE(addresses.addresses, '[]'::jsonb) AS addresses,
               COALESCE(roles.roles, '[]'::jsonb) AS roles,
               {_CONTACT_CREATED_BY_NAME_SQL}
             FROM contacts ct
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
             {_CONTACT_CREATED_BY_JOINS_SQL}
             LEFT JOIN LATERAL (
               SELECT jsonb_agg(
@@ -1230,7 +1240,11 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             search_parts = [
                 f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.last_name,'')) "
                 f"ILIKE ${next_param_index}",
-                f"COALESCE(au.email::text,'') ILIKE ${next_param_index}",
+                f"""EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) AS e(email)
+                  WHERE COALESCE(e.email->>'email','') ILIKE ${next_param_index}
+                )""",
             ]
             args.append(f"%{search_stripped}%")
             next_param_index += 1
@@ -1270,7 +1284,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             f"""
             SELECT COUNT(1)
             FROM contacts ct
-            LEFT JOIN auth.users au ON au.id = ct.user_id
             WHERE {where_sql}
             """,
             *args,
@@ -1298,7 +1311,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.first_name,
               ct.last_name,
               ct.title,
-              au.email::text AS email,
+              {_CONTACT_PRIMARY_EMAIL_SQL} AS email,
               ct.profile_photo_url,
               ct.external_contact_id,
               ct.phones,
@@ -1307,7 +1320,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.created_at,
               ct.updated_at
             FROM contacts ct
-            LEFT JOIN auth.users au ON au.id = ct.user_id
             LEFT JOIN company_names_by_contact cn
               ON cn.contact_id = ct.id
             LEFT JOIN LATERAL (
@@ -1428,16 +1440,14 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if not contact_ids:
             return []
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               ct.id::text AS id,
               ct.first_name,
               ct.last_name,
-              NULLIF(au.email::text, '') AS email,
+              {_CONTACT_PRIMARY_EMAIL_SQL} AS email,
               ct.external_contact_id
             FROM contacts ct
-            LEFT JOIN auth.users au
-              ON au.id = ct.user_id
             WHERE ct.organization_id = $1::uuid
               AND ct.id = ANY($2::uuid[])
               AND ct.status != $3

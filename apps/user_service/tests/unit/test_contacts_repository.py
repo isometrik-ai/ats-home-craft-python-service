@@ -58,7 +58,7 @@ class _FakeConn:
 
 @pytest.mark.asyncio
 async def test_get_contact_id_by_email_lookup():
-    """Email lookup joins auth.users and normalizes email."""
+    """Email lookup matches contact emails JSONB and normalizes email."""
     conn = _FakeConn(row={"id": "c1"})
     repo = ContactsRepository(db_connection=conn)
 
@@ -70,13 +70,14 @@ async def test_get_contact_id_by_email_lookup():
     assert contact_id == "c1"
     query, args = conn.fetchrow_calls[0]
     assert "FROM contacts ct" in query
-    assert "auth.users" in query
+    assert "jsonb_array_elements(COALESCE(ct.emails" in query
+    assert "auth.users au" not in query
     assert args[2] == "jane@example.com"
 
 
 @pytest.mark.asyncio
 async def test_get_contact_ids_by_emails_bulk():
-    """Bulk email lookup uses ANY($3::text[])."""
+    """Bulk email lookup uses ANY($3::text[]) against contact emails JSONB."""
     conn = _FakeConn(
         rows=[
             {"email_norm": "a@example.com", "id": "c1"},
@@ -92,7 +93,9 @@ async def test_get_contact_ids_by_emails_bulk():
 
     assert mapping == {"a@example.com": "c1", "b@example.com": "c2"}
     query, args = conn.fetch_calls[0]
+    assert "jsonb_array_elements(COALESCE(ct.emails" in query
     assert "= ANY($3::text[])" in query
+    assert "auth.users" not in query
     assert ClientStatus.DELETED.value in args
 
 
@@ -181,12 +184,36 @@ async def test_list_contacts_search_predicate():
 
     count_query, count_args = conn.fetchval_calls[0]
     assert "ILIKE" in count_query
+    assert "jsonb_array_elements(COALESCE(ct.emails" in count_query
+    assert "au.email" not in count_query
     assert count_query.count("(") == count_query.count(")")
     assert "%jane%" in count_args
     assert ContactType.OWNER.value in count_args
     _, list_args = conn.fetch_calls[0]
     assert list_args[-2] == 10
     assert list_args[-1] == 10
+
+
+@pytest.mark.asyncio
+async def test_list_contacts_uses_primary_contact_email():
+    """List selects primary contact email from contacts.emails JSONB."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = ContactsRepository(db_connection=conn)
+
+    await repo.list_contacts(
+        organization_id=ORG_ID,
+        search=None,
+        status=None,
+        contact_type=None,
+        page=1,
+        page_size=20,
+    )
+
+    list_query, _ = conn.fetch_calls[0]
+    assert "jsonb_array_elements(COALESCE(ct.emails" in list_query
+    assert "is_primary" in list_query
+    assert "au.email" not in list_query
+    assert "LEFT JOIN auth.users au" not in list_query
 
 
 @pytest.mark.asyncio
@@ -592,6 +619,8 @@ async def test_get_contact_details():
     assert details["id"] == "c1"
     query, _ = _sql_args(conn.fetchrow)
     assert "contact_companies cc" in query
+    assert "jsonb_array_elements(COALESCE(ct.emails" in query
+    assert "LEFT JOIN auth.users au" not in query
 
 
 @pytest.mark.asyncio
@@ -670,6 +699,8 @@ async def test_get_contacts_by_ids():
     assert len(rows) == 2
     query, _ = conn.fetch_calls[0]
     assert "= ANY" in query
+    assert "jsonb_array_elements(COALESCE(ct.emails" in query
+    assert "LEFT JOIN auth.users au" not in query
 
 
 @pytest.mark.asyncio
