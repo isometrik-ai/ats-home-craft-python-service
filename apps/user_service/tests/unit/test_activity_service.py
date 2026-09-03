@@ -331,6 +331,104 @@ def test_flatten_contact_company_display():
     assert items[0].new_display_value == "Beta"
 
 
+def test_flatten_contact_multi_field_update_returns_summary():
+    """Multi-field contact UPDATEs emit one summary item (one per audit row)."""
+    service = _service()
+    row = _audit_row(
+        table_name="contacts",
+        old_values={"data": {"first_name": "Old", "last_name": "Name", "email": "old@example.com"}},
+        new_values={
+            "data": {"first_name": "New", "last_name": "Person", "email": "new@example.com"}
+        },
+        changed_fields=["first_name", "last_name", "email"],
+    )
+
+    items = service._flatten_contact_audit_row(  # pylint: disable=protected-access
+        audit_row=row, record_id="c1"
+    )
+
+    assert len(items) == 1
+    assert items[0].id.endswith(":summary")
+    assert items[0].action_type == "UPDATE"
+    assert items[0].field is None
+
+
+def test_flatten_contact_single_field_update_returns_detail():
+    """Single-field contact UPDATEs still emit one detail line."""
+    service = _service()
+    row = _audit_row(
+        table_name="contacts",
+        old_values={"data": {"first_name": "Old"}},
+        new_values={"data": {"first_name": "New"}},
+        changed_fields=["first_name"],
+    )
+
+    items = service._flatten_contact_audit_row(  # pylint: disable=protected-access
+        audit_row=row, record_id="c1"
+    )
+
+    assert len(items) == 1
+    assert items[0].field == "first_name"
+    assert items[0].old_value == "Old"
+    assert items[0].new_value == "New"
+
+
+@pytest.mark.asyncio
+async def test_get_contact_activity_pagination_matches_audit_rows():
+    """get_contact_activity returns one timeline item per audit row."""
+    service = ActivityService(user_context=_ctx(), db_connection=MagicMock())
+    service.audit_log_repository = MagicMock()
+    service.audit_log_repository.get_activity_logs_for_record_with_actor_names = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "audit-create",
+                    "user_id": "actor-1",
+                    "user_email": "actor@example.com",
+                    "action_type": "CREATE",
+                    "table_name": "contacts",
+                    "timestamp": "2026-01-03T00:00:00Z",
+                    "old_values": None,
+                    "new_values": {"data": {"first_name": "New"}},
+                    "changed_fields": [],
+                },
+                {
+                    "id": "audit-update",
+                    "user_id": "actor-1",
+                    "user_email": "actor@example.com",
+                    "action_type": "UPDATE",
+                    "table_name": "contacts",
+                    "timestamp": "2026-01-02T00:00:00Z",
+                    "old_values": {"data": {"first_name": "Old", "last_name": "Name"}},
+                    "new_values": {"data": {"first_name": "New", "last_name": "Person"}},
+                    "changed_fields": ["first_name", "last_name"],
+                },
+                {
+                    "id": "audit-single",
+                    "user_id": "actor-1",
+                    "user_email": "actor@example.com",
+                    "action_type": "UPDATE",
+                    "table_name": "contacts",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "old_values": {"data": {"email": "old@example.com"}},
+                    "new_values": {"data": {"email": "new@example.com"}},
+                    "changed_fields": ["email"],
+                },
+            ],
+            5,
+        )
+    )
+    service._get_custom_field_name_map = AsyncMock(return_value={})  # pylint: disable=protected-access
+
+    items, total = await service.get_contact_activity(contact_id="c1", limit=10, offset=0)
+
+    assert total == 5
+    assert len(items) == 3
+    assert items[0]["action_type"] == "CREATE"
+    assert items[1]["id"].endswith(":summary")
+    assert items[2]["field"] == "email"
+
+
 def test_flatten_company_contact_display():
     """Company contact association changes get display values."""
     service = _service()
