@@ -1275,7 +1275,7 @@ class TenantRequestsService:
                     contact_unit_id=old_contact_unit_id,
                     move_type=MoveEventType.MOVE_OUT.value,
                     event_date=now.date(),
-                    notes=f"Superseded by tenant request {tenant_request_id}",
+                    notes="Superseded by tenant request",
                 )
             await self.repo.update_request_status(
                 organization_id=org_id,
@@ -1342,7 +1342,7 @@ class TenantRequestsService:
             move_type=MoveEventType.MOVE_IN.value,
             event_date=body.move_in_date,
             fee_amount=body.move_in_fee,
-            notes=f"Tenant request approved ({tenant_request_id})",
+            notes="Tenant request approved",
             documents=self._snapshot_tenant_request_documents(documents),
         )
         await self.repo.update_request_status(
