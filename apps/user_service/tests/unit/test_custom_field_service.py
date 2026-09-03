@@ -4431,3 +4431,9 @@ def test_coerce_image_field_and_validate_required_fields():
     required_def = _defn("f1", "name", "text", is_required=True)
     with pytest.raises(ValidationException):
         service._validate_required_fields({"f1": required_def}, {})
+
+
+def test_entity_type_asset_registered():
+    """EntityType.ASSET is available for facility-management custom fields."""
+    assert EntityType.ASSET.value == "asset"
+    assert EntityType.ASSET in EntityType
