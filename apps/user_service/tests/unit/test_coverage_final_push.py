@@ -526,16 +526,24 @@ async def test_invalidate_user_sessions_cache_redis_mark_failure(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_require_request_user_raises():
-    from libs.shared_middleware.jwt_auth import get_user_from_auth_db
+    import importlib
+
+    from libs.shared_middleware import jwt_auth
+
+    jwt_auth = importlib.reload(jwt_auth)
 
     request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
     with pytest.raises(UnauthorizedException):
-        await get_user_from_auth_db(request)
+        await jwt_auth.get_user_from_auth_db(request, redis_client=None)
 
 
 @pytest.mark.asyncio
 async def test_get_user_from_auth_db_success():
-    from libs.shared_middleware.jwt_auth import get_user_from_auth_db
+    import importlib
+
+    from libs.shared_middleware import jwt_auth
+
+    jwt_auth = importlib.reload(jwt_auth)
 
     request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
     request.state.user = {"sub": "u1", "email": "u@example.com", "session_id": "s1"}
@@ -544,7 +552,7 @@ async def test_get_user_from_auth_db_success():
         "libs.shared_middleware.jwt_auth.coalesced_resolve_session_context_from_db",
         AsyncMock(return_value=session_ctx),
     ):
-        user = await get_user_from_auth_db(request)
+        user = await jwt_auth.get_user_from_auth_db(request, redis_client=None)
     assert user["_session_context"] == session_ctx
 
 
