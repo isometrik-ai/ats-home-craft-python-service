@@ -444,6 +444,7 @@ async def _get_user_from_auth(request: Request, _redis_client=None) -> dict:
         "email": "test@example.com",
         "session_id": "test-session-id",
         "user_metadata": {"organization_id": "org-123", "type": "organization_member"},
+        "_session_context": {"organization_id": "org-123"},
     }
     # Set request.state.user before get_user_from_auth checks for it
 
@@ -458,6 +459,11 @@ async def _get_user_from_auth(request: Request, _redis_client=None) -> dict:
     )
     request.state.user = user
     return user
+
+
+async def _get_user_from_auth_db(request: Request, _redis_client=None) -> dict:
+    """Mock DB-backed auth used by GET /auth/validate in integration tests."""
+    return await _get_user_from_auth(request, _redis_client=_redis_client)
 
 
 async def _fake_db_conn():
@@ -487,14 +493,20 @@ def override_dependencies(monkeypatch):
     app.dependency_overrides[supabase_service] = _stub_supabase
     app.dependency_overrides[supabase_anon_client_with_headers] = _stub_supabase
     # Override get_user_from_auth dependency using FastAPI's dependency override system
-    from libs.shared_middleware.jwt_auth import get_user_from_auth
+    from libs.shared_middleware.jwt_auth import (
+        get_user_from_auth,
+        get_user_from_auth_db,
+    )
 
     app.dependency_overrides[get_user_from_auth] = _get_user_from_auth
+    app.dependency_overrides[get_user_from_auth_db] = _get_user_from_auth_db
     # Also patch it in modules where it's imported to ensure consistency
     monkeypatch.setattr(jwt_auth, "get_user_from_auth", _get_user_from_auth)
+    monkeypatch.setattr(jwt_auth, "get_user_from_auth_db", _get_user_from_auth_db)
     from apps.user_service.app.api import auth as auth_module
 
     monkeypatch.setattr(auth_module, "get_user_from_auth", _get_user_from_auth)
+    monkeypatch.setattr(auth_module, "get_user_from_auth_db", _get_user_from_auth_db)
 
     yield
     app.dependency_overrides.clear()

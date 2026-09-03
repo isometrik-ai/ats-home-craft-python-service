@@ -42,7 +42,7 @@ from apps.user_service.app.schemas.auth import (
 )
 from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
-from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_middleware.jwt_auth import get_user_from_auth, get_user_from_auth_db
 from libs.shared_utils.http_exceptions import UnauthorizedException
 from libs.shared_utils.isometrik_service import create_isometrik_token
 from libs.shared_utils.response_factory import success_response
@@ -51,6 +51,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 UserDependency = Annotated[dict, Depends(get_user_from_auth)]
+ValidateUserDependency = Annotated[dict, Depends(get_user_from_auth_db)]
 
 
 @handle_api_exceptions("login")
@@ -504,7 +505,7 @@ async def switch_organization(
 )
 async def validate(
     request: Request,
-    _current_user: UserDependency,
+    current_user: ValidateUserDependency,
 ):
     """Validate authentication token and return organization_id.
 
@@ -518,9 +519,8 @@ async def validate(
     Returns:
         ValidateTokenResponse: Contains organization_id
     """
-    # Get organization_id from request.state (already fetched by get_user_from_auth)
-    audit_context = getattr(request.state, "audit_user_context", None)
-    organization_id = audit_context.get("organization_id") if audit_context else None
+    session_ctx = current_user.get("_session_context") or {}
+    organization_id = session_ctx.get("organization_id")
 
     if not organization_id:
         raise UnauthorizedException(

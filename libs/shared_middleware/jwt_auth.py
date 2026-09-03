@@ -257,7 +257,7 @@ async def get_user_from_auth_redis(
 
 async def get_user_from_auth_db(
     request: Request,
-    redis_client: redis.Redis | None = None,
+    redis_client: redis.Redis | None = Depends(redis_client_dep),
 ) -> dict:
     """Authenticate using Postgres only and warm Redis. Does not read Redis."""
     user = _require_request_user(request)
