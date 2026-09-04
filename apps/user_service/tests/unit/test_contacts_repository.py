@@ -58,7 +58,7 @@ class _FakeConn:
 
 @pytest.mark.asyncio
 async def test_get_contact_id_by_email_lookup():
-    """Email lookup matches contact emails JSONB and normalizes email."""
+    """Email lookup joins auth.users and normalizes email."""
     conn = _FakeConn(row={"id": "c1"})
     repo = ContactsRepository(db_connection=conn)
 
@@ -70,14 +70,13 @@ async def test_get_contact_id_by_email_lookup():
     assert contact_id == "c1"
     query, args = conn.fetchrow_calls[0]
     assert "FROM contacts ct" in query
-    assert "jsonb_array_elements(COALESCE(ct.emails" in query
-    assert "auth.users au" not in query
+    assert "auth.users" in query
     assert args[2] == "jane@example.com"
 
 
 @pytest.mark.asyncio
 async def test_get_contact_ids_by_emails_bulk():
-    """Bulk email lookup uses ANY($3::text[]) against contact emails JSONB."""
+    """Bulk email lookup uses ANY($3::text[])."""
     conn = _FakeConn(
         rows=[
             {"email_norm": "a@example.com", "id": "c1"},
@@ -93,9 +92,7 @@ async def test_get_contact_ids_by_emails_bulk():
 
     assert mapping == {"a@example.com": "c1", "b@example.com": "c2"}
     query, args = conn.fetch_calls[0]
-    assert "jsonb_array_elements(COALESCE(ct.emails" in query
     assert "= ANY($3::text[])" in query
-    assert "auth.users" not in query
     assert ClientStatus.DELETED.value in args
 
 
@@ -619,8 +616,6 @@ async def test_get_contact_details():
     assert details["id"] == "c1"
     query, _ = _sql_args(conn.fetchrow)
     assert "contact_companies cc" in query
-    assert "jsonb_array_elements(COALESCE(ct.emails" in query
-    assert "LEFT JOIN auth.users au" not in query
 
 
 @pytest.mark.asyncio
@@ -699,8 +694,6 @@ async def test_get_contacts_by_ids():
     assert len(rows) == 2
     query, _ = conn.fetch_calls[0]
     assert "= ANY" in query
-    assert "jsonb_array_elements(COALESCE(ct.emails" in query
-    assert "LEFT JOIN auth.users au" not in query
 
 
 @pytest.mark.asyncio
