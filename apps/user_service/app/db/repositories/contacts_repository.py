@@ -94,6 +94,17 @@ LEFT JOIN auth.users creator_au
   ON creator_au.id = ct.created_by
 """
 
+_CONTACT_PRIMARY_EMAIL_SQL = """
+(
+    SELECT NULLIF(trim(p.email->>'email'), '')
+    FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) WITH ORDINALITY AS p(email, ord)
+    ORDER BY
+        CASE WHEN COALESCE((p.email->>'is_primary')::boolean, false) THEN 0 ELSE 1 END,
+        p.ord
+    LIMIT 1
+)
+"""
+
 CONTACT_DETAIL_JSONB_LIST_FIELDS: tuple[str, ...] = (
     "phones",
     "emails",
@@ -1230,7 +1241,11 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             search_parts = [
                 f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.last_name,'')) "
                 f"ILIKE ${next_param_index}",
-                f"COALESCE(au.email::text,'') ILIKE ${next_param_index}",
+                f"""EXISTS (
+                  SELECT 1
+                  FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) AS e(email)
+                  WHERE COALESCE(e.email->>'email','') ILIKE ${next_param_index}
+                )""",
             ]
             args.append(f"%{search_stripped}%")
             next_param_index += 1
@@ -1270,7 +1285,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             f"""
             SELECT COUNT(1)
             FROM contacts ct
-            LEFT JOIN auth.users au ON au.id = ct.user_id
             WHERE {where_sql}
             """,
             *args,
@@ -1298,7 +1312,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.first_name,
               ct.last_name,
               ct.title,
-              au.email::text AS email,
+              {_CONTACT_PRIMARY_EMAIL_SQL} AS email,
               ct.profile_photo_url,
               ct.external_contact_id,
               ct.phones,
@@ -1307,7 +1321,6 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.created_at,
               ct.updated_at
             FROM contacts ct
-            LEFT JOIN auth.users au ON au.id = ct.user_id
             LEFT JOIN company_names_by_contact cn
               ON cn.contact_id = ct.id
             LEFT JOIN LATERAL (
