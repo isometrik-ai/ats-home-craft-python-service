@@ -140,6 +140,8 @@ async def test_list_contacts_status_filter():
     assert ClientStatus.DELETED.value not in count_args
     list_query, _ = conn.fetch_calls[0]
     assert "company_names_by_contact" in list_query
+    assert "ct.emails" in list_query
+    assert "auth.users" not in list_query
 
 
 @pytest.mark.asyncio
@@ -181,6 +183,8 @@ async def test_list_contacts_search_predicate():
 
     count_query, count_args = conn.fetchval_calls[0]
     assert "ILIKE" in count_query
+    assert "jsonb_array_elements(COALESCE(ct.emails" in count_query
+    assert "auth.users" not in count_query
     assert count_query.count("(") == count_query.count(")")
     assert "%jane%" in count_args
     assert ContactType.OWNER.value in count_args

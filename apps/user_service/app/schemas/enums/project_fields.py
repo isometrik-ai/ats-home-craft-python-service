@@ -284,6 +284,7 @@ class EntityType(str, Enum):
     LEAD = "lead"
     PROJECT = "project"
     USER = "user"
+    ASSET = "asset"
 
 
 class EntityListStatus(str, Enum):

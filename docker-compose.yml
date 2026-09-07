@@ -1,5 +1,5 @@
 services:
-  ats-home-craft-python-service:
+  user-service:
     container_name: ats-home-craft-python-service
     restart: always
     image: appscrip007/ats-home-craft-python-service:latest
@@ -7,6 +7,21 @@ services:
       - ats_home_craft_network
     ports:
       - "5000:5000"
+    env_file:
+      - .env
+    logging:
+      options:
+        max-size: "1m"
+        max-file: "3"
+
+  work-order-service:
+    container_name: ats-work-order-service
+    restart: always
+    image: appscrip007/ats-home-craft-work-order-service:latest
+    networks:
+      - ats_home_craft_network
+    ports:
+      - "5001:5001"
     env_file:
       - .env
     logging:

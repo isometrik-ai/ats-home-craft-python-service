@@ -111,6 +111,9 @@ from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
 )
 from apps.user_service.app.utils.email_utils import send_client_creation_email
+from apps.user_service.app.utils.unit_list_serialization import (
+    format_primary_contact_email,
+)
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.auth_repository import (
     create_user,
@@ -2643,6 +2646,13 @@ class ContactsService:
             list_row["phones"] = parse_json_field(phones) or []
         elif phones is None:
             list_row["phones"] = []
+
+        emails = list_row.pop("emails", None)
+        if isinstance(emails, str):
+            emails = parse_json_field(emails) or []
+        elif emails is None:
+            emails = []
+        list_row["email"] = format_primary_contact_email(emails)
 
         tags = list_row.get("tags")
         if tags is None:

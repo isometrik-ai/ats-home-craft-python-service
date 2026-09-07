@@ -46,14 +46,14 @@ repos:
           --in-place,
           --recursive,
         ]
-        exclude: ^(docs/|migrations/)
+        exclude: ^(docs/|apps/[^/]+/docs/|migrations/)
 
   - repo: https://github.com/pycqa/isort
     rev: 6.0.1
     hooks:
       - id: isort
         args: ["--profile", "black", "--filter-files"]
-        exclude: ^(docs/|migrations/)
+        exclude: ^(docs/|apps/[^/]+/docs/|migrations/)
 
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.19.1
@@ -87,7 +87,7 @@ repos:
           "--disable=E0401"
         ]
         # Exclude generated gRPC/protobuf stubs (pylint: long lines, generated servicer stubs).
-        exclude: ^(docs/|migrations/|alembic/)|grpc_stubs/
+        exclude: ^(docs/|apps/[^/]+/docs/|migrations/|alembic/)|grpc_stubs/
         additional_dependencies: [
           "fastapi==0.115.12",
           "sqlalchemy==2.0.40",
@@ -101,7 +101,32 @@ repos:
           "alembic",
           "starlette",
           "anyio",
-          "python-dotenv"
+          "python-dotenv",
+          "asyncpg",
+          "boto3",
+          "httpx",
+          "ddtrace==3.9.4",
+          "python-dateutil",
+          "pytest",
+          "pytest-asyncio",
+          # OpenTelemetry — required for pylint to resolve telemetry_config imports
+          "opentelemetry-api==1.38.0",
+          "opentelemetry-sdk==1.38.0",
+          "opentelemetry-semantic-conventions==0.59b0",
+          "opentelemetry-util-http==0.59b0",
+          "opentelemetry-instrumentation==0.59b0",
+          "opentelemetry-instrumentation-asgi==0.59b0",
+          "opentelemetry-instrumentation-fastapi==0.59b0",
+          "opentelemetry-instrumentation-logging==0.59b0",
+          "opentelemetry-instrumentation-pymongo==0.59b0",
+          "opentelemetry-instrumentation-requests==0.59b0",
+          "opentelemetry-instrumentation-asyncpg==0.59b0",
+          "opentelemetry-instrumentation-httpx==0.59b0",
+          "opentelemetry-exporter-otlp-proto-common==1.38.0",
+          "opentelemetry-exporter-otlp-proto-grpc==1.38.0",
+          "opentelemetry-exporter-otlp-proto-http==1.38.0",
+          "opentelemetry-proto==1.38.0",
+          "grpcio>=1.71.0",
         ]
 
   - repo: https://github.com/executablebooks/mdformat

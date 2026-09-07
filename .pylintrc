@@ -25,8 +25,8 @@ persistent=yes
 # Number of processes to use for static checking
 jobs=4
 
-# Add project roots to pylint's Python path
-init-hook='import sys; sys.path.extend(["apps", "libs"])'
+# Project root must be on sys.path so `apps.*` and `libs.*` imports resolve.
+init-hook='import sys; sys.path.insert(0, ".")'
 
 [MESSAGES CONTROL]
 # Disable messages that are not relevant for your FastAPI project
@@ -83,7 +83,7 @@ evaluation=10.0 - ((float(5 * error + warning + refactor + convention) / stateme
 # kw: Keyword arguments
 # dt: Datetime
 # tx: Transaction
-good-names=i,j,k,ex,Run,_,id,db,e,x,y,z,ip,pk,fn,qs,f,to,kw,dt,tx,io,ok,q
+good-names=i,j,k,ex,Run,_,id,db,e,x,y,z,ip,pk,fn,qs,f,to,kw,dt,tx,io,ok,q,at,by
 
 # Bad variable names which should always be refused
 bad-names=foo,bar,baz,toto,tutu,tata
@@ -147,9 +147,10 @@ ignore-imports=no
 
 # Additional directories to ignore (duplicate-code detection only)
 ignore-paths=
+    ^apps/user_service/docs/.*$
+    ^apps/work_order_service/docs/.*$
     ^migrations/.*$
     ^alembic/.*$
-    ^docs/.*$
 
 [TYPECHECK]
 # Tells whether missing members are treated as class attributes
