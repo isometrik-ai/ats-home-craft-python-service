@@ -26,6 +26,7 @@ from apps.work_order_service.app.schemas.openapi import (
     TriggerTestApiResponse,
 )
 from apps.work_order_service.app.services.events_service import EventsService
+from apps.work_order_service.app.utils.webhook_url import validate_outbound_webhook_url
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     WORK_ORDER_MANAGEMENT_EDIT,
@@ -94,11 +95,13 @@ async def create_trigger(
         permission_codes=WORK_ORDER_MANAGEMENT_EDIT,
         request=request,
     )
+    payload = dump_request(body)
+    validate_outbound_webhook_url(payload["webhook_url"])
     record = await IntegrationRepository(db_connection).create_trigger(
         {
             "organization_id": ctx.organization_id,
             "project_id": project_id,
-            **dump_request(body),
+            **payload,
         }
     )
     return success_response(
@@ -133,13 +136,16 @@ async def update_trigger(
         permission_codes=WORK_ORDER_MANAGEMENT_EDIT,
         request=request,
     )
+    patch = dump_request(body, partial=True)
+    if "webhook_url" in patch:
+        validate_outbound_webhook_url(patch["webhook_url"])
     repo = IntegrationRepository(db_connection)
     record = await repo.update_trigger(
         trigger_id,
         {
             "organization_id": ctx.organization_id,
             "project_id": project_id,
-            **dump_request(body, partial=True),
+            **patch,
         },
     )
     if not record:

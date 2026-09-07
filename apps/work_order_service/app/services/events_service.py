@@ -13,6 +13,7 @@ from apps.work_order_service.app.db.repositories.integration_repository import (
     IntegrationRepository,
 )
 from apps.work_order_service.app.services.webhook_worker import enqueue_delivery
+from apps.work_order_service.app.utils.webhook_url import validate_outbound_webhook_url
 
 VALID_SOURCES = ("fm", "vendor_portal", "scheduler", "api")
 ENTITY_EVENTS = ("created", "updated", "deleted", "status_changed")
@@ -148,6 +149,18 @@ class EventsService:
             "snapshot": snapshot,
         }
         for trigger in triggers:
+            delivery = await self.repo.insert_webhook_delivery(
+                {
+                    "organization_id": org_id,
+                    "project_id": proj_id,
+                    "trigger_id": trigger["id"],
+                    "entity": entity,
+                    "entity_id": record.get("id"),
+                    "event": f"{entity}.{event}",
+                    "request_payload": payload,
+                    "delivered": False,
+                }
+            )
             enqueue_delivery(
                 organization_id=org_id,
                 project_id=proj_id,
@@ -156,6 +169,7 @@ class EventsService:
                 secret=trigger.get("secret"),
                 event=f"{entity}.{event}",
                 payload=payload,
+                delivery_id=delivery["id"],
             )
 
     async def test_trigger(
@@ -166,11 +180,12 @@ class EventsService:
     ) -> dict[str, Any]:
         """Fire a sample payload at a trigger and record the delivery."""
         from apps.work_order_service.app.services.webhook_worker import (
+            _persist_delivery_result,
             _post_webhook,
-            _record_delivery,
         )
 
         started = datetime.now(timezone.utc)
+        validate_outbound_webhook_url(trigger["webhook_url"])
         payload = {
             "id": str(uuid.uuid4()),
             "at": _now_iso(),
@@ -190,7 +205,7 @@ class EventsService:
         )
         duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
         delivered = status is not None and 200 <= status < 300
-        await _record_delivery(
+        await _persist_delivery_result(
             {
                 "organization_id": trigger["organization_id"],
                 "project_id": trigger["project_id"],

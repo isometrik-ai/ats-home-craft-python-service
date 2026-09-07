@@ -98,13 +98,16 @@ class WorkOrdersService:
         self, *, project_id: str, entity_id: str, data: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Update."""
+        payload_data = dict(data)
+        if not self.ctx:
+            payload_data.pop("timeline", None)
         if self.ctx and self.ctx.organization_id:
-            payload = {**self._scope(project_id), **data}
+            payload = {**self._scope(project_id), **payload_data}
         else:
             payload = {
-                "organization_id": data.get("organization_id"),
+                "organization_id": payload_data.get("organization_id"),
                 "project_id": project_id,
-                **data,
+                **payload_data,
             }
         before = None
         if self.ctx and self.ctx.organization_id:

@@ -61,6 +61,7 @@ async def vendor_update_work_order(
 ):
     """Vendor update work order."""
     allowed = dump_request(body, partial=True)
+    allowed.pop("timeline", None)
     allowed["organization_id"] = work_order["organization_id"]
     record = await WorkOrdersService(db_connection).update(
         project_id=work_order["project_id"],

@@ -340,6 +340,54 @@ class IntegrationRepository:
         )
         return record_to_dict(row)
 
+    async def update_webhook_delivery(
+        self,
+        delivery_id: str,
+        *,
+        response_status: int | None,
+        error: str | None,
+        attempt: int,
+        duration_ms: int,
+        delivered: bool,
+    ) -> None:
+        """Update a pending webhook delivery with the HTTP result."""
+        await self.conn.execute(
+            """
+            UPDATE work_order.webhook_deliveries
+            SET response_status = $2,
+                error = $3,
+                attempt = $4,
+                duration_ms = $5,
+                delivered = $6
+            WHERE id = $1::uuid
+            """,
+            delivery_id,
+            response_status,
+            error,
+            attempt,
+            duration_ms,
+            delivered,
+        )
+
+    async def list_pending_webhook_deliveries(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return undelivered webhook rows for worker recovery."""
+        rows = await self.conn.fetch(
+            """
+            SELECT d.*, t.webhook_url, t.secret
+            FROM work_order.webhook_deliveries d
+            LEFT JOIN work_order.trigger_configs t ON t.id = d.trigger_id
+            WHERE d.delivered = false
+            ORDER BY d.created_at ASC
+            LIMIT $1
+            """,
+            limit,
+        )
+        return [record_to_dict(row) for row in rows]
+
     async def list_webhook_deliveries(
         self,
         *,

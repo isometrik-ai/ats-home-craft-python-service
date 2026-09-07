@@ -7,8 +7,9 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
-COPY apps/work_order_service/requirements.txt ./work-order-requirements.txt
-RUN pip install --no-cache-dir -r work-order-requirements.txt
+COPY apps/user_service/requirements.txt ./apps/user_service/requirements.txt
+COPY apps/work_order_service/requirements.txt ./apps/work_order_service/requirements.txt
+RUN pip install --no-cache-dir -r apps/work_order_service/requirements.txt
 
 COPY . .
 

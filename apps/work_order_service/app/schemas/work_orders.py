@@ -63,5 +63,4 @@ class VendorUpdateWorkOrderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     state: WorkOrderState | None = None
-    timeline: list[dict[str, Any]] | None = None
     form_values: dict[str, Any] | None = None
