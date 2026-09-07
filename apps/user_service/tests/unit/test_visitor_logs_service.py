@@ -567,7 +567,7 @@ async def test_get_log_detail_guard_name_missing_without_user_id():
 
 
 def test_pass_visit_status_exited_with_check_in_and_out():
-    """Pass visit_status is exited when both check-in and check-out exist."""
+    """Pass visit_status is exited when the latest check-out is after check-in."""
     events = [
         {
             "event_type": PassEventType.CHECKED_IN.value,
@@ -582,6 +582,28 @@ def test_pass_visit_status_exited_with_check_in_and_out():
         detail={"events": events, "status": "active", "valid_until": None}
     )
     assert status == VisitorLogVisitStatus.EXITED.value
+
+
+def test_pass_visit_status_inside_after_reentry_same_day():
+    """Pass visit_status is inside when the latest check-in follows the latest check-out."""
+    events = [
+        {
+            "event_type": PassEventType.CHECKED_IN.value,
+            "occurred_at": datetime(2026, 9, 2, 8, 9, tzinfo=timezone.utc),
+        },
+        {
+            "event_type": PassEventType.CHECKED_OUT.value,
+            "occurred_at": datetime(2026, 9, 2, 8, 22, tzinfo=timezone.utc),
+        },
+        {
+            "event_type": PassEventType.CHECKED_IN.value,
+            "occurred_at": datetime(2026, 9, 2, 8, 32, tzinfo=timezone.utc),
+        },
+    ]
+    status = VisitorLogsService._pass_visit_status(
+        detail={"events": events, "status": "active", "valid_until": None}
+    )
+    assert status == VisitorLogVisitStatus.INSIDE.value
 
 
 def test_pass_visit_status_expired_without_check_in():

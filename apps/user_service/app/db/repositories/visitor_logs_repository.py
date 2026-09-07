@@ -448,8 +448,9 @@ TRIM(
               NULL::text AS guard_name_fallback,
               ci.access_status::text AS access_status,
               CASE
+                WHEN ci.occurred_at IS NOT NULL
+                     AND (co.occurred_at IS NULL OR ci.occurred_at > co.occurred_at) THEN '{inside}'
                 WHEN ci.occurred_at IS NOT NULL AND co.occurred_at IS NOT NULL THEN '{exited}'
-                WHEN ci.occurred_at IS NOT NULL AND co.occurred_at IS NULL THEN '{inside}'
                 WHEN ci.occurred_at IS NOT NULL AND ci.access_status = '{access_denied}' THEN '{denied}'
                 WHEN p.status = '{pass_cancelled}'::pass_status THEN '{denied}'
                 WHEN p.status = '{pass_expired}'::pass_status THEN '{expired}'
