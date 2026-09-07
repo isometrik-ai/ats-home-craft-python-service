@@ -36,6 +36,11 @@ PROJECTS_MANAGEMENT_EDIT = "projects_management.edit"
 PROJECTS_MANAGEMENT_DELETE = "projects_management.delete"
 PROJECT_MEMBERS_MANAGE = "project_members.manage"
 
+WORK_ORDER_MANAGEMENT_VIEW = "work_order_management.view"
+WORK_ORDER_MANAGEMENT_EDIT = "work_order_management.edit"
+WORK_ORDER_MANAGEMENT_APPROVE = "work_order_management.approve"
+WORK_ORDER_MANAGEMENT_PAY = "work_order_management.pay"
+
 CUSTOM_FIELDS_MANAGEMENT_CREATE = "custom_fields_management.create"
 CUSTOM_FIELDS_MANAGEMENT_VIEW = "custom_fields_management.view"
 CUSTOM_FIELDS_MANAGEMENT_EDIT = "custom_fields_management.edit"
@@ -400,6 +405,31 @@ DEFAULT_PERMISSIONS = [
         "Generate invoices, run billing scheduler, and manage escalations",
         "finance",
     ),
+    # work order management (assets, AMC, WOs — not project facilities/locations)
+    (
+        WORK_ORDER_MANAGEMENT_VIEW,
+        "View Work Order Management",
+        "View assets, contracts, work orders, and invoices",
+        "work_order_management",
+    ),
+    (
+        WORK_ORDER_MANAGEMENT_EDIT,
+        "Edit Work Order Management",
+        "Create and update assets, contracts, and work orders",
+        "work_order_management",
+    ),
+    (
+        WORK_ORDER_MANAGEMENT_APPROVE,
+        "Approve Vendor Invoices",
+        "Approve or reject vendor invoices",
+        "work_order_management",
+    ),
+    (
+        WORK_ORDER_MANAGEMENT_PAY,
+        "Record Vendor Payments",
+        "Record payments against approved invoices",
+        "work_order_management",
+    ),
 ]
 
 
@@ -436,6 +466,7 @@ ENTITY_PERMISSION_CODE_PREFIXES = (
     "companies_management.",
     "contacts_management.",
     "projects_management.",
+    "work_order_management.",
 )
 
 ALL_CUSTOM_FIELDS_MANAGEMENT_PERMISSION_CODES = frozenset(

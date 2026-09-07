@@ -1,0 +1,5 @@
+# WOM imports shared user_service modules (common_utils, custom_field_service, presigned_url).
+-r ../user_service/requirements.txt
+
+# Contract scheduler recurrence calculations (scheduler_service.py).
+python-dateutil>=2.9.0

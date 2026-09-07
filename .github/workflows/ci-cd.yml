@@ -10,7 +10,6 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/ats-home-craft-python-service
 
 jobs:
   lint:
@@ -72,10 +71,19 @@ jobs:
 
 
   docker-build-prod:
-    name: Build & Push Docker Image (Production)
+    name: Build & Push (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [lint, test]
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    strategy:
+      matrix:
+        include:
+          - service: user-service
+            dockerfile: docker/user_service.Dockerfile
+            image_repo: ats-home-craft-python-service
+          - service: work-order-service
+            dockerfile: docker/work_order_service.Dockerfile
+            image_repo: ats-home-craft-work-order-service
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -93,27 +101,32 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./${{ matrix.dockerfile }}
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:prod-${{ github.run_number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_repo }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_repo }}:prod-${{ github.run_number }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
           build-args: |
             BUILD_ENV=production
             BUILD_VERSION=${{ github.sha }}
 
       - name: Notify deployment
         run: |
-          echo "✅ Production docker build and push completed!"
+          echo "✅ Production docker build and push completed for ${{ matrix.service }}!"
           echo "📦 Images tagged:"
-          echo "   - ${{ env.IMAGE_NAME }}:latest"
-          echo "   - ${{ env.IMAGE_NAME }}:prod-${{ github.run_number }}"
+          echo "   - ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_repo }}:latest"
+          echo "   - ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_repo }}:prod-${{ github.run_number }}"
           echo "🔗 Commit: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}"
 
-      - name: Deploy to Ubuntu Server
-        if: ${{ github.event_name == 'push' }}
+  deploy:
+    name: Deploy to Ubuntu Server
+    runs-on: ubuntu-latest
+    needs: docker-build-prod
+    if: github.event_name == 'push'
+    steps:
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.1.0
         with:
           host: ${{ secrets.SERVER_HOST }}
