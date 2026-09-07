@@ -580,6 +580,11 @@ class CommunityEventsService:
         body: CancelCommunityEventRequest,
     ) -> CommunityEventDetailResponse:
         """Cancel published event."""
+        event_row = await self.repo.fetch_event_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
         await self.repo.update_event_fields(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -600,6 +605,8 @@ class CommunityEventsService:
             actor_user_id=self.user_context.user_id,
             payload={"reason": body.reason},
         )
+        if event_row:
+            await self._dispatch_cancel_push(event=event_row)
         return await self.get_event(project_id=project_id, event_id=event_id)
 
     async def complete_event(
@@ -888,3 +895,16 @@ class CommunityEventsService:
             event=event,
             recipient_user_ids=user_ids,
         )
+
+    async def _dispatch_cancel_push(self, *, event: dict[str, Any]) -> None:
+        """Notify confirmed and waitlisted bookers when event is cancelled (best-effort)."""
+        bookers = await self.repo.list_active_bookers_for_notification(
+            organization_id=self.organization_id,
+            event_id=str(event["id"]),
+        )
+        for booker in bookers:
+            await self.notifications.notify_event_cancelled(
+                organization_id=self.organization_id,
+                contact_id=str(booker["contact_id"]),
+                event=event,
+            )

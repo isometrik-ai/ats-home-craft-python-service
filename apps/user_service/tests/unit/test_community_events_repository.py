@@ -423,3 +423,13 @@ async def test_reminder_queries():
         event_id=EVENT,
     )
     assert bookers[0]["contact_id"] == "contact-1"
+
+    conn.rows = [
+        {"contact_id": "contact-1", "user_id": "user-1"},
+        {"contact_id": "contact-2", "user_id": "user-2"},
+    ]
+    active = await repo.list_active_bookers_for_notification(
+        organization_id=ORG,
+        event_id=EVENT,
+    )
+    assert len(active) == 2

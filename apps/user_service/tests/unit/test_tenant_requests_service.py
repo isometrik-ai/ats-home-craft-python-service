@@ -1172,7 +1172,7 @@ async def test_approve_request_records_move_in_event(mock_contacts_cls: MagicMoc
     assert move_in["event_date"] == date(2026, 8, 1)
     assert move_in["fee_amount"] == Decimal("5000")
     assert len(move_in["documents"]) == 3
-    assert REQUEST_ID in str(move_in.get("notes") or "")
+    assert move_in.get("notes") == "Tenant request approved"
 
 
 @pytest.mark.asyncio
@@ -1260,8 +1260,10 @@ async def test_approve_request_supersedes_existing(
     assert move_out["move_type"] == MoveEventType.MOVE_OUT.value
     assert move_out["contact_id"] == "old-tenant-contact"
     assert move_out["contact_unit_id"] == "old-link"
+    assert move_out.get("notes") == "Superseded by tenant request"
     assert move_in["move_type"] == MoveEventType.MOVE_IN.value
     assert move_in["contact_id"] == "tenant-contact-1"
+    assert move_in.get("notes") == "Tenant request approved"
     mock_turnover_cls.return_value.release_outgoing_tenant_household.assert_awaited_once()
 
 

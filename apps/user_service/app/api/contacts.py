@@ -327,9 +327,8 @@ async def list_contacts(
     "/activity/{contact_id}/",
     status_code=http_status.HTTP_200_OK,
     description=(
-        "Activity feed for a contact. `page` / `page_size` paginate (newest first). "
-        "`data` contains flattened lines (often one per changed field). `total` and `total_pages` "
-        "refer to audit rows; `len(data)` may be larger than `page_size`."
+        "Activity feed for a contact. `page` / `page_size` paginate audit log rows (newest first). "
+        "Each audit row maps to one item in `data`."
     ),
     summary="Get contact activity",
     responses=COMMON_ERROR_RESPONSES,

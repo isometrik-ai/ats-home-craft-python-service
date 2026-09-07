@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Request, Response
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.schemas.visitor_logs import (
     VisitorLogDetailApiResponse,
+    VisitorLogExportQuery,
     VisitorLogListApiResponse,
+    VisitorLogMonthlyReportQuery,
     VisitorLogOverviewApiResponse,
     VisitorLogOverviewQuery,
     VisitorLogQuery,
@@ -63,6 +65,14 @@ DETAIL_SUCCESS_RESPONSES: dict[int | str, dict] = {
             "Pass detail with timeline when the id is a pass; "
             "walk-in detail when the id is a walk-in entry."
         ),
+    },
+}
+
+EXPORT_SUCCESS_RESPONSES: dict[int | str, dict] = {
+    **COMMON_ERROR_RESPONSES,
+    http_status.HTTP_200_OK: {
+        "description": "CSV attachment with visitor log export data.",
+        "content": {"text/csv": {}},
     },
 }
 
@@ -159,6 +169,93 @@ async def get_visitor_log_overview(
         message_key="visitor_logs.success.overview_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=result,
+    )
+
+
+@handle_api_exceptions("export visitor logs entry exit report")
+@router.get(
+    "/export",
+    status_code=http_status.HTTP_200_OK,
+    summary="Export visitor log entry/exit details as CSV",
+    description=(
+        "Exports the filtered visitor log table as CSV using the same filters as "
+        "GET /visitor-logs (without pagination)."
+    ),
+    response_model=None,
+    responses=EXPORT_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def export_visitor_logs(
+    request: Request,
+    query: VisitorLogExportQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Export filtered visitor log rows as a CSV attachment."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=query.project_id,
+        permission_codes=VISITOR_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = VisitorLogsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    csv_text = await service.export_entry_exit_csv(query=query)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="visitor-logs-entry-exit-{query.project_id}.csv"'
+            )
+        },
+    )
+
+
+@handle_api_exceptions("export visitor logs monthly report")
+@router.get(
+    "/monthly-report",
+    status_code=http_status.HTTP_200_OK,
+    summary="Export visitor log monthly report as CSV",
+    description=(
+        "Exports overview card metrics for a calendar month as CSV. "
+        "Defaults to the current month when month is omitted."
+    ),
+    response_model=None,
+    responses=EXPORT_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def export_visitor_logs_monthly_report(
+    request: Request,
+    query: VisitorLogMonthlyReportQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Export monthly visitor log summary as a CSV attachment."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=query.project_id,
+        permission_codes=VISITOR_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = VisitorLogsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    month_suffix = query.month or VisitorLogsService._current_month()
+    csv_text = await service.export_monthly_report_csv(query=query)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="visitor-logs-monthly-{month_suffix}-{query.project_id}.csv"'
+            )
+        },
     )
 
 

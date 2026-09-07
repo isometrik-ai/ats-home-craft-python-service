@@ -379,6 +379,14 @@ async def test_cancel_and_delete_event():
     svc.repo.insert_audit_log = AsyncMock()
     svc.repo.fetch_event_by_id = AsyncMock(return_value=_event_row())
     svc.repo.list_gallery = AsyncMock(return_value=[])
+    svc.repo.list_active_bookers_for_notification = AsyncMock(
+        return_value=[
+            {"contact_id": "contact-1", "user_id": "user-1"},
+            {"contact_id": "contact-2", "user_id": "user-2"},
+        ]
+    )
+    svc.notifications = MagicMock()
+    svc.notifications.notify_event_cancelled = AsyncMock()
 
     from apps.user_service.app.schemas.community_events import (
         CancelCommunityEventRequest,
@@ -390,6 +398,12 @@ async def test_cancel_and_delete_event():
         body=CancelCommunityEventRequest(reason="Rain"),
     )
     assert cancelled.title == "Summer fest"
+    assert svc.notifications.notify_event_cancelled.await_count == 2
+    notified_contacts = {
+        call.kwargs["contact_id"]
+        for call in svc.notifications.notify_event_cancelled.await_args_list
+    }
+    assert notified_contacts == {"contact-1", "contact-2"}
 
     deleted = await svc.delete_event(project_id=PROJECT_ID, event_id=EVENT_ID)
     assert deleted.title == "Summer fest"

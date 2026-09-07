@@ -129,5 +129,6 @@ COMMUNITY_EVENT_MAX_MEDIA_BYTES = 5 * 1024 * 1024
 COMMUNITY_EVENT_ALLOWED_MEDIA_MIMES = frozenset({"image/jpeg", "image/png"})
 COMMUNITY_EVENT_EXPORT_MAX_ROWS = 10_000
 CONTACTS_EXPORT_MAX_ROWS = 10_000
+VISITOR_LOGS_EXPORT_MAX_ROWS = 10_000
 
 # ============================================================================
