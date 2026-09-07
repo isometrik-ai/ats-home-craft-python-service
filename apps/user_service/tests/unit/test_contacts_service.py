@@ -297,7 +297,7 @@ def _contact_list_row(**overrides) -> dict[str, Any]:
         "id": CONTACT_ID,
         "first_name": "Jane",
         "last_name": "Doe",
-        "email": "jane@example.com",
+        "emails": [{"email": "jane@example.com", "is_primary": True}],
         "phones": "[]",
         "company_names": '["Acme"]',
         "tags": ["vip"],
@@ -423,6 +423,7 @@ async def test_list_contacts_returns_items(monkeypatch):
 
     assert result["total"] == 1
     assert result["items"][0]["first_name"] == "Jane"
+    assert result["items"][0]["email"] == "jane@example.com"
     assert repo.last_list_kwargs["organization_id"] == ORG_ID
     assert repo.last_list_kwargs["search"] == "jane"
 
@@ -2183,6 +2184,27 @@ def test_normalize_contact_list_row_parses_json():
     phones = row["phones"]
     assert isinstance(phones, list)
     assert phones[0]["phone_number"] == "111"
+
+
+def test_normalize_contact_list_row_email_from_contacts():
+    """Normalize list row picks primary contact email with non-primary fallback."""
+    row = _contact_list_row(
+        emails=[
+            {"email": "secondary@example.com", "is_primary": False},
+            {"email": "primary@example.com", "is_primary": True},
+        ]
+    )
+    ContactsService._normalize_contact_list_row(row)
+    assert row["email"] == "primary@example.com"
+    assert "emails" not in row
+
+    row = _contact_list_row(emails=[{"email": "only@example.com", "is_primary": False}])
+    ContactsService._normalize_contact_list_row(row)
+    assert row["email"] == "only@example.com"
+
+    row = _contact_list_row(emails=[])
+    ContactsService._normalize_contact_list_row(row)
+    assert row["email"] is None
 
 
 def test_schedule_lifecycle_event_publishes(monkeypatch):
