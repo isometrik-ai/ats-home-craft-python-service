@@ -86,6 +86,7 @@ async def test_list_logs_includes_passes_without_check_in():
     count_query, _ = conn.fetchval_calls[0]
     assert "LEFT JOIN LATERAL" in count_query
     assert PassEventType.CHECKED_IN.value in count_query
+    assert "ci.occurred_at > co.occurred_at" in count_query
     assert "visit_status" in count_query
 
 

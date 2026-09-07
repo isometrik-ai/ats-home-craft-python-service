@@ -404,10 +404,10 @@ class VisitorLogsService:
         in_time = cls._parse_dt(check_in.get("occurred_at")) if check_in else None
         out_time = cls._parse_dt(check_out.get("occurred_at")) if check_out else None
 
+        if in_time and (not out_time or in_time > out_time):
+            return VisitorLogVisitStatus.INSIDE.value
         if in_time and out_time:
             return VisitorLogVisitStatus.EXITED.value
-        if in_time and not out_time:
-            return VisitorLogVisitStatus.INSIDE.value
 
         status = str(detail.get("status") or "")
         if status == PassStatus.CANCELLED.value:
