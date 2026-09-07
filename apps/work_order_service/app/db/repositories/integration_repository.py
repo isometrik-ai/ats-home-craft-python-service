@@ -373,6 +373,8 @@ class IntegrationRepository:
         self,
         *,
         limit: int = 100,
+        after_id: str | None = None,
+        max_attempts: int = 3,
     ) -> list[dict[str, Any]]:
         """Return undelivered webhook rows for worker recovery."""
         rows = await self.conn.fetch(
@@ -381,10 +383,14 @@ class IntegrationRepository:
             FROM work_order.webhook_deliveries d
             LEFT JOIN work_order.trigger_configs t ON t.id = d.trigger_id
             WHERE d.delivered = false
-            ORDER BY d.created_at ASC
+              AND d.attempt < $2
+              AND ($3::uuid IS NULL OR d.id > $3::uuid)
+            ORDER BY d.id ASC
             LIMIT $1
             """,
             limit,
+            max_attempts,
+            after_id,
         )
         return [record_to_dict(row) for row in rows]
 

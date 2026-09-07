@@ -7,11 +7,16 @@ import hashlib
 import hmac
 import json
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
-import httpx
+import httpcore
 
-from apps.work_order_service.app.utils.webhook_url import validate_outbound_webhook_url
+from apps.work_order_service.app.utils.webhook_url import (
+    resolve_webhook_hostname,
+    validate_outbound_webhook_url,
+)
 from libs.shared_db.drivers.asyncpg_client import get_pool
+from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.logger import app_logger
 
 MAX_ATTEMPTS = 3
@@ -43,6 +48,7 @@ class WebhookWorker:
         event: str,
         payload: dict,
         delivery_id: str | None = None,
+        prior_attempts: int = 0,
     ) -> None:
         """Queue one webhook delivery."""
         self._ensure_queue().put_nowait(
@@ -55,6 +61,7 @@ class WebhookWorker:
                 "secret": secret,
                 "event": event,
                 "payload": payload,
+                "prior_attempts": prior_attempts,
             }
         )
 
@@ -103,13 +110,49 @@ async def _post_webhook(
 ) -> tuple[int | None, str | None]:
     """POST a signed webhook payload and return status or transport error."""
     validate_outbound_webhook_url(url)
-    headers = {"Content-Type": "application/json", "X-ATS-Event": event}
-    if secret:
-        headers["X-ATS-Signature"] = _sign(secret, body)
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return None, "ValidationException: invalid webhook URL"
+
+    port = parsed.port or 443
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, content=body, headers=headers, follow_redirects=False)
-        return resp.status_code, None
+        pinned_ip = await resolve_webhook_hostname(hostname, port=port)
+    except ValidationException:
+        return None, "ValidationException: webhook URL blocked"
+    except Exception as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+
+    header_items = [
+        (b"content-type", b"application/json"),
+        (b"x-ats-event", event.encode()),
+        (b"host", hostname.encode()),
+    ]
+    if secret:
+        header_items.append((b"x-ats-signature", _sign(secret, body).encode()))
+
+    timeout = {"connect": 10.0, "read": 10.0, "write": 10.0, "pool": 10.0}
+    request = httpcore.Request(
+        method=b"POST",
+        url=(b"https", pinned_ip.encode(), port, path.encode()),
+        headers=header_items,
+        content=body,
+        extensions={
+            "timeout": timeout,
+            "sni_hostname": hostname.encode("ascii"),
+        },
+    )
+
+    try:
+        async with httpcore.AsyncConnectionPool() as pool:
+            response = await pool.handle_async_request(request)
+        status = response.status
+        await response.aclose()
+        return status, None
     except Exception as exc:  # — retried below
         return None, f"{type(exc).__name__}: {exc}"
 
@@ -165,13 +208,21 @@ async def _persist_delivery_result(
 
 async def _deliver(item: dict) -> None:
     """Deliver one queued webhook with retries and audit logging."""
+    prior_attempts = int(item.get("prior_attempts") or 0)
+    if prior_attempts >= MAX_ATTEMPTS:
+        app_logger.warning(
+            "Skipping webhook delivery %s — attempt limit reached",
+            item.get("delivery_id"),
+        )
+        return
+
     started = datetime.now(timezone.utc)
     body = json.dumps(item["payload"], default=str).encode()
     status: int | None = None
     error: str | None = None
-    attempts = 0
+    attempts = prior_attempts
 
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(prior_attempts + 1, MAX_ATTEMPTS + 1):
         attempts = attempt
         status, error = await _post_webhook(
             item["webhook_url"], item.get("secret"), item["event"], body
@@ -208,30 +259,47 @@ async def _recover_pending_deliveries(worker: WebhookWorker) -> None:
         IntegrationRepository,
     )
 
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute("SET search_path TO work_order, public")
-        pending = await IntegrationRepository(conn).list_pending_webhook_deliveries(
-            limit=RECOVERY_BATCH_SIZE
-        )
-
-    for row in pending:
-        webhook_url = row.get("webhook_url")
-        if not webhook_url:
-            app_logger.warning(
-                "Skipping webhook delivery %s — trigger URL unavailable", row.get("id")
+    after_id: str | None = None
+    recovered = 0
+    while True:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute("SET search_path TO work_order, public")
+            pending = await IntegrationRepository(conn).list_pending_webhook_deliveries(
+                limit=RECOVERY_BATCH_SIZE,
+                after_id=after_id,
+                max_attempts=MAX_ATTEMPTS,
             )
-            continue
-        worker.enqueue_delivery(
-            organization_id=row["organization_id"],
-            project_id=row["project_id"],
-            trigger_id=str(row["trigger_id"]) if row.get("trigger_id") else "",
-            webhook_url=webhook_url,
-            secret=row.get("secret"),
-            event=row["event"],
-            payload=row.get("request_payload") or {},
-            delivery_id=row["id"],
-        )
+
+        if not pending:
+            break
+
+        for row in pending:
+            after_id = row["id"]
+            webhook_url = row.get("webhook_url")
+            if not webhook_url:
+                app_logger.warning(
+                    "Skipping webhook delivery %s — trigger URL unavailable", row.get("id")
+                )
+                continue
+            worker.enqueue_delivery(
+                organization_id=row["organization_id"],
+                project_id=row["project_id"],
+                trigger_id=str(row["trigger_id"]) if row.get("trigger_id") else "",
+                webhook_url=webhook_url,
+                secret=row.get("secret"),
+                event=row["event"],
+                payload=row.get("request_payload") or {},
+                delivery_id=row["id"],
+                prior_attempts=int(row.get("attempt") or 0),
+            )
+            recovered += 1
+
+        if len(pending) < RECOVERY_BATCH_SIZE:
+            break
+
+    if recovered:
+        app_logger.info("Recovered %d pending webhook deliveries", recovered)
 
 
 def enqueue_delivery(
@@ -244,6 +312,7 @@ def enqueue_delivery(
     event: str,
     payload: dict,
     delivery_id: str | None = None,
+    prior_attempts: int = 0,
 ) -> None:
     """Queue one webhook delivery."""
     _worker.enqueue_delivery(
@@ -255,6 +324,7 @@ def enqueue_delivery(
         event=event,
         payload=payload,
         delivery_id=delivery_id,
+        prior_attempts=prior_attempts,
     )
 
 

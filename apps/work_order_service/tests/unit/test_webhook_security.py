@@ -1,11 +1,35 @@
 """Unit tests for webhook URL validation and vendor request schemas."""
 
+import socket
+
 import pytest
 from pydantic import ValidationError
 
 from apps.work_order_service.app.schemas.work_orders import VendorUpdateWorkOrderRequest
 from apps.work_order_service.app.utils.webhook_url import validate_outbound_webhook_url
 from libs.shared_utils.http_exceptions import ValidationException
+
+_PUBLIC_IP = "93.184.216.34"
+
+
+@pytest.fixture(autouse=True)
+def mock_public_dns(monkeypatch):
+    """Resolve hostnames to a stable public IP in unit tests."""
+
+    def fake_getaddrinfo(host, port, *_args, **_kwargs):
+        if host in {"127.0.0.1", "localhost", "169.254.169.254"}:
+            raise socket.gaierror("blocked")
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                6,
+                "",
+                (host if host.replace(".", "").isdigit() else _PUBLIC_IP, port),
+            )
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
 
 def test_vendor_update_rejects_timeline_field():
@@ -49,3 +73,15 @@ def test_validate_webhook_url_rejects_unsafe_urls(url: str):
     """Private, non-HTTPS, and localhost webhook URLs are rejected."""
     with pytest.raises(ValidationException):
         validate_outbound_webhook_url(url)
+
+
+def test_validate_webhook_url_rejects_hostname_resolving_to_private(monkeypatch):
+    """Hostnames that resolve to private IPs are rejected."""
+
+    def fake_getaddrinfo(host, port, *_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+
+    with pytest.raises(ValidationException):
+        validate_outbound_webhook_url("https://rebind.example/hook")
