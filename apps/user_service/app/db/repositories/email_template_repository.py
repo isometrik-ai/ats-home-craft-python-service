@@ -148,6 +148,31 @@ class EmailTemplateRepository:
         )
         return dict(row) if row else None
 
+    async def get_published_trigger_by_name(
+        self,
+        organization_id: str,
+        name: str,
+    ) -> dict[str, Any] | None:
+        """Return the newest published TRIGGER template with the given name."""
+        query = f"""
+            SELECT {self._columns_expr()}
+            FROM {self.TABLE_NAME}
+            WHERE organization_id = $1
+              AND name = $2
+              AND template_type = $3
+              AND status = $4
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            organization_id,
+            name,
+            EmailTemplateType.TRIGGER.value,
+            EmailTemplateStatus.PUBLISHED.value,
+        )
+        return dict(row) if row else None
+
     async def get_template_by_id(
         self,
         organization_id: str,

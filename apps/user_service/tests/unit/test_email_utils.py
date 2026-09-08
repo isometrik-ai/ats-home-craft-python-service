@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from apps.user_service.app.utils import email_utils
 
@@ -203,6 +205,83 @@ def test_unit_assignment_welcome_email_failure_on_exception() -> None:
             login_email="john@example.com",
         )
     assert ok is False
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.utils.email_utils.EmailTemplateRepository")
+async def test_resolve_unit_assignment_welcome_content_uses_db_template(
+    mock_repo_cls,
+) -> None:
+    """Published org DB template overrides subject and HTML."""
+    mock_repo_cls.return_value.get_published_trigger_by_name = AsyncMock(
+        return_value={
+            "subject": "DB — {{ organization_name }}",
+            "html_content": "<p>DB hello {{ greeting_name }}</p>",
+        }
+    )
+    context = {
+        "greeting_name": "John",
+        "organization_name": "Green Valley Residency",
+        "project_name": "Sunrise Towers",
+        "unit_display": "Tower A — 1204",
+        "phone_display": "+91 9876543210",
+        "email_display": "john@example.com",
+        "has_login_phone": True,
+        "ios_app_store_url": None,
+        "android_play_store_url": None,
+        "app_name": "ATS Home Craft",
+        "current_year": 2026,
+        "company_name": "House of Apps AI",
+        "company_address": "123 Main Street",
+        "privacy_policy_url": "https://houseofapps.ai/privacy",
+        "terms_url": "https://houseofapps.ai/terms",
+    }
+
+    subject, message, html = await email_utils.resolve_unit_assignment_welcome_content(
+        db_connection=MagicMock(),
+        organization_id="org-1",
+        context=context,
+    )
+
+    assert subject == "DB — Green Valley Residency"
+    assert "DB hello John" in html
+    assert "+91 9876543210" in message
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.utils.email_utils.EmailTemplateRepository")
+async def test_resolve_unit_assignment_welcome_content_falls_back_to_files(
+    mock_repo_cls,
+) -> None:
+    """Missing DB template uses file templates."""
+    mock_repo_cls.return_value.get_published_trigger_by_name = AsyncMock(return_value=None)
+    context = {
+        "greeting_name": "John",
+        "app_name": "ATS Home Craft",
+        "organization_name": "Green Valley Residency",
+        "project_name": "Sunrise Towers",
+        "unit_display": "Tower A — 1204",
+        "phone_display": "+91 9876543210",
+        "email_display": "john@example.com",
+        "has_login_phone": True,
+        "ios_app_store_url": None,
+        "android_play_store_url": None,
+        "current_year": 2026,
+        "company_name": "House of Apps AI",
+        "company_address": "123 Main Street",
+        "privacy_policy_url": "https://houseofapps.ai/privacy",
+        "terms_url": "https://houseofapps.ai/terms",
+    }
+
+    subject, message, html = await email_utils.resolve_unit_assignment_welcome_content(
+        db_connection=MagicMock(),
+        organization_id="org-1",
+        context=context,
+    )
+
+    assert "Green Valley Residency" in subject
+    assert "+91 9876543210" in message
+    assert "Tower A — 1204" in html
 
 
 def test_unit_assignment_welcome_email_shows_only_configured_store_button() -> None:

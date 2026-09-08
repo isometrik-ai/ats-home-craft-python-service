@@ -130,3 +130,19 @@ async def test_update_and_delete_template():
     deleted = await repo.delete_template(ORG_ID, TEMPLATE_ID)
     assert deleted["id"] == TEMPLATE_ID
     assert "DELETE FROM email_templates" in conn.fetchrow_calls[1][0]
+
+
+@pytest.mark.asyncio
+async def test_get_published_trigger_by_name():
+    conn = _FakeConn(row={"id": TEMPLATE_ID, "name": "unit_assignment_welcome"})
+    repo = EmailTemplateRepository(db_connection=conn)
+
+    row = await repo.get_published_trigger_by_name(ORG_ID, "unit_assignment_welcome")
+
+    assert row["name"] == "unit_assignment_welcome"
+    query, args = conn.fetchrow_calls[0]
+    assert "template_type" in query
+    assert "status" in query
+    assert args[1] == "unit_assignment_welcome"
+    assert args[2] == EmailTemplateType.TRIGGER.value
+    assert args[3] == EmailTemplateStatus.PUBLISHED.value

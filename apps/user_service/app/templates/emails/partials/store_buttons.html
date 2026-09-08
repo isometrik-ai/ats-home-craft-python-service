@@ -1,0 +1,17 @@
+<p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 12px;">
+  Get started by installing the app on your phone:
+</p>
+<div style="margin: 24px 0; text-align: center;">
+  {% if ios_app_store_url %}
+  <a href="{{ ios_app_store_url }}"
+      style="display:inline-block; margin:8px 12px 8px 0; padding:12px 20px; background-color:#111827; color:#ffffff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:600;">
+    Download on the App Store
+  </a>
+  {% endif %}
+  {% if android_play_store_url %}
+  <a href="{{ android_play_store_url }}"
+      style="display:inline-block; margin:8px 0; padding:12px 20px; background-color:#1d4ed8; color:#ffffff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:600;">
+    Get it on Google Play
+  </a>
+  {% endif %}
+</div>

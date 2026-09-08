@@ -1,0 +1,47 @@
+Hello {{ greeting_name }},
+
+Welcome to {{ app_name }}!
+
+On behalf of the entire {{ organization_name }} team, we are delighted to have you with us.
+
+Your home has been registered in our community management system, and your unit allotment is now complete. Through the {{ app_name }} app, you can access community services, stay updated on notices and events, manage your profile, and complete your move-in onboarding.
+
+Your allotment details:
+- Community: {{ organization_name }}
+- Project: {{ project_name }}
+- Unit: {{ unit_display }}
+- Status: Assigned — pending your confirmation in the app
+
+Your registered details:
+- Phone number: {{ phone_display }}
+- Email: {{ email_display }}
+
+{% if has_login_phone -%}
+Sign in on the app login screen using your phone number: {{ phone_display }}
+{% else -%}
+Sign in on the app login screen using your registered phone number.
+{% endif -%}
+Your email is your registered contact on file with the community.
+
+{% if ios_app_store_url or android_play_store_url -%}
+Download the {{ app_name }} app:
+{% if ios_app_store_url -%}
+App Store: {{ ios_app_store_url }}
+{% endif -%}
+{% if android_play_store_url -%}
+Google Play: {{ android_play_store_url }}
+{% endif -%}
+
+{% endif -%}
+Your next steps:
+1. Download the {{ app_name }} app
+2. Sign in with your phone number{% if has_login_phone %} ({{ phone_display }}){% endif %}
+
+3. Accept your unit when prompted ({{ unit_display }})
+4. Complete your profile and finish onboarding
+
+If you have any questions, please contact your community management team. We look forward to serving you.
+
+Warm regards,
+The {{ organization_name }} Team
+Powered by {{ app_name }}

@@ -846,7 +846,20 @@ Email contents:
 - App Store and Google Play download buttons when `IOS_APP_STORE_URL` / `ANDROID_PLAY_STORE_URL` are configured
 
 Implementation: `ContactUnitsService.admin_assign_unit` →
-`send_unit_assignment_welcome_email` in `apps/user_service/app/utils/email_utils.py`.
+`send_unit_assignment_welcome_email_for_org` in `apps/user_service/app/utils/email_utils.py`.
+
+**Template resolution (hybrid):**
+
+1. If the org has a **published** DB trigger template named `unit_assignment_welcome`, subject and
+   HTML are compiled at send time with Jinja2 from the stored strings (Pug-style runtime templates).
+1. Otherwise the backend uses file templates under `apps/user_service/app/templates/emails/`.
+
+Use Jinja syntax in DB templates (`{{ greeting_name }}`, `{% if %}`, `{% extends %}`), not the
+`{{.variable_key}}` placeholders used by the generic email-template preview API.
+
+Templates live under `apps/user_service/app/templates/emails/` (Jinja2 fallback):
+`unit_assignment_welcome/subject.txt`, `body.txt`, `body.html`, shared layout in
+`layouts/transactional.html`.
 
 Create contact + unit in one request sends **only** the unit welcome email (not
 `send_client_creation_email`).

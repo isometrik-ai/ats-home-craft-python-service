@@ -39,7 +39,9 @@ from apps.user_service.app.utils.common_utils import (
     format_iso_datetime,
     parse_json_any,
 )
-from apps.user_service.app.utils.email_utils import send_unit_assignment_welcome_email
+from apps.user_service.app.utils.email_utils import (
+    send_unit_assignment_welcome_email_for_org,
+)
 from libs.shared_db.supabase_db.client import get_supabase_service_client
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.logger import get_logger
@@ -712,7 +714,9 @@ class ContactUnitsService:
             project_name = str(project.get("name") or project.get("code") or "").strip()
             unit_display = self._build_unit_display_label(normalized_unit)
 
-            send_unit_assignment_welcome_email(
+            await send_unit_assignment_welcome_email_for_org(
+                db_connection=self.db_connection,
+                organization_id=org_id,
                 email=recipient_email,
                 first_name=contact.get("first_name"),
                 organization_name=organization_name,

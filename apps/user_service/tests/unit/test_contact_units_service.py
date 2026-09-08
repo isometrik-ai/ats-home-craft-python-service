@@ -665,7 +665,9 @@ async def test_create_unit_allotment_contact_not_found():
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_maybe_send_welcome_email_sends_when_contact_has_email(
@@ -708,7 +710,9 @@ async def test_maybe_send_welcome_email_sends_when_contact_has_email(
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_maybe_send_welcome_email_skips_without_email(
     mock_contacts_repo_cls,
@@ -732,7 +736,9 @@ async def test_maybe_send_welcome_email_skips_without_email(
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_maybe_send_welcome_email_does_not_fail_assign_on_error(
@@ -761,7 +767,9 @@ async def test_maybe_send_welcome_email_does_not_fail_assign_on_error(
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_maybe_send_welcome_email_skips_when_contact_not_found(
     mock_contacts_repo_cls,
@@ -787,7 +795,9 @@ async def test_maybe_send_welcome_email_skips_when_contact_not_found(
     "apps.user_service.app.services.contact_units_service.get_supabase_service_client",
     new_callable=AsyncMock,
 )
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_maybe_send_welcome_email_provisions_auth_without_user_id(
@@ -825,7 +835,9 @@ async def test_maybe_send_welcome_email_provisions_auth_without_user_id(
 
 @pytest.mark.asyncio
 @patch("apps.user_service.app.services.contacts_service.ContactsService")
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_maybe_send_welcome_email_skips_auth_when_user_exists(
@@ -865,7 +877,9 @@ async def test_maybe_send_welcome_email_skips_auth_when_user_exists(
     "apps.user_service.app.services.contact_units_service.get_supabase_service_client",
     new_callable=AsyncMock,
 )
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_maybe_send_welcome_email_continues_when_auth_provision_fails(
@@ -901,7 +915,9 @@ async def test_maybe_send_welcome_email_continues_when_auth_provision_fails(
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
 @patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
 @patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
 async def test_admin_assign_unit_succeeds_when_welcome_email_fails(
