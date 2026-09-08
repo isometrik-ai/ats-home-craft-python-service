@@ -788,6 +788,13 @@ class CommunityEventsService:
             payment_status.replace("_", " ").title(),
         )
 
+    @staticmethod
+    def _csv_safe(value: Any) -> Any:
+        """Neutralize spreadsheet formula injection in CSV cell values."""
+        if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+            return "'" + value
+        return value
+
     async def export_events_csv(
         self,
         *,
@@ -913,7 +920,13 @@ class CommunityEventsService:
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow(["event_display_code", "event_title", "currency"])
-        writer.writerow([event_row["display_code"], event_row["title"], currency])
+        writer.writerow(
+            [
+                self._csv_safe(event_row["display_code"]),
+                self._csv_safe(event_row["title"]),
+                self._csv_safe(currency),
+            ]
+        )
         writer.writerow(["collected_minor", "pending_minor"])
         writer.writerow(
             [
@@ -927,10 +940,10 @@ class CommunityEventsService:
             payment_status = str(row.get("payment_status") or "")
             writer.writerow(
                 [
-                    row.get("contact_name"),
+                    self._csv_safe(row.get("contact_name")),
                     row.get("amount_minor"),
-                    self._payment_status_label(payment_status),
-                    row.get("txn_ref"),
+                    self._csv_safe(self._payment_status_label(payment_status)),
+                    self._csv_safe(row.get("txn_ref")),
                 ]
             )
         return buffer.getvalue()
