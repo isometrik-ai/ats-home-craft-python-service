@@ -31,9 +31,9 @@ from libs.shared_utils.common_query import (
     LEADS_MANAGEMENT_DELETE,
     LEADS_MANAGEMENT_EDIT,
     LEADS_MANAGEMENT_VIEW,
+    PROJECT_SETUP_DELETE,
+    PROJECT_SETUP_EDIT,
     PROJECTS_MANAGEMENT_CREATE,
-    PROJECTS_MANAGEMENT_DELETE,
-    PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import (
@@ -190,8 +190,8 @@ class EntityListsService:
             },
             EntityType.PROJECT: {
                 "create": PROJECTS_MANAGEMENT_CREATE,
-                "edit": PROJECTS_MANAGEMENT_EDIT,
-                "delete": PROJECTS_MANAGEMENT_DELETE,
+                "edit": PROJECT_SETUP_EDIT,
+                "delete": PROJECT_SETUP_DELETE,
                 "view": PROJECTS_MANAGEMENT_VIEW,
             },
         }

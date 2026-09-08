@@ -354,11 +354,16 @@ class ProjectsRepository(BaseRepository):
               p.setup_current_step::text AS setup_current_step,
               p.created_at,
               p.updated_at,
-              pm.role
+              pm.project_role_id::text AS project_role_id,
+              pr.slug AS role_slug,
+              pr.name AS role_name
             FROM projects p
             INNER JOIN project_members pm
               ON pm.project_id = p.id
              AND pm.organization_id = p.organization_id
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
             WHERE {where_sql}
             ORDER BY p.created_at DESC
             OFFSET ${next_param} LIMIT ${next_param + 1}
@@ -467,22 +472,27 @@ class ProjectsRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         user_id: str,
-        role: str = "community_admin",
+        project_role_id: str,
     ) -> dict[str, Any]:
         """Add (or keep) a project member."""
         row = await self.db_connection.fetchrow(
             """
-            INSERT INTO project_members (organization_id, project_id, user_id, role)
-            VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+            INSERT INTO project_members (
+                organization_id,
+                project_id,
+                user_id,
+                project_role_id
+            )
+            VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid)
             ON CONFLICT (project_id, user_id) DO UPDATE
-              SET role = EXCLUDED.role,
+              SET project_role_id = EXCLUDED.project_role_id,
                   updated_at = now()
             RETURNING *
             """,
             organization_id,
             project_id,
             user_id,
-            role,
+            project_role_id,
         )
         return dict(row)
 
@@ -552,16 +562,16 @@ class ProjectsRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         user_id: str,
-        role: str | None = None,
+        project_role_id: str | None = None,
         status: str | None = None,
     ) -> dict[str, Any] | None:
-        """Patch role and/or status on a project member."""
+        """Patch project_role_id and/or status on a project member."""
         sets: list[str] = ["updated_at = now()"]
         args: list[Any] = [organization_id, project_id, user_id]
         next_param = 4
-        if role is not None:
-            sets.append(f"role = ${next_param}")
-            args.append(role)
+        if project_role_id is not None:
+            sets.append(f"project_role_id = ${next_param}::uuid")
+            args.append(project_role_id)
             next_param += 1
         if status is not None:
             sets.append(f"status = ${next_param}")
@@ -606,7 +616,7 @@ class ProjectsRepository(BaseRepository):
         *,
         organization_id: str,
         project_id: str,
-        role: str | None = None,
+        role_slug: str | None = None,
         status: str | None = None,
         search: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -625,9 +635,9 @@ class ProjectsRepository(BaseRepository):
         else:
             conditions.append("pm.status != 'suspended'")
 
-        if role is not None:
-            conditions.append(f"pm.role = ${next_param}::project_member_role")
-            args.append(role)
+        if role_slug is not None:
+            conditions.append(f"pr.slug = ${next_param}")
+            args.append(role_slug)
             next_param += 1
 
         if search:
@@ -650,7 +660,9 @@ class ProjectsRepository(BaseRepository):
               pm.organization_id::text AS organization_id,
               pm.project_id::text AS project_id,
               pm.user_id::text AS user_id,
-              pm.role,
+              pm.project_role_id::text AS project_role_id,
+              pr.slug AS role_slug,
+              pr.name AS role_name,
               pm.status,
               pm.joined_at,
               pm.created_at,
@@ -661,6 +673,9 @@ class ProjectsRepository(BaseRepository):
               om.role_id::text AS org_role_id,
               om.member_role
             FROM project_members pm
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
             INNER JOIN organization_members om
               ON om.user_id = pm.user_id
              AND om.organization_id = pm.organization_id
@@ -672,25 +687,57 @@ class ProjectsRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
-    async def count_active_members_by_role(
+    async def count_active_members_by_role_slug(
         self,
         *,
         organization_id: str,
         project_id: str,
-        role: str,
+        role_slug: str,
     ) -> int:
-        """Count active project members with a given role."""
+        """Count active project members with a given role slug."""
         count = await self.db_connection.fetchval(
             """
             SELECT COUNT(1)
-            FROM project_members
-            WHERE organization_id = $1::uuid
-              AND project_id = $2::uuid
-              AND role = $3
-              AND status = 'active'
+            FROM project_members pm
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
+            WHERE pm.organization_id = $1::uuid
+              AND pm.project_id = $2::uuid
+              AND pr.slug = $3
+              AND pm.status = 'active'
             """,
             organization_id,
             project_id,
-            role,
+            role_slug,
         )
         return int(count or 0)
+
+    async def get_active_member_with_role(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        user_id: str,
+    ) -> dict[str, Any] | None:
+        """Return active project member joined with project role slug."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+              pm.*,
+              pr.slug AS role_slug,
+              pr.name AS role_name
+            FROM project_members pm
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
+            WHERE pm.organization_id = $1::uuid
+              AND pm.project_id = $2::uuid
+              AND pm.user_id = $3::uuid
+              AND pm.status = 'active'
+            """,
+            organization_id,
+            project_id,
+            user_id,
+        )
+        return dict(row) if row else None

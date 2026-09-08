@@ -21,6 +21,7 @@ from apps.user_service.app.schemas.project_setup import (
     ProjectMediaRequest,
     UpdateProjectRequest,
 )
+from apps.user_service.app.services.project_roles_service import ProjectRolesService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
@@ -30,6 +31,7 @@ from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ValidationException,
 )
+from libs.shared_utils.project_role_defaults import COMMUNITY_ADMIN_SLUG
 from libs.shared_utils.status_codes import CustomStatusCode
 
 _PROJECT_CODE_MAX_LEN = 64
@@ -209,7 +211,9 @@ class ProjectsService:
     def _my_project_summary_from_row(row: dict[str, Any]) -> dict[str, Any]:
         """Serialize an assigned-project list row."""
         summary = ProjectsService._summary_from_row(row)
-        summary["role"] = str(row.get("role") or "")
+        summary["project_role_id"] = str(row.get("project_role_id") or "")
+        summary["role_slug"] = str(row.get("role_slug") or "")
+        summary["role_name"] = row.get("role_name")
         return summary
 
     @staticmethod
@@ -318,17 +322,24 @@ class ProjectsService:
             project_id=str(inserted["id"]),
             property_types=property_types,
         )
+        project_roles_service = ProjectRolesService(db_connection=self.db_connection)
+        role_ids = await project_roles_service.seed_default_roles_for_project(
+            organization_id=org_id,
+            project_id=str(inserted["id"]),
+        )
+        community_admin_role_id = role_ids[COMMUNITY_ADMIN_SLUG]
         if self.user_context.user_id:
             await self.projects_repo.upsert_member(
                 organization_id=org_id,
                 project_id=str(inserted["id"]),
                 user_id=self.user_context.user_id,
+                project_role_id=community_admin_role_id,
             )
         await self.projects_repo.upsert_member(
             organization_id=org_id,
             project_id=str(inserted["id"]),
             user_id=community_admin_user_id,
-            role="community_admin",
+            project_role_id=community_admin_role_id,
         )
         refreshed = await self.projects_repo.get_project(
             organization_id=org_id, project_id=str(inserted["id"])
@@ -389,11 +400,16 @@ class ProjectsService:
                 organization_id=org_id, project_id=project_id
             )
         if "community_admin_user_id" in patch and patch["community_admin_user_id"]:
+            project_roles_service = ProjectRolesService(db_connection=self.db_connection)
+            community_admin_role_id = await project_roles_service.get_community_admin_role_id(
+                organization_id=org_id,
+                project_id=project_id,
+            )
             await self.projects_repo.upsert_member(
                 organization_id=org_id,
                 project_id=project_id,
                 user_id=str(patch["community_admin_user_id"]),
-                role="community_admin",
+                project_role_id=community_admin_role_id,
             )
         return {
             "old_data": current,

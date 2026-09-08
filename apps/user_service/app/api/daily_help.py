@@ -46,8 +46,9 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    PROJECTS_MANAGEMENT_EDIT,
-    PROJECTS_MANAGEMENT_VIEW,
+    DAILY_HELP_MANAGEMENT_CREATE,
+    DAILY_HELP_MANAGEMENT_UPDATE,
+    DAILY_HELP_MANAGEMENT_VIEW,
     VISITOR_MANAGEMENT_VERIFY,
 )
 from libs.shared_utils.response_factory import list_response, success_response
@@ -177,7 +178,7 @@ async def get_project_daily_help_summary(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -211,7 +212,7 @@ async def list_project_daily_help_profiles(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -248,7 +249,7 @@ async def export_project_daily_help_profiles(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -280,7 +281,7 @@ async def list_project_daily_help_categories(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=[PROJECTS_MANAGEMENT_VIEW, VISITOR_MANAGEMENT_VERIFY],
+        permission_codes=[DAILY_HELP_MANAGEMENT_VIEW, VISITOR_MANAGEMENT_VERIFY],
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -321,7 +322,7 @@ async def create_project_daily_help_category(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=[PROJECTS_MANAGEMENT_EDIT, VISITOR_MANAGEMENT_VERIFY],
+        permission_codes=[DAILY_HELP_MANAGEMENT_CREATE, VISITOR_MANAGEMENT_VERIFY],
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -373,7 +374,7 @@ async def update_project_daily_help_category(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -427,7 +428,7 @@ async def create_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_CREATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -559,7 +560,7 @@ async def get_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -593,7 +594,7 @@ async def list_project_daily_help_household_links(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -635,7 +636,7 @@ async def link_project_daily_help_to_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -692,7 +693,7 @@ async def unlink_project_daily_help_from_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -747,7 +748,7 @@ async def regenerate_daily_help_gate_passcode(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -801,7 +802,7 @@ async def update_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1047,7 +1048,7 @@ async def deactivate_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1097,7 +1098,7 @@ async def reactivate_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1147,7 +1148,7 @@ async def delete_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1197,7 +1198,7 @@ async def restore_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1248,7 +1249,7 @@ async def add_daily_help_document(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1304,7 +1305,7 @@ async def delete_daily_help_document(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1359,7 +1360,7 @@ async def replace_daily_help_availability(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
@@ -1418,7 +1419,7 @@ async def get_daily_help_attendance(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)

@@ -306,12 +306,22 @@ class InviteService:
         """Assign accepted invitee to a project when project_id was set on the invitation."""
         if not project_id:
             return
-        role = project_role or ProjectMemberRole.COMMUNITY_ADMIN.value
+        from apps.user_service.app.services.project_roles_service import (
+            ProjectRolesService,
+        )
+
+        roles_service = ProjectRolesService(db_connection=self.db_connection)
+        slug = project_role or ProjectMemberRole.COMMUNITY_ADMIN.value
+        project_role_id = await roles_service.resolve_role_id_for_slug(
+            organization_id=organization_id,
+            project_id=project_id,
+            slug=slug,
+        )
         await self.projects_repository.upsert_member(
             organization_id=organization_id,
             project_id=project_id,
             user_id=user_id,
-            role=role,
+            project_role_id=project_role_id,
         )
 
     def _validate_invitation_for_acceptance(

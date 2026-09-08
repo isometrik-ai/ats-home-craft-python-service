@@ -10,20 +10,21 @@ from apps.user_service.app.db.repositories.organization_member_repository import
     OrganizationMemberRepository,
 )
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
-from apps.user_service.app.schemas.enums import ProjectMemberRole, ProjectMemberStatus
+from apps.user_service.app.schemas.enums import ProjectMemberStatus
 from apps.user_service.app.schemas.project_members import (
     AssignProjectMemberRequest,
     ProjectMemberResponse,
     UpdateProjectMemberRequest,
 )
+from apps.user_service.app.services.project_roles_service import ProjectRolesService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    ensure_project_staff_management_access_for_context,
     ensure_staff_project_access_for_context,
     format_iso_datetime,
 )
 from libs.shared_utils.common_query import (
-    PROJECT_MEMBERS_MANAGE,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
 )
@@ -32,6 +33,7 @@ from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ValidationException,
 )
+from libs.shared_utils.project_role_defaults import COMMUNITY_ADMIN_SLUG
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -48,6 +50,10 @@ class ProjectMembersService:
         self.user_context = user_context
         self.projects_repo = ProjectsRepository(db_connection)
         self.org_member_repo = OrganizationMemberRepository(db_connection)
+        self.project_roles_service = ProjectRolesService(
+            db_connection=db_connection,
+            user_context=user_context,
+        )
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
             user_context=user_context,
@@ -67,11 +73,10 @@ class ProjectMembersService:
 
     async def _ensure_can_manage_members(self, *, project_id: str) -> None:
         """Ensure caller may manage project members."""
-        await ensure_staff_project_access_for_context(
+        await ensure_project_staff_management_access_for_context(
             user_context=self.user_context,
             db_connection=self.db_connection,
             project_id=project_id,
-            permission_codes=PROJECT_MEMBERS_MANAGE,
         )
 
     async def _ensure_assignee_is_org_member(self, *, user_id: str) -> None:
@@ -93,7 +98,14 @@ class ProjectMembersService:
     def _to_response(row: dict[str, Any]) -> ProjectMemberResponse:
         """Map a project member row to API response."""
         payload = dict(row)
-        for key in ("id", "organization_id", "project_id", "user_id", "org_role_id"):
+        for key in (
+            "id",
+            "organization_id",
+            "project_id",
+            "user_id",
+            "project_role_id",
+            "org_role_id",
+        ):
             if payload.get(key) is not None:
                 payload[key] = str(payload[key])
         if payload.get("joined_at") is not None:
@@ -104,7 +116,7 @@ class ProjectMembersService:
         self,
         *,
         project_id: str,
-        role: ProjectMemberRole | None = None,
+        role_slug: str | None = None,
         status: ProjectMemberStatus | None = None,
         search: str | None = None,
     ) -> list[ProjectMemberResponse]:
@@ -116,7 +128,7 @@ class ProjectMembersService:
         rows = await self.projects_repo.list_members_with_profiles(
             organization_id=org_id,
             project_id=project_id,
-            role=role.value if role else None,
+            role_slug=role_slug,
             status=status.value if status else None,
             search=search,
         )
@@ -135,6 +147,12 @@ class ProjectMembersService:
 
         org_id = self.user_context.organization_id
         assert org_id
+        await self.project_roles_service.ensure_project_role_belongs_to_project(
+            organization_id=org_id,
+            project_id=project_id,
+            project_role_id=body.project_role_id,
+        )
+
         existing = await self.projects_repo.get_member(
             organization_id=org_id,
             project_id=project_id,
@@ -150,14 +168,14 @@ class ProjectMembersService:
             organization_id=org_id,
             project_id=project_id,
             user_id=body.user_id,
-            role=body.role.value,
+            project_role_id=body.project_role_id,
         )
         if existing and existing.get("status") != ProjectMemberStatus.ACTIVE.value:
             updated = await self.projects_repo.update_member(
                 organization_id=org_id,
                 project_id=project_id,
                 user_id=body.user_id,
-                role=body.role.value,
+                project_role_id=body.project_role_id,
                 status=ProjectMemberStatus.ACTIVE.value,
             )
             row = updated or row
@@ -193,12 +211,33 @@ class ProjectMembersService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        next_role = body.role.value if body.role else str(current.get("role"))
+        if body.project_role_id:
+            await self.project_roles_service.ensure_project_role_belongs_to_project(
+                organization_id=org_id,
+                project_id=project_id,
+                project_role_id=body.project_role_id,
+            )
+
+        current_slug = await self._role_slug_for_member(
+            organization_id=org_id,
+            project_id=project_id,
+            project_role_id=str(current.get("project_role_id") or ""),
+        )
         next_status = body.status.value if body.status else str(current.get("status"))
+        next_slug = current_slug
+        if body.project_role_id:
+            role = await self.project_roles_service.repo.get_role_by_id(
+                organization_id=org_id,
+                project_id=project_id,
+                project_role_id=body.project_role_id,
+            )
+            next_slug = str((role or {}).get("slug") or "")
+
         await self._ensure_not_last_community_admin(
             project_id=project_id,
-            current=current,
-            next_role=next_role,
+            current_slug=current_slug,
+            current_status=str(current.get("status")),
+            next_slug=next_slug,
             next_status=next_status,
         )
 
@@ -206,7 +245,7 @@ class ProjectMembersService:
             organization_id=org_id,
             project_id=project_id,
             user_id=user_id,
-            role=body.role.value if body.role else None,
+            project_role_id=body.project_role_id,
             status=body.status.value if body.status else None,
         )
         if not updated:
@@ -239,10 +278,17 @@ class ProjectMembersService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+        current_slug = await self._role_slug_for_member(
+            organization_id=org_id,
+            project_id=project_id,
+            project_role_id=str(current.get("project_role_id") or ""),
+        )
+
         await self._ensure_not_last_community_admin(
             project_id=project_id,
-            current=current,
-            next_role=str(current.get("role")),
+            current_slug=current_slug,
+            current_status=str(current.get("status")),
+            next_slug=current_slug,
             next_status=ProjectMemberStatus.SUSPENDED.value,
         )
 
@@ -257,32 +303,47 @@ class ProjectMembersService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+    async def _role_slug_for_member(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        project_role_id: str,
+    ) -> str:
+        """Resolve a member's project role slug."""
+        if not project_role_id:
+            return ""
+        role = await self.project_roles_service.repo.get_role_by_id(
+            organization_id=organization_id,
+            project_id=project_id,
+            project_role_id=project_role_id,
+        )
+        return str((role or {}).get("slug") or "")
+
     async def _ensure_not_last_community_admin(
         self,
         *,
         project_id: str,
-        current: dict[str, Any],
-        next_role: str,
+        current_slug: str,
+        current_status: str,
+        next_slug: str,
         next_status: str,
     ) -> None:
         """Prevent removing or demoting the last active community admin."""
         if (
-            current.get("role") != ProjectMemberRole.COMMUNITY_ADMIN.value
-            or current.get("status") != ProjectMemberStatus.ACTIVE.value
+            current_slug != COMMUNITY_ADMIN_SLUG
+            or current_status != ProjectMemberStatus.ACTIVE.value
         ):
             return
-        if (
-            next_role == ProjectMemberRole.COMMUNITY_ADMIN.value
-            and next_status == ProjectMemberStatus.ACTIVE.value
-        ):
+        if next_slug == COMMUNITY_ADMIN_SLUG and next_status == ProjectMemberStatus.ACTIVE.value:
             return
 
         org_id = self.user_context.organization_id
         assert org_id
-        admin_count = await self.projects_repo.count_active_members_by_role(
+        admin_count = await self.projects_repo.count_active_members_by_role_slug(
             organization_id=org_id,
             project_id=project_id,
-            role=ProjectMemberRole.COMMUNITY_ADMIN.value,
+            role_slug=COMMUNITY_ADMIN_SLUG,
         )
         if admin_count <= 1:
             raise ValidationException(

@@ -24,8 +24,8 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    PROJECTS_MANAGEMENT_EDIT,
-    PROJECTS_MANAGEMENT_VIEW,
+    TENANT_REQUESTS_MANAGEMENT_EDIT,
+    TENANT_REQUESTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -61,7 +61,7 @@ async def get_project_tenant_request_summary(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = TenantRequestsService(
@@ -101,7 +101,7 @@ async def list_project_tenant_requests(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = TenantRequestsService(
@@ -140,7 +140,7 @@ async def get_project_tenant_request(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = TenantRequestsService(
@@ -187,7 +187,7 @@ async def verify_tenant_document(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = TenantRequestsService(
@@ -245,7 +245,7 @@ async def reject_tenant_document(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = TenantRequestsService(
@@ -304,7 +304,7 @@ async def approve_tenant_request(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = TenantRequestsService(

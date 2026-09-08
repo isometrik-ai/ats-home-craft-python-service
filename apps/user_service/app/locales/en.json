@@ -350,6 +350,27 @@
       "project_deleted": "Project deleted successfully."
     }
   },
+  "project_roles": {
+    "errors": {
+      "not_found": "Project role not found.",
+      "community_admin_not_found": "Community admin role is not configured for this project.",
+      "permission_not_project_scopable": "One or more permissions cannot be assigned to project roles.",
+      "system_role_not_deletable": "Default project roles cannot be deleted.",
+      "role_in_use": "Cannot delete role. It is currently assigned to {member_count} project member(s).",
+      "slug_invalid": "Role slug must start with a letter and contain only lowercase letters, numbers, and underscores.",
+      "slug_reserved": "The slug '{slug}' is reserved for a default project role.",
+      "slug_already_exists": "A project role with slug '{slug}' already exists."
+    },
+    "success": {
+      "list_retrieved": "Project roles retrieved successfully.",
+      "detail_retrieved": "Project role retrieved successfully.",
+      "created": "Project role created successfully.",
+      "updated": "Project role updated successfully.",
+      "deleted": "Project role deleted successfully.",
+      "assignable_permissions_retrieved": "Assignable project permissions retrieved successfully.",
+      "permissions_retrieved": "Project permissions retrieved successfully."
+    }
+  },
   "project_members": {
     "errors": {
       "not_found": "Project member not found.",
