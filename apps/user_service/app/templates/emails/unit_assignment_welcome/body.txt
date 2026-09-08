@@ -16,25 +16,27 @@ Your registered details:
 - Phone number: {{ phone_display }}
 - Email: {{ email_display }}
 
-{% if has_login_phone -%}
+{% if has_login_phone %}
 Sign in on the app login screen using your phone number: {{ phone_display }}
-{% else -%}
+{% else %}
 Sign in on the app login screen using your registered phone number.
-{% endif -%}
+{% endif %}
 Your email is your registered contact on file with the community.
 
-{% if ios_app_store_url or android_play_store_url -%}
+{% if ios_app_store_url or android_play_store_url %}
 Download the {{ app_name }} app:
-{% if ios_app_store_url -%}
+{% if ios_app_store_url %}
 App Store: {{ ios_app_store_url }}
-{% endif -%}
-{% if android_play_store_url -%}
+{% endif %}
+{% if android_play_store_url %}
 Google Play: {{ android_play_store_url }}
-{% endif -%}
+{% endif %}
 
-{% endif -%}
+{% endif %}
 Your next steps:
+{% if ios_app_store_url or android_play_store_url %}
 1. Download the {{ app_name }} app
+{% endif %}
 2. Sign in with your phone number{% if has_login_phone %} ({{ phone_display }}){% endif %}
 
 3. Accept your unit when prompted ({{ unit_display }})

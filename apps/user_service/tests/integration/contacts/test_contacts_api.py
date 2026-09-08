@@ -630,10 +630,17 @@ async def test_assign_unit(monkeypatch, client):
         assert contact_id == CONTACT_ID
         return {"id": "cu-1", "unit_id": UNIT_ID, "contact_id": CONTACT_ID}
 
+    def fake_schedule_welcome_email(**_kwargs):
+        return None
+
     monkeypatch.setattr(
-        "apps.user_service.app.services.contact_units_service."
-        "ContactUnitsService.admin_assign_unit",
+        "apps.user_service.app.api.contacts.ContactUnitsService.admin_assign_unit",
         fake_assign_unit,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.contacts.ContactUnitsService"
+        ".schedule_unit_assignment_welcome_email",
+        fake_schedule_welcome_email,
     )
 
     res = await client.post(

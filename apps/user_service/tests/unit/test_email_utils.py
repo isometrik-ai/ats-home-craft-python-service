@@ -154,6 +154,40 @@ def test_unit_assignment_welcome_email_includes_phone_and_store_links() -> None:
     assert "https://play.google.com/store/apps/details?id=com.example" in html
 
 
+def test_normalize_store_url_rejects_non_http_schemes() -> None:
+    """Store URLs must be http(s) to avoid javascript/data links in email hrefs."""
+    assert email_utils._normalize_store_url("javascript:alert(1)") is None
+    assert email_utils._normalize_store_url("https://apps.apple.com/app/id123") == (
+        "https://apps.apple.com/app/id123"
+    )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.utils.email_utils.send_email", return_value=True)
+@patch("apps.user_service.app.utils.email_utils.resolve_unit_assignment_welcome_content")
+async def test_send_unit_assignment_welcome_email_for_org_uses_thread_pool(
+    mock_resolve,
+    mock_send,
+) -> None:
+    """Async sender offloads blocking httpx email transport to a worker thread."""
+    mock_resolve.return_value = ("Subject", "Plain", "<p>Hi</p>")
+
+    ok = await email_utils.send_unit_assignment_welcome_email_for_org(
+        db_connection=MagicMock(),
+        organization_id="org-1",
+        email="john@example.com",
+        first_name="John",
+        organization_name="Green Valley Residency",
+        project_name="Sunrise Towers",
+        unit_display="Tower A — 1204",
+        login_phone="+91 9876543210",
+        login_email="john@example.com",
+    )
+
+    assert ok is True
+    mock_send.assert_called_once()
+
+
 def test_unit_assignment_welcome_email_omits_store_buttons_when_urls_missing() -> None:
     """Store download buttons are omitted when store URLs are not configured."""
     with patch(
@@ -255,6 +289,44 @@ async def test_resolve_unit_assignment_welcome_content_falls_back_to_files(
 ) -> None:
     """Missing DB template uses file templates."""
     mock_repo_cls.return_value.get_published_trigger_by_name = AsyncMock(return_value=None)
+    context = {
+        "greeting_name": "John",
+        "app_name": "ATS Home Craft",
+        "organization_name": "Green Valley Residency",
+        "project_name": "Sunrise Towers",
+        "unit_display": "Tower A — 1204",
+        "phone_display": "+91 9876543210",
+        "email_display": "john@example.com",
+        "has_login_phone": True,
+        "ios_app_store_url": None,
+        "android_play_store_url": None,
+        "current_year": 2026,
+        "company_name": "House of Apps AI",
+        "company_address": "123 Main Street",
+        "privacy_policy_url": "https://houseofapps.ai/privacy",
+        "terms_url": "https://houseofapps.ai/terms",
+    }
+
+    subject, message, html = await email_utils.resolve_unit_assignment_welcome_content(
+        db_connection=MagicMock(),
+        organization_id="org-1",
+        context=context,
+    )
+
+    assert "Green Valley Residency" in subject
+    assert "+91 9876543210" in message
+    assert "Tower A — 1204" in html
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.utils.email_utils.EmailTemplateRepository")
+async def test_resolve_unit_assignment_welcome_content_falls_back_on_db_error(
+    mock_repo_cls,
+) -> None:
+    """DB lookup failures fall back to file templates instead of aborting."""
+    mock_repo_cls.return_value.get_published_trigger_by_name = AsyncMock(
+        side_effect=RuntimeError("db unavailable")
+    )
     context = {
         "greeting_name": "John",
         "app_name": "ATS Home Craft",

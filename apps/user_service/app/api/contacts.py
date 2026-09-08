@@ -236,6 +236,15 @@ async def create_contact(
             background_tasks=background_tasks,
             enrichment_targets=result.get("enrichment_targets"),
         )
+    welcome_email = result.get("unit_assignment_welcome_email")
+    if welcome_email and user_context is not None:
+        ContactUnitsService.schedule_unit_assignment_welcome_email(
+            background_tasks=background_tasks,
+            organization_id=str(user_context.organization_id),
+            actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+            contact_id=str(welcome_email["contact_id"]),
+            normalized_unit=welcome_email["normalized_unit"],
+        )
 
     return success_response(
         request=request,
@@ -1164,6 +1173,7 @@ async def add_contact_household_member(
 )
 async def assign_unit_to_contact(
     request: Request,
+    background_tasks: BackgroundTasks,
     contact_id: str = Path(..., description="Contact identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
@@ -1180,6 +1190,13 @@ async def assign_unit_to_contact(
         user_context=user_context,
     )
     data = await units_service.admin_assign_unit(contact_id=contact_id, body=body)
+    ContactUnitsService.schedule_unit_assignment_welcome_email(
+        background_tasks=background_tasks,
+        organization_id=str(user_context.organization_id),
+        actor_user_id=str(user_context.user_id) if user_context.user_id else None,
+        contact_id=contact_id,
+        normalized_unit=data,
+    )
     set_audit_context(
         request,
         user_context,

@@ -382,9 +382,29 @@ async def test_admin_assign_unit_creates_pending_allotment():
     )
     assert result["id"] == "cu-1"
     assert result["assign_date"] == "2026-07-15"
-    svc._maybe_send_unit_assignment_welcome_email.assert_awaited_once_with(
+    svc._maybe_send_unit_assignment_welcome_email.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_schedule_unit_assignment_welcome_email_adds_background_task():
+    """Welcome email side effects are scheduled for after commit."""
+    background_tasks = MagicMock()
+    normalized_unit = {"id": "cu-1", "code": "A-101"}
+
+    ContactUnitsService.schedule_unit_assignment_welcome_email(
+        background_tasks=background_tasks,
+        organization_id="org-1",
+        actor_user_id="admin-1",
         contact_id="contact-1",
-        normalized_unit=result,
+        normalized_unit=normalized_unit,
+    )
+
+    background_tasks.add_task.assert_called_once_with(
+        ContactUnitsService.send_unit_assignment_welcome_email_background,
+        organization_id="org-1",
+        actor_user_id="admin-1",
+        contact_id="contact-1",
+        normalized_unit=normalized_unit,
     )
 
 
@@ -916,16 +936,43 @@ async def test_maybe_send_welcome_email_continues_when_auth_provision_fails(
 
 @pytest.mark.asyncio
 @patch(
+    "apps.user_service.app.services.contact_units_service.ContactUnitsService"
+    "._maybe_send_unit_assignment_welcome_email",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.contact_units_service.get_pool")
+@patch("apps.user_service.app.services.contact_units_service.AcquireConnection")
+async def test_send_unit_assignment_welcome_email_background(
+    mock_acquire_cls,
+    mock_get_pool,
+    mock_maybe_send,
+):
+    """Background sender acquires a pool connection and delegates to the helper."""
+    mock_conn = MagicMock()
+    mock_acquire_cls.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_acquire_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+    mock_get_pool.return_value = MagicMock()
+    normalized_unit = {"id": "cu-1", "code": "A-101"}
+
+    await ContactUnitsService.send_unit_assignment_welcome_email_background(
+        organization_id="org-1",
+        actor_user_id="admin-1",
+        contact_id="contact-1",
+        normalized_unit=normalized_unit,
+    )
+
+    mock_maybe_send.assert_awaited_once_with(
+        contact_id="contact-1",
+        normalized_unit=normalized_unit,
+    )
+
+
+@pytest.mark.asyncio
+@patch(
     "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
 )
-@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
-@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
-async def test_admin_assign_unit_succeeds_when_welcome_email_fails(
-    mock_contacts_repo_cls,
-    mock_org_repo_cls,
-    mock_send_email,
-):
-    """Unit assignment succeeds even when welcome email delivery fails."""
+async def test_admin_assign_unit_does_not_send_welcome_email_inline(mock_send_email):
+    """Unit assignment DB path does not send welcome email before commit."""
     svc = _service()
     svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
     svc.repo.contact_exists = AsyncMock(return_value=True)
@@ -947,6 +994,31 @@ async def test_admin_assign_unit_succeeds_when_welcome_email_fails(
             "created_at": ASSIGNED_AT,
         }
     )
+    body = AdminAssignUnitRequest(
+        unit_id="unit-1",
+        assign_date=ASSIGN_DATE,
+        is_primary=True,
+        relationship=ContactUnitRelationship.SELF,
+    )
+
+    result = await svc.admin_assign_unit(contact_id="contact-1", body=body)
+
+    assert result["id"] == "cu-1"
+    mock_send_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email_for_org"
+)
+@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_swallows_sender_failure(
+    mock_contacts_repo_cls,
+    mock_org_repo_cls,
+    mock_send_email,
+):
+    """Welcome email helper swallows sender failures without raising."""
     mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
         return_value={
             "first_name": "John",
@@ -959,15 +1031,11 @@ async def test_admin_assign_unit_succeeds_when_welcome_email_fails(
         return_value={"name": "Green Valley Residency"}
     )
     mock_send_email.side_effect = RuntimeError("smtp down")
-    body = AdminAssignUnitRequest(
-        unit_id="unit-1",
-        assign_date=ASSIGN_DATE,
-        is_primary=True,
-        relationship=ContactUnitRelationship.SELF,
+    svc = _service()
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="contact-1",
+        normalized_unit={"code": "A-101", "project": {"name": "Sunrise Towers"}},
     )
 
-    result = await svc.admin_assign_unit(contact_id="contact-1", body=body)
-
-    assert result["id"] == "cu-1"
-    assert result["status"] == "pending"
-    mock_send_email.assert_called_once()
+    mock_send_email.assert_awaited_once()

@@ -165,8 +165,8 @@ async def test_scenario_success_send_with_db_content(mock_resolve, mock_send) ->
 
     assert ok is True
     mock_send.assert_called_once()
-    to, subject, plain, html = mock_send.call_args[0]
-    assert to == "john@example.com"
+    email_to, subject, plain, html, from_name = mock_send.call_args[0]
+    assert email_to == "john@example.com"
     assert subject == "Welcome John — Green Valley Residency"
     assert "DB hello John" in html
 

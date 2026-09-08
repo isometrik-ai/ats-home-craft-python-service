@@ -717,7 +717,8 @@ async def test_create_contact_with_unit_assignment(monkeypatch):
     repo = _FakeContactsRepo()
     svc = _service(contacts_repo=repo)
     _patch_create_identity(svc)
-    admin_assign = AsyncMock(return_value={"id": "cu-1", "unit_id": "unit-1", "status": "pending"})
+    normalized_unit = {"id": "cu-1", "unit_id": "unit-1", "status": "pending"}
+    admin_assign = AsyncMock(return_value=normalized_unit)
     mock_send = MagicMock()
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.ContactUnitsService.admin_assign_unit",
@@ -728,7 +729,7 @@ async def test_create_contact_with_unit_assignment(monkeypatch):
         mock_send,
     )
 
-    await svc.create_contact(
+    result = await svc.create_contact(
         CreateContactRequest(
             email="owner@example.com",
             first_name="Owner",
@@ -743,6 +744,10 @@ async def test_create_contact_with_unit_assignment(monkeypatch):
     assert assign_kwargs["contact_id"] == CONTACT_ID
     assert assign_kwargs["body"].unit_id == "unit-1"
     assert assign_kwargs["body"].assign_date == date.today()
+    assert result["unit_assignment_welcome_email"] == {
+        "contact_id": CONTACT_ID,
+        "normalized_unit": normalized_unit,
+    }
 
 
 def test_create_contact_rejects_unit_assignment_with_vendor_type():

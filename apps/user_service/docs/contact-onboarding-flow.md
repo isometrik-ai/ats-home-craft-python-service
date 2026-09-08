@@ -845,8 +845,9 @@ Email contents:
 - Registered **phone number** and **email** (sign in with phone on the app)
 - App Store and Google Play download buttons when `IOS_APP_STORE_URL` / `ANDROID_PLAY_STORE_URL` are configured
 
-Implementation: `ContactUnitsService.admin_assign_unit` →
-`send_unit_assignment_welcome_email_for_org` in `apps/user_service/app/utils/email_utils.py`.
+Implementation: `ContactUnitsService.admin_assign_unit` persists the allotment only;
+auth provisioning and `send_unit_assignment_welcome_email_for_org` run **after commit**
+via `BackgroundTasks` (same for create-contact + unit assignment).
 
 **Template resolution (hybrid):**
 

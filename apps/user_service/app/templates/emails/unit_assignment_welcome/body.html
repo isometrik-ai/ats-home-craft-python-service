@@ -45,10 +45,10 @@
   </p>
 </div>
 
+{% if ios_app_store_url or android_play_store_url %}
 <p style="color: #111827; font-size: 16px; font-weight: 600; margin: 24px 0 8px 0;">
   Download the {{ app_name }} app
 </p>
-{% if ios_app_store_url or android_play_store_url %}
 {% include "partials/store_buttons.html" %}
 {% endif %}
 
@@ -56,7 +56,9 @@
   Your next steps
 </p>
 <ol style="color: #4b5563; font-size: 16px; line-height: 1.8; margin: 0 0 20px 20px; padding: 0;">
+  {% if ios_app_store_url or android_play_store_url %}
   <li>Download the {{ app_name }} app from the App Store or Google Play</li>
+  {% endif %}
   <li>Sign in with your phone number <strong>{{ phone_display }}</strong></li>
   <li>Accept your unit when prompted — this confirms your allotment at {{ unit_display }}</li>
   <li>Complete your profile and finish onboarding at your convenience</li>

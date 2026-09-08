@@ -105,6 +105,27 @@ def test_render_unit_assignment_text_omits_password() -> None:
     assert "+91 9876543210" in message
 
 
+def test_render_unit_assignment_text_preserves_line_after_sign_in_block() -> None:
+    """Plain-text sign-in block keeps a newline before the email sentence."""
+    _, message, _ = render_transactional_email("unit_assignment_welcome", _sample_context())
+    assert "phone number: +91 9876543210\nYour email is" in message
+
+
+def test_render_unit_assignment_html_escapes_user_controlled_fields() -> None:
+    """HTML templates auto-escape contact/org fields to prevent injection."""
+    context = _sample_context()
+    context["organization_name"] = '<script>alert("x")</script>'
+    context["greeting_name"] = 'Jane"><img src=x onerror=alert(1)>'
+    context["unit_display"] = "<b>Evil</b>"
+
+    _, _, html = render_transactional_email("unit_assignment_welcome", context)
+
+    assert "<script>" not in html
+    assert "<img src=x" not in html
+    assert "&lt;script&gt;" in html
+    assert "Jane&quot;&gt;" in html or "Jane&#34;&gt;" in html
+
+
 def test_render_unit_assignment_html_without_store_urls() -> None:
     """Store buttons are omitted when URLs are not configured."""
     context = _sample_context()
@@ -113,3 +134,4 @@ def test_render_unit_assignment_html_without_store_urls() -> None:
     _, _, html = render_transactional_email("unit_assignment_welcome", context)
     assert "Download on the App Store" not in html
     assert "Get it on Google Play" not in html
+    assert "Download the ATS Home Craft app" not in html

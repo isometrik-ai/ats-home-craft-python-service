@@ -2,6 +2,7 @@
 This module provides shared email functionality for sending emails via Supabase Edge Functions.
 """
 
+import asyncio
 from datetime import datetime
 
 import asyncpg
@@ -1406,10 +1407,14 @@ Best regards,
 
 
 def _normalize_store_url(url: str | None) -> str | None:
-    """Return a trimmed store URL or None when unset."""
+    """Return a safe http(s) store URL or None when unset/invalid."""
     if not url or not str(url).strip():
         return None
-    return str(url).strip()
+    cleaned = str(url).strip()
+    lowered = cleaned.lower()
+    if not (lowered.startswith("https://") or lowered.startswith("http://")):
+        return None
+    return cleaned
 
 
 def _build_unit_assignment_welcome_context(
@@ -1457,10 +1462,18 @@ async def resolve_unit_assignment_welcome_content(
 ) -> tuple[str, str, str]:
     """Resolve unit welcome email content: org DB template first, file templates fallback."""
     repository = EmailTemplateRepository(db_connection)
-    db_row = await repository.get_published_trigger_by_name(
-        organization_id,
-        UNIT_ASSIGNMENT_WELCOME_TRIGGER_NAME,
-    )
+    db_row: dict | None = None
+    try:
+        db_row = await repository.get_published_trigger_by_name(
+            organization_id,
+            UNIT_ASSIGNMENT_WELCOME_TRIGGER_NAME,
+        )
+    except Exception as error:
+        logger.warning(
+            "Failed to load published unit assignment welcome template for org %s: %s",
+            organization_id,
+            str(error),
+        )
     if db_row:
         return render_transactional_email_from_db_row(
             UNIT_ASSIGNMENT_WELCOME_TEMPLATE_KEY,
@@ -1560,7 +1573,14 @@ async def send_unit_assignment_welcome_email_for_org(
             context,
         )
 
-        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+        email_sent = await asyncio.to_thread(
+            send_email,
+            email,
+            subject,
+            message,
+            html_message,
+            ROSS_AI_FROM_NAME,
+        )
         if email_sent:
             logger.info("Unit assignment welcome email sent successfully to %s", email)
             return True

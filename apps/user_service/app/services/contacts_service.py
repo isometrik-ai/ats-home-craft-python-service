@@ -1657,7 +1657,7 @@ class ContactsService:
                 user_context=self.user_context,
             )
             assign_date = body.unit_assignment.assign_date or date.today()
-            await units_service.admin_assign_unit(
+            normalized_unit = await units_service.admin_assign_unit(
                 contact_id=str(contact_id),
                 body=AdminAssignUnitRequest(
                     unit_id=body.unit_assignment.unit_id,
@@ -1666,6 +1666,8 @@ class ContactsService:
                     relationship=body.unit_assignment.relationship,
                 ),
             )
+        else:
+            normalized_unit = None
 
         person_payload = self._build_person_payload(
             body=body,
@@ -1699,6 +1701,14 @@ class ContactsService:
             "reused_existing": reused_existing_contact,
             "enrichment_targets": enrichment_targets,
             "created_entities": created_entities,
+            "unit_assignment_welcome_email": (
+                {
+                    "contact_id": str(contact_id),
+                    "normalized_unit": normalized_unit,
+                }
+                if normalized_unit is not None
+                else None
+            ),
         }
 
     @staticmethod

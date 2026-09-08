@@ -8,6 +8,7 @@ from uuid import UUID
 
 import asyncpg
 from asyncpg.exceptions import UniqueViolationError
+from fastapi import BackgroundTasks
 
 from apps.user_service.app.config.app_settings import shared_settings
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
@@ -42,6 +43,7 @@ from apps.user_service.app.utils.common_utils import (
 from apps.user_service.app.utils.email_utils import (
     send_unit_assignment_welcome_email_for_org,
 )
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_db.supabase_db.client import get_supabase_service_client
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.logger import get_logger
@@ -734,6 +736,48 @@ class ContactUnitsService:
                 str(error),
             )
 
+    @staticmethod
+    async def send_unit_assignment_welcome_email_background(
+        *,
+        organization_id: str,
+        actor_user_id: str | None,
+        contact_id: str,
+        normalized_unit: dict[str, Any],
+    ) -> None:
+        """Send welcome email using a pool connection after the DB transaction commits."""
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            service = ContactUnitsService(
+                db_connection=conn,
+                user_context=UserContext(
+                    user_id=actor_user_id or "system",
+                    email="system@local",
+                    organization_id=organization_id,
+                ),
+            )
+            await service._maybe_send_unit_assignment_welcome_email(
+                contact_id=contact_id,
+                normalized_unit=normalized_unit,
+            )
+
+    @staticmethod
+    def schedule_unit_assignment_welcome_email(
+        *,
+        background_tasks: BackgroundTasks,
+        organization_id: str,
+        actor_user_id: str | None,
+        contact_id: str,
+        normalized_unit: dict[str, Any],
+    ) -> None:
+        """Schedule auth provisioning and welcome email after commit."""
+        background_tasks.add_task(
+            ContactUnitsService.send_unit_assignment_welcome_email_background,
+            organization_id=organization_id,
+            actor_user_id=actor_user_id,
+            contact_id=contact_id,
+            normalized_unit=normalized_unit,
+        )
+
     async def admin_assign_unit(
         self,
         *,
@@ -754,9 +798,4 @@ class ContactUnitsService:
             organization_id=org_id,
             contact_unit_id=str(row["id"]),
         )
-        normalized = self._normalize_unit_row(full or row)
-        await self._maybe_send_unit_assignment_welcome_email(
-            contact_id=contact_id,
-            normalized_unit=normalized,
-        )
-        return normalized
+        return self._normalize_unit_row(full or row)
