@@ -555,7 +555,7 @@ async def export_community_event_revenue(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
