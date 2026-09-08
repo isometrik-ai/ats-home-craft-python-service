@@ -38,6 +38,7 @@ from apps.user_service.app.schemas.enums import (
     COMMUNITY_EVENT_CATEGORY_LABELS,
     COMMUNITY_EVENT_EXPORT_MAX_ROWS,
     COMMUNITY_EVENT_MAX_GALLERY,
+    COMMUNITY_EVENT_PAYMENT_STATUS_LABELS,
     CommunityEventAuditAction,
     CommunityEventPublishMode,
     CommunityEventPublishStatus,
@@ -779,6 +780,14 @@ class CommunityEventsService:
         )
         return self._booking_list_item(row)
 
+    @staticmethod
+    def _payment_status_label(payment_status: str) -> str:
+        """Human-readable payment status for revenue UI."""
+        return COMMUNITY_EVENT_PAYMENT_STATUS_LABELS.get(
+            payment_status,
+            payment_status.replace("_", " ").title(),
+        )
+
     async def export_events_csv(
         self,
         *,
@@ -864,6 +873,64 @@ class CommunityEventsService:
                     row.get("booking_status"),
                     row.get("payment_status"),
                     row.get("booked_at"),
+                ]
+            )
+        return buffer.getvalue()
+
+    async def export_revenue_csv(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+    ) -> str:
+        """Export event revenue report as CSV."""
+        await self.setup_service.ensure_project(project_id=project_id)
+        event_row = await self.repo.fetch_event_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
+        if not event_row:
+            raise NotFoundException(
+                message_key="community_events.errors.event_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        summary = await self.repo.get_revenue_summary_for_event(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
+        rows, _ = await self.repo.list_revenue_transactions_for_event(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+            payment_status=None,
+            limit=COMMUNITY_EVENT_EXPORT_MAX_ROWS,
+            offset=0,
+        )
+        currency = str(event_row.get("currency") or "INR")
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["event_display_code", "event_title", "currency"])
+        writer.writerow([event_row["display_code"], event_row["title"], currency])
+        writer.writerow(["collected_minor", "pending_minor"])
+        writer.writerow(
+            [
+                int(summary.get("collected_minor") or 0),
+                int(summary.get("pending_minor") or 0),
+            ]
+        )
+        writer.writerow([])
+        writer.writerow(["resident", "amount_minor", "status", "txn_ref"])
+        for row in rows:
+            payment_status = str(row.get("payment_status") or "")
+            writer.writerow(
+                [
+                    row.get("contact_name"),
+                    row.get("amount_minor"),
+                    self._payment_status_label(payment_status),
+                    row.get("txn_ref"),
                 ]
             )
         return buffer.getvalue()
