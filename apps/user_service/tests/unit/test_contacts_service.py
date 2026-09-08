@@ -718,20 +718,27 @@ async def test_create_contact_with_unit_assignment(monkeypatch):
     svc = _service(contacts_repo=repo)
     _patch_create_identity(svc)
     admin_assign = AsyncMock(return_value={"id": "cu-1", "unit_id": "unit-1", "status": "pending"})
+    mock_send = MagicMock()
     monkeypatch.setattr(
         "apps.user_service.app.services.contacts_service.ContactUnitsService.admin_assign_unit",
         admin_assign,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.send_client_creation_email",
+        mock_send,
     )
 
     await svc.create_contact(
         CreateContactRequest(
             email="owner@example.com",
             first_name="Owner",
+            portal_access=True,
             unit_assignment=ContactUnitAssignmentAtCreate(unit_id="unit-1"),
         )
     )
 
     admin_assign.assert_awaited_once()
+    mock_send.assert_not_called()
     assign_kwargs = admin_assign.await_args.kwargs
     assert assign_kwargs["contact_id"] == CONTACT_ID
     assert assign_kwargs["body"].unit_id == "unit-1"

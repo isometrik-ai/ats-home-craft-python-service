@@ -352,6 +352,7 @@ async def test_admin_assign_unit_creates_pending_allotment():
             "created_at": ASSIGNED_AT,
         }
     )
+    svc._maybe_send_unit_assignment_welcome_email = AsyncMock()
     body = AdminAssignUnitRequest(
         unit_id="unit-1",
         assign_date=ASSIGN_DATE,
@@ -381,6 +382,10 @@ async def test_admin_assign_unit_creates_pending_allotment():
     )
     assert result["id"] == "cu-1"
     assert result["assign_date"] == "2026-07-15"
+    svc._maybe_send_unit_assignment_welcome_email.assert_awaited_once_with(
+        contact_id="contact-1",
+        normalized_unit=result,
+    )
 
 
 @pytest.mark.asyncio
@@ -657,3 +662,296 @@ async def test_create_unit_allotment_contact_not_found():
             relationship="self",
             project_id="proj-1",
         )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_sends_when_contact_has_email(
+    mock_contacts_repo_cls,
+    mock_org_repo_cls,
+    mock_send_email,
+):
+    """Welcome email is sent when the contact has a primary email."""
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
+        return_value={
+            "first_name": "John",
+            "emails": [{"email": "john@example.com", "is_primary": True}],
+            "phones": [{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True}],
+            "user_id": "auth-1",
+        }
+    )
+    mock_org_repo_cls.return_value.get_organization_by_id = AsyncMock(
+        return_value={"name": "Green Valley Residency"}
+    )
+    svc = _service()
+    normalized_unit = {
+        "tower_name": "Tower A",
+        "unit_label": "1204",
+        "code": "A-1204",
+        "project": {"name": "Sunrise Towers"},
+    }
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="contact-1",
+        normalized_unit=normalized_unit,
+    )
+
+    mock_send_email.assert_called_once()
+    kwargs = mock_send_email.call_args.kwargs
+    assert kwargs["email"] == "john@example.com"
+    assert kwargs["login_email"] == "john@example.com"
+    assert kwargs["login_phone"] == "+91 9876543210"
+    assert kwargs["unit_display"] == "Tower A — 1204"
+    assert "password" not in kwargs
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_skips_without_email(
+    mock_contacts_repo_cls,
+    mock_send_email,
+):
+    """Welcome email is skipped when the contact has no email address."""
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
+        return_value={
+            "first_name": "John",
+            "phones": [{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True}],
+        }
+    )
+    svc = _service()
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="contact-1",
+        normalized_unit={"code": "A-101", "project": {"name": "Sunrise Towers"}},
+    )
+
+    mock_send_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_does_not_fail_assign_on_error(
+    mock_contacts_repo_cls,
+    mock_org_repo_cls,
+    mock_send_email,
+):
+    """Email failures are swallowed so unit assignment is not blocked."""
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
+        return_value={
+            "emails": [{"email": "john@example.com", "is_primary": True}],
+            "phones": [],
+            "user_id": "auth-1",
+        }
+    )
+    mock_org_repo_cls.return_value.get_organization_by_id = AsyncMock(
+        return_value={"name": "Green Valley Residency"}
+    )
+    mock_send_email.side_effect = RuntimeError("smtp down")
+    svc = _service()
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="contact-1",
+        normalized_unit={"code": "A-101", "project": {"name": "Sunrise Towers"}},
+    )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_skips_when_contact_not_found(
+    mock_contacts_repo_cls,
+    mock_send_email,
+):
+    """Welcome email is skipped when the contact row does not exist."""
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(return_value=None)
+    svc = _service()
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="missing-contact",
+        normalized_unit={"code": "A-101", "project": {"name": "Sunrise Towers"}},
+    )
+
+    mock_send_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contacts_service.ContactsService",
+)
+@patch(
+    "apps.user_service.app.services.contact_units_service.get_supabase_service_client",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_provisions_auth_without_user_id(
+    mock_contacts_repo_cls,
+    mock_org_repo_cls,
+    mock_send_email,
+    mock_supabase_client,
+    mock_contacts_service_cls,
+):
+    """Auth is provisioned server-side when contact has phone but no user_id."""
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
+        return_value={
+            "first_name": "John",
+            "emails": [{"email": "john@example.com", "is_primary": True}],
+            "phones": [{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True}],
+            "user_id": None,
+        }
+    )
+    mock_org_repo_cls.return_value.get_organization_by_id = AsyncMock(
+        return_value={"name": "Green Valley Residency"}
+    )
+    mock_supabase_client.return_value = MagicMock()
+    provision = AsyncMock()
+    mock_contacts_service_cls.return_value.provision_auth_for_existing_contact = provision
+    svc = _service()
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="contact-1",
+        normalized_unit={"code": "A-101", "project": {"name": "Sunrise Towers"}},
+    )
+
+    provision.assert_awaited_once_with(contact_id="contact-1")
+    mock_send_email.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contacts_service.ContactsService")
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_skips_auth_when_user_exists(
+    mock_contacts_repo_cls,
+    mock_org_repo_cls,
+    mock_send_email,
+    mock_contacts_service_cls,
+):
+    """Auth provisioning is skipped when contact already has user_id."""
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
+        return_value={
+            "first_name": "John",
+            "emails": [{"email": "john@example.com", "is_primary": True}],
+            "phones": [{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True}],
+            "user_id": "auth-1",
+        }
+    )
+    mock_org_repo_cls.return_value.get_organization_by_id = AsyncMock(
+        return_value={"name": "Green Valley Residency"}
+    )
+    provision = AsyncMock()
+    mock_contacts_service_cls.return_value.provision_auth_for_existing_contact = provision
+    svc = _service()
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="contact-1",
+        normalized_unit={"code": "A-101", "project": {"name": "Sunrise Towers"}},
+    )
+
+    provision.assert_not_awaited()
+    mock_send_email.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contacts_service.ContactsService")
+@patch(
+    "apps.user_service.app.services.contact_units_service.get_supabase_service_client",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_maybe_send_welcome_email_continues_when_auth_provision_fails(
+    mock_contacts_repo_cls,
+    mock_org_repo_cls,
+    mock_send_email,
+    mock_supabase_client,
+    mock_contacts_service_cls,
+):
+    """Auth provisioning errors are swallowed; email is not attempted after failure."""
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
+        return_value={
+            "emails": [{"email": "john@example.com", "is_primary": True}],
+            "phones": [{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True}],
+            "user_id": None,
+        }
+    )
+    mock_org_repo_cls.return_value.get_organization_by_id = AsyncMock(
+        return_value={"name": "Green Valley Residency"}
+    )
+    mock_supabase_client.return_value = MagicMock()
+    mock_contacts_service_cls.return_value.provision_auth_for_existing_contact = AsyncMock(
+        side_effect=RuntimeError("supabase down")
+    )
+    svc = _service()
+
+    await svc._maybe_send_unit_assignment_welcome_email(
+        contact_id="contact-1",
+        normalized_unit={"code": "A-101", "project": {"name": "Sunrise Towers"}},
+    )
+
+    mock_send_email.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contact_units_service.send_unit_assignment_welcome_email")
+@patch("apps.user_service.app.services.contact_units_service.OrganizationRepository")
+@patch("apps.user_service.app.services.contact_units_service.ContactsRepository")
+async def test_admin_assign_unit_succeeds_when_welcome_email_fails(
+    mock_contacts_repo_cls,
+    mock_org_repo_cls,
+    mock_send_email,
+):
+    """Unit assignment succeeds even when welcome email delivery fails."""
+    svc = _service()
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.contact_exists = AsyncMock(return_value=True)
+    svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
+    svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
+    svc.repo.insert_allotment = AsyncMock(return_value={"id": "cu-1", "status": "pending"})
+    svc.repo.get_by_id = AsyncMock(
+        return_value={
+            "id": "cu-1",
+            "unit_id": "unit-1",
+            "project_id": "proj-1",
+            "contact_id": "contact-1",
+            "code": "A-101",
+            "status": "pending",
+            "is_primary": True,
+            "is_default_login": False,
+            "relationship": "self",
+            "assigned_at": ASSIGNED_AT,
+            "created_at": ASSIGNED_AT,
+        }
+    )
+    mock_contacts_repo_cls.return_value.get_contact_for_update = AsyncMock(
+        return_value={
+            "first_name": "John",
+            "emails": [{"email": "john@example.com", "is_primary": True}],
+            "phones": [{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True}],
+            "user_id": "auth-1",
+        }
+    )
+    mock_org_repo_cls.return_value.get_organization_by_id = AsyncMock(
+        return_value={"name": "Green Valley Residency"}
+    )
+    mock_send_email.side_effect = RuntimeError("smtp down")
+    body = AdminAssignUnitRequest(
+        unit_id="unit-1",
+        assign_date=ASSIGN_DATE,
+        is_primary=True,
+        relationship=ContactUnitRelationship.SELF,
+    )
+
+    result = await svc.admin_assign_unit(contact_id="contact-1", body=body)
+
+    assert result["id"] == "cu-1"
+    assert result["status"] == "pending"
+    mock_send_email.assert_called_once()

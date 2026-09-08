@@ -125,6 +125,108 @@ def test_client_creation_email_with_password() -> None:
     assert "TempPass1!" in mock_send.call_args[0][2]
 
 
+def test_unit_assignment_welcome_email_includes_phone_and_store_links() -> None:
+    """Unit assignment welcome email includes phone, email, and store URLs."""
+    with patch(
+        "apps.user_service.app.utils.email_utils.send_email", return_value=True
+    ) as mock_send:
+        ok = email_utils.send_unit_assignment_welcome_email(
+            email="john@example.com",
+            first_name="John",
+            organization_name="Green Valley Residency",
+            project_name="Sunrise Towers",
+            unit_display="Tower A — 1204",
+            login_phone="+91 9876543210",
+            login_email="john@example.com",
+            ios_app_store_url="https://apps.apple.com/app/id123",
+            android_play_store_url="https://play.google.com/store/apps/details?id=com.example",
+        )
+    assert ok is True
+    plain_text = mock_send.call_args[0][2]
+    html = mock_send.call_args[0][3]
+    assert "+91 9876543210" in plain_text
+    assert "john@example.com" in plain_text
+    assert "Welcome to ATS Home Craft" in plain_text or "Welcome to" in plain_text
+    assert "password" not in plain_text.lower()
+    assert "https://apps.apple.com/app/id123" in html
+    assert "https://play.google.com/store/apps/details?id=com.example" in html
+
+
+def test_unit_assignment_welcome_email_omits_store_buttons_when_urls_missing() -> None:
+    """Store download buttons are omitted when store URLs are not configured."""
+    with patch(
+        "apps.user_service.app.utils.email_utils.send_email", return_value=True
+    ) as mock_send:
+        ok = email_utils.send_unit_assignment_welcome_email(
+            email="john@example.com",
+            first_name="John",
+            organization_name="Green Valley Residency",
+            project_name="Sunrise Towers",
+            unit_display="Tower A — 1204",
+            login_phone="+91 9876543210",
+            login_email="john@example.com",
+        )
+    assert ok is True
+    html = mock_send.call_args[0][3]
+    assert "Download on the App Store" not in html
+    assert "Get it on Google Play" not in html
+
+
+def test_unit_assignment_welcome_email_failure_when_send_returns_false() -> None:
+    """Unit assignment welcome email returns False when transport fails."""
+    with patch("apps.user_service.app.utils.email_utils.send_email", return_value=False):
+        ok = email_utils.send_unit_assignment_welcome_email(
+            email="john@example.com",
+            first_name="John",
+            organization_name="Green Valley Residency",
+            project_name="Sunrise Towers",
+            unit_display="Tower A — 1204",
+            login_phone="+91 9876543210",
+            login_email="john@example.com",
+        )
+    assert ok is False
+
+
+def test_unit_assignment_welcome_email_failure_on_exception() -> None:
+    """Unit assignment welcome email returns False when send_email raises."""
+    with patch(
+        "apps.user_service.app.utils.email_utils.send_email",
+        side_effect=RuntimeError("smtp unavailable"),
+    ):
+        ok = email_utils.send_unit_assignment_welcome_email(
+            email="john@example.com",
+            first_name="John",
+            organization_name="Green Valley Residency",
+            project_name="Sunrise Towers",
+            unit_display="Tower A — 1204",
+            login_phone="+91 9876543210",
+            login_email="john@example.com",
+        )
+    assert ok is False
+
+
+def test_unit_assignment_welcome_email_shows_only_configured_store_button() -> None:
+    """Only configured store URLs render as download buttons."""
+    with patch(
+        "apps.user_service.app.utils.email_utils.send_email", return_value=True
+    ) as mock_send:
+        ok = email_utils.send_unit_assignment_welcome_email(
+            email="john@example.com",
+            first_name="John",
+            organization_name="Green Valley Residency",
+            project_name="Sunrise Towers",
+            unit_display="Tower A — 1204",
+            login_phone="+91 9876543210",
+            login_email="john@example.com",
+            ios_app_store_url="https://apps.apple.com/app/id123",
+            android_play_store_url="",
+        )
+    assert ok is True
+    html = mock_send.call_args[0][3]
+    assert "Download on the App Store" in html
+    assert "Get it on Google Play" not in html
+
+
 def test_org_delete_request_email() -> None:
     """Delete request email notifies super admins."""
     with patch(

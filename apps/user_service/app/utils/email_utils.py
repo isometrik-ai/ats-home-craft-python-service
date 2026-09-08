@@ -1394,6 +1394,240 @@ Best regards,
         return False
 
 
+def _build_app_store_download_buttons_html(
+    *,
+    ios_app_store_url: str | None,
+    android_play_store_url: str | None,
+) -> str:
+    """Build optional App Store / Play Store CTA buttons for transactional emails."""
+    buttons: list[str] = []
+    if ios_app_store_url and ios_app_store_url.strip():
+        buttons.append(
+            f"""<a href="{ios_app_store_url.strip()}" style="display:inline-block; margin:8px 12px 8px 0; padding:12px 20px; background-color:#111827; color:#ffffff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:600;">Download on the App Store</a>"""
+        )
+    if android_play_store_url and android_play_store_url.strip():
+        buttons.append(
+            f"""<a href="{android_play_store_url.strip()}" style="display:inline-block; margin:8px 0; padding:12px 20px; background-color:#1d4ed8; color:#ffffff; text-decoration:none; border-radius:8px; font-size:14px; font-weight:600;">Get it on Google Play</a>"""
+        )
+    if not buttons:
+        return ""
+    return '<div style="margin: 24px 0; text-align: center;">' + "".join(buttons) + "</div>"
+
+
+def _build_app_store_download_links_text(
+    *,
+    ios_app_store_url: str | None,
+    android_play_store_url: str | None,
+) -> str:
+    """Plain-text store links for email fallbacks."""
+    lines: list[str] = []
+    if ios_app_store_url and ios_app_store_url.strip():
+        lines.append(f"App Store: {ios_app_store_url.strip()}")
+    if android_play_store_url and android_play_store_url.strip():
+        lines.append(f"Google Play: {android_play_store_url.strip()}")
+    return "\n".join(lines)
+
+
+def send_unit_assignment_welcome_email(
+    *,
+    email: str,
+    first_name: str | None,
+    organization_name: str,
+    project_name: str,
+    unit_display: str,
+    login_phone: str | None,
+    login_email: str | None,
+    ios_app_store_url: str | None = None,
+    android_play_store_url: str | None = None,
+    company_name: str = COMMON_COMPANY_NAME,
+    company_address: str = COMMON_COMPANY_ADDRESS,
+    privacy_policy_url: str = COMMON_PRIVACY_POLICY_URL,
+    terms_url: str = COMMON_TERMS_URL,
+) -> bool:
+    """Send a welcome email when an admin assigns a unit to a contact."""
+    try:
+        current_year = datetime.now().year
+        app_name = shared_settings.app_name
+        greeting_name = (first_name or "").strip() or "there"
+        subject = f"Welcome to {app_name} — Your unit at {organization_name}"
+        phone_display = (login_phone or "").strip() or "Not on file"
+        email_display = (login_email or email or "").strip()
+        store_buttons_html = _build_app_store_download_buttons_html(
+            ios_app_store_url=ios_app_store_url,
+            android_play_store_url=android_play_store_url,
+        )
+        store_links_text = _build_app_store_download_links_text(
+            ios_app_store_url=ios_app_store_url,
+            android_play_store_url=android_play_store_url,
+        )
+        download_text_block = (
+            f"Download the {app_name} app:\n{store_links_text}\n" if store_links_text else ""
+        )
+        sign_in_phone_line = (
+            f"Sign in on the app login screen using your phone number: {phone_display}\n"
+            if login_phone and login_phone.strip()
+            else "Sign in on the app login screen using your registered phone number.\n"
+        )
+
+        message = f"""Hello {greeting_name},
+
+Welcome to {app_name}!
+
+On behalf of the entire {organization_name} team, we are delighted to have you with us.
+
+Your home has been registered in our community management system, and your unit allotment is now complete. Through the {app_name} app, you can access community services, stay updated on notices and events, manage your profile, and complete your move-in onboarding.
+
+Your allotment details:
+- Community: {organization_name}
+- Project: {project_name}
+- Unit: {unit_display}
+- Status: Assigned — pending your confirmation in the app
+
+Your registered details:
+- Phone number: {phone_display}
+- Email: {email_display}
+
+{sign_in_phone_line}Your email is your registered contact on file with the community.
+
+{download_text_block}Your next steps:
+1. Download the {app_name} app
+2. Sign in with your phone number{f" ({phone_display})" if login_phone and login_phone.strip() else ""}
+3. Accept your unit when prompted ({unit_display})
+4. Complete your profile and finish onboarding
+
+If you have any questions, please contact your community management team. We look forward to serving you.
+
+Warm regards,
+The {organization_name} Team
+Powered by {app_name}"""
+
+        store_buttons_section = (
+            f"""
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 12px;">
+                  Get started by installing the app on your phone:
+                </p>
+                {store_buttons_html}
+                """
+            if store_buttons_html
+            else ""
+        )
+
+        html_message = f"""<!DOCTYPE html>
+<html lang="en" style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to {app_name}</title>
+  </head>
+  <body style="background-color: #f8f9fb; padding: 0; margin: 0;">
+    <table width="100%" cellpadding="0" cellspacing="0"
+        style="background-color: #f8f9fb; padding: 40px 0;">
+      <tr>
+        <td align="center">
+          <table width="600" cellpadding="0" cellspacing="0"
+              style="background-color: #ffffff; border-radius: 12px; overflow: hidden;
+              box-shadow: 0 4px 8px rgba(0,0,0,0.05);">
+            <tr>
+              <td style="background-color: #1d4ed8; padding: 30px 40px; text-align: center;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 22px;">Welcome to {app_name}</h1>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding: 40px;">
+                <p style="color: #111827; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Hello {greeting_name},
+                </p>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  <strong>Welcome to {app_name}!</strong> On behalf of the entire
+                  <strong>{organization_name}</strong> team, we are delighted to have you with us.
+                </p>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  Your home has been registered in our community management system, and your unit
+                  allotment is now complete. Through the {app_name} app, you can access community
+                  services, stay updated on notices and events, manage your profile, and complete
+                  your move-in onboarding — all in one place.
+                </p>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6; margin-bottom: 20px;">
+                  We are here to make your living experience smooth and connected from day one.
+                </p>
+                <div style="background-color: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                  <p style="margin: 0 0 12px 0; color: #111827; font-weight: 600; font-size: 16px;">
+                    Your allotment details
+                  </p>
+                  <p style="margin: 5px 0; color: #111827;"><strong>Community:</strong> {organization_name}</p>
+                  <p style="margin: 5px 0; color: #111827;"><strong>Project:</strong> {project_name}</p>
+                  <p style="margin: 5px 0; color: #111827;"><strong>Unit:</strong> {unit_display}</p>
+                  <p style="margin: 5px 0; color: #111827;"><strong>Status:</strong> Assigned — pending your confirmation in the app</p>
+                </div>
+                <div style="background-color: #eff6ff; border-left: 4px solid #1d4ed8; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                  <p style="margin: 0 0 12px 0; color: #111827; font-weight: 600; font-size: 16px;">
+                    Your registered details
+                  </p>
+                  <p style="margin: 5px 0; color: #111827;"><strong>Phone number:</strong> {phone_display}</p>
+                  <p style="margin: 5px 0; color: #111827;"><strong>Email:</strong> {email_display}</p>
+                  <p style="margin: 12px 0 0 0; color: #4b5563; font-size: 15px; line-height: 1.6;">
+                    Sign in on the app login screen using your <strong>phone number</strong>.
+                    Your email is your registered contact on file with the community.
+                  </p>
+                </div>
+                <p style="color: #111827; font-size: 16px; font-weight: 600; margin: 24px 0 8px 0;">
+                  Download the {app_name} app
+                </p>
+                {store_buttons_section}
+                <p style="color: #111827; font-size: 16px; font-weight: 600; margin: 24px 0 12px 0;">
+                  Your next steps
+                </p>
+                <ol style="color: #4b5563; font-size: 16px; line-height: 1.8; margin: 0 0 20px 20px; padding: 0;">
+                  <li>Download the {app_name} app from the App Store or Google Play</li>
+                  <li>Sign in with your phone number <strong>{phone_display}</strong></li>
+                  <li>Accept your unit when prompted — this confirms your allotment at {unit_display}</li>
+                  <li>Complete your profile and finish onboarding at your convenience</li>
+                </ol>
+                <p style="color: #4b5563; font-size: 16px; line-height: 1.6;">
+                  If you have any questions or need assistance, please reach out to your community
+                  management team. We look forward to serving you.
+                </p>
+                <p style="color: #111827; font-size: 16px; margin-top: 30px; line-height: 1.6;">
+                  Warm regards,<br>
+                  <strong>The {organization_name} Team</strong><br>
+                  <em style="color: #6b7280;">Powered by {app_name}</em>
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background-color: #f3f4f6; text-align: center; padding: 20px;
+                  font-size: 13px; color: #6b7280;">
+                <p style="margin: 0;">This is an automated welcome message from {organization_name} via {app_name}.</p>
+                <p style="margin: 4px 0;">
+                &copy; {current_year} {company_name}. All rights reserved.
+                </p>
+                <p style="margin: 4px 0;">{company_address}</p>
+                <p style="margin: 0;">
+                  <a href="{privacy_policy_url}"
+                  style="color: #6b7280; text-decoration: none;">Privacy Policy</a> |
+                  <a href="{terms_url}"
+                  style="color: #6b7280; text-decoration: none;">Terms of Service</a>
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"""
+
+        email_sent = send_email(email, subject, message, html_message, from_name=ROSS_AI_FROM_NAME)
+        if email_sent:
+            logger.info("Unit assignment welcome email sent successfully to %s", email)
+            return True
+        logger.error("Failed to send unit assignment welcome email to %s", email)
+        return False
+    except Exception as error:
+        logger.error("Error sending unit assignment welcome email: %s", str(error))
+        return False
+
+
 def send_org_member_banned_email(
     *,
     email: str,

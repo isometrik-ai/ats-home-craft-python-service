@@ -826,6 +826,31 @@ POST /v1/contacts/{contact_id}/units
 Creates a new `contact_units` row with `status = pending`. Existing wizard step rows stay
 `completed` / `skipped`.
 
+### Notifications (unit assignment welcome email)
+
+When an admin assigns a unit via `POST /v1/contacts/{contact_id}/units` (including create-contact
+with `unit_assignment` in the same request), the backend sends a **best-effort welcome email** if
+the contact has a primary email on file.
+
+| Condition                              | Behavior                                                         |
+| -------------------------------------- | ---------------------------------------------------------------- |
+| Contact has email                      | Send welcome email via Supabase `custom-email` edge function     |
+| Contact has no email                   | Skip email (API still succeeds)                                  |
+| Contact has no auth user but has phone | Provision Supabase auth server-side; password is **not** emailed |
+
+Email contents:
+
+- Warm welcome from the community team and ATS Home Craft
+- Allotment details (community, project, unit, pending confirmation status)
+- Registered **phone number** and **email** (sign in with phone on the app)
+- App Store and Google Play download buttons when `IOS_APP_STORE_URL` / `ANDROID_PLAY_STORE_URL` are configured
+
+Implementation: `ContactUnitsService.admin_assign_unit` →
+`send_unit_assignment_welcome_email` in `apps/user_service/app/utils/email_utils.py`.
+
+Create contact + unit in one request sends **only** the unit welcome email (not
+`send_client_creation_email`).
+
 ### What the contact sees
 
 | API               | Result                                             |

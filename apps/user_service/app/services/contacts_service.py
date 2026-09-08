@@ -1643,12 +1643,13 @@ class ContactsService:
         else:
             created_lead_id = None
 
-        self._maybe_send_contact_creation_email(
-            portal_access=bool(body.portal_access),
-            email=email_norm,
-            organization_name=org_name,
-            password=created_password if not reused_existing_contact else None,
-        )
+        if body.unit_assignment is None:
+            self._maybe_send_contact_creation_email(
+                portal_access=bool(body.portal_access),
+                email=email_norm,
+                organization_name=org_name,
+                password=created_password if not reused_existing_contact else None,
+            )
 
         if body.unit_assignment is not None:
             units_service = ContactUnitsService(

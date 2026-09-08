@@ -9,6 +9,7 @@ from uuid import UUID
 import asyncpg
 from asyncpg.exceptions import UniqueViolationError
 
+from apps.user_service.app.config.app_settings import shared_settings
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
     ContactOnboardingRepository,
 )
@@ -17,6 +18,10 @@ from apps.user_service.app.db.repositories.contact_roles_repository import (
 )
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
+)
+from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
@@ -29,9 +34,18 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.unit_occupancy_turnover_service import (
     UnitOccupancyTurnoverService,
 )
-from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.common_utils import (
+    UserContext,
+    format_iso_datetime,
+    parse_json_any,
+)
+from apps.user_service.app.utils.email_utils import send_unit_assignment_welcome_email
+from libs.shared_db.supabase_db.client import get_supabase_service_client
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger(__name__)
 
 
 class ContactUnitsService:
@@ -595,6 +609,127 @@ class ContactUnitsService:
             "assign_date": normalized.get("assign_date"),
         }
 
+    @staticmethod
+    def _format_login_phone_display(*, phone_isd_code: str | None, phone_number: str | None) -> str:
+        """Format a contact phone for display in welcome emails."""
+        isd = (phone_isd_code or "").strip()
+        number = (phone_number or "").strip()
+        if not number:
+            return ""
+        if isd and not isd.startswith("+"):
+            isd = f"+{isd.lstrip('+')}"
+        return f"{isd} {number}".strip()
+
+    @staticmethod
+    def _build_unit_display_label(normalized_unit: dict[str, Any]) -> str:
+        """Build a human-readable unit label for emails."""
+        tower_name = (normalized_unit.get("tower_name") or "").strip()
+        unit_label = (normalized_unit.get("unit_label") or "").strip()
+        code = (normalized_unit.get("code") or "").strip()
+        unit_part = unit_label or code or "your unit"
+        if tower_name:
+            return f"{tower_name} — {unit_part}"
+        return unit_part
+
+    @staticmethod
+    def _extract_primary_email(contact: dict[str, Any]) -> str | None:
+        """Return the primary email address from a contact row."""
+        emails = parse_json_any(contact.get("emails"), default=[])
+        if not isinstance(emails, list):
+            return None
+        primary = next((item for item in emails if item.get("is_primary")), None)
+        if primary and primary.get("email"):
+            return str(primary["email"]).strip().lower()
+        if emails and emails[0].get("email"):
+            return str(emails[0]["email"]).strip().lower()
+        legacy_email = contact.get("email")
+        if isinstance(legacy_email, str) and legacy_email.strip():
+            return legacy_email.strip().lower()
+        return None
+
+    @staticmethod
+    def _extract_primary_phone(contact: dict[str, Any]) -> tuple[str | None, str | None]:
+        """Return primary phone ISD code and number from a contact row."""
+        phones = parse_json_any(contact.get("phones"), default=[])
+        if not isinstance(phones, list) or not phones:
+            return None, None
+        primary = next((item for item in phones if item.get("is_primary")), phones[0])
+        return primary.get("phone_isd_code"), primary.get("phone_number")
+
+    async def _maybe_send_unit_assignment_welcome_email(
+        self,
+        *,
+        contact_id: str,
+        normalized_unit: dict[str, Any],
+    ) -> None:
+        """Send a welcome email after admin unit assignment (best-effort)."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        try:
+            contacts_repo = ContactsRepository(self.db_connection)
+            contact = await contacts_repo.get_contact_for_update(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            if not contact:
+                return
+
+            recipient_email = self._extract_primary_email(contact)
+            if not recipient_email:
+                logger.info(
+                    "Skipping unit assignment welcome email for contact %s: no email on file",
+                    contact_id,
+                )
+                return
+
+            phone_isd_code, phone_number = self._extract_primary_phone(contact)
+            login_phone = self._format_login_phone_display(
+                phone_isd_code=phone_isd_code,
+                phone_number=phone_number,
+            )
+
+            if not contact.get("user_id") and phone_number:
+                from apps.user_service.app.services.contacts_service import (
+                    ContactsService,
+                )
+
+                supabase_client = await get_supabase_service_client()
+                contacts_service = ContactsService(
+                    db_connection=self.db_connection,
+                    user_context=self.user_context,
+                    supabase_client=supabase_client,
+                )
+                await contacts_service.provision_auth_for_existing_contact(
+                    contact_id=contact_id,
+                )
+
+            org_repo = OrganizationRepository(self.db_connection)
+            organization = await org_repo.get_organization_by_id(org_id)
+            organization_name = str(
+                (organization or {}).get("name") or shared_settings.company_name or ""
+            )
+            project = normalized_unit.get("project") or {}
+            project_name = str(project.get("name") or project.get("code") or "").strip()
+            unit_display = self._build_unit_display_label(normalized_unit)
+
+            send_unit_assignment_welcome_email(
+                email=recipient_email,
+                first_name=contact.get("first_name"),
+                organization_name=organization_name,
+                project_name=project_name or organization_name,
+                unit_display=unit_display,
+                login_phone=login_phone or None,
+                login_email=recipient_email,
+                ios_app_store_url=shared_settings.ios_app_store_url,
+                android_play_store_url=shared_settings.android_play_store_url,
+            )
+        except Exception as error:
+            logger.error(
+                "Failed to send unit assignment welcome email for contact %s: %s",
+                contact_id,
+                str(error),
+            )
+
     async def admin_assign_unit(
         self,
         *,
@@ -615,4 +750,9 @@ class ContactUnitsService:
             organization_id=org_id,
             contact_unit_id=str(row["id"]),
         )
-        return self._normalize_unit_row(full or row)
+        normalized = self._normalize_unit_row(full or row)
+        await self._maybe_send_unit_assignment_welcome_email(
+            contact_id=contact_id,
+            normalized_unit=normalized,
+        )
+        return normalized
