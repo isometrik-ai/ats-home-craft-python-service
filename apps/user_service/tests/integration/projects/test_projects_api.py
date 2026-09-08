@@ -72,7 +72,12 @@ _FAKE_PROJECT_DETAILS = {
     "country": "India",
 }
 
-_FAKE_MY_PROJECT = {**_FAKE_PROJECT_SUMMARY, "role": "community_admin"}
+_FAKE_MY_PROJECT = {
+    **_FAKE_PROJECT_SUMMARY,
+    "project_role_id": COMMUNITY_ADMIN_ROLE_ID,
+    "role_slug": "community_admin",
+    "role_name": "Community Admin",
+}
 
 _FAKE_PROJECT_STATUS = {
     "project_id": PROJECT_ID,
@@ -394,7 +399,7 @@ async def test_list_my_projects(monkeypatch, client):
     res = await client.get("/v1/projects/mine")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == PROJECT_ID
-    assert body["data"][0]["role"] == "community_admin"
+    assert body["data"][0]["role_slug"] == "community_admin"
 
 
 @pytest.mark.asyncio
