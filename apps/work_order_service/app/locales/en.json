@@ -1,0 +1,115 @@
+{
+  "errors": {
+    "validation_error": "The request could not be processed because one or more fields are invalid."
+  },
+  "success": {
+    "list_retrieved": "List retrieved successfully.",
+    "retrieved": "Retrieved successfully.",
+    "created": "Created successfully.",
+    "updated": "Updated successfully.",
+    "deleted": "Deleted successfully."
+  },
+  "auth": {
+    "errors": {
+      "unauthorized": "Authentication is required to access this resource."
+    }
+  },
+  "presigned_url": {
+    "errors": {
+      "r2_credentials_not_configured": "R2 credentials not configured. Please set R2_ACCESS_KEY, R2_SECRET_KEY, and R2_ACCOUNT_ID environment variables."
+    },
+    "success": {
+      "presigned_url_generated": "Presigned URL generated successfully."
+    }
+  },
+  "work_orders": {
+    "success": {
+      "list": "Form templates retrieved successfully.",
+      "created": "Form template created successfully.",
+      "retrieved": "Form template retrieved successfully."
+    }
+  },
+  "assets": {
+    "success": {
+      "list_retrieved": "Assets retrieved successfully.",
+      "retrieved": "Asset retrieved successfully.",
+      "created": "Asset created successfully.",
+      "updated": "Asset updated successfully.",
+      "deleted": "Asset deleted successfully."
+    }
+  },
+  "asset_categories": {
+    "success": {
+      "list_retrieved": "Asset categories retrieved successfully.",
+      "retrieved": "Asset category retrieved successfully.",
+      "created": "Asset category created successfully.",
+      "updated": "Asset category updated successfully.",
+      "deleted": "Asset category deleted successfully."
+    }
+  },
+  "contracts": {
+    "success": {
+      "list_retrieved": "Maintenance contracts retrieved successfully.",
+      "retrieved": "Maintenance contract retrieved successfully.",
+      "created": "Maintenance contract created successfully.",
+      "updated": "Maintenance contract updated successfully.",
+      "deleted": "Maintenance contract deleted successfully."
+    }
+  },
+  "invoices": {
+    "success": {
+      "list_retrieved": "Vendor invoices retrieved successfully.",
+      "retrieved": "Vendor invoice retrieved successfully.",
+      "created": "Vendor invoice created successfully.",
+      "updated": "Vendor invoice updated successfully.",
+      "deleted": "Vendor invoice deleted successfully."
+    }
+  },
+  "payments": {
+    "success": {
+      "list_retrieved": "Payments retrieved successfully.",
+      "retrieved": "Payment retrieved successfully.",
+      "created": "Payment recorded successfully.",
+      "updated": "Payment updated successfully.",
+      "deleted": "Payment deleted successfully."
+    }
+  },
+  "integrations": {
+    "success": {
+      "list_retrieved": "Integration triggers retrieved successfully.",
+      "created": "Integration trigger created successfully.",
+      "updated": "Integration trigger updated successfully.",
+      "deleted": "Integration trigger deleted successfully.",
+      "tested": "Integration trigger test completed successfully."
+    }
+  },
+  "vendor_portal": {
+    "success": {
+      "retrieved": "Work order retrieved successfully.",
+      "updated": "Work order updated successfully.",
+      "created": "Invoice submitted successfully.",
+      "list_retrieved": "Invoices retrieved successfully."
+    },
+    "errors": {
+      "invalid_token": "The vendor access token is invalid or has expired."
+    }
+  },
+  "scheduler": {
+    "success": {
+      "updated": "Scheduler run completed successfully."
+    }
+  },
+  "logs": {
+    "success": {
+      "audit_list_retrieved": "Audit events retrieved successfully.",
+      "webhook_list_retrieved": "Webhook deliveries retrieved successfully."
+    }
+  },
+  "api_keys": {
+    "success": {
+      "list_retrieved": "API keys retrieved successfully.",
+      "created": "API key created successfully.",
+      "deleted": "API key revoked successfully."
+    }
+  }
+}
