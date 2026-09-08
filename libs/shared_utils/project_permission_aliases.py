@@ -18,9 +18,13 @@ from libs.shared_utils.common_query import (
     NOTICES_MANAGEMENT_VIEW,
     PARKING_MANAGEMENT_EDIT,
     PARKING_MANAGEMENT_VIEW,
+    PROJECT_MEMBERS_MANAGE,
     PROJECT_MEMBERS_MANAGE_ASSIGNED,
     PROJECT_SETUP_DELETE,
     PROJECT_SETUP_EDIT,
+    PROJECTS_MANAGEMENT_DELETE,
+    PROJECTS_MANAGEMENT_EDIT,
+    PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_EDIT,
     RESIDENT_MANAGEMENT_VIEW,
@@ -95,3 +99,69 @@ def project_role_grants_any(
         if role_permission_codes.intersection(satisfiers):
             return True
     return False
+
+
+def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
+    """Org-role codes that satisfy the ceiling for a project-scoped API action."""
+    codes = {permission_code}
+    if permission_code not in PROJECT_SCOPABLE_PERMISSION_CODES:
+        return frozenset(codes)
+
+    codes.add(PROJECTS_MANAGEMENT_VIEW)
+
+    if permission_code in {
+        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        VISITOR_MANAGEMENT_VIEW,
+        NOTICES_MANAGEMENT_VIEW,
+        COMMUNITY_EVENTS_MANAGEMENT_VIEW,
+        DAILY_HELP_MANAGEMENT_VIEW,
+        TENANT_REQUESTS_MANAGEMENT_VIEW,
+        MOVE_EVENTS_MANAGEMENT_VIEW,
+        PARKING_MANAGEMENT_VIEW,
+        RESIDENT_MANAGEMENT_VIEW,
+        FINANCE_MANAGEMENT_VIEW,
+        WORK_ORDER_MANAGEMENT_VIEW,
+    }:
+        codes.add(PROJECTS_MANAGEMENT_VIEW_ASSIGNED)
+
+    if permission_code in {
+        PROJECT_SETUP_EDIT,
+        PROJECT_SETUP_DELETE,
+        PROJECT_MEMBERS_MANAGE_ASSIGNED,
+        VISITOR_MANAGEMENT_VERIFY,
+        NOTICES_MANAGEMENT_EDIT,
+        COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+        DAILY_HELP_MANAGEMENT_CREATE,
+        DAILY_HELP_MANAGEMENT_UPDATE,
+        DAILY_HELP_MANAGEMENT_REVIEW,
+        TENANT_REQUESTS_MANAGEMENT_EDIT,
+        MOVE_EVENTS_MANAGEMENT_EDIT,
+        PARKING_MANAGEMENT_EDIT,
+        RESIDENT_MANAGEMENT_EDIT,
+        FINANCE_MANAGEMENT_EDIT,
+        FINANCE_MANAGEMENT_ADMIN,
+        WORK_ORDER_MANAGEMENT_EDIT,
+        WORK_ORDER_MANAGEMENT_APPROVE,
+        WORK_ORDER_MANAGEMENT_PAY,
+    }:
+        codes.add(PROJECTS_MANAGEMENT_EDIT)
+
+    if permission_code in {PROJECT_SETUP_DELETE}:
+        codes.add(PROJECTS_MANAGEMENT_DELETE)
+
+    if permission_code == PROJECT_MEMBERS_MANAGE_ASSIGNED:
+        codes.add(PROJECT_MEMBERS_MANAGE)
+
+    return frozenset(codes)
+
+
+def expand_org_ceiling_permission_codes(permission_codes: list[str]) -> list[str]:
+    """Expand project-scoped API codes to acceptable org-role ceiling codes."""
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for code in permission_codes:
+        for candidate in org_ceiling_permission_codes(code):
+            if candidate not in seen:
+                seen.add(candidate)
+                expanded.append(candidate)
+    return expanded

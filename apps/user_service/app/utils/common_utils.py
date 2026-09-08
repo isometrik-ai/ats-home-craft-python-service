@@ -39,7 +39,10 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.logger import get_logger
-from libs.shared_utils.project_permission_aliases import project_role_grants_any
+from libs.shared_utils.project_permission_aliases import (
+    expand_org_ceiling_permission_codes,
+    project_role_grants_any,
+)
 from libs.shared_utils.project_role_defaults import COMMUNITY_ADMIN_SLUG
 from libs.shared_utils.session_context_cache import resolve_session_context
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -475,13 +478,7 @@ async def ensure_staff_project_access_for_context(
         )
 
     action_codes = _expand_project_view_permission_codes(
-        _normalize_permission_codes(permission_codes)
-    )
-    await require_any_permission(
-        permission_codes=action_codes,
-        user_context=user_context,
-        db_connection=db_connection,
-        organization_id=org_id,
+        expand_org_ceiling_permission_codes(_normalize_permission_codes(permission_codes))
     )
 
     setup_service = ProjectSetupService(
@@ -498,6 +495,13 @@ async def ensure_staff_project_access_for_context(
     )
     if has_org_wide:
         return user_context
+
+    await require_any_permission(
+        permission_codes=action_codes,
+        user_context=user_context,
+        db_connection=db_connection,
+        organization_id=org_id,
+    )
 
     has_assigned_view = await check_user_access_async(
         permission_code=[PROJECTS_MANAGEMENT_VIEW_ASSIGNED],

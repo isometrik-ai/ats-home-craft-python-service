@@ -11,6 +11,8 @@ from apps.user_service.app.utils.common_utils import (
     user_has_any_permission,
 )
 from libs.shared_utils.common_query import (
+    PROJECT_SETUP_EDIT,
+    PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     VISITOR_MANAGEMENT_VIEW,
@@ -257,6 +259,64 @@ async def test_ensure_staff_project_access_assigned_allows_matching_project_role
             permission_codes=VISITOR_MANAGEMENT_VIEW,
         )
         assert ctx.project_member_role == "security"
+
+
+@pytest.mark.asyncio
+async def test_ensure_staff_project_access_legacy_org_edit_satisfies_setup_ceiling():
+    """Legacy org projects_management.edit satisfies project_setup.edit ceiling."""
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    setup_mock = MagicMock()
+    setup_mock.ensure_project = AsyncMock(return_value={"id": PROJECT_ID})
+    repo_mock = MagicMock()
+    repo_mock.get_active_member_with_role = AsyncMock(
+        return_value={
+            "project_role_id": ROLE_ID,
+            "role_slug": "community_admin",
+            "user_id": USER_ID,
+        }
+    )
+    roles_repo_mock = MagicMock()
+    roles_repo_mock.get_permission_codes_for_role = AsyncMock(
+        return_value={PROJECT_SETUP_EDIT, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    )
+
+    async def _access_side_effect(**kwargs):
+        code = kwargs["permission_code"][0]
+        return code in {
+            PROJECTS_MANAGEMENT_EDIT,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        }
+
+    with (
+        patch(
+            "apps.user_service.app.utils.common_utils.extract_user_context",
+            new=AsyncMock(return_value=_user_context()),
+        ),
+        patch(
+            "apps.user_service.app.services.project_setup_service.ProjectSetupService",
+            return_value=setup_mock,
+        ),
+        patch(
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
+            new=AsyncMock(side_effect=_access_side_effect),
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository",
+            return_value=repo_mock,
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.project_roles_repository.ProjectRolesRepository",
+            return_value=roles_repo_mock,
+        ),
+    ):
+        ctx = await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db,
+            project_id=PROJECT_ID,
+            permission_codes=PROJECT_SETUP_EDIT,
+        )
+        assert ctx.project_member_role == "community_admin"
 
 
 @pytest.mark.asyncio
