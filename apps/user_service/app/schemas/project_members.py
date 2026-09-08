@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from apps.user_service.app.schemas.enums import ProjectMemberRole, ProjectMemberStatus
+from apps.user_service.app.schemas.enums import ProjectMemberStatus
 
 
 class AssignProjectMemberRequest(BaseModel):
@@ -13,7 +13,7 @@ class AssignProjectMemberRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     user_id: str = Field(..., description="Auth user id of the org member to assign.")
-    role: ProjectMemberRole = Field(default=ProjectMemberRole.COMMUNITY_ADMIN)
+    project_role_id: str = Field(..., description="Project role template id for this project.")
 
 
 class UpdateProjectMemberRequest(BaseModel):
@@ -21,7 +21,7 @@ class UpdateProjectMemberRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: ProjectMemberRole | None = None
+    project_role_id: str | None = None
     status: ProjectMemberStatus | None = None
 
 
@@ -34,7 +34,9 @@ class ProjectMemberResponse(BaseModel):
     organization_id: str
     project_id: str
     user_id: str
-    role: ProjectMemberRole | str
+    project_role_id: str
+    role_slug: str
+    role_name: str | None = None
     status: ProjectMemberStatus | str
     joined_at: str | None = None
     email: str | None = None
@@ -49,16 +51,49 @@ class ListProjectMembersQuery(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    role: ProjectMemberRole | None = Field(
+    role_slug: str | None = Field(
         default=None,
-        description="Filter by project member role (community_admin, security, etc.).",
+        description="Filter by project role slug (community_admin, security, etc.).",
     )
     status: ProjectMemberStatus | None = Field(
         default=None,
-        description=("Filter by assignment status. When omitted, suspended members are excluded."),
+        description="Filter by assignment status. When omitted, suspended members are excluded.",
     )
     search: str | None = Field(
         default=None,
         min_length=1,
         description="Case-insensitive match on member email or name.",
     )
+
+
+class ProjectMemberListApiResponse(BaseModel):
+    """API envelope for GET /projects/{project_id}/members."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[ProjectMemberResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ProjectMemberApiResponse(BaseModel):
+    """API envelope for assign and update project member."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ProjectMemberResponse
+
+
+class ProjectMemberRemovedApiResponse(BaseModel):
+    """API envelope for DELETE /projects/{project_id}/members/{user_id}."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str

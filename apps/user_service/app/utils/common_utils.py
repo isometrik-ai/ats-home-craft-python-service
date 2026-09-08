@@ -28,6 +28,8 @@ from pydantic import BaseModel
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.common_query import (
+    PROJECT_MEMBERS_MANAGE,
+    PROJECT_MEMBERS_MANAGE_ASSIGNED,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
 )
@@ -37,6 +39,8 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.project_permission_aliases import project_role_grants_any
+from libs.shared_utils.project_role_defaults import COMMUNITY_ADMIN_SLUG
 from libs.shared_utils.session_context_cache import resolve_session_context
 from libs.shared_utils.status_codes import CustomStatusCode
 from libs.shared_utils.super_admin_utils import is_system_super_admin
@@ -56,6 +60,7 @@ class UserContext:
     email: str
     organization_id: str | None = None
     user_type: str | None = None
+    project_member_role: str | None = None
 
 
 @dataclass
@@ -501,18 +506,94 @@ async def ensure_staff_project_access_for_context(
         db_connection=db_connection,
     )
     if has_assigned_view:
-        member = await ProjectsRepository(db_connection).get_active_member(
+        from apps.user_service.app.db.repositories.project_roles_repository import (
+            ProjectRolesRepository,
+        )
+
+        member = await ProjectsRepository(db_connection).get_active_member_with_role(
             organization_id=org_id,
             project_id=project_id,
             user_id=user_context.user_id,
         )
         if member:
-            return user_context
+            requested_codes = _normalize_permission_codes(permission_codes)
+            role_codes = await ProjectRolesRepository(db_connection).get_permission_codes_for_role(
+                project_role_id=str(member["project_role_id"]),
+            )
+            if project_role_grants_any(
+                role_permission_codes=role_codes,
+                required_permission_codes=requested_codes,
+            ):
+                user_context.project_member_role = str(member.get("role_slug") or "") or None
+                return user_context
+            raise ForbiddenException(
+                message_key="errors.insufficient_permissions",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
 
     raise ForbiddenException(
         message_key="auth.errors.project_access_denied",
         custom_code=CustomStatusCode.FORBIDDEN,
     )
+
+
+async def ensure_project_staff_management_access_for_context(
+    *,
+    user_context: UserContext,
+    db_connection: asyncpg.Connection,
+    project_id: str,
+) -> UserContext:
+    """Allow HQ project member managers or community admins with manage_assigned."""
+    await ensure_staff_project_access_for_context(
+        user_context=user_context,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[
+            PROJECTS_MANAGEMENT_VIEW,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        ],
+    )
+
+    org_id = user_context.organization_id
+    assert org_id and user_context.user_id
+
+    has_hq_manage = await check_user_access_async(
+        permission_code=[PROJECT_MEMBERS_MANAGE],
+        user_id=user_context.user_id,
+        organization_id=org_id,
+        db_connection=db_connection,
+    )
+    if has_hq_manage:
+        return user_context
+
+    has_assigned_manage = await check_user_access_async(
+        permission_code=[PROJECT_MEMBERS_MANAGE_ASSIGNED],
+        user_id=user_context.user_id,
+        organization_id=org_id,
+        db_connection=db_connection,
+    )
+    if not has_assigned_manage:
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    from apps.user_service.app.db.repositories.projects_repository import (
+        ProjectsRepository,
+    )
+
+    member = await ProjectsRepository(db_connection).get_active_member_with_role(
+        organization_id=org_id,
+        project_id=project_id,
+        user_id=user_context.user_id,
+    )
+    if not member or str(member.get("role_slug") or "") != COMMUNITY_ADMIN_SLUG:
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    return user_context
 
 
 async def ensure_staff_project_access(
@@ -554,12 +635,12 @@ async def ensure_security_project_member_access(
     )
     org_id = user_context.organization_id
     assert org_id and user_context.user_id
-    member = await ProjectsRepository(db_connection).get_active_member(
+    member = await ProjectsRepository(db_connection).get_active_member_with_role(
         organization_id=org_id,
         project_id=project_id,
         user_id=user_context.user_id,
     )
-    if not member or str(member.get("role") or "") != ProjectMemberRole.SECURITY.value:
+    if not member or str(member.get("role_slug") or "") != ProjectMemberRole.SECURITY.value:
         raise ForbiddenException(
             message_key="daily_help.errors.security_role_required",
             custom_code=CustomStatusCode.FORBIDDEN,
@@ -573,43 +654,15 @@ async def ensure_daily_help_reviewer_access(
     project_id: str,
     request: Request | None = None,
 ) -> UserContext:
-    """Allow org editors or active community_admin project members to review submissions."""
-    from apps.user_service.app.db.repositories.projects_repository import (
-        ProjectsRepository,
-    )
-    from apps.user_service.app.schemas.enums import ProjectMemberRole
-    from libs.shared_utils.common_query import (
-        PROJECTS_MANAGEMENT_EDIT,
-        PROJECTS_MANAGEMENT_VIEW,
-    )
+    """Allow org reviewers or project members with daily_help_management.review."""
+    from libs.shared_utils.common_query import DAILY_HELP_MANAGEMENT_REVIEW
 
-    user_context = await ensure_staff_project_access(
+    return await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=DAILY_HELP_MANAGEMENT_REVIEW,
         request=request,
-    )
-    org_id = user_context.organization_id
-    assert org_id and user_context.user_id
-    has_edit = await check_user_access_async(
-        permission_code=[PROJECTS_MANAGEMENT_EDIT],
-        user_id=user_context.user_id,
-        organization_id=org_id,
-        db_connection=db_connection,
-    )
-    if has_edit:
-        return user_context
-    member = await ProjectsRepository(db_connection).get_active_member(
-        organization_id=org_id,
-        project_id=project_id,
-        user_id=user_context.user_id,
-    )
-    if member and str(member.get("role") or "") == ProjectMemberRole.COMMUNITY_ADMIN.value:
-        return user_context
-    raise ForbiddenException(
-        message_key="daily_help.errors.reviewer_access_denied",
-        custom_code=CustomStatusCode.FORBIDDEN,
     )
 
 
@@ -733,7 +786,7 @@ async def extract_notice_viewer_context(
         )
 
     projects_repo = ProjectsRepository(db_connection)
-    member = await projects_repo.get_active_member(
+    member = await projects_repo.get_active_member_with_role(
         organization_id=org_id,
         project_id=resolved_project_id,
         user_id=user_context.user_id,
@@ -748,7 +801,7 @@ async def extract_notice_viewer_context(
         user_context=user_context,
         contact_id=None,
         contact_user_id=user_context.user_id,
-        project_member_role=str(member.get("role") or "") or None,
+        project_member_role=str(member.get("role_slug") or "") or None,
     )
 
 

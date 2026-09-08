@@ -35,6 +35,33 @@ PROJECTS_MANAGEMENT_VIEW_ASSIGNED = "projects_management.view_assigned"
 PROJECTS_MANAGEMENT_EDIT = "projects_management.edit"
 PROJECTS_MANAGEMENT_DELETE = "projects_management.delete"
 PROJECT_MEMBERS_MANAGE = "project_members.manage"
+PROJECT_MEMBERS_MANAGE_ASSIGNED = "project_members.manage_assigned"
+
+PROJECT_SETUP_EDIT = "project_setup.edit"
+PROJECT_SETUP_DELETE = "project_setup.delete"
+
+NOTICES_MANAGEMENT_VIEW = "notices_management.view"
+NOTICES_MANAGEMENT_EDIT = "notices_management.edit"
+
+COMMUNITY_EVENTS_MANAGEMENT_VIEW = "community_events_management.view"
+COMMUNITY_EVENTS_MANAGEMENT_EDIT = "community_events_management.edit"
+
+DAILY_HELP_MANAGEMENT_VIEW = "daily_help_management.view"
+DAILY_HELP_MANAGEMENT_CREATE = "daily_help_management.create"
+DAILY_HELP_MANAGEMENT_UPDATE = "daily_help_management.update"
+DAILY_HELP_MANAGEMENT_REVIEW = "daily_help_management.review"
+
+TENANT_REQUESTS_MANAGEMENT_VIEW = "tenant_requests_management.view"
+TENANT_REQUESTS_MANAGEMENT_EDIT = "tenant_requests_management.edit"
+
+MOVE_EVENTS_MANAGEMENT_VIEW = "move_events_management.view"
+MOVE_EVENTS_MANAGEMENT_EDIT = "move_events_management.edit"
+
+PARKING_MANAGEMENT_VIEW = "parking_management.view"
+PARKING_MANAGEMENT_EDIT = "parking_management.edit"
+
+RESIDENT_MANAGEMENT_VIEW = "resident_management.view"
+RESIDENT_MANAGEMENT_EDIT = "resident_management.edit"
 
 WORK_ORDER_MANAGEMENT_VIEW = "work_order_management.view"
 WORK_ORDER_MANAGEMENT_EDIT = "work_order_management.edit"
@@ -285,6 +312,120 @@ DEFAULT_PERMISSIONS = [
         "Manage Project Members",
         "Assign and remove staff on projects",
         "projects",
+    ),
+    (
+        PROJECT_MEMBERS_MANAGE_ASSIGNED,
+        "Manage Assigned Project Members",
+        "Assign and remove staff on projects where caller is community admin",
+        "projects",
+    ),
+    (
+        PROJECT_SETUP_EDIT,
+        "Edit Project Setup",
+        "Modify project setup, towers, units, and configuration within assigned projects",
+        "projects",
+    ),
+    (
+        PROJECT_SETUP_DELETE,
+        "Delete Project",
+        "Delete projects the user is assigned to with sufficient project role",
+        "projects",
+    ),
+    (
+        NOTICES_MANAGEMENT_VIEW,
+        "View Notices",
+        "View notice board content within assigned projects",
+        "notices",
+    ),
+    (
+        NOTICES_MANAGEMENT_EDIT,
+        "Edit Notices",
+        "Create and publish notices within assigned projects",
+        "notices",
+    ),
+    (
+        COMMUNITY_EVENTS_MANAGEMENT_VIEW,
+        "View Community Events",
+        "View community events within assigned projects",
+        "community_events",
+    ),
+    (
+        COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+        "Edit Community Events",
+        "Create and manage community events within assigned projects",
+        "community_events",
+    ),
+    (
+        DAILY_HELP_MANAGEMENT_VIEW,
+        "View Daily Help",
+        "View daily help registry within assigned projects",
+        "daily_help",
+    ),
+    (
+        DAILY_HELP_MANAGEMENT_CREATE,
+        "Create Daily Help",
+        "Create daily help profiles within assigned projects",
+        "daily_help",
+    ),
+    (
+        DAILY_HELP_MANAGEMENT_UPDATE,
+        "Update Daily Help",
+        "Edit daily help profiles and categories within assigned projects",
+        "daily_help",
+    ),
+    (
+        DAILY_HELP_MANAGEMENT_REVIEW,
+        "Review Daily Help",
+        "Approve or reject daily help submissions within assigned projects",
+        "daily_help",
+    ),
+    (
+        TENANT_REQUESTS_MANAGEMENT_VIEW,
+        "View Tenant Requests",
+        "View tenant requests within assigned projects",
+        "tenant_requests",
+    ),
+    (
+        TENANT_REQUESTS_MANAGEMENT_EDIT,
+        "Edit Tenant Requests",
+        "Approve or reject tenant requests within assigned projects",
+        "tenant_requests",
+    ),
+    (
+        MOVE_EVENTS_MANAGEMENT_VIEW,
+        "View Move Events",
+        "View move-in and move-out events within assigned projects",
+        "move_events",
+    ),
+    (
+        MOVE_EVENTS_MANAGEMENT_EDIT,
+        "Edit Move Events",
+        "Create and update move events within assigned projects",
+        "move_events",
+    ),
+    (
+        PARKING_MANAGEMENT_VIEW,
+        "View Parking Allotments",
+        "View parking slots and allotments within assigned projects",
+        "parking",
+    ),
+    (
+        PARKING_MANAGEMENT_EDIT,
+        "Edit Parking Allotments",
+        "Assign and release parking slots within assigned projects",
+        "parking",
+    ),
+    (
+        RESIDENT_MANAGEMENT_VIEW,
+        "View Project Residents",
+        "View resident registry within assigned projects",
+        "residents",
+    ),
+    (
+        RESIDENT_MANAGEMENT_EDIT,
+        "Edit Project Residents",
+        "Onboard and update residents within assigned projects",
+        "residents",
     ),
     # custom fields management
     (

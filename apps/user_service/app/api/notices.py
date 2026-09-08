@@ -25,8 +25,8 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    PROJECTS_MANAGEMENT_EDIT,
-    PROJECTS_MANAGEMENT_VIEW,
+    NOTICES_MANAGEMENT_EDIT,
+    NOTICES_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -63,7 +63,7 @@ async def get_project_notice_summary(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=NOTICES_MANAGEMENT_VIEW,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -96,7 +96,7 @@ async def list_project_notices(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=NOTICES_MANAGEMENT_VIEW,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -132,7 +132,7 @@ async def get_project_notice_reach_estimate(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=NOTICES_MANAGEMENT_VIEW,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -165,7 +165,7 @@ async def get_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=NOTICES_MANAGEMENT_VIEW,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -205,7 +205,7 @@ async def create_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -256,7 +256,7 @@ async def update_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -310,7 +310,7 @@ async def delete_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -363,7 +363,7 @@ async def restore_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -413,7 +413,7 @@ async def duplicate_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -464,7 +464,7 @@ async def pin_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -517,7 +517,7 @@ async def unpin_project_notice(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
@@ -558,7 +558,7 @@ async def publish_due_project_notices(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)

@@ -160,7 +160,7 @@ ______________________________________________________________________
 All routes under `/v1/projects/{project_id}/parking-allotment/…`
 Router: `app/api/parking_allotment.py` · Tag: **Parking Allotment**
 
-RBAC: reads `PROJECTS_MANAGEMENT_VIEW`, writes `PROJECTS_MANAGEMENT_EDIT`.
+RBAC: reads `PARKING_MANAGEMENT_VIEW`, writes `PARKING_MANAGEMENT_EDIT`.
 
 ### Reads
 

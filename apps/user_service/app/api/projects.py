@@ -55,7 +55,19 @@ from apps.user_service.app.schemas.project_inventory import (
 from apps.user_service.app.schemas.project_members import (
     AssignProjectMemberRequest,
     ListProjectMembersQuery,
+    ProjectMemberApiResponse,
+    ProjectMemberListApiResponse,
+    ProjectMemberRemovedApiResponse,
     UpdateProjectMemberRequest,
+)
+from apps.user_service.app.schemas.project_roles import (
+    CreateProjectRoleRequest,
+    ProjectAssignablePermissionListApiResponse,
+    ProjectMyPermissionsApiResponse,
+    ProjectRoleDeletedApiResponse,
+    ProjectRoleDetailApiResponse,
+    ProjectRoleListApiResponse,
+    UpdateProjectRoleRequest,
 )
 from apps.user_service.app.schemas.project_setup import (
     CompleteStepRequest,
@@ -83,6 +95,7 @@ from apps.user_service.app.services.facilities_service import FacilitiesService
 from apps.user_service.app.services.inventory_service import InventoryService
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.project_members_service import ProjectMembersService
+from apps.user_service.app.services.project_roles_service import ProjectRolesService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.services.projects_service import ProjectsService
 from apps.user_service.app.services.site_map_service import SiteMapService
@@ -95,16 +108,16 @@ from apps.user_service.app.utils.common_utils import (
     UserContext,
     check_any_permissions,
     check_permissions,
+    ensure_project_staff_management_access_for_context,
     ensure_staff_project_access,
     extract_user_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    PROJECT_MEMBERS_MANAGE,
+    PROJECT_SETUP_DELETE,
+    PROJECT_SETUP_EDIT,
     PROJECTS_MANAGEMENT_CREATE,
-    PROJECTS_MANAGEMENT_DELETE,
-    PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     VISITOR_MANAGEMENT_VIEW,
@@ -163,6 +176,22 @@ async def _staff_project_access(
         project_id=project_id,
         permission_codes=permission_codes,
         request=request,
+    )
+
+
+async def _project_staff_management_access(
+    *,
+    request: Request,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str,
+) -> UserContext:
+    """HQ or community-admin project staff management access."""
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    return await ensure_project_staff_management_access_for_context(
+        user_context=user_context,
+        db_connection=db_connection,
+        project_id=project_id,
     )
 
 
@@ -444,7 +473,7 @@ async def update_project(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
     result = await service.update_project(project_id=project_id, body=body)
@@ -494,7 +523,7 @@ async def delete_project(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_project(project_id=project_id)
@@ -546,7 +575,7 @@ async def complete_setup_step(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ProjectSetupService(db_connection=db_connection, user_context=user_context)
     data = await service.complete_step(project_id=project_id, step_key=step_key, data=body.data)
@@ -595,7 +624,7 @@ async def complete_project_setup(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ProjectSetupService(db_connection=db_connection, user_context=user_context)
     data = await service.complete_wizard(project_id=project_id)
@@ -645,7 +674,7 @@ async def add_project_media(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
     data = await service.add_media(project_id=project_id, body=body)
@@ -733,7 +762,7 @@ async def delete_project_media(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ProjectsService(db_connection=db_connection, user_context=user_context)
     result = await service.remove_media(project_id=project_id, media_id=media_id)
@@ -792,7 +821,7 @@ async def create_tower(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_tower(project_id=project_id, body=body)
@@ -923,7 +952,7 @@ async def update_tower(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.update_tower(project_id=project_id, tower_id=tower_id, body=body)
@@ -972,7 +1001,7 @@ async def delete_tower(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_tower(project_id=project_id, tower_id=tower_id)
@@ -1021,7 +1050,7 @@ async def create_tower_wing(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_wing(project_id=project_id, tower_id=tower_id, body=body)
@@ -1108,7 +1137,7 @@ async def delete_tower_wing(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_wing(project_id=project_id, tower_id=tower_id, wing_id=wing_id)
@@ -1157,7 +1186,7 @@ async def create_tower_gate(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_gate(project_id=project_id, tower_id=tower_id, body=body)
@@ -1244,7 +1273,7 @@ async def delete_tower_gate(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_gate(project_id=project_id, tower_id=tower_id, gate_id=gate_id)
@@ -1293,7 +1322,7 @@ async def create_tower_lift(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_lift(project_id=project_id, tower_id=tower_id, body=body)
@@ -1380,7 +1409,7 @@ async def delete_tower_lift(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_lift(project_id=project_id, tower_id=tower_id, lift_id=lift_id)
@@ -1429,7 +1458,7 @@ async def create_floor(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     data = await service.create_floor(project_id=project_id, tower_id=tower_id, body=body)
@@ -1516,7 +1545,7 @@ async def delete_floor(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = TowersService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_floor(project_id=project_id, tower_id=tower_id, floor_id=floor_id)
@@ -1569,7 +1598,7 @@ async def create_unit_config(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     data = await service.create_config(project_id=project_id, body=body)
@@ -1656,7 +1685,7 @@ async def update_unit_config(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     data = await service.update_config(project_id=project_id, config_id=config_id, body=body)
@@ -1705,7 +1734,7 @@ async def delete_unit_config(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_config(project_id=project_id, config_id=config_id)
@@ -1754,7 +1783,7 @@ async def create_plot_item(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     data = await service.create_plot_item(project_id=project_id, config_id=config_id, body=body)
@@ -1841,7 +1870,7 @@ async def delete_plot_item(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_plot_item(
@@ -1892,7 +1921,7 @@ async def add_config_media(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     data = await service.add_media(project_id=project_id, config_id=config_id, body=body)
@@ -1979,7 +2008,7 @@ async def delete_config_media(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = UnitConfigsService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_media(
@@ -2034,7 +2063,7 @@ async def upsert_floor_inventory(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = InventoryService(db_connection=db_connection, user_context=user_context)
     items = await service.upsert_inventory(project_id=project_id, body=body)
@@ -2179,7 +2208,7 @@ async def create_facility(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
     data = await service.create_facility(project_id=project_id, body=body)
@@ -2365,7 +2394,7 @@ async def update_facility(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
     data = await service.update_facility(project_id=project_id, facility_id=facility_id, body=body)
@@ -2414,7 +2443,7 @@ async def delete_facility(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_facility(project_id=project_id, facility_id=facility_id)
@@ -2467,7 +2496,7 @@ async def create_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.create_unit(project_id=project_id, body=body)
@@ -2521,7 +2550,7 @@ async def bulk_create_units(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.create_units_bulk(project_id=project_id, body=body)
@@ -2779,7 +2808,7 @@ async def unassign_unit_owner(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ContactUnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.unassign_unit_owner(project_id=project_id, unit_id=unit_id)
@@ -2836,7 +2865,7 @@ async def reassign_unit_owner(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ContactUnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.reassign_unit_owner(
@@ -2941,7 +2970,7 @@ async def add_unit_document(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ContactUnitDocumentsService(
         db_connection=db_connection,
@@ -2999,7 +3028,7 @@ async def delete_unit_document(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = ContactUnitDocumentsService(
         db_connection=db_connection,
@@ -3053,7 +3082,7 @@ async def update_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.update_unit(project_id=project_id, unit_id=unit_id, body=body)
@@ -3102,7 +3131,7 @@ async def delete_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_unit(project_id=project_id, unit_id=unit_id)
@@ -3150,7 +3179,7 @@ async def create_parking_zone(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     data = await service.create_parking_zone(project_id=project_id, body=body)
@@ -3235,7 +3264,7 @@ async def delete_parking_zone(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = UnitsService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_parking_zone(project_id=project_id, zone_id=zone_id)
@@ -3288,7 +3317,7 @@ async def update_project_location(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
     data = await service.update_location(project_id=project_id, body=body)
@@ -3338,7 +3367,7 @@ async def create_site_map_overlays(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
     items = await service.create_overlays(project_id=project_id, body=body)
@@ -3423,7 +3452,7 @@ async def delete_site_map_overlay(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_DELETE,
+        permission_codes=PROJECT_SETUP_DELETE,
     )
     service = SiteMapService(db_connection=db_connection, user_context=user_context)
     result = await service.delete_overlay(project_id=project_id, overlay_id=overlay_id)
@@ -3444,6 +3473,403 @@ async def delete_site_map_overlay(
 
 
 # ---------------------------------------------------------------------------
+# Project roles (per-project RBAC templates)
+# ---------------------------------------------------------------------------
+
+
+def _project_rbac_ok_response(
+    model: type,
+    description: str,
+    *,
+    status_code: int = http_status.HTTP_200_OK,
+) -> dict[int | str, dict]:
+    """Build OpenAPI success responses for project RBAC endpoints."""
+    return {
+        **COMMON_ERROR_RESPONSES,
+        status_code: {"model": model, "description": description},
+    }
+
+
+def _project_rbac_created_response(model: type, description: str) -> dict[int | str, dict]:
+    """Build OpenAPI 201 responses for project RBAC endpoints."""
+    return _project_rbac_ok_response(
+        model,
+        description,
+        status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+PROJECT_ROLE_LIST_RESPONSES = _project_rbac_ok_response(
+    ProjectRoleListApiResponse,
+    "Project role templates for the project.",
+)
+PROJECT_ROLE_DETAIL_RESPONSES = _project_rbac_ok_response(
+    ProjectRoleDetailApiResponse,
+    "Project role with assigned permissions.",
+)
+PROJECT_ROLE_CREATED_RESPONSES = _project_rbac_created_response(
+    ProjectRoleDetailApiResponse,
+    "Newly created custom project role.",
+)
+PROJECT_ROLE_UPDATED_RESPONSES = PROJECT_ROLE_DETAIL_RESPONSES
+PROJECT_ROLE_DELETED_RESPONSES = _project_rbac_ok_response(
+    ProjectRoleDeletedApiResponse,
+    "Custom project role deleted.",
+)
+PROJECT_ASSIGNABLE_PERMISSION_LIST_RESPONSES = _project_rbac_ok_response(
+    ProjectAssignablePermissionListApiResponse,
+    "Permissions that may be assigned to project role templates.",
+)
+PROJECT_MY_PERMISSIONS_RESPONSES = _project_rbac_ok_response(
+    ProjectMyPermissionsApiResponse,
+    "Effective project permissions for the current user.",
+)
+PROJECT_MEMBER_LIST_RESPONSES = _project_rbac_ok_response(
+    ProjectMemberListApiResponse,
+    "Staff assigned to the project.",
+)
+PROJECT_MEMBER_MUTATION_RESPONSES = _project_rbac_ok_response(
+    ProjectMemberApiResponse,
+    "Project member assignment details.",
+)
+PROJECT_MEMBER_ASSIGNED_RESPONSES = _project_rbac_created_response(
+    ProjectMemberApiResponse,
+    "Newly assigned project member.",
+)
+PROJECT_MEMBER_REMOVED_RESPONSES = _project_rbac_ok_response(
+    ProjectMemberRemovedApiResponse,
+    "Project member assignment removed.",
+)
+
+
+@handle_api_exceptions("list project roles")
+@router.get(
+    "/{project_id}/roles",
+    status_code=http_status.HTTP_200_OK,
+    summary="List project role templates",
+    response_model=None,
+    responses=PROJECT_ROLE_LIST_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_project_roles(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return customizable role templates for a project."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[
+            PROJECTS_MANAGEMENT_VIEW,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        ],
+    )
+    service = ProjectRolesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    items = await service.list_roles(project_id=project_id)
+    payload = [item.model_dump() for item in items]
+    return list_response(
+        request=request,
+        items=payload,
+        total=len(payload),
+        page=1,
+        page_size=max(len(payload), 1),
+        message_key="project_roles.success.list_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if payload else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("create project role")
+@router.post(
+    "/{project_id}/roles",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Create a custom project role template",
+    response_model=None,
+    responses=PROJECT_ROLE_CREATED_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="project_roles",
+    category="PROJECT_ROLES",
+)
+async def create_project_role(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    body: CreateProjectRoleRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Create a custom project role with its own slug and permissions."""
+    user_context = await _project_staff_management_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+    )
+    service = ProjectRolesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    role = await service.create_role(project_id=project_id, body=body)
+    data = role.model_dump()
+    _set_audit(
+        request,
+        user_context,
+        table="project_roles",
+        requested_id=data["id"],
+        description=f"Created project role {data['slug']} on project {project_id}",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_roles.success.created",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=data,
+    )
+
+
+@handle_api_exceptions("list assignable project role permissions")
+@router.get(
+    "/{project_id}/roles/permissions",
+    status_code=http_status.HTTP_200_OK,
+    summary="List permissions assignable to project roles",
+    description=(
+        "Returns the org permission catalog entries that may be attached to a project role "
+        "template. Use the returned ids as permission_ids when creating or updating roles."
+    ),
+    response_model=None,
+    responses=PROJECT_ASSIGNABLE_PERMISSION_LIST_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_assignable_project_role_permissions(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return project-scopable permissions for the role editor."""
+    user_context = await _project_staff_management_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+    )
+    service = ProjectRolesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    items = await service.list_assignable_permissions(project_id=project_id)
+    payload = [item.model_dump() for item in items]
+    return list_response(
+        request=request,
+        items=payload,
+        total=len(payload),
+        page=1,
+        page_size=max(len(payload), 1),
+        message_key="project_roles.success.assignable_permissions_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if payload else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("get project role detail")
+@router.get(
+    "/{project_id}/roles/{project_role_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get project role detail",
+    response_model=None,
+    responses=PROJECT_ROLE_DETAIL_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_project_role_detail(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    project_role_id: str = Path(..., description="Project role identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return one project role with assigned permissions."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[
+            PROJECTS_MANAGEMENT_VIEW,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        ],
+    )
+    service = ProjectRolesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    role = await service.get_role_detail(
+        project_id=project_id,
+        project_role_id=project_role_id,
+    )
+    return success_response(
+        request=request,
+        message_key="project_roles.success.detail_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=role.model_dump(),
+    )
+
+
+@handle_api_exceptions("update project role")
+@router.patch(
+    "/{project_id}/roles/{project_role_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Update a project role template",
+    response_model=None,
+    responses=PROJECT_ROLE_UPDATED_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="project_roles",
+    category="PROJECT_ROLES",
+)
+async def update_project_role(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    project_role_id: str = Path(..., description="Project role identifier (UUID string)."),
+    body: UpdateProjectRoleRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Update project role metadata and/or permissions."""
+    user_context = await _project_staff_management_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+    )
+    service = ProjectRolesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    role = await service.update_role(
+        project_id=project_id,
+        project_role_id=project_role_id,
+        body=body,
+    )
+    data = role.model_dump()
+    _set_audit(
+        request,
+        user_context,
+        table="project_roles",
+        requested_id=project_role_id,
+        description=f"Updated project role {project_role_id} on project {project_id}",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_roles.success.updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("delete project role")
+@router.delete(
+    "/{project_id}/roles/{project_role_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Delete a custom project role template",
+    response_model=None,
+    responses=PROJECT_ROLE_DELETED_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="project_roles",
+    category="PROJECT_ROLES",
+)
+async def delete_project_role(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    project_role_id: str = Path(..., description="Project role identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Delete a custom project role. Default system roles (is_system=true) cannot be deleted."""
+    user_context = await _project_staff_management_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+    )
+    service = ProjectRolesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    existing = await service.get_role_detail(
+        project_id=project_id,
+        project_role_id=project_role_id,
+    )
+    await service.delete_role(
+        project_id=project_id,
+        project_role_id=project_role_id,
+    )
+    _set_audit(
+        request,
+        user_context,
+        table="project_roles",
+        requested_id=project_role_id,
+        description=f"Deleted project role {project_role_id} on project {project_id}",
+        risk_level="medium",
+        old_data=existing.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="project_roles.success.deleted",
+        custom_code=CustomStatusCode.DELETED,
+    )
+
+
+@handle_api_exceptions("get my project permissions")
+@router.get(
+    "/{project_id}/my-permissions",
+    status_code=http_status.HTTP_200_OK,
+    summary="Effective permissions for current user on a project",
+    response_model=None,
+    responses=PROJECT_MY_PERMISSIONS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_my_project_permissions(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return project-role permissions intersected with org permissions."""
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    service = ProjectRolesService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await service.get_my_permissions(project_id=project_id)
+    return success_response(
+        request=request,
+        message_key="project_roles.success.permissions_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Project members (staff assignment)
 # ---------------------------------------------------------------------------
 
@@ -3457,7 +3883,8 @@ async def delete_site_map_overlay(
         "Returns project member rows joined with organization member profiles. "
         "Filter by role, status, or search by name/email."
     ),
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=PROJECT_MEMBER_LIST_RESPONSES,
 )
 @limiter.limit("100/minute")
 async def list_project_members(
@@ -3484,7 +3911,7 @@ async def list_project_members(
     )
     items = await service.list_members(
         project_id=project_id,
-        role=query.role,
+        role_slug=query.role_slug,
         status=query.status,
         search=query.search,
     )
@@ -3505,7 +3932,8 @@ async def list_project_members(
     "/{project_id}/members",
     status_code=http_status.HTTP_201_CREATED,
     summary="Assign an organization member to a project",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=PROJECT_MEMBER_ASSIGNED_RESPONSES,
 )
 @limiter.limit("60/minute")
 @audit_api_call(
@@ -3523,12 +3951,11 @@ async def assign_project_member(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Assign an active organization member to a project."""
-    user_context = await _staff_project_access(
+    user_context = await _project_staff_management_access(
         request=request,
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECT_MEMBERS_MANAGE,
     )
     service = ProjectMembersService(
         db_connection=db_connection,
@@ -3558,7 +3985,8 @@ async def assign_project_member(
     "/{project_id}/members/{user_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Update a project member role or status",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=PROJECT_MEMBER_MUTATION_RESPONSES,
 )
 @limiter.limit("60/minute")
 @audit_api_call(
@@ -3577,12 +4005,11 @@ async def update_project_member(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Update project member role or status."""
-    user_context = await _staff_project_access(
+    user_context = await _project_staff_management_access(
         request=request,
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECT_MEMBERS_MANAGE,
     )
     service = ProjectMembersService(
         db_connection=db_connection,
@@ -3615,7 +4042,8 @@ async def update_project_member(
     "/{project_id}/members/{user_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Remove a project member assignment",
-    responses=COMMON_ERROR_RESPONSES,
+    response_model=None,
+    responses=PROJECT_MEMBER_REMOVED_RESPONSES,
 )
 @limiter.limit("60/minute")
 @audit_api_call(
@@ -3633,12 +4061,11 @@ async def remove_project_member(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Suspend a user's assignment to a project."""
-    user_context = await _staff_project_access(
+    user_context = await _project_staff_management_access(
         request=request,
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECT_MEMBERS_MANAGE,
     )
     service = ProjectMembersService(
         db_connection=db_connection,
@@ -3769,7 +4196,7 @@ async def review_project_vehicle_request(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
     data = await service.review_vehicle(
@@ -3828,7 +4255,7 @@ async def delete_project_vehicle(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PROJECT_SETUP_EDIT,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
     data = await service.admin_delete_project_vehicle(

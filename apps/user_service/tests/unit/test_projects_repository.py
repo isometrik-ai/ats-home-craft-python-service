@@ -151,7 +151,8 @@ async def test_list_projects_for_member_joins_project_members():
     assert "INNER JOIN project_members pm" in count_query
     assert "pm.user_id = $2::uuid" in count_query
     assert "pm.status = 'active'" in count_query
-    assert "pm.role" in list_query
+    assert "INNER JOIN project_roles pr" in list_query
+    assert "role_slug" in list_query
 
 
 @pytest.mark.asyncio
@@ -234,14 +235,14 @@ async def test_project_media_and_members():
 
     assert await repo.delete_media(organization_id="org-1", project_id="p1", media_id="m1")
 
-    conn.row = {"id": "mem1", "role": "community_admin"}
+    conn.row = {"id": "mem1", "project_role_id": "role-1"}
     member = await repo.upsert_member(
         organization_id="org-1",
         project_id="p1",
         user_id="user-1",
-        role="community_admin",
+        project_role_id="role-1",
     )
-    assert member["role"] == "community_admin"
+    assert member["project_role_id"] == "role-1"
 
     members = await repo.list_members(organization_id="org-1", project_id="p1")
     assert len(members) == 1
@@ -250,7 +251,7 @@ async def test_project_media_and_members():
 @pytest.mark.asyncio
 async def test_member_helpers_and_media_by_kind():
     """Member CRUD helpers and delete_media_by_kind."""
-    conn = _FakeConn(row={"id": "mem1", "role": "staff", "status": "active"})
+    conn = _FakeConn(row={"id": "mem1", "project_role_id": "role-1", "status": "active"})
     repo = ProjectsRepository(db_connection=conn)
 
     active = await repo.get_active_member(
@@ -262,14 +263,14 @@ async def test_member_helpers_and_media_by_kind():
     member = await repo.get_member(organization_id="org-1", project_id="p1", user_id="user-1")
     assert member["status"] == "suspended"
 
-    conn.row = {"id": "mem1", "role": "security"}
+    conn.row = {"id": "mem1", "project_role_id": "role-2"}
     updated = await repo.update_member(
         organization_id="org-1",
         project_id="p1",
         user_id="user-1",
-        role="security",
+        project_role_id="role-2",
     )
-    assert updated["role"] == "security"
+    assert updated["project_role_id"] == "role-2"
     assert "UPDATE project_members" in conn.fetchrow_calls[-1][0]
 
     conn.row = {"id": "mem1", "status": "active"}
@@ -286,25 +287,25 @@ async def test_member_helpers_and_media_by_kind():
 
 @pytest.mark.asyncio
 async def test_list_members_with_profiles_and_count_by_role():
-    conn = _FakeConn(rows=[{"user_id": "user-1", "role": "staff"}], val=2)
+    conn = _FakeConn(rows=[{"user_id": "user-1", "role_slug": "staff"}], val=2)
     repo = ProjectsRepository(db_connection=conn)
 
     members = await repo.list_members_with_profiles(
         organization_id="org-1",
         project_id="p1",
-        role="staff",
+        role_slug="staff",
         status="active",
         search="john",
     )
     assert len(members) == 1
     query, _ = conn.fetch_calls[0]
     assert "organization_members" in query
-    assert "pm.role = $" in query
+    assert "pr.slug = $" in query
 
-    count = await repo.count_active_members_by_role(
+    count = await repo.count_active_members_by_role_slug(
         organization_id="org-1",
         project_id="p1",
-        role="security",
+        role_slug="security",
     )
     assert count == 2
 
