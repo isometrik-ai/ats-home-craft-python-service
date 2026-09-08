@@ -470,8 +470,8 @@ async def test_extract_notice_viewer_context_uses_project_member_for_staff():
         ) as mock_projects_cls,
     ):
         mock_contacts_cls.return_value.get_active_contact_by_user_id = AsyncMock(return_value=None)
-        mock_projects_cls.return_value.get_active_member = AsyncMock(
-            return_value={"role": "security", "user_id": "staff-1"}
+        mock_projects_cls.return_value.get_active_member_with_role = AsyncMock(
+            return_value={"role_slug": "security", "user_id": "staff-1"}
         )
         viewer = await extract_notice_viewer_context(
             current_user,
@@ -500,7 +500,7 @@ async def test_extract_notice_viewer_context_denies_unassigned_staff():
         ) as mock_projects_cls,
     ):
         mock_contacts_cls.return_value.get_active_contact_by_user_id = AsyncMock(return_value=None)
-        mock_projects_cls.return_value.get_active_member = AsyncMock(return_value=None)
+        mock_projects_cls.return_value.get_active_member_with_role = AsyncMock(return_value=None)
         with pytest.raises(ForbiddenException):
             await extract_notice_viewer_context(
                 current_user,

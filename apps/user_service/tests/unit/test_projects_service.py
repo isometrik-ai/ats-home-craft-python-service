@@ -389,8 +389,12 @@ async def test_list_my_projects_requires_session():
 
 @pytest.mark.asyncio
 async def test_list_my_projects_includes_role():
-    """My projects adds role from member row."""
-    row = _project_row(role="community_admin")
+    """My projects adds role slug from member row."""
+    row = _project_row(
+        project_role_id="role-1",
+        role_slug="community_admin",
+        role_name="Community Admin",
+    )
     service = _service(projects_repo=_FakeProjectsRepo(projects=[row]))
     with _patch_unit_counts_by_property_type():
         result = await service.list_my_projects(
@@ -400,7 +404,7 @@ async def test_list_my_projects_includes_role():
             page=1,
             page_size=20,
         )
-    assert result["items"][0]["role"] == "community_admin"
+    assert result["items"][0]["role_slug"] == "community_admin"
 
 
 @pytest.mark.asyncio
@@ -415,7 +419,7 @@ async def test_delete_project_success():
 
 @pytest.mark.asyncio
 async def test_create_project_success(monkeypatch):
-    """Create inserts project, syncs steps, and registers members."""
+    """Create inserts project, syncs steps, seeds roles, and registers members."""
     repo = _FakeProjectsRepo(project=_project_row())
     service = _service(projects_repo=repo)
     org_member_repo = MagicMock()
@@ -424,13 +428,23 @@ async def test_create_project_success(monkeypatch):
         "apps.user_service.app.services.projects_service.OrganizationMemberRepository",
         lambda db_connection: org_member_repo,
     )
+    roles_service = MagicMock()
+    roles_service.seed_default_roles_for_project = AsyncMock(
+        return_value={"community_admin": "role-ca-id"}
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.projects_service.ProjectRolesService",
+        lambda db_connection: roles_service,
+    )
 
     result = await service.create_project(_create_body())
 
     assert result["project_id"]
     assert repo.inserted_project is not None
     assert len(repo.upsert_calls) == 2
+    assert all(call["project_role_id"] == "role-ca-id" for call in repo.upsert_calls)
     service.setup_service.sync_steps_for_property_types.assert_awaited_once()
+    roles_service.seed_default_roles_for_project.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -452,6 +466,12 @@ async def test_update_project_patches_row(monkeypatch):
     monkeypatch.setattr(
         "apps.user_service.app.services.projects_service.OrganizationMemberRepository",
         lambda db_connection: org_member_repo,
+    )
+    roles_service = MagicMock()
+    roles_service.get_community_admin_role_id = AsyncMock(return_value="role-ca-id")
+    monkeypatch.setattr(
+        "apps.user_service.app.services.projects_service.ProjectRolesService",
+        lambda db_connection: roles_service,
     )
 
     body = UpdateProjectRequest(

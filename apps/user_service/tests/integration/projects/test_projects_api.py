@@ -15,6 +15,7 @@ from apps.user_service.tests.integration.helpers import (
     admin_context,
     patch_check_any_permissions,
     patch_check_permissions,
+    patch_project_staff_management_access_wrapper,
     patch_staff_project_access_wrapper,
 )
 from apps.user_service.tests.utils.assertions import assert_success
@@ -36,6 +37,7 @@ PLOT_ITEM_ID = "550e8400-e29b-41d4-a716-446655440001"
 VEHICLE_ID = "660e8400-e29b-41d4-a716-446655440001"
 SLOT_ID = "770e8400-e29b-41d4-a716-446655440001"
 ADMIN_USER_ID = "550e8400-e29b-41d4-a716-446655440000"
+COMMUNITY_ADMIN_ROLE_ID = "880e8400-e29b-41d4-a716-446655440099"
 
 _API = "apps.user_service.app.api.projects"
 
@@ -70,7 +72,12 @@ _FAKE_PROJECT_DETAILS = {
     "country": "India",
 }
 
-_FAKE_MY_PROJECT = {**_FAKE_PROJECT_SUMMARY, "role": "community_admin"}
+_FAKE_MY_PROJECT = {
+    **_FAKE_PROJECT_SUMMARY,
+    "project_role_id": COMMUNITY_ADMIN_ROLE_ID,
+    "role_slug": "community_admin",
+    "role_name": "Community Admin",
+}
 
 _FAKE_PROJECT_STATUS = {
     "project_id": PROJECT_ID,
@@ -281,6 +288,7 @@ def _patch_projects_access(monkeypatch) -> None:
     patch_check_permissions(monkeypatch, _API, org_id=ORG)
     patch_check_any_permissions(monkeypatch, _API, org_id=ORG)
     patch_staff_project_access_wrapper(monkeypatch, _API, org_id=ORG)
+    patch_project_staff_management_access_wrapper(monkeypatch, _API, org_id=ORG)
 
 
 def _patch_extract_user_context(monkeypatch) -> None:
@@ -391,7 +399,7 @@ async def test_list_my_projects(monkeypatch, client):
     res = await client.get("/v1/projects/mine")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == PROJECT_ID
-    assert body["data"][0]["role"] == "community_admin"
+    assert body["data"][0]["role_slug"] == "community_admin"
 
 
 @pytest.mark.asyncio
@@ -2124,7 +2132,9 @@ _FAKE_PROJECT_MEMBER = {
     "user_id": ADMIN_USER_ID,
     "project_id": PROJECT_ID,
     "organization_id": ORG,
-    "role": "community_admin",
+    "project_role_id": COMMUNITY_ADMIN_ROLE_ID,
+    "role_slug": "community_admin",
+    "role_name": "Community Admin",
     "status": "active",
     "first_name": "Admin",
     "last_name": "User",
@@ -2141,11 +2151,11 @@ async def test_list_project_members(monkeypatch, client):
         _self,
         *,
         project_id: str,
-        role=None,
+        role_slug=None,
         status=None,
         search=None,
     ):
-        del _self, role, status, search
+        del _self, role_slug, status, search
         assert project_id == PROJECT_ID
         return [ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)]
 
@@ -2157,12 +2167,12 @@ async def test_list_project_members(monkeypatch, client):
     res = await client.get(f"/v1/projects/{PROJECT_ID}/members")
     body = assert_success(res, 200)
     assert body["data"][0]["user_id"] == ADMIN_USER_ID
-    assert body["data"][0]["role"] == "community_admin"
+    assert body["data"][0]["role_slug"] == "community_admin"
 
 
 @pytest.mark.asyncio
 async def test_list_project_members_with_filters(monkeypatch, client):
-    """GET /projects/{project_id}/members forwards role/status/search query params."""
+    """GET /projects/{project_id}/members forwards role_slug/status/search query params."""
     _patch_projects_access(monkeypatch)
     captured: dict[str, object] = {}
 
@@ -2170,13 +2180,13 @@ async def test_list_project_members_with_filters(monkeypatch, client):
         _self,
         *,
         project_id: str,
-        role=None,
+        role_slug=None,
         status=None,
         search=None,
     ):
         del _self
         captured["project_id"] = project_id
-        captured["role"] = role
+        captured["role_slug"] = role_slug
         captured["status"] = status
         captured["search"] = search
         return [ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)]
@@ -2188,12 +2198,12 @@ async def test_list_project_members_with_filters(monkeypatch, client):
 
     res = await client.get(
         f"/v1/projects/{PROJECT_ID}/members",
-        params={"role": "security", "status": "active", "search": "john"},
+        params={"role_slug": "security", "status": "active", "search": "john"},
     )
     body = assert_success(res, 200)
     assert body["data"][0]["user_id"] == ADMIN_USER_ID
     assert captured["project_id"] == PROJECT_ID
-    assert captured["role"].value == "security"
+    assert captured["role_slug"] == "security"
     assert captured["status"].value == "active"
     assert captured["search"] == "john"
 
@@ -2207,6 +2217,7 @@ async def test_assign_project_member(monkeypatch, client):
         del _self
         assert project_id == PROJECT_ID
         assert body.user_id == ADMIN_USER_ID
+        assert body.project_role_id == COMMUNITY_ADMIN_ROLE_ID
         return ProjectMemberResponse.model_validate(_FAKE_PROJECT_MEMBER)
 
     monkeypatch.setattr(
@@ -2216,7 +2227,7 @@ async def test_assign_project_member(monkeypatch, client):
 
     res = await client.post(
         f"/v1/projects/{PROJECT_ID}/members",
-        json={"user_id": ADMIN_USER_ID, "role": "community_admin"},
+        json={"user_id": ADMIN_USER_ID, "project_role_id": COMMUNITY_ADMIN_ROLE_ID},
     )
     body = assert_success(res, 201)
     assert body["data"]["user_id"] == ADMIN_USER_ID
@@ -2240,3 +2251,79 @@ async def test_remove_project_member(monkeypatch, client):
     res = await client.delete(f"/v1/projects/{PROJECT_ID}/members/{ADMIN_USER_ID}")
     body = assert_success(res, 200)
     assert "data" not in body
+
+
+@pytest.mark.asyncio
+async def test_create_project_role(monkeypatch, client):
+    """POST /projects/{project_id}/roles creates a custom role."""
+    _patch_projects_access(monkeypatch)
+
+    async def fake_create_role(_self, *, project_id: str, body):
+        del _self
+        assert project_id == PROJECT_ID
+        assert body.name == "Maintenance Lead"
+        assert body.slug == "maintenance_lead"
+        from apps.user_service.app.schemas.project_roles import ProjectRoleDetailItem
+
+        return ProjectRoleDetailItem(
+            id="990e8400-e29b-41d4-a716-446655440099",
+            organization_id=ORG,
+            project_id=PROJECT_ID,
+            slug="maintenance_lead",
+            name="Maintenance Lead",
+            description=None,
+            is_system=False,
+            permission_count=1,
+            member_count=0,
+            permission_ids=["perm-1"],
+            permissions=[],
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_roles_service.ProjectRolesService.create_role",
+        fake_create_role,
+    )
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/roles",
+        json={
+            "name": "Maintenance Lead",
+            "slug": "maintenance_lead",
+            "permission_ids": ["perm-1"],
+        },
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["slug"] == "maintenance_lead"
+    assert body["data"]["is_system"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_assignable_project_role_permissions(monkeypatch, client):
+    """GET /projects/{project_id}/roles/permissions returns role editor catalog."""
+    _patch_projects_access(monkeypatch)
+
+    async def fake_list_assignable_permissions(_self, *, project_id: str):
+        del _self
+        assert project_id == PROJECT_ID
+        from apps.user_service.app.schemas.admin_access_management import PermissionItem
+
+        return [
+            PermissionItem(
+                id="perm-1",
+                code="notices_management.view",
+                name="View Notices",
+                category="projects",
+                description="View project notices",
+                created_at="2026-01-01T00:00:00Z",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_roles_service.ProjectRolesService.list_assignable_permissions",
+        fake_list_assignable_permissions,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/roles/permissions")
+    body = assert_success(res, 200)
+    assert body["data"][0]["code"] == "notices_management.view"
+    assert body["data"][0]["id"] == "perm-1"

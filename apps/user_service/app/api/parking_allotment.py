@@ -36,8 +36,8 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    PROJECTS_MANAGEMENT_EDIT,
-    PROJECTS_MANAGEMENT_VIEW,
+    PARKING_MANAGEMENT_EDIT,
+    PARKING_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -119,7 +119,7 @@ async def get_parking_allotment_summary(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=PARKING_MANAGEMENT_VIEW,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -157,7 +157,7 @@ async def list_parking_allotment_slots(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=PARKING_MANAGEMENT_VIEW,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -204,7 +204,7 @@ async def get_parking_allotment_slot_detail(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=PARKING_MANAGEMENT_VIEW,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -238,7 +238,7 @@ async def list_parking_allotment_slot_history(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=PARKING_MANAGEMENT_VIEW,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -272,7 +272,7 @@ async def list_parking_allotment_units(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=PARKING_MANAGEMENT_VIEW,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -316,7 +316,7 @@ async def get_parking_allotment_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=PARKING_MANAGEMENT_VIEW,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -358,7 +358,7 @@ async def allot_parking_slot_to_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PARKING_MANAGEMENT_EDIT,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -409,7 +409,7 @@ async def reassign_parking_slot(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PARKING_MANAGEMENT_EDIT,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -460,7 +460,7 @@ async def release_parking_slot(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PARKING_MANAGEMENT_EDIT,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -515,7 +515,7 @@ async def block_parking_slot(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PARKING_MANAGEMENT_EDIT,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -569,7 +569,7 @@ async def unblock_parking_slot(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PARKING_MANAGEMENT_EDIT,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)
@@ -620,7 +620,7 @@ async def allot_parking_slot_from_unit(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=PARKING_MANAGEMENT_EDIT,
         request=request,
     )
     service = ParkingAllotmentService(db_connection=db_connection, user_context=user_context)

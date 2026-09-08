@@ -28,8 +28,8 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    PROJECTS_MANAGEMENT_EDIT,
-    PROJECTS_MANAGEMENT_VIEW,
+    COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+    COMMUNITY_EVENTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -64,7 +64,7 @@ async def get_community_events_summary(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -97,7 +97,7 @@ async def list_community_events(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -134,7 +134,7 @@ async def export_community_events(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -168,7 +168,7 @@ async def get_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -206,7 +206,7 @@ async def create_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -254,7 +254,7 @@ async def update_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -295,7 +295,7 @@ async def publish_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -329,7 +329,7 @@ async def cancel_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -362,7 +362,7 @@ async def complete_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -395,7 +395,7 @@ async def delete_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -428,7 +428,7 @@ async def restore_community_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -467,7 +467,7 @@ async def create_community_event_booking_on_behalf(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -514,7 +514,7 @@ async def list_community_event_bookings(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -588,7 +588,7 @@ async def export_community_event_bookings(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -627,7 +627,7 @@ async def mark_community_event_booking_paid(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
@@ -675,7 +675,7 @@ async def mark_community_event_booking_waived(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_EDIT,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = CommunityEventsService(db_connection=db_connection, user_context=user_context)

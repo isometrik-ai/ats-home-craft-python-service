@@ -156,10 +156,13 @@ class NoticeRecipientResolutionService:
             """
             SELECT DISTINCT pm.user_id::text AS user_id
             FROM project_members pm
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
             WHERE pm.organization_id = $1::uuid
               AND pm.project_id = $2::uuid
               AND pm.status = $3
-              AND pm.role = ANY($4::project_member_role[])
+              AND pr.slug = ANY($4::text[])
             """,
             organization_id,
             project_id,
@@ -179,10 +182,13 @@ class NoticeRecipientResolutionService:
             """
             SELECT DISTINCT pm.user_id::text AS user_id
             FROM project_members pm
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
             WHERE pm.organization_id = $1::uuid
               AND pm.project_id = $2::uuid
               AND pm.status = $3
-              AND pm.role = $4::project_member_role
+              AND pr.slug = $4
             """,
             organization_id,
             project_id,
@@ -236,11 +242,14 @@ class NoticeRecipientResolutionService:
             """
             SELECT 1
             FROM project_members pm
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
             WHERE pm.organization_id = $1::uuid
               AND pm.project_id = $2::uuid
               AND pm.user_id = $3::uuid
               AND pm.status = $4
-              AND pm.role = ANY($5::project_member_role[])
+              AND pr.slug = ANY($5::text[])
             LIMIT 1
             """,
             organization_id,
@@ -263,11 +272,14 @@ class NoticeRecipientResolutionService:
             """
             SELECT 1
             FROM project_members pm
+            INNER JOIN project_roles pr
+              ON pr.id = pm.project_role_id
+             AND pr.project_id = pm.project_id
             WHERE pm.organization_id = $1::uuid
               AND pm.project_id = $2::uuid
               AND pm.user_id = $3::uuid
               AND pm.status = $4
-              AND pm.role = $5::project_member_role
+              AND pr.slug = $5
             LIMIT 1
             """,
             organization_id,

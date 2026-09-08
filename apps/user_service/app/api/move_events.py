@@ -23,10 +23,8 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    CONTACTS_MANAGEMENT_CREATE,
-    CONTACTS_MANAGEMENT_DELETE,
-    CONTACTS_MANAGEMENT_EDIT,
-    CONTACTS_MANAGEMENT_VIEW,
+    MOVE_EVENTS_MANAGEMENT_EDIT,
+    MOVE_EVENTS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -104,7 +102,7 @@ async def list_move_events(
         current_user=current_user,
         db_connection=db_connection,
         project_id=query.project_id,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        permission_codes=MOVE_EVENTS_MANAGEMENT_VIEW,
         request=request,
     )
     service = MoveEventsService(
@@ -180,7 +178,7 @@ async def create_move_event(
         current_user=current_user,
         db_connection=db_connection,
         project_id=str(unit["project_id"]),
-        permission_codes=CONTACTS_MANAGEMENT_CREATE,
+        permission_codes=MOVE_EVENTS_MANAGEMENT_EDIT,
         request=request,
     )
     service = MoveEventsService(
@@ -226,7 +224,7 @@ async def get_move_event(
         current_user=current_user,
         db_connection=db_connection,
         move_event_id=move_event_id,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        permission_codes=MOVE_EVENTS_MANAGEMENT_VIEW,
     )
     service = MoveEventsService(
         db_connection=db_connection,
@@ -269,7 +267,7 @@ async def update_move_event(
         current_user=current_user,
         db_connection=db_connection,
         move_event_id=move_event_id,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        permission_codes=MOVE_EVENTS_MANAGEMENT_EDIT,
     )
     service = MoveEventsService(
         db_connection=db_connection,
@@ -320,7 +318,7 @@ async def delete_move_event(
         current_user=current_user,
         db_connection=db_connection,
         move_event_id=move_event_id,
-        permission_codes=CONTACTS_MANAGEMENT_DELETE,
+        permission_codes=MOVE_EVENTS_MANAGEMENT_EDIT,
     )
     service = MoveEventsService(
         db_connection=db_connection,

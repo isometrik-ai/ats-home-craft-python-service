@@ -121,8 +121,9 @@ ______________________________________________________________________
 ## 4. API catalog
 
 All routes are under `/v1/projects` and require authentication + an org context. RBAC codes:
-`PROJECTS_MANAGEMENT_VIEW` (reads), `PROJECTS_MANAGEMENT_CREATE`, `PROJECTS_MANAGEMENT_EDIT`,
-`PROJECTS_MANAGEMENT_DELETE` (writes).
+`PROJECTS_MANAGEMENT_VIEW` / `PROJECTS_MANAGEMENT_VIEW_ASSIGNED` (reads), `PROJECTS_MANAGEMENT_CREATE`
+(org-level create), `PROJECT_SETUP_EDIT` / `PROJECT_SETUP_DELETE` (project setup writes).
+Module-specific routes (notices, events, parking, etc.) use their own granular permission codes.
 
 ### Project + wizard
 

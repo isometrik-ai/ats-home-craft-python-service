@@ -93,6 +93,21 @@ def patch_staff_project_access_wrapper(
     monkeypatch.setattr(f"{module_path}._staff_project_access", fake_staff_project_access)
 
 
+def patch_project_staff_management_access_wrapper(
+    monkeypatch, module_path: str, org_id: str = "org-123"
+) -> None:
+    """Patch _project_staff_management_access used by project member/role routes."""
+
+    async def fake_project_staff_management_access(**kwargs):
+        del kwargs
+        return admin_context(org_id=org_id)
+
+    monkeypatch.setattr(
+        f"{module_path}._project_staff_management_access",
+        fake_project_staff_management_access,
+    )
+
+
 def patch_staff_move_event_access(monkeypatch, module_path: str, org_id: str = "org-123") -> None:
     """Patch _staff_move_event_access wrapper used by the move events API."""
 
