@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -496,47 +497,47 @@ class ContactUnitsService:
         org_id = self.user_context.organization_id
         assert org_id
 
-        contacts_repo = ContactsRepository(self.db_connection)
-        contact = await contacts_repo.get_contact_details(
-            contact_id=contact_id,
-            organization_id=org_id,
-        )
-        if not contact:
-            logger.info(
-                "Skipping unit allotment welcome email: contact %s not found",
-                contact_id,
-            )
-            return
-
-        recipient_email = format_primary_contact_email(contact.get("emails"))
-        if not recipient_email:
-            recipient_email = str(contact.get("email") or "").strip() or None
-        if not recipient_email:
-            logger.info(
-                "Skipping unit allotment welcome email: no email for contact %s",
-                contact_id,
-            )
-            return
-
-        org_repo = OrganizationRepository(self.db_connection)
-        organization = await org_repo.get_organization_by_id(org_id)
-        community_name = str((organization or {}).get("name") or "").strip()
-
-        body_context = build_unit_allotment_welcome_body_context(
-            contact=contact,
-            allotment_row=allotment_row,
-            community_name=community_name,
-        )
         try:
-            send_unit_allotment_welcome_email(
+            contacts_repo = ContactsRepository(self.db_connection)
+            contact = await contacts_repo.get_contact_details(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            if not contact:
+                logger.info(
+                    "Skipping unit allotment welcome email: contact %s not found",
+                    contact_id,
+                )
+                return
+
+            recipient_email = format_primary_contact_email(contact.get("emails"))
+            if not recipient_email:
+                recipient_email = str(contact.get("email") or "").strip() or None
+            if not recipient_email:
+                logger.info(
+                    "Skipping unit allotment welcome email: no email for contact %s",
+                    contact_id,
+                )
+                return
+
+            org_repo = OrganizationRepository(self.db_connection)
+            organization = await org_repo.get_organization_by_id(org_id)
+            community_name = str((organization or {}).get("name") or "").strip()
+
+            body_context = build_unit_allotment_welcome_body_context(
+                contact=contact,
+                allotment_row=allotment_row,
+                community_name=community_name,
+            )
+            await asyncio.to_thread(
+                send_unit_allotment_welcome_email,
                 email=recipient_email,
                 body_context=body_context,
             )
-        except Exception as send_error:
+        except Exception as error:
             logger.error(
-                "Failed to send unit allotment welcome email to %s: %s",
-                recipient_email,
-                str(send_error),
+                "Failed to prepare or send unit allotment welcome email: %s",
+                error,
             )
 
     async def _vacate_unit_for_owner_change(

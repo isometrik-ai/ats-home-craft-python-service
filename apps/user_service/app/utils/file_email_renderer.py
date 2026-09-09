@@ -68,6 +68,67 @@ def _substitute_placeholders(
     return PLACEHOLDER_RE.sub(_replace, template)
 
 
+def render_email_partial(
+    partial: str,
+    context: dict[str, str],
+    *,
+    escape_html: bool = True,
+) -> str:
+    """Render a reusable HTML fragment from templates/emails/partials/."""
+    template = _read_template_file(str(_template_path("partials", f"{partial}.html")))
+    return _substitute_placeholders(template, context, escape_html=escape_html)
+
+
+def _app_store_card_layout(*, card_count: int, index: int) -> tuple[str, str]:
+    """Return (card_width, cell_padding) for a store card at the given index."""
+    if card_count == 1:
+        return "100%", "0"
+    if index == 0:
+        return "50%", "0 8px 0 0"
+    return "50%", "0 0 0 8px"
+
+
+def render_app_store_cards_html(ios_url: str, android_url: str) -> str:
+    """Compose optional app-store cards from partial templates."""
+    cards: list[str] = []
+    entries: list[tuple[str, str]] = []
+    if ios_url:
+        entries.append(("app_store_ios_card", ios_url))
+    if android_url:
+        entries.append(("app_store_android_card", android_url))
+    for index, (partial_name, url) in enumerate(entries):
+        card_width, cell_padding = _app_store_card_layout(
+            card_count=len(entries),
+            index=index,
+        )
+        cards.append(
+            render_email_partial(
+                partial_name,
+                {
+                    "app_store_url": url,
+                    "card_width": card_width,
+                    "cell_padding": cell_padding,
+                },
+            )
+        )
+    if not cards:
+        return ""
+    return render_email_partial(
+        "app_store_cards_wrapper",
+        {"cards_inner": "".join(cards)},
+    )
+
+
+def enrich_body_context(body_context: dict[str, str]) -> dict[str, str]:
+    """Add derived template values (e.g. optional HTML sections) before render."""
+    enriched = dict(body_context)
+    if "app_store_cards_html" not in enriched:
+        ios_url = str(enriched.get("ios_app_url") or "").strip()
+        android_url = str(enriched.get("android_app_url") or "").strip()
+        enriched["app_store_cards_html"] = render_app_store_cards_html(ios_url, android_url)
+    return enriched
+
+
 def default_layout_context() -> dict[str, str]:
     """Build default layout placeholder values from shared settings."""
     return {
@@ -97,6 +158,8 @@ def render_email(
     if layout_context:
         merged_layout_context.update(layout_context)
 
+    resolved_body_context = enrich_body_context(body_context)
+
     subject_template = _read_template_file(str(_template_path("subjects", f"{body}.txt")))
     plain_body_template = _read_template_file(str(_template_path("bodies", f"{body}.txt")))
     html_body_template = _read_template_file(str(_template_path("bodies", f"{body}.html")))
@@ -105,12 +168,12 @@ def render_email(
 
     rendered_plain_body = _substitute_placeholders(
         plain_body_template,
-        body_context,
+        resolved_body_context,
         escape_html=False,
     )
     rendered_html_body = _substitute_placeholders(
         html_body_template,
-        body_context,
+        resolved_body_context,
         escape_html=True,
     )
 
@@ -133,7 +196,7 @@ def render_email(
         escape_html=True,
     )
 
-    subject_context = {**merged_layout_context, **body_context}
+    subject_context = {**merged_layout_context, **resolved_body_context}
     subject = _substitute_placeholders(
         subject_template,
         subject_context,

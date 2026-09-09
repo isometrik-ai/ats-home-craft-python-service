@@ -7,11 +7,16 @@ import pytest
 from apps.user_service.app.utils.file_email_renderer import (
     BODY_CONTENT_TOKEN,
     EmailTemplateNotFoundError,
+    render_app_store_cards_html,
     render_email,
 )
 
 
 def _sample_body_context() -> dict[str, str]:
+    from apps.user_service.app.utils.unit_allotment_email_helpers import (
+        build_app_store_url_context,
+    )
+
     return {
         "app_name": "ATS Home Craft",
         "first_name": "John",
@@ -22,11 +27,10 @@ def _sample_body_context() -> dict[str, str]:
         "allotment_status": "Assigned — pending your confirmation in the app",
         "registered_email": "john.doe@example.com",
         "registered_phone": "+91 9876543210",
-        "ios_app_url": "https://apps.apple.com/example",
-        "android_app_url": "https://play.google.com/example",
-        "ios_app_href": "https://apps.apple.com/example",
-        "android_app_href": "https://play.google.com/example",
-        "app_download_fallback": "",
+        **build_app_store_url_context(
+            ios_url="https://apps.apple.com/example",
+            android_url="https://play.google.com/example",
+        ),
     }
 
 
@@ -71,6 +75,38 @@ def test_render_email_missing_template_raises() -> None:
     """Missing template files raise EmailTemplateNotFoundError."""
     with pytest.raises(EmailTemplateNotFoundError):
         render_email(body="does_not_exist", body_context={"first_name": "Jane"})
+
+
+def test_render_email_omits_store_buttons_when_urls_unset() -> None:
+    """HTML omits store cards and shows fallback when app URLs are not configured."""
+    from apps.user_service.app.utils.unit_allotment_email_helpers import (
+        APP_DOWNLOAD_FALLBACK_MESSAGE,
+        build_app_store_url_context,
+    )
+
+    context = _sample_body_context()
+    context.update(build_app_store_url_context(ios_url="", android_url=""))
+
+    _plain_text, html, _subject = render_email(
+        body="unit_allotment_welcome",
+        body_context=context,
+    )
+
+    assert APP_DOWNLOAD_FALLBACK_MESSAGE in _plain_text
+    assert "Download on the App Store" not in html
+    assert 'href="#"' not in html
+
+
+def test_render_app_store_cards_html_partial_urls() -> None:
+    """Only configured store cards are rendered from partial templates."""
+    html = render_app_store_cards_html(
+        ios_url="https://apps.apple.com/example",
+        android_url="",
+    )
+
+    assert "Download on the App Store" in html
+    assert "Google Play" not in html
+    assert 'href="#"' not in html
 
 
 def test_render_email_excludes_login_credentials_copy() -> None:

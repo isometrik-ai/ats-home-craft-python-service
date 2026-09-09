@@ -62,6 +62,8 @@ def test_build_unit_allotment_welcome_body_context() -> None:
     assert "ios_app_url" in context
     assert "android_app_url" in context
     assert "app_download_fallback" in context
+    assert "app_store_links_plain" in context
+    assert "app_store_cards_html" not in context
 
 
 def test_build_app_store_url_context_fallback(monkeypatch) -> None:
@@ -80,3 +82,16 @@ def test_build_app_store_url_context_fallback(monkeypatch) -> None:
     assert context["ios_app_url"] == ""
     assert context["android_app_url"] == ""
     assert context["app_download_fallback"] == APP_DOWNLOAD_FALLBACK_MESSAGE
+    assert context["app_store_links_plain"] == ""
+
+
+def test_build_app_store_url_context_partial_urls() -> None:
+    """Plain text includes only configured store links."""
+    context = build_app_store_url_context(
+        ios_url="https://apps.apple.com/example",
+        android_url="",
+    )
+
+    assert context["app_download_fallback"] == ""
+    assert "Download on the App Store" in context["app_store_links_plain"]
+    assert "Google Play" not in context["app_store_links_plain"]

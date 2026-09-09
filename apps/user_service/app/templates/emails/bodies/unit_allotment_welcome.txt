@@ -35,11 +35,7 @@ DOWNLOAD THE {{.app_name}} APP
 ────────────────────────────────
 Get started by installing the app on your phone:
 
-Download on the App Store
-{{.ios_app_url}}
-
-Get it on Google Play
-{{.android_app_url}}
+{{.app_store_links_plain}}
 
 {{.app_download_fallback}}
 

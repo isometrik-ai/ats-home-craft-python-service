@@ -36,17 +36,34 @@ def build_allotment_location_label(row: dict[str, Any]) -> str:
     return label or "—"
 
 
-def build_app_store_url_context() -> dict[str, str]:
-    """Return app-store URL placeholders for email templates."""
-    ios_url = (shared_settings.mobile_app_ios_url or "").strip()
-    android_url = (shared_settings.mobile_app_android_url or "").strip()
+def _build_app_store_links_plain(ios_url: str, android_url: str) -> str:
+    """Build plain-text store links; omit sections when URL is unset."""
+    lines: list[str] = []
+    if ios_url:
+        lines.extend(["Download on the App Store", ios_url, ""])
+    if android_url:
+        lines.extend(["Get it on Google Play", android_url, ""])
+    return "\n".join(lines).strip()
+
+
+def build_app_store_url_context(
+    *,
+    ios_url: str | None = None,
+    android_url: str | None = None,
+) -> dict[str, str]:
+    """Return app-store data placeholders for email templates."""
+    resolved_ios = (
+        ios_url if ios_url is not None else (shared_settings.mobile_app_ios_url or "")
+    ).strip()
+    resolved_android = (
+        android_url if android_url is not None else (shared_settings.mobile_app_android_url or "")
+    ).strip()
     return {
-        "ios_app_url": ios_url,
-        "android_app_url": android_url,
-        "ios_app_href": ios_url or "#",
-        "android_app_href": android_url or "#",
+        "ios_app_url": resolved_ios,
+        "android_app_url": resolved_android,
+        "app_store_links_plain": _build_app_store_links_plain(resolved_ios, resolved_android),
         "app_download_fallback": (
-            APP_DOWNLOAD_FALLBACK_MESSAGE if not ios_url and not android_url else ""
+            APP_DOWNLOAD_FALLBACK_MESSAGE if not resolved_ios and not resolved_android else ""
         ),
     }
 

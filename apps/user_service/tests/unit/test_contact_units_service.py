@@ -730,3 +730,20 @@ async def test_maybe_send_unit_allotment_welcome_email_skips_without_email(
     )
 
     mock_send.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contact_units_service.ContactsRepository.get_contact_details",
+    new_callable=AsyncMock,
+    side_effect=RuntimeError("database unavailable"),
+)
+async def test_maybe_send_unit_allotment_welcome_email_swallows_errors(
+    _mock_contact_details,
+):
+    """Email preparation failures must not propagate after allotment succeeds."""
+    svc = _service()
+    await svc._maybe_send_unit_allotment_welcome_email(
+        contact_id="contact-1",
+        allotment_row={"relationship": "self", "project_name": "Sunrise Towers"},
+    )
