@@ -6,8 +6,8 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.db.repositories.permission_repository import (
-    PermissionsRepository,
+from apps.user_service.app.db.repositories.project_permissions_repository import (
+    ProjectPermissionsRepository,
 )
 from apps.user_service.app.db.repositories.project_roles_repository import (
     ProjectRolesRepository,
@@ -39,6 +39,7 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.project_permission_aliases import (
     PROJECT_SCOPABLE_PERMISSION_CODES,
+    project_code_allowed_by_org_ceiling,
 )
 from libs.shared_utils.project_role_defaults import (
     COMMUNITY_ADMIN_SLUG,
@@ -61,7 +62,7 @@ class ProjectRolesService:
         self.db_connection = db_connection
         self.user_context = user_context
         self.repo = ProjectRolesRepository(db_connection)
-        self.permissions_repo = PermissionsRepository(db_connection)
+        self.project_permissions_repo = ProjectPermissionsRepository(db_connection)
         self.projects_repo = ProjectsRepository(db_connection)
 
     async def seed_default_roles_for_project(
@@ -231,11 +232,11 @@ class ProjectRolesService:
                 )
 
         if body.permission_ids is not None:
-            permission_ids = await self._resolve_project_permission_ids(body.permission_ids)
+            project_permission_ids = await self._resolve_project_permission_ids(body.permission_ids)
             await self.repo.replace_role_permissions(
                 organization_id=org_id,
                 project_role_id=project_role_id,
-                permission_ids=permission_ids,
+                project_permission_ids=project_permission_ids,
             )
 
         return await self.get_role_detail(
@@ -259,7 +260,7 @@ class ProjectRolesService:
             requested_slug=body.slug,
             name=body.name,
         )
-        permission_ids = await self._resolve_project_permission_ids(body.permission_ids)
+        project_permission_ids = await self._resolve_project_permission_ids(body.permission_ids)
 
         try:
             created = await self.repo.create_role(
@@ -278,11 +279,11 @@ class ProjectRolesService:
             ) from exc
 
         project_role_id = str(created["id"])
-        if permission_ids:
+        if project_permission_ids:
             await self.repo.replace_role_permissions(
                 organization_id=org_id,
                 project_role_id=project_role_id,
-                permission_ids=permission_ids,
+                project_permission_ids=project_permission_ids,
             )
 
         return await self.get_role_detail(
@@ -291,14 +292,11 @@ class ProjectRolesService:
         )
 
     async def list_assignable_permissions(self, *, project_id: str) -> list[PermissionItem]:
-        """Return org permissions that may be assigned to a project role template."""
+        """Return project permission catalog rows assignable to a project role template."""
         org_id = self._require_org_id()
         await self._ensure_project(project_id=project_id)
-        rows = await self.permissions_repo.get_all_permissions(org_id)
-        permission_rows = [
-            row for row in rows if str(row.get("code") or "") in PROJECT_SCOPABLE_PERMISSION_CODES
-        ]
-        formatted = format_permissions_data(permission_rows)
+        rows = await self.project_permissions_repo.get_all_permissions(org_id)
+        formatted = format_permissions_data(rows)
         return [PermissionItem.model_validate(item) for item in formatted]
 
     async def delete_role(
@@ -353,12 +351,8 @@ class ProjectRolesService:
             db_connection=self.db_connection,
         )
         if has_org_wide:
-            org_permissions = await self.permissions_repo.get_all_permissions(org_id)
-            codes = sorted(
-                str(row["code"])
-                for row in org_permissions
-                if str(row["code"]) in PROJECT_SCOPABLE_PERMISSION_CODES
-            )
+            project_catalog = await self.project_permissions_repo.get_all_permissions(org_id)
+            codes = sorted(str(row["code"]) for row in project_catalog)
             return ProjectMyPermissionsResponse(
                 project_id=project_id,
                 is_org_wide=True,
@@ -381,15 +375,10 @@ class ProjectRolesService:
         project_codes = sorted(
             await self.repo.get_permission_codes_for_role(project_role_id=role_id)
         )
-        effective: list[str] = []
-        for code in project_codes:
-            if await check_user_access_async(
-                permission_code=[code],
-                user_id=self.user_context.user_id,
-                organization_id=org_id,
-                db_connection=self.db_connection,
-            ):
-                effective.append(code)
+        org_codes = await self._fetch_org_permission_codes(org_id=org_id)
+        effective = sorted(
+            code for code in project_codes if project_code_allowed_by_org_ceiling(org_codes, code)
+        )
 
         return ProjectMyPermissionsResponse(
             project_id=project_id,
@@ -402,11 +391,11 @@ class ProjectRolesService:
         )
 
     async def _resolve_project_permission_ids(self, permission_ids: list[str]) -> list[str]:
-        """Validate permission ids are project-scopable for the current org."""
+        """Validate ids refer to project_permissions rows for the current org."""
         org_id = self._require_org_id()
         resolved: list[str] = []
         for permission_id in permission_ids:
-            row = await self.permissions_repo.get_permission_by_id(permission_id, org_id)
+            row = await self.project_permissions_repo.get_permission_by_id(permission_id, org_id)
             if not row:
                 raise BadRequestException(
                     message_key="permissions.errors.permission_not_found",
@@ -420,6 +409,25 @@ class ProjectRolesService:
                 )
             resolved.append(str(row["id"]))
         return resolved
+
+    async def _fetch_org_permission_codes(self, *, org_id: str) -> set[str]:
+        """Return org-role permission codes for the current user."""
+        assert self.user_context and self.user_context.user_id
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT ARRAY_AGG(DISTINCT p.code) AS user_permissions
+            FROM organization_members om
+            INNER JOIN role_permissions rp ON om.role_id = rp.role_id
+            INNER JOIN permissions p ON rp.permission_id = p.id
+            WHERE om.user_id = $1::uuid
+              AND om.organization_id = $2::uuid
+              AND om.status = 'active'
+            """,
+            self.user_context.user_id,
+            org_id,
+        )
+        raw = row["user_permissions"] if row and row.get("user_permissions") else []
+        return {str(code) for code in raw}
 
     async def _resolve_unique_custom_slug(
         self,

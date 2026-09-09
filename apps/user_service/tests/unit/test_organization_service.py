@@ -138,6 +138,8 @@ def _service(*, org_repo: _FakeOrgRepo | None = None) -> OrganizationService:
     svc.team_repository = MagicMock()
     svc.role_repository = MagicMock()
     svc.permissions_repository = MagicMock()
+    svc.project_permissions_repository = MagicMock()
+    svc.project_permissions_repository.create_default_permissions = AsyncMock(return_value=[])
     return svc
 
 

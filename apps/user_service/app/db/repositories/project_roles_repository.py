@@ -150,7 +150,7 @@ class ProjectRolesRepository:
         perm_rows = await self.db_connection.fetch(
             """
             SELECT id::text AS id, code
-            FROM permissions
+            FROM project_permissions
             WHERE organization_id = $1::uuid
               AND code = ANY($2::text[])
             """,
@@ -164,22 +164,22 @@ class ProjectRolesRepository:
             if not role_id:
                 continue
             for code in codes:
-                permission_id = code_to_perm_id.get(code)
-                if not permission_id:
+                project_permission_id = code_to_perm_id.get(code)
+                if not project_permission_id:
                     continue
                 await self.db_connection.execute(
                     """
                     INSERT INTO project_role_permissions (
                         organization_id,
                         project_role_id,
-                        permission_id
+                        project_permission_id
                     )
                     VALUES ($1::uuid, $2::uuid, $3::uuid)
-                    ON CONFLICT (project_role_id, permission_id) DO NOTHING
+                    ON CONFLICT (project_role_id, project_permission_id) DO NOTHING
                     """,
                     organization_id,
                     role_id,
-                    permission_id,
+                    project_permission_id,
                 )
 
         return slug_to_id
@@ -190,7 +190,7 @@ class ProjectRolesRepository:
             """
             SELECT p.code
             FROM project_role_permissions prp
-            INNER JOIN permissions p ON p.id = prp.permission_id
+            INNER JOIN project_permissions p ON p.id = prp.project_permission_id
             WHERE prp.project_role_id = $1::uuid
             """,
             project_role_id,
@@ -214,8 +214,8 @@ class ProjectRolesRepository:
               p.description,
               p.created_at
             FROM project_role_permissions prp
-            INNER JOIN permissions p
-              ON p.id = prp.permission_id
+            INNER JOIN project_permissions p
+              ON p.id = prp.project_permission_id
              AND p.organization_id = prp.organization_id
             WHERE prp.organization_id = $1::uuid
               AND prp.project_role_id = $2::uuid
@@ -231,7 +231,7 @@ class ProjectRolesRepository:
         *,
         organization_id: str,
         project_role_id: str,
-        permission_ids: list[str],
+        project_permission_ids: list[str],
     ) -> None:
         """Replace all permissions on a project role."""
         await self.db_connection.execute(
@@ -243,19 +243,22 @@ class ProjectRolesRepository:
             organization_id,
             project_role_id,
         )
-        if not permission_ids:
+        if not project_permission_ids:
             return
         await self.db_connection.executemany(
             """
             INSERT INTO project_role_permissions (
                 organization_id,
                 project_role_id,
-                permission_id
+                project_permission_id
             )
             VALUES ($1::uuid, $2::uuid, $3::uuid)
-            ON CONFLICT (project_role_id, permission_id) DO NOTHING
+            ON CONFLICT (project_role_id, project_permission_id) DO NOTHING
             """,
-            [(organization_id, project_role_id, permission_id) for permission_id in permission_ids],
+            [
+                (organization_id, project_role_id, project_permission_id)
+                for project_permission_id in project_permission_ids
+            ],
         )
 
     async def count_members_with_role(self, *, project_role_id: str) -> int:

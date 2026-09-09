@@ -122,6 +122,13 @@ COMMUNITY_EVENT_CATEGORY_LABELS: dict[str, str] = {
     CommunityEventCategory.AGM.value: "AGM",
 }
 
+COMMUNITY_EVENT_PAYMENT_STATUS_LABELS: dict[str, str] = {
+    CommunityEventPaymentStatus.NOT_APPLICABLE.value: "N/A",
+    CommunityEventPaymentStatus.PENDING.value: "Pending",
+    CommunityEventPaymentStatus.PAID.value: "Paid",
+    CommunityEventPaymentStatus.WAIVED.value: "Waived",
+}
+
 COMMUNITY_EVENT_MAX_TITLE_LENGTH = 120
 COMMUNITY_EVENT_MAX_DESCRIPTION_LENGTH = 2000
 COMMUNITY_EVENT_MAX_GALLERY = 10

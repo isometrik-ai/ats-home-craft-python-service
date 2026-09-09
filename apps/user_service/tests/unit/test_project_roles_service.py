@@ -174,26 +174,18 @@ async def test_create_role_rejects_reserved_slug() -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_assignable_permissions_filters_project_scopable_codes() -> None:
-    """Assignable permission catalog excludes org-only permissions."""
+async def test_list_assignable_permissions_reads_project_catalog() -> None:
+    """Assignable permission catalog comes from project_permissions."""
     repo = MagicMock()
     svc = _service(repo=repo)
-    svc.permissions_repo.get_all_permissions = AsyncMock(
+    svc.project_permissions_repo.get_all_permissions = AsyncMock(
         return_value=[
             {
                 "id": "perm-1",
                 "code": "notices_management.view",
                 "name": "View Notices",
-                "category": "projects",
+                "category": "notices",
                 "description": "View notices",
-                "created_at": "2026-01-01T00:00:00Z",
-            },
-            {
-                "id": "perm-2",
-                "code": "roles_management.view",
-                "name": "View Roles",
-                "category": "settings",
-                "description": "Org roles",
                 "created_at": "2026-01-01T00:00:00Z",
             },
         ]

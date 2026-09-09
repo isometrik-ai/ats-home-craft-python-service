@@ -28,10 +28,14 @@ from pydantic import BaseModel
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.common_query import (
+    CONTACTS_MANAGEMENT_EDIT,
+    CONTACTS_MANAGEMENT_VIEW,
     PROJECT_MEMBERS_MANAGE,
     PROJECT_MEMBERS_MANAGE_ASSIGNED,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    RESIDENT_MANAGEMENT_EDIT,
+    RESIDENT_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import (
     ForbiddenException,
@@ -690,6 +694,99 @@ async def ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
         permission_codes=permission_codes,
+        request=request,
+    )
+
+
+async def ensure_crm_or_resident_project_access(
+    *,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str | None,
+    edit: bool = False,
+    request: Request | None = None,
+) -> UserContext:
+    """Use resident_management on a project scope; org CRM permissions when project_id is omitted."""
+    if project_id:
+        permission_codes = RESIDENT_MANAGEMENT_EDIT if edit else RESIDENT_MANAGEMENT_VIEW
+        return await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=permission_codes,
+            request=request,
+        )
+    permission_codes = CONTACTS_MANAGEMENT_EDIT if edit else CONTACTS_MANAGEMENT_VIEW
+    return await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=permission_codes,
+        request=request,
+    )
+
+
+async def ensure_resident_access_for_unit(
+    *,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    unit_id: str,
+    edit: bool = False,
+    request: Request | None = None,
+) -> UserContext:
+    """Resolve a unit's project and enforce resident_management with project assignment rules."""
+    from apps.user_service.app.db.repositories.contact_units_repository import (
+        ContactUnitsRepository,
+    )
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = user_context.organization_id
+    if not org_id:
+        raise ValidationException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+    unit = await ContactUnitsRepository(db_connection).get_unit_project(
+        organization_id=org_id,
+        unit_id=unit_id,
+    )
+    if not unit or not unit.get("project_id"):
+        raise NotFoundException(
+            message_key="projects.errors.unit_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    permission_codes = RESIDENT_MANAGEMENT_EDIT if edit else RESIDENT_MANAGEMENT_VIEW
+    return await ensure_staff_project_access_for_context(
+        user_context=user_context,
+        db_connection=db_connection,
+        project_id=str(unit["project_id"]),
+        permission_codes=permission_codes,
+    )
+
+
+async def ensure_resident_or_crm_contact_access(
+    *,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str | None = None,
+    unit_id: str | None = None,
+    edit: bool = False,
+    request: Request | None = None,
+) -> UserContext:
+    """Prefer unit-scoped resident access, then project-scoped, then org CRM permissions."""
+    if unit_id:
+        return await ensure_resident_access_for_unit(
+            current_user=current_user,
+            db_connection=db_connection,
+            unit_id=unit_id,
+            edit=edit,
+            request=request,
+        )
+    return await ensure_crm_or_resident_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        edit=edit,
         request=request,
     )
 

@@ -313,6 +313,103 @@ DEFAULT_PERMISSIONS = [
         "Assign and remove staff on projects",
         "projects",
     ),
+    # custom fields management
+    (
+        "custom_fields_management.view",
+        "View Custom Fields",
+        "View custom field list and details",
+        "custom_fields",
+    ),
+    (
+        "custom_fields_management.create",
+        "Create Custom Fields",
+        "Create new custom fields",
+        "custom_fields",
+    ),
+    (
+        "custom_fields_management.edit",
+        "Edit Custom Fields",
+        "Modify custom field information",
+        "custom_fields",
+    ),
+    (
+        "custom_fields_management.delete",
+        "Delete Custom Fields",
+        "Remove custom fields from the system",
+        "custom_fields",
+    ),
+    # lead stages management
+    (
+        "leads_management.view",
+        "View Leads",
+        "View leads list and details",
+        "leads",
+    ),
+    (
+        LEADS_MANAGEMENT_VIEW_SYSTEM,
+        "View System Leads",
+        "View organization-wide leads",
+        "leads",
+    ),
+    (
+        "leads_management.create",
+        "Create Leads",
+        "Create new leads",
+        "leads",
+    ),
+    (
+        "leads_management.edit",
+        "Edit Leads",
+        "Modify lead information",
+        "leads",
+    ),
+    (
+        "leads_management.delete",
+        "Delete Leads",
+        "Remove leads from the system",
+        "leads",
+    ),
+    (
+        BUSINESS_DASHBOARD_VIEW,
+        "View Dashboard",
+        "View organization CRM dashboard metrics",
+        "dashboard",
+    ),
+    # Email Templates
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_VIEW,
+        "View Email Templates",
+        "View email template list and details",
+        "email_templates",
+    ),
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_CREATE,
+        "Create Email Templates",
+        "Create email templates",
+        "email_templates",
+    ),
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_EDIT,
+        "Edit Email Templates",
+        "Modify email templates",
+        "email_templates",
+    ),
+    (
+        EMAIL_TEMPLATES_MANAGEMENT_DELETE,
+        "Delete Email Templates",
+        "Remove email templates",
+        "email_templates",
+    ),
+]
+
+# Project-role catalog (stored in project_permissions, not organization permissions).
+DEFAULT_PROJECT_PERMISSIONS = [
+    (
+        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        "View Assigned Projects",
+        "View and access only projects assigned via project_members",
+        "projects",
+    ),
     (
         PROJECT_MEMBERS_MANAGE_ASSIGNED,
         "Manage Assigned Project Members",
@@ -418,103 +515,42 @@ DEFAULT_PERMISSIONS = [
     (
         RESIDENT_MANAGEMENT_VIEW,
         "View Project Residents",
-        "View resident registry within assigned projects",
+        "View unit occupants, household links, and resident profiles within assigned projects",
         "residents",
     ),
     (
         RESIDENT_MANAGEMENT_EDIT,
         "Edit Project Residents",
-        "Onboard and update residents within assigned projects",
+        (
+            "Assign units, manage household members, and"
+            "update resident occupancy within assigned projects"
+        ),
         "residents",
-    ),
-    # custom fields management
-    (
-        "custom_fields_management.view",
-        "View Custom Fields",
-        "View custom field list and details",
-        "custom_fields",
-    ),
-    (
-        "custom_fields_management.create",
-        "Create Custom Fields",
-        "Create new custom fields",
-        "custom_fields",
-    ),
-    (
-        "custom_fields_management.edit",
-        "Edit Custom Fields",
-        "Modify custom field information",
-        "custom_fields",
-    ),
-    (
-        "custom_fields_management.delete",
-        "Delete Custom Fields",
-        "Remove custom fields from the system",
-        "custom_fields",
-    ),
-    # lead stages management
-    (
-        "leads_management.view",
-        "View Leads",
-        "View leads list and details",
-        "leads",
-    ),
-    (
-        LEADS_MANAGEMENT_VIEW_SYSTEM,
-        "View System Leads",
-        "View organization-wide leads",
-        "leads",
-    ),
-    (
-        "leads_management.create",
-        "Create Leads",
-        "Create new leads",
-        "leads",
-    ),
-    (
-        "leads_management.edit",
-        "Edit Leads",
-        "Modify lead information",
-        "leads",
-    ),
-    (
-        "leads_management.delete",
-        "Delete Leads",
-        "Remove leads from the system",
-        "leads",
     ),
     (
         BUSINESS_DASHBOARD_VIEW,
-        "View Dashboard",
-        "View organization CRM dashboard metrics",
+        "View Project Dashboard",
+        "View project business dashboard metrics",
         "dashboard",
     ),
-    # Email Templates
     (
-        EMAIL_TEMPLATES_MANAGEMENT_VIEW,
-        "View Email Templates",
-        "View email template list and details",
-        "email_templates",
+        CONTACTS_MANAGEMENT_VIEW,
+        "View Project Contacts",
+        "View contacts within assigned projects",
+        "contacts",
     ),
     (
-        EMAIL_TEMPLATES_MANAGEMENT_CREATE,
-        "Create Email Templates",
-        "Create email templates",
-        "email_templates",
+        CONTACTS_MANAGEMENT_CREATE,
+        "Create Project Contacts",
+        "Create contacts within assigned projects",
+        "contacts",
     ),
     (
-        EMAIL_TEMPLATES_MANAGEMENT_EDIT,
-        "Edit Email Templates",
-        "Modify email templates",
-        "email_templates",
+        CONTACTS_MANAGEMENT_DELETE,
+        "Delete Project Contacts",
+        "Remove contacts within assigned projects",
+        "contacts",
     ),
-    (
-        EMAIL_TEMPLATES_MANAGEMENT_DELETE,
-        "Delete Email Templates",
-        "Remove email templates",
-        "email_templates",
-    ),
-    # visitor logs / gate management
     (
         VISITOR_MANAGEMENT_VIEW,
         "View Visitor Logs",
@@ -527,7 +563,6 @@ DEFAULT_PERMISSIONS = [
         "Verify passes and record check-in/check-out at the gate",
         "visitor_logs",
     ),
-    # Finance / maintenance fees
     (
         FINANCE_MANAGEMENT_VIEW,
         "View Finance",
@@ -546,7 +581,6 @@ DEFAULT_PERMISSIONS = [
         "Generate invoices, run billing scheduler, and manage escalations",
         "finance",
     ),
-    # work order management (assets, AMC, WOs — not project facilities/locations)
     (
         WORK_ORDER_MANAGEMENT_VIEW,
         "View Work Order Management",
@@ -572,6 +606,8 @@ DEFAULT_PERMISSIONS = [
         "work_order_management",
     ),
 ]
+
+PROJECT_PERMISSION_CODES = frozenset(code for code, _, _, _ in DEFAULT_PROJECT_PERMISSIONS)
 
 
 # Common SELECT fields for roles

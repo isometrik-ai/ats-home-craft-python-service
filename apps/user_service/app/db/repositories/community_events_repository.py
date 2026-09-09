@@ -635,6 +635,87 @@ class CommunityEventsRepository(BaseRepository):
         )
         return [dict(row) for row in rows], total
 
+    async def get_revenue_summary_for_event(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        event_id: str,
+    ) -> dict[str, Any]:
+        """Sum collected and pending amounts for non-cancelled paid-event bookings."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+              COALESCE(SUM(b.total_amount_minor) FILTER (
+                WHERE b.payment_status = 'paid'::community_event_payment_status
+              ), 0) AS collected_minor,
+              COALESCE(SUM(b.total_amount_minor) FILTER (
+                WHERE b.payment_status = 'pending'::community_event_payment_status
+              ), 0) AS pending_minor
+            FROM community_event_bookings b
+            WHERE b.organization_id = $1::uuid
+              AND b.project_id = $2::uuid
+              AND b.event_id = $3::uuid
+              AND b.booking_status <> 'cancelled'::community_event_booking_status
+              AND b.payment_status <> 'not_applicable'::community_event_payment_status
+            """,
+            organization_id,
+            project_id,
+            event_id,
+        )
+        return dict(row) if row else {"collected_minor": 0, "pending_minor": 0}
+
+    async def list_revenue_transactions_for_event(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        event_id: str,
+        payment_status: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Revenue tab transactions for non-cancelled payable bookings."""
+        conditions = [
+            "b.organization_id = $1::uuid",
+            "b.project_id = $2::uuid",
+            "b.event_id = $3::uuid",
+            "b.booking_status <> 'cancelled'::community_event_booking_status",
+            "b.payment_status <> 'not_applicable'::community_event_payment_status",
+        ]
+        values: list[Any] = [organization_id, project_id, event_id]
+        idx = 4
+        if payment_status:
+            conditions.append(f"b.payment_status = ${idx}::community_event_payment_status")
+            values.append(payment_status)
+            idx += 1
+        where_sql = " AND ".join(conditions)
+        total_row = await self.db_connection.fetchrow(
+            f"SELECT COUNT(*) AS total FROM community_event_bookings b WHERE {where_sql}",
+            *values,
+        )
+        total = int(total_row["total"]) if total_row else 0
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              b.id::text AS booking_id,
+              b.display_code AS txn_ref,
+              b.total_amount_minor AS amount_minor,
+              b.currency,
+              b.payment_status::text AS payment_status,
+              {_CONTACT_NAME_SQL.strip()}
+            FROM community_event_bookings b
+            LEFT JOIN contacts c ON c.id = b.contact_id
+            WHERE {where_sql}
+            ORDER BY b.paid_at DESC NULLS LAST, b.booked_at DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+            """,
+            *values,
+            limit,
+            offset,
+        )
+        return [dict(row) for row in rows], total
+
     async def count_active_tickets_for_contact(
         self,
         *,

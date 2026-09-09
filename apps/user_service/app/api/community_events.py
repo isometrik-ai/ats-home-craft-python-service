@@ -534,6 +534,39 @@ async def list_community_event_bookings(
     )
 
 
+@handle_api_exceptions("export community event revenue report")
+@router.get(
+    "/{project_id}/community-events/{event_id}/revenue/export",
+    status_code=http_status.HTTP_200_OK,
+    summary="Download event revenue report CSV",
+    response_model=None,
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def export_community_event_revenue(
+    request: Request,
+    project_id: str = Path(...),
+    event_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Download revenue report for the event Revenue tab."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
+    csv_text = await service.export_revenue_csv(project_id=project_id, event_id=event_id)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="event-revenue-{event_id}.csv"'},
+    )
+
+
 @handle_api_exceptions("export community event bookings")
 @router.get(
     "/{project_id}/community-events/{event_id}/bookings/export",

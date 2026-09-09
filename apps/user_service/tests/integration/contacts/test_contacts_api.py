@@ -5,7 +5,10 @@ from __future__ import annotations
 import pytest
 
 from apps.user_service.app.schemas.enums import ClientStatus
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import (
+    patch_check_permissions,
+    patch_crm_or_resident_access,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 
 CONTACT_ID = "contact-1"
@@ -48,6 +51,7 @@ _FAKE_DETAILS = {
 def _patch_contacts_access(monkeypatch) -> None:
     """Bypass RBAC for contacts routes."""
     patch_check_permissions(monkeypatch, "apps.user_service.app.api.contacts")
+    patch_crm_or_resident_access(monkeypatch, "apps.user_service.app.api.contacts")
 
 
 @pytest.mark.asyncio

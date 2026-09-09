@@ -63,6 +63,9 @@ from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
+    ensure_crm_or_resident_project_access,
+    ensure_resident_access_for_unit,
+    ensure_resident_or_crm_contact_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -169,11 +172,20 @@ async def create_contact(
     lead_created_event: dict | None = None
     lead_event_key: str | None = None
     async with db_connection.transaction():
-        user_context = await check_permissions(
-            current_user=current_user,
-            db_connection=db_connection,
-            permission_codes=CONTACTS_MANAGEMENT_CREATE,
-        )
+        if body.unit_assignment is not None:
+            user_context = await ensure_resident_access_for_unit(
+                current_user=current_user,
+                db_connection=db_connection,
+                unit_id=body.unit_assignment.unit_id,
+                edit=True,
+                request=request,
+            )
+        else:
+            user_context = await check_permissions(
+                current_user=current_user,
+                db_connection=db_connection,
+                permission_codes=CONTACTS_MANAGEMENT_CREATE,
+            )
         service = ContactsService(
             db_connection=db_connection,
             user_context=user_context,
@@ -277,10 +289,11 @@ async def list_contacts(
     Returns:
         Paginated list response envelope containing contact summary items and total count.
     """
-    user_context = await check_permissions(
+    user_context = await ensure_crm_or_resident_project_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        project_id=str(body.project_id) if body.project_id else None,
+        request=request,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
 
@@ -454,10 +467,11 @@ async def search_contacts(
     Notes:
         This endpoint intentionally returns raw Typesense hits.
     """
-    user_context = await check_permissions(
+    user_context = await ensure_crm_or_resident_project_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        project_id=project_id,
+        request=request,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
     result = await service.search_contacts(
@@ -519,10 +533,11 @@ async def get_contact_overview(
     ),
 ):
     """Return overview card counts for the Contacts registry dashboard."""
-    user_context = await check_permissions(
+    user_context = await ensure_crm_or_resident_project_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        project_id=project_id,
+        request=request,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
     data = await service.get_contact_overview(
@@ -559,10 +574,11 @@ async def export_contacts(
 ):
     """Export filtered contacts as a CSV attachment."""
     _ = request  # Required by slowapi rate limiter; response is a raw CSV attachment.
-    user_context = await check_permissions(
+    user_context = await ensure_crm_or_resident_project_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        project_id=str(query.project_id) if query.project_id else None,
+        request=request,
     )
     service = ContactsService(db_connection=db_connection, user_context=user_context)
     csv_text = await service.export_contacts_csv(query=query)
@@ -878,14 +894,19 @@ async def list_contact_units(
         default=None,
         description="Filter by contact_unit status (pending, active, moved_out).",
     ),
+    project_id: str | None = Query(
+        default=None,
+        description="When set, requires resident_management.view on the project.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List all unit assignments for a contact (admin)."""
-    user_context = await check_permissions(
+    user_context = await ensure_crm_or_resident_project_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        project_id=project_id,
+        request=request,
     )
     contacts_service = ContactsService(
         db_connection=db_connection,
@@ -930,14 +951,20 @@ async def list_contact_vehicles(
         default=None,
         description="Optional unit filter; returns vehicles for that unit only.",
     ),
+    project_id: str | None = Query(
+        default=None,
+        description="When set, requires resident_management.view on the project.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List vehicles registered by a contact (admin)."""
-    user_context = await check_permissions(
+    user_context = await ensure_resident_or_crm_contact_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        project_id=project_id,
+        unit_id=unit_id,
+        request=request,
     )
     contacts_service = ContactsService(
         db_connection=db_connection,
@@ -991,10 +1018,12 @@ async def create_contact_vehicle(
     body: AdminCreateVehicleRequest = Body(...),
 ):
     """Register an approved vehicle for a contact (admin)."""
-    user_context = await check_permissions(
+    user_context = await ensure_resident_access_for_unit(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        unit_id=body.unit_id,
+        edit=True,
+        request=request,
     )
     contacts_service = ContactsService(
         db_connection=db_connection,
@@ -1043,14 +1072,20 @@ async def list_contact_household(
         default=None,
         description="Filter household members to one unit.",
     ),
+    project_id: str | None = Query(
+        default=None,
+        description="When set, requires resident_management.view on the project.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """List household members for a primary contact (admin)."""
-    user_context = await check_permissions(
+    user_context = await ensure_resident_or_crm_contact_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_VIEW,
+        project_id=project_id,
+        unit_id=unit_id,
+        request=request,
     )
     contacts_service = ContactsService(
         db_connection=db_connection,
@@ -1104,10 +1139,12 @@ async def add_contact_household_member(
     body: CreateHouseholdMemberRequest = Body(...),
 ):
     """Add a household member for a primary contact (admin)."""
-    user_context = await check_permissions(
+    user_context = await ensure_resident_access_for_unit(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        unit_id=body.unit_id,
+        edit=True,
+        request=request,
     )
     contacts_service = ContactsService(
         db_connection=db_connection,
@@ -1170,10 +1207,12 @@ async def assign_unit_to_contact(
     body: AdminAssignUnitRequest = Body(...),
 ):
     """Admin pre-allotment of a unit to a contact."""
-    user_context = await check_permissions(
+    user_context = await ensure_resident_access_for_unit(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=CONTACTS_MANAGEMENT_EDIT,
+        unit_id=body.unit_id,
+        edit=True,
+        request=request,
     )
     units_service = ContactUnitsService(
         db_connection=db_connection,

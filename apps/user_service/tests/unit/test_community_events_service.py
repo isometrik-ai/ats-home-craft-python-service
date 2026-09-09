@@ -650,6 +650,81 @@ async def test_export_bookings_csv():
 
 
 @pytest.mark.asyncio
+async def test_export_revenue_csv():
+    svc = _service()
+    svc.repo.fetch_event_by_id = AsyncMock(
+        return_value={
+            "id": EVENT_ID,
+            "display_code": "EVT-8",
+            "title": "Brazil fest",
+            "currency": "INR",
+        }
+    )
+    svc.repo.get_revenue_summary_for_event = AsyncMock(
+        return_value={"collected_minor": 64000, "pending_minor": 0}
+    )
+    svc.repo.list_revenue_transactions_for_event = AsyncMock(
+        return_value=(
+            [
+                {
+                    "txn_ref": "BKG-34",
+                    "contact_name": "Ms. Rasika Bharati",
+                    "amount_minor": 22000,
+                    "payment_status": "paid",
+                }
+            ],
+            1,
+        )
+    )
+    csv_text = await svc.export_revenue_csv(project_id=PROJECT_ID, event_id=EVENT_ID)
+    assert "Brazil fest" in csv_text
+    assert "BKG-34" in csv_text
+    assert "Paid" in csv_text
+
+
+@pytest.mark.asyncio
+async def test_export_revenue_csv_sanitizes_formula_injection():
+    svc = _service()
+    svc.repo.fetch_event_by_id = AsyncMock(
+        return_value={
+            "id": EVENT_ID,
+            "display_code": "=CMD|'/C calc'!A0",
+            "title": "+SUM(1,1)",
+            "currency": "INR",
+        }
+    )
+    svc.repo.get_revenue_summary_for_event = AsyncMock(
+        return_value={"collected_minor": 100, "pending_minor": 0}
+    )
+    svc.repo.list_revenue_transactions_for_event = AsyncMock(
+        return_value=(
+            [
+                {
+                    "txn_ref": "-1+1",
+                    "contact_name": "@SUM(A1:A9)",
+                    "amount_minor": 100,
+                    "payment_status": "paid",
+                }
+            ],
+            1,
+        )
+    )
+    csv_text = await svc.export_revenue_csv(project_id=PROJECT_ID, event_id=EVENT_ID)
+    assert "'=CMD|'/C calc'!A0" in csv_text
+    assert "'+SUM(1,1)" in csv_text
+    assert "'@SUM(A1:A9)" in csv_text
+    assert "'-1+1" in csv_text
+
+
+@pytest.mark.asyncio
+async def test_export_revenue_csv_event_not_found():
+    svc = _service()
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc.export_revenue_csv(project_id=PROJECT_ID, event_id=EVENT_ID)
+
+
+@pytest.mark.asyncio
 async def test_create_event_publish_validation_failures():
     from apps.user_service.app.schemas.community_events import (
         CreateCommunityEventRequest,
