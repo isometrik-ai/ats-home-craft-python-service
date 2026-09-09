@@ -1,0 +1,54 @@
+Welcome to {{.app_name}}
+
+Hello {{.first_name}},
+
+Welcome to {{.app_name}}! On behalf of the entire {{.community_name}} team, we are delighted to have you with us.
+
+Your home has been registered in our community management system, and your unit allotment is now complete. Through the {{.app_name}} app, you can access community services, stay updated on notices and events, manage your profile, and complete your move-in onboarding — all in one place.
+
+We are here to make your living experience smooth and connected from day one.
+
+YOUR ALLOTMENT DETAILS
+──────────────────────
+Community : {{.community_name}}
+Project   : {{.project_name}}
+Unit      : {{.unit_display}}
+Location  : {{.location_label}}
+Status    : {{.allotment_status}}
+
+HOW TO SIGN IN
+──────────────
+Once you have downloaded the app, sign in using your registered phone number:
+
+{{.registered_phone}}
+
+Enter this number on the login screen in {{.app_name}}. This is your primary way to access your account.
+
+YOUR REGISTERED DETAILS
+───────────────────────
+For your reference, we have registered the following contact details for your account:
+
+  • Email: {{.registered_email}}
+  • Phone: {{.registered_phone}}
+
+DOWNLOAD THE {{.app_name}} APP
+────────────────────────────────
+Get started by installing the app on your phone:
+
+{{.app_store_links_plain}}
+
+{{.app_download_fallback}}
+
+YOUR NEXT STEPS
+───────────────
+1. Download the {{.app_name}} app from the App Store or Google Play
+2. Sign in with your phone number {{.registered_phone}}
+3. Accept your unit when prompted — this confirms your allotment at {{.unit_display}}
+4. Complete your profile and finish onboarding at your convenience
+
+If you have any questions or need assistance, please reach out to your community management team. We look forward to serving you.
+
+Warm regards,
+The {{.community_name}} Team
+
+Powered by {{.app_name}}

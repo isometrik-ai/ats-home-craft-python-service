@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -18,6 +19,10 @@ from apps.user_service.app.db.repositories.contact_roles_repository import (
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
+)
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.contact_onboarding import AdminAssignUnitRequest
 from apps.user_service.app.schemas.enums import (
@@ -30,8 +35,18 @@ from apps.user_service.app.services.unit_occupancy_turnover_service import (
     UnitOccupancyTurnoverService,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.email_utils import send_unit_allotment_welcome_email
+from apps.user_service.app.utils.unit_allotment_email_helpers import (
+    build_unit_allotment_welcome_body_context,
+)
+from apps.user_service.app.utils.unit_list_serialization import (
+    format_primary_contact_email,
+)
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger(__name__)
 
 
 class ContactUnitsService:
@@ -469,6 +484,62 @@ class ContactUnitsService:
         )
         return row
 
+    async def _maybe_send_unit_allotment_welcome_email(
+        self,
+        *,
+        contact_id: str,
+        allotment_row: dict[str, Any],
+    ) -> None:
+        """Send welcome email after admin unit allotment (non-blocking side effect)."""
+        if (allotment_row.get("relationship") or "") != ContactUnitRelationship.SELF.value:
+            return
+
+        org_id = self.user_context.organization_id
+        assert org_id
+
+        try:
+            contacts_repo = ContactsRepository(self.db_connection)
+            contact = await contacts_repo.get_contact_details(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            if not contact:
+                logger.info(
+                    "Skipping unit allotment welcome email: contact %s not found",
+                    contact_id,
+                )
+                return
+
+            recipient_email = format_primary_contact_email(contact.get("emails"))
+            if not recipient_email:
+                recipient_email = str(contact.get("email") or "").strip() or None
+            if not recipient_email:
+                logger.info(
+                    "Skipping unit allotment welcome email: no email for contact %s",
+                    contact_id,
+                )
+                return
+
+            org_repo = OrganizationRepository(self.db_connection)
+            organization = await org_repo.get_organization_by_id(org_id)
+            community_name = str((organization or {}).get("name") or "").strip()
+
+            body_context = build_unit_allotment_welcome_body_context(
+                contact=contact,
+                allotment_row=allotment_row,
+                community_name=community_name,
+            )
+            await asyncio.to_thread(
+                send_unit_allotment_welcome_email,
+                email=recipient_email,
+                body_context=body_context,
+            )
+        except Exception as error:
+            logger.error(
+                "Failed to prepare or send unit allotment welcome email: %s",
+                error,
+            )
+
     async def _vacate_unit_for_owner_change(
         self,
         *,
@@ -576,6 +647,10 @@ class ContactUnitsService:
             organization_id=org_id,
             contact_unit_id=str(row["id"]),
         )
+        await self._maybe_send_unit_allotment_welcome_email(
+            contact_id=contact_id,
+            allotment_row=full or row,
+        )
         normalized = self._normalize_unit_row(full or row)
         unit_status = (
             "occupied"
@@ -614,5 +689,9 @@ class ContactUnitsService:
         full = await self.repo.get_by_id(
             organization_id=org_id,
             contact_unit_id=str(row["id"]),
+        )
+        await self._maybe_send_unit_allotment_welcome_email(
+            contact_id=contact_id,
+            allotment_row=full or row,
         )
         return self._normalize_unit_row(full or row)

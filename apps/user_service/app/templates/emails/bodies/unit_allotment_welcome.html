@@ -1,0 +1,120 @@
+<h1 style="margin:0 0 20px 0;font-size:24px;line-height:1.3;color:#111827;font-weight:700;">
+  Welcome to {{.app_name}}
+</h1>
+
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Hello {{.first_name}},
+</p>
+
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  <strong>Welcome to {{.app_name}}!</strong> On behalf of the entire
+  <strong>{{.community_name}}</strong> team, we are delighted to have you with us.
+</p>
+
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Your home has been registered in our community management system, and your unit allotment
+  is now complete. Through the {{.app_name}} app, you can access community services, stay
+  updated on notices and events, manage your profile, and complete your move-in onboarding
+  &mdash; all in one place.
+</p>
+
+<p style="margin:0 0 28px 0;font-size:15px;line-height:1.7;color:#374151;">
+  We are here to make your living experience smooth and connected from day one.
+</p>
+
+<h2 style="margin:0 0 14px 0;font-size:17px;line-height:1.4;color:#111827;font-weight:700;">
+  Your allotment details
+</h2>
+
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px 0;border-top:1px solid #e5e7eb;">
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;width:130px;border-bottom:1px solid #e5e7eb;vertical-align:top;">Community</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.community_name}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;border-bottom:1px solid #e5e7eb;vertical-align:top;">Project</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.project_name}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;border-bottom:1px solid #e5e7eb;vertical-align:top;">Unit</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.unit_display}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;border-bottom:1px solid #e5e7eb;vertical-align:top;">Location</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.location_label}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;vertical-align:top;">Status</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;vertical-align:top;">{{.allotment_status}}</td>
+  </tr>
+</table>
+
+<h2 style="margin:0 0 14px 0;font-size:17px;line-height:1.4;color:#111827;font-weight:700;">
+  How to sign in
+</h2>
+
+<p style="margin:0 0 12px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Once you have downloaded the app, sign in using your <strong>registered phone number</strong>:
+</p>
+
+<p style="margin:0 0 12px 0;font-size:18px;line-height:1.5;color:#111827;font-weight:700;">
+  {{.registered_phone}}
+</p>
+
+<p style="margin:0 0 28px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Enter this number on the login screen in {{.app_name}}. This is your primary way to access
+  your account.
+</p>
+
+<h2 style="margin:0 0 14px 0;font-size:17px;line-height:1.4;color:#111827;font-weight:700;">
+  Your registered details
+</h2>
+
+<p style="margin:0 0 12px 0;font-size:15px;line-height:1.7;color:#374151;">
+  For your reference, we have registered the following contact details for your account:
+</p>
+
+<ul style="margin:0 0 28px 0;padding-left:20px;font-size:15px;line-height:1.8;color:#374151;">
+  <li><strong>Email:</strong> {{.registered_email}}</li>
+  <li><strong>Phone:</strong> {{.registered_phone}}</li>
+</ul>
+
+<h2 style="margin:0 0 14px 0;font-size:17px;line-height:1.4;color:#111827;font-weight:700;">
+  Download the {{.app_name}} app
+</h2>
+
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Get started by installing the app on your phone:
+</p>
+
+{{RAW:app_store_cards_html}}
+
+<p style="margin:0 0 28px 0;font-size:15px;line-height:1.7;color:#374151;">{{.app_download_fallback}}</p>
+
+<h2 style="margin:28px 0 14px 0;font-size:17px;line-height:1.4;color:#111827;font-weight:700;">
+  Your next steps
+</h2>
+
+<ol style="margin:0 0 28px 0;padding-left:20px;font-size:15px;line-height:1.8;color:#374151;">
+  <li><strong>Download</strong> the {{.app_name}} app from the App Store or Google Play</li>
+  <li><strong>Sign in</strong> with your phone number <strong>{{.registered_phone}}</strong></li>
+  <li>
+    <strong>Accept your unit</strong> when prompted &mdash; this confirms your allotment at
+    <strong>{{.unit_display}}</strong>
+  </li>
+  <li><strong>Complete your profile</strong> and finish onboarding at your convenience</li>
+</ol>
+
+<p style="margin:0 0 20px 0;font-size:15px;line-height:1.7;color:#374151;">
+  If you have any questions or need assistance, please reach out to your community management
+  team. We look forward to serving you.
+</p>
+
+<p style="margin:0 0 8px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Warm regards,<br />
+  <strong>The {{.community_name}} Team</strong>
+</p>
+
+<p style="margin:0;font-size:13px;line-height:1.6;color:#6b7280;font-style:italic;">
+  Powered by {{.app_name}}
+</p>

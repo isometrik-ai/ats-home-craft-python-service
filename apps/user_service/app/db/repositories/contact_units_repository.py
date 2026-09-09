@@ -39,6 +39,7 @@ SELECT
   u.unit_label,
   t.name AS tower_name,
   f.display_name AS floor_name,
+  f.level_number AS floor_level_number,
   uc.display_label AS config_label,
   COALESCE(uc.two_wheeler_parking_entitlement, 0)::int AS two_wheeler_parking_entitlement,
   COALESCE(uc.four_wheeler_parking_entitlement, 0)::int AS four_wheeler_parking_entitlement,

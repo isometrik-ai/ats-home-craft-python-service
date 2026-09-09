@@ -260,6 +260,8 @@ class SharedAppSettings(BaseSettings):
         "COMPANY_PRIVACY_POLICY_URL", default="https://houseofapps.ai/privacy"
     )
     company_terms_url: str = config("COMPANY_TERMS_URL", default="https://houseofapps.ai/terms")
+    mobile_app_ios_url: str = config("MOBILE_APP_IOS_URL", default="")
+    mobile_app_android_url: str = config("MOBILE_APP_ANDROID_URL", default="")
     openai_api_key: str = config("OPENAI_API_KEY")
     org_memory_llm_model: str = config("ORG_MEMORY_LLM_MODEL", default="gpt-4.1-mini")
     rossai_api_key: str = config("ROSSAI_API_KEY", default="")
