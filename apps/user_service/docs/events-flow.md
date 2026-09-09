@@ -76,6 +76,8 @@ Each event has:
 | Soft delete                                                             | `POST /projects/{project_id}/community-events/{id}/delete`                                                                       |
 | Restore                                                                 | `POST /projects/{project_id}/community-events/{id}/restore`                                                                      |
 | Event bookings list                                                     | `GET /projects/{project_id}/community-events/{id}/bookings`                                                                      |
+| Download revenue report (Revenue tab)                                   | `GET /projects/{project_id}/community-events/{id}/revenue/export`                                                                |
+| Export RSVPs / bookings CSV                                             | `GET /projects/{project_id}/community-events/{id}/bookings/export`                                                               |
 | Book on behalf (walk-in / clubhouse)                                    | `POST /projects/{project_id}/community-events/{id}/bookings`                                                                     |
 | Mark booking paid                                                       | `POST .../bookings/{booking_id}/mark-paid`                                                                                       |
 | Mark waived (optional)                                                  | `POST .../bookings/{booking_id}/mark-waived`                                                                                     |
@@ -452,7 +454,50 @@ POST /v1/projects/{project_id}/community-events/{event_id}/bookings
 - Bypasses resident booking window rules; always creates `confirmed` (no waitlist).
 - Optional `mark_paid: true` chains to the existing mark-paid flow for paid events.
 
-### 4.5 Cancel / complete / delete
+### 4.5 Revenue download report
+
+Admin opens event detail → **Revenue** tab → **Download Report**:
+
+```http
+GET /v1/projects/{project_id}/community-events/{event_id}/revenue/export
+```
+
+Returns CSV with event summary header rows plus payment transaction rows. Trigger a browser file
+download; response is not JSON.
+
+**CSV shape (example — Brazil fest):**
+
+```csv
+event_display_code,event_title,currency
+EVT-8,Brazil fest,INR
+collected_minor,pending_minor
+64000,0
+
+resident,amount_minor,status,txn_ref
+Ms. Rasika Bharati,22000,Paid,BKG-34
+Mark Z,21000,Paid,BKG-33
+Marshel Z,21000,Paid,BKG-32
+```
+
+| UI field  | CSV column                         |
+| --------- | ---------------------------------- |
+| COLLECTED | `collected_minor` (header row)     |
+| PENDING   | `pending_minor` (header row)       |
+| RESIDENT  | `resident`                         |
+| AMOUNT    | `amount_minor` (paise)             |
+| STATUS    | `status` (`Paid`, `Pending`, etc.) |
+| TXN REF   | `txn_ref` (`BKG-{n}`)              |
+
+Only **non-cancelled** payable bookings (`pending`, `paid`, `waived`) are included. Free events
+export zero totals and no transaction rows.
+
+**Export RSVPs** (Quick Actions) uses the separate bookings export:
+
+```http
+GET /v1/projects/{project_id}/community-events/{event_id}/bookings/export
+```
+
+### 4.6 Cancel / complete / delete
 
 | Action       | Endpoint            | Effect                                          |
 | ------------ | ------------------- | ----------------------------------------------- |

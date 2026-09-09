@@ -14,6 +14,7 @@ from apps.user_service.app.api.community_events import (
     create_community_event,
     delete_community_event,
     export_community_event_bookings,
+    export_community_event_revenue,
     export_community_events,
     get_community_event,
     get_community_events_summary,
@@ -46,6 +47,7 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 EVENT_ID = "22222222-2222-2222-2222-222222222222"
@@ -141,6 +143,7 @@ async def test_event_read_endpoints(mock_service_cls, mock_access):
     service.export_events_csv = AsyncMock(return_value="title\nSummer fest\n")
     service.list_bookings = AsyncMock(return_value=([], 0))
     service.export_bookings_csv = AsyncMock(return_value="booking\n")
+    service.export_revenue_csv = AsyncMock(return_value="resident,amount_minor\nResident,22000\n")
 
     assert (
         await get_community_events_summary(
@@ -196,6 +199,76 @@ async def test_event_read_endpoints(mock_service_cls, mock_access):
             current_user={"sub": "staff-1"},
         )
     ).status_code == 200
+    revenue_export = await export_community_event_revenue(
+        request=_request(),
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+    assert revenue_export.status_code == 200
+    assert revenue_export.headers["content-type"].startswith("text/csv")
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.api.community_events.ensure_staff_project_access", new_callable=AsyncMock
+)
+@patch("apps.user_service.app.api.community_events.CommunityEventsService")
+async def test_export_community_event_revenue_success(mock_service_cls, mock_access):
+    """Revenue export returns CSV attachment."""
+    mock_access.return_value = _user_context()
+    mock_service_cls.return_value.export_revenue_csv = AsyncMock(
+        return_value=(
+            "event_display_code,event_title,currency\n"
+            "EVT-8,Brazil fest,INR\n"
+            "resident,amount_minor,status,txn_ref\n"
+            "Ms. Rasika Bharati,22000,Paid,BKG-34\n"
+        )
+    )
+
+    response = await export_community_event_revenue(
+        request=_request(),
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers.get("content-disposition", "")
+    assert f"event-revenue-{EVENT_ID}.csv" in response.headers.get("content-disposition", "")
+    assert "BKG-34" in response.body.decode()
+    mock_service_cls.return_value.export_revenue_csv.assert_awaited_once_with(
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+    )
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.api.community_events.ensure_staff_project_access", new_callable=AsyncMock
+)
+@patch("apps.user_service.app.api.community_events.CommunityEventsService")
+async def test_export_community_event_revenue_event_not_found(mock_service_cls, mock_access):
+    """Revenue export returns 404 when event is missing."""
+    mock_access.return_value = _user_context()
+    mock_service_cls.return_value.export_revenue_csv = AsyncMock(
+        side_effect=NotFoundException(
+            message_key="community_events.errors.event_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    )
+
+    with pytest.raises(NotFoundException):
+        await export_community_event_revenue(
+            request=_request(),
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
 
 
 @pytest.mark.asyncio
