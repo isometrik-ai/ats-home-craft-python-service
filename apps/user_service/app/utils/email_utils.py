@@ -6,6 +6,7 @@ from datetime import datetime
 
 import httpx
 
+from apps.user_service.app.utils.file_email_renderer import render_email
 from libs.shared_config.app_settings import shared_settings
 from libs.shared_utils.logger import get_logger
 
@@ -1527,3 +1528,69 @@ If you have trouble accessing the organization, contact support at {support_emai
     except Exception as error:
         logger.error("Error sending org member unbanned email: %s", str(error))
         return False
+
+
+def send_templated_email(
+    *,
+    email: str,
+    template: str,
+    body_context: dict[str, str],
+    layout: str = "transactional",
+    layout_context: dict[str, str] | None = None,
+    from_name: str | None = None,
+    email_type: str | None = None,
+) -> bool:
+    """Send a multipart email rendered from file templates under templates/emails/.
+
+    Args:
+        email: Recipient address.
+        template: Body template name (matches bodies/{template}.html and .txt).
+        body_context: Placeholder values for the body template.
+        layout: Layout shell name (matches layouts/{layout}.html and .txt).
+        layout_context: Optional layout placeholder overrides.
+        from_name: Sender display name; defaults to app_name.
+        email_type: Human-readable label for logs (defaults to template name).
+
+    Returns:
+        bool: True when the email was sent successfully, False otherwise.
+    """
+    label = email_type or template.replace("_", " ")
+    sender_name = from_name or ROSS_AI_FROM_NAME
+    try:
+        plain_text, html_message, subject = render_email(
+            body=template,
+            layout=layout,
+            body_context=body_context,
+            layout_context=layout_context,
+        )
+        email_sent = send_email(
+            email,
+            subject,
+            plain_text,
+            html_message,
+            from_name=sender_name,
+        )
+        if email_sent:
+            logger.info("%s email sent successfully to %s", label, email)
+            return True
+        logger.error("Failed to send %s email to %s", label, email)
+        return False
+    except Exception as error:
+        logger.error("Error sending %s email: %s", label, str(error))
+        return False
+
+
+def send_unit_allotment_welcome_email(
+    *,
+    email: str,
+    body_context: dict[str, str],
+    layout_context: dict[str, str] | None = None,
+) -> bool:
+    """Send multipart unit allotment welcome email rendered from file templates."""
+    return send_templated_email(
+        email=email,
+        template="unit_allotment_welcome",
+        body_context=body_context,
+        layout_context=layout_context,
+        email_type="Unit allotment welcome",
+    )

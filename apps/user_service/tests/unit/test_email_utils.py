@@ -384,6 +384,77 @@ def test_org_member_banned_email_exception() -> None:
         )
 
 
+def test_send_templated_email_success() -> None:
+    """Generic templated email renders and sends multipart content."""
+    with patch(
+        "apps.user_service.app.utils.email_utils.render_email",
+        return_value=("Plain body", "<p>HTML body</p>", "Subject line"),
+    ) as mock_render:
+        with patch(
+            "apps.user_service.app.utils.email_utils.send_email", return_value=True
+        ) as mock_send:
+            ok = email_utils.send_templated_email(
+                email="user@example.com",
+                template="unit_allotment_welcome",
+                body_context={"first_name": "Jane"},
+                email_type="Custom welcome",
+            )
+
+    assert ok is True
+    mock_render.assert_called_once_with(
+        body="unit_allotment_welcome",
+        layout="transactional",
+        body_context={"first_name": "Jane"},
+        layout_context=None,
+    )
+    mock_send.assert_called_once_with(
+        "user@example.com",
+        "Subject line",
+        "Plain body",
+        "<p>HTML body</p>",
+        from_name=email_utils.ROSS_AI_FROM_NAME,
+    )
+
+
+def test_send_unit_allotment_welcome_email_success() -> None:
+    """Unit allotment welcome email sends multipart content."""
+    with patch(
+        "apps.user_service.app.utils.email_utils.render_email",
+        return_value=("Plain body", "<p>HTML body</p>", "Welcome subject"),
+    ) as mock_render:
+        with patch(
+            "apps.user_service.app.utils.email_utils.send_email", return_value=True
+        ) as mock_send:
+            ok = email_utils.send_unit_allotment_welcome_email(
+                email="owner@example.com",
+                body_context={"first_name": "John"},
+            )
+
+    assert ok is True
+    mock_render.assert_called_once()
+    mock_send.assert_called_once_with(
+        "owner@example.com",
+        "Welcome subject",
+        "Plain body",
+        "<p>HTML body</p>",
+        from_name=email_utils.ROSS_AI_FROM_NAME,
+    )
+
+
+def test_send_unit_allotment_welcome_email_failure() -> None:
+    """Unit allotment welcome email returns False when send fails."""
+    with patch(
+        "apps.user_service.app.utils.email_utils.render_email",
+        return_value=("Plain", "<p>HTML</p>", "Subject"),
+    ):
+        with patch("apps.user_service.app.utils.email_utils.send_email", return_value=False):
+            ok = email_utils.send_unit_allotment_welcome_email(
+                email="owner@example.com",
+                body_context={"first_name": "John"},
+            )
+    assert ok is False
+
+
 def test_org_member_unbanned_email_exception() -> None:
     """Unbanned member email catches send exceptions."""
     with patch(

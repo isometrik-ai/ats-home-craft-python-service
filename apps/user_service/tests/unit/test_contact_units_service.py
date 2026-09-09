@@ -359,8 +359,11 @@ async def test_admin_assign_unit_creates_pending_allotment():
         relationship=ContactUnitRelationship.SELF,
     )
 
+    svc._maybe_send_unit_allotment_welcome_email = AsyncMock()
+
     result = await svc.admin_assign_unit(contact_id="contact-1", body=body)
 
+    svc._maybe_send_unit_allotment_welcome_email.assert_awaited_once()
     svc.repo.insert_allotment.assert_awaited_once_with(
         organization_id="org-1",
         project_id="proj-1",
@@ -524,6 +527,7 @@ async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls, mock_move_e
         }
     )
     svc.units_repo.has_active_owner = AsyncMock(return_value=True)
+    svc._maybe_send_unit_allotment_welcome_email = AsyncMock()
 
     result = await svc.reassign_unit_owner(
         project_id="proj-1",
@@ -532,6 +536,7 @@ async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls, mock_move_e
         assign_date=ASSIGN_DATE,
     )
 
+    svc._maybe_send_unit_allotment_welcome_email.assert_awaited_once()
     mock_turnover.vacate_unit_completely.assert_awaited_once_with(
         organization_id="org-1",
         project_id="proj-1",
@@ -657,3 +662,71 @@ async def test_create_unit_allotment_contact_not_found():
             relationship="self",
             project_id="proj-1",
         )
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contact_units_service.OrganizationRepository.get_organization_by_id",
+    new_callable=AsyncMock,
+    return_value={"name": "Green Valley Residency"},
+)
+@patch(
+    "apps.user_service.app.services.contact_units_service.ContactsRepository.get_contact_details",
+    new_callable=AsyncMock,
+    return_value={
+        "first_name": "John",
+        "emails": [{"email": "john@example.com", "is_primary": True}],
+        "phones": [{"phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": True}],
+    },
+)
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_allotment_welcome_email",
+    return_value=True,
+)
+async def test_maybe_send_unit_allotment_welcome_email_sends(
+    mock_send,
+    _mock_contact_details,
+    _mock_organization,
+):
+    """Welcome email is sent when contact has a primary email."""
+    svc = _service()
+    await svc._maybe_send_unit_allotment_welcome_email(
+        contact_id="contact-1",
+        allotment_row={
+            "relationship": "self",
+            "project_name": "Sunrise Towers",
+            "tower_name": "Tower A",
+            "unit_label": "1204",
+            "code": "A-1204",
+            "floor_name": "F18",
+            "floor_level_number": 18,
+        },
+    )
+
+    mock_send.assert_called_once()
+    assert mock_send.call_args.kwargs["email"] == "john@example.com"
+    assert mock_send.call_args.kwargs["body_context"]["location_label"] == "Tower A · F18"
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contact_units_service.ContactsRepository.get_contact_details",
+    new_callable=AsyncMock,
+    return_value={"first_name": "John", "emails": [], "phones": []},
+)
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_allotment_welcome_email",
+    return_value=True,
+)
+async def test_maybe_send_unit_allotment_welcome_email_skips_without_email(
+    mock_send,
+    _mock_contact_details,
+):
+    """Welcome email is skipped when the contact has no email."""
+    svc = _service()
+    await svc._maybe_send_unit_allotment_welcome_email(
+        contact_id="contact-1",
+        allotment_row={"relationship": "self", "project_name": "Sunrise Towers"},
+    )
+
+    mock_send.assert_not_called()

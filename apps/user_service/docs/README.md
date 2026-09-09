@@ -8,12 +8,13 @@ ______________________________________________________________________
 
 ## Start here
 
-| Document                                                   | Audience           | Purpose                        |
-| ---------------------------------------------------------- | ------------------ | ------------------------------ |
-| [membership-architecture.md](./membership-architecture.md) | Engineering team   | Org + project membership model |
-| [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Backend + frontend | Resident onboarding flow       |
-| [project-setup-flow.md](./project-setup-flow.md)           | Backend + frontend | Admin project setup wizard     |
-| [adr/README.md](./adr/README.md)                           | All engineers      | ADR index                      |
+| Document                                                                 | Audience           | Purpose                                       |
+| ------------------------------------------------------------------------ | ------------------ | --------------------------------------------- |
+| [membership-architecture.md](./membership-architecture.md)               | Engineering team   | Org + project membership model                |
+| [contact-onboarding-flow.md](./contact-onboarding-flow.md)               | Backend + frontend | Resident onboarding flow                      |
+| [project-setup-flow.md](./project-setup-flow.md)                         | Backend + frontend | Admin project setup wizard                    |
+| [file-based-transactional-email.md](./file-based-transactional-email.md) | Backend engineers  | File-template emails (`send_templated_email`) |
+| [adr/README.md](./adr/README.md)                                         | All engineers      | ADR index                                     |
 
 ______________________________________________________________________
 

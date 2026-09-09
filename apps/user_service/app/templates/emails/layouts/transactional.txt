@@ -1,0 +1,11 @@
+{{.app_name}}
+────────────────────────────────
+
+{{BODY_CONTENT}}
+
+────────────────────────────────
+Powered by {{.app_name}}
+{{.support_email}} | {{.company_website}}
+
+Please do not reply to this email.
+© {{.current_year}} {{.company_name}}

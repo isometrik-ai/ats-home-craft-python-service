@@ -49,6 +49,20 @@ def format_primary_contact_phone(phones: Any) -> str | None:
     return f"{isd_code}{number}".strip() if isd_code else number
 
 
+def format_primary_contact_phone_display(phones: Any) -> str | None:
+    """Return the primary phone formatted for human-readable display (e.g. email copy)."""
+    phone = _select_primary_jsonb_item(phones)
+    if not phone:
+        return None
+    isd_code = str(phone.get("phone_isd_code") or "").strip()
+    number = str(phone.get("phone_number") or "").strip()
+    if not number:
+        return None
+    if isd_code:
+        return f"{isd_code} {number}".strip()
+    return number
+
+
 def format_primary_contact_email(emails: Any) -> str | None:
     """Return the primary email address from a contact emails JSONB list."""
     email_item = _select_primary_jsonb_item(emails)
