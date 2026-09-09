@@ -120,6 +120,9 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_CREATE,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    VEHICLE_MANAGEMENT_DELETE,
+    VEHICLE_MANAGEMENT_EDIT,
+    VEHICLE_MANAGEMENT_VIEW,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
@@ -4137,7 +4140,7 @@ async def list_project_vehicle_requests(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECTS_MANAGEMENT_VIEW,
+        permission_codes=VEHICLE_MANAGEMENT_VIEW,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
     items = await service.list_project_vehicles(
@@ -4196,7 +4199,7 @@ async def review_project_vehicle_request(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECT_SETUP_EDIT,
+        permission_codes=VEHICLE_MANAGEMENT_EDIT,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
     data = await service.review_vehicle(
@@ -4255,7 +4258,7 @@ async def delete_project_vehicle(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=PROJECT_SETUP_EDIT,
+        permission_codes=VEHICLE_MANAGEMENT_DELETE,
     )
     service = VehiclesService(db_connection=db_connection, user_context=user_context)
     data = await service.admin_delete_project_vehicle(
