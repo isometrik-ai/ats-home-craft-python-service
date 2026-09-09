@@ -60,6 +60,10 @@ MOVE_EVENTS_MANAGEMENT_EDIT = "move_events_management.edit"
 PARKING_MANAGEMENT_VIEW = "parking_management.view"
 PARKING_MANAGEMENT_EDIT = "parking_management.edit"
 
+VEHICLE_MANAGEMENT_VIEW = "vehicle_management.view"
+VEHICLE_MANAGEMENT_EDIT = "vehicle_management.edit"
+VEHICLE_MANAGEMENT_DELETE = "vehicle_management.delete"
+
 RESIDENT_MANAGEMENT_VIEW = "resident_management.view"
 RESIDENT_MANAGEMENT_EDIT = "resident_management.edit"
 
@@ -511,6 +515,24 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "Edit Parking Allotments",
         "Assign and release parking slots within assigned projects",
         "parking",
+    ),
+    (
+        VEHICLE_MANAGEMENT_VIEW,
+        "View Vehicle Requests",
+        "View resident vehicle registration requests within assigned projects",
+        "vehicles",
+    ),
+    (
+        VEHICLE_MANAGEMENT_EDIT,
+        "Review Vehicle Requests",
+        "Approve or reject resident vehicle registration requests",
+        "vehicles",
+    ),
+    (
+        VEHICLE_MANAGEMENT_DELETE,
+        "Delete Project Vehicles",
+        "Remove resident vehicle registration requests and approved vehicles",
+        "vehicles",
     ),
     (
         RESIDENT_MANAGEMENT_VIEW,
