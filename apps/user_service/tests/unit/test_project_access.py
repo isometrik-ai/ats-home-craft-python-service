@@ -6,15 +6,19 @@ import pytest
 
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    ensure_crm_or_resident_project_access,
+    ensure_resident_access_for_unit,
     ensure_staff_project_access,
     require_any_permission,
     user_has_any_permission,
 )
 from libs.shared_utils.common_query import (
+    CONTACTS_MANAGEMENT_VIEW,
     PROJECT_SETUP_EDIT,
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    RESIDENT_MANAGEMENT_VIEW,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import ForbiddenException
@@ -333,3 +337,77 @@ async def test_user_has_any_permission():
             db_connection=db,
             organization_id=ORG_ID,
         )
+
+
+@pytest.mark.asyncio
+async def test_ensure_crm_or_resident_project_access_uses_resident_on_project():
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    with patch(
+        "apps.user_service.app.utils.common_utils.ensure_staff_project_access",
+        new=AsyncMock(return_value=_user_context()),
+    ) as staff_access:
+        await ensure_crm_or_resident_project_access(
+            current_user=current_user,
+            db_connection=db,
+            project_id=PROJECT_ID,
+        )
+        staff_access.assert_awaited_once_with(
+            current_user=current_user,
+            db_connection=db,
+            project_id=PROJECT_ID,
+            permission_codes=RESIDENT_MANAGEMENT_VIEW,
+            request=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_ensure_crm_or_resident_project_access_uses_crm_without_project():
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    with patch(
+        "apps.user_service.app.utils.common_utils.check_permissions",
+        new=AsyncMock(return_value=_user_context()),
+    ) as check_permissions:
+        await ensure_crm_or_resident_project_access(
+            current_user=current_user,
+            db_connection=db,
+            project_id=None,
+        )
+        check_permissions.assert_awaited_once_with(
+            current_user=current_user,
+            db_connection=db,
+            permission_codes=CONTACTS_MANAGEMENT_VIEW,
+            request=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_ensure_resident_access_for_unit_resolves_project():
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    unit_repo = MagicMock()
+    unit_repo.get_unit_project = AsyncMock(return_value={"project_id": PROJECT_ID})
+    with (
+        patch(
+            "apps.user_service.app.utils.common_utils.extract_user_context",
+            new=AsyncMock(return_value=_user_context()),
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.contact_units_repository.ContactUnitsRepository",
+            return_value=unit_repo,
+        ),
+        patch(
+            "apps.user_service.app.utils.common_utils.ensure_staff_project_access_for_context",
+            new=AsyncMock(return_value=_user_context()),
+        ) as staff_access,
+    ):
+        await ensure_resident_access_for_unit(
+            current_user=current_user,
+            db_connection=db,
+            unit_id="55555555-5555-5555-5555-555555555555",
+            edit=True,
+        )
+        staff_access.assert_awaited_once()
+        assert staff_access.await_args.kwargs["project_id"] == PROJECT_ID
+        assert staff_access.await_args.kwargs["permission_codes"] == "resident_management.edit"

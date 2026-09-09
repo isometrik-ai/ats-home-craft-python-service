@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from libs.shared_utils.common_query import (
+    BUSINESS_DASHBOARD_VIEW,
     COMMUNITY_EVENTS_MANAGEMENT_EDIT,
     COMMUNITY_EVENTS_MANAGEMENT_VIEW,
+    CONTACTS_MANAGEMENT_CREATE,
+    CONTACTS_MANAGEMENT_DELETE,
+    CONTACTS_MANAGEMENT_VIEW,
     DAILY_HELP_MANAGEMENT_CREATE,
     DAILY_HELP_MANAGEMENT_REVIEW,
     DAILY_HELP_MANAGEMENT_UPDATE,
@@ -20,6 +24,7 @@ from libs.shared_utils.common_query import (
     PARKING_MANAGEMENT_VIEW,
     PROJECT_MEMBERS_MANAGE,
     PROJECT_MEMBERS_MANAGE_ASSIGNED,
+    PROJECT_PERMISSION_CODES,
     PROJECT_SETUP_DELETE,
     PROJECT_SETUP_EDIT,
     PROJECTS_MANAGEMENT_DELETE,
@@ -37,12 +42,9 @@ from libs.shared_utils.common_query import (
     WORK_ORDER_MANAGEMENT_PAY,
     WORK_ORDER_MANAGEMENT_VIEW,
 )
-from libs.shared_utils.project_role_defaults import DEFAULT_PROJECT_ROLE_PERMISSIONS
 
 # All permission codes that may appear on a project role template.
-PROJECT_SCOPABLE_PERMISSION_CODES: frozenset[str] = frozenset(
-    {code for codes in DEFAULT_PROJECT_ROLE_PERMISSIONS.values() for code in codes}
-)
+PROJECT_SCOPABLE_PERMISSION_CODES: frozenset[str] = PROJECT_PERMISSION_CODES
 
 # Maps an API/org permission requirement to project-role codes that satisfy it.
 PROJECT_PERMISSION_SATISFIERS: dict[str, frozenset[str]] = {
@@ -62,8 +64,8 @@ PROJECT_PERMISSION_SATISFIERS: dict[str, frozenset[str]] = {
     DAILY_HELP_MANAGEMENT_REVIEW: frozenset({DAILY_HELP_MANAGEMENT_REVIEW}),
     TENANT_REQUESTS_MANAGEMENT_VIEW: frozenset({TENANT_REQUESTS_MANAGEMENT_VIEW}),
     TENANT_REQUESTS_MANAGEMENT_EDIT: frozenset({TENANT_REQUESTS_MANAGEMENT_EDIT}),
-    MOVE_EVENTS_MANAGEMENT_VIEW: frozenset({MOVE_EVENTS_MANAGEMENT_VIEW, RESIDENT_MANAGEMENT_VIEW}),
-    MOVE_EVENTS_MANAGEMENT_EDIT: frozenset({MOVE_EVENTS_MANAGEMENT_EDIT, RESIDENT_MANAGEMENT_EDIT}),
+    MOVE_EVENTS_MANAGEMENT_VIEW: frozenset({MOVE_EVENTS_MANAGEMENT_VIEW}),
+    MOVE_EVENTS_MANAGEMENT_EDIT: frozenset({MOVE_EVENTS_MANAGEMENT_EDIT}),
     PARKING_MANAGEMENT_VIEW: frozenset({PARKING_MANAGEMENT_VIEW}),
     PARKING_MANAGEMENT_EDIT: frozenset({PARKING_MANAGEMENT_EDIT}),
     RESIDENT_MANAGEMENT_VIEW: frozenset({RESIDENT_MANAGEMENT_VIEW}),
@@ -75,6 +77,10 @@ PROJECT_PERMISSION_SATISFIERS: dict[str, frozenset[str]] = {
     WORK_ORDER_MANAGEMENT_EDIT: frozenset({WORK_ORDER_MANAGEMENT_EDIT}),
     WORK_ORDER_MANAGEMENT_APPROVE: frozenset({WORK_ORDER_MANAGEMENT_APPROVE}),
     WORK_ORDER_MANAGEMENT_PAY: frozenset({WORK_ORDER_MANAGEMENT_PAY}),
+    BUSINESS_DASHBOARD_VIEW: frozenset({BUSINESS_DASHBOARD_VIEW}),
+    CONTACTS_MANAGEMENT_VIEW: frozenset({CONTACTS_MANAGEMENT_VIEW}),
+    CONTACTS_MANAGEMENT_CREATE: frozenset({CONTACTS_MANAGEMENT_CREATE}),
+    CONTACTS_MANAGEMENT_DELETE: frozenset({CONTACTS_MANAGEMENT_DELETE}),
 }
 
 
@@ -121,6 +127,8 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
         RESIDENT_MANAGEMENT_VIEW,
         FINANCE_MANAGEMENT_VIEW,
         WORK_ORDER_MANAGEMENT_VIEW,
+        BUSINESS_DASHBOARD_VIEW,
+        CONTACTS_MANAGEMENT_VIEW,
     }:
         codes.add(PROJECTS_MANAGEMENT_VIEW_ASSIGNED)
 
@@ -143,6 +151,8 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
         WORK_ORDER_MANAGEMENT_EDIT,
         WORK_ORDER_MANAGEMENT_APPROVE,
         WORK_ORDER_MANAGEMENT_PAY,
+        CONTACTS_MANAGEMENT_CREATE,
+        CONTACTS_MANAGEMENT_DELETE,
     }:
         codes.add(PROJECTS_MANAGEMENT_EDIT)
 
@@ -153,6 +163,16 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
         codes.add(PROJECT_MEMBERS_MANAGE)
 
     return frozenset(codes)
+
+
+def project_code_allowed_by_org_ceiling(
+    org_permission_codes: set[str],
+    project_permission_code: str,
+) -> bool:
+    """Return True when the user's org role satisfies the ceiling for a project permission."""
+    return bool(
+        org_permission_codes.intersection(org_ceiling_permission_codes(project_permission_code))
+    )
 
 
 def expand_org_ceiling_permission_codes(permission_codes: list[str]) -> list[str]:

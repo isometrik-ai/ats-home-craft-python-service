@@ -81,6 +81,25 @@ def patch_ensure_staff_project_access_optional(
     )
 
 
+def patch_crm_or_resident_access(monkeypatch, module_path: str, org_id: str = "org-123") -> None:
+    """Patch resident/CRM access helpers imported by an API module."""
+
+    async def fake_access(**kwargs):
+        del kwargs
+        return admin_context(org_id=org_id)
+
+    for helper_name in (
+        "ensure_crm_or_resident_project_access",
+        "ensure_resident_access_for_unit",
+        "ensure_resident_or_crm_contact_access",
+    ):
+        monkeypatch.setattr(
+            f"{module_path}.{helper_name}",
+            fake_access,
+            raising=False,
+        )
+
+
 def patch_staff_project_access_wrapper(
     monkeypatch, module_path: str, org_id: str = "org-123"
 ) -> None:

@@ -1,11 +1,13 @@
 """Unit tests for project permission alias helpers."""
 
 from libs.shared_utils.common_query import (
+    MOVE_EVENTS_MANAGEMENT_VIEW,
     NOTICES_MANAGEMENT_EDIT,
     PROJECT_SETUP_EDIT,
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    RESIDENT_MANAGEMENT_VIEW,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.project_permission_aliases import (
@@ -43,6 +45,14 @@ def test_org_ceiling_includes_legacy_projects_management_edit():
     assert PROJECT_SETUP_EDIT in ceiling
     assert PROJECTS_MANAGEMENT_EDIT in ceiling
     assert PROJECTS_MANAGEMENT_VIEW in ceiling
+
+
+def test_move_events_not_satisfied_by_resident_management_only():
+    role_codes = {RESIDENT_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    assert not project_role_grants_any(
+        role_permission_codes=role_codes,
+        required_permission_codes=[MOVE_EVENTS_MANAGEMENT_VIEW],
+    )
 
 
 def test_expand_org_ceiling_permission_codes_deduplicates():

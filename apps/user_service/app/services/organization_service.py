@@ -22,6 +22,9 @@ from apps.user_service.app.db.repositories import (
 from apps.user_service.app.db.repositories.email_template_repository import (
     EmailTemplateRepository,
 )
+from apps.user_service.app.db.repositories.project_permissions_repository import (
+    ProjectPermissionsRepository,
+)
 from apps.user_service.app.schemas.ai_overview_settings import AiOverviewSettings
 from apps.user_service.app.schemas.common import OrganizationBasicDetails, Subscription
 from apps.user_service.app.schemas.enums import (
@@ -110,6 +113,9 @@ class OrganizationService:
         self.db_connection = db_connection
         self.organization_repository = OrganizationRepository(db_connection=db_connection)
         self.permissions_repository = PermissionsRepository(db_connection=db_connection)
+        self.project_permissions_repository = ProjectPermissionsRepository(
+            db_connection=db_connection
+        )
         self.role_repository = RoleRepository(db_connection=db_connection)
         self.organization_member_repository = OrganizationMemberRepository(
             db_connection=db_connection
@@ -295,6 +301,9 @@ class OrganizationService:
         permission_ids = await self.permissions_repository.create_default_permissions(
             organization_id=organization_id
         )
+        await self.project_permissions_repository.create_default_permissions(
+            organization_id=organization_id
+        )
         super_admin_role_id = await self._create_super_admin_role(organization_id, permission_ids)
         # Pass isometrik_details to _add_requesting_user_as_member
         await self._add_requesting_user_as_member(
@@ -378,6 +387,9 @@ class OrganizationService:
         await self.email_template_repository.insert_default_layout(organization_id)
 
         permission_ids = await self.permissions_repository.create_default_permissions(
+            organization_id=organization_id
+        )
+        await self.project_permissions_repository.create_default_permissions(
             organization_id=organization_id
         )
         super_admin_role_id = await self._create_super_admin_role(organization_id, permission_ids)
