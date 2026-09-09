@@ -13,9 +13,6 @@ from apps.user_service.app.utils.unit_list_serialization import (
 )
 from libs.shared_config.app_settings import shared_settings
 
-ALLOTMENT_WELCOME_STATUS = "Assigned — pending your confirmation in the app"
-APP_DOWNLOAD_FALLBACK_MESSAGE = "Contact your community office for app download instructions."
-
 
 def build_unit_display(row: dict[str, Any]) -> str:
     """Return the unit code for email copy (location is shown separately)."""
@@ -62,9 +59,43 @@ def build_app_store_url_context(
         "ios_app_url": resolved_ios,
         "android_app_url": resolved_android,
         "app_store_links_plain": _build_app_store_links_plain(resolved_ios, resolved_android),
-        "app_download_fallback": (
-            APP_DOWNLOAD_FALLBACK_MESSAGE if not resolved_ios and not resolved_android else ""
-        ),
+    }
+
+
+def find_owner_released_row(
+    *,
+    released_rows: list[dict[str, Any]],
+    previous_contact_id: str | None,
+) -> dict[str, Any] | None:
+    """Return the released owner (relationship=self) row from a vacate result."""
+    owner_rows = [row for row in released_rows if str(row.get("relationship") or "") == "self"]
+    if not owner_rows:
+        return None
+    if previous_contact_id:
+        for row in owner_rows:
+            if str(row.get("contact_id") or "") == previous_contact_id:
+                return row
+    return owner_rows[0]
+
+
+def build_unit_allotment_removed_body_context(
+    *,
+    contact: dict[str, Any],
+    allotment_row: dict[str, Any],
+    community_name: str,
+    removal_reason: str,
+) -> dict[str, str]:
+    """Build template variables for the unit allotment removed email body."""
+    first_name = str(contact.get("first_name") or "").strip() or "there"
+
+    return {
+        "app_name": shared_settings.app_name,
+        "first_name": first_name,
+        "community_name": community_name or shared_settings.app_name,
+        "project_name": str(allotment_row.get("project_name") or "").strip() or "—",
+        "unit_display": build_unit_display(allotment_row),
+        "location_label": build_allotment_location_label(allotment_row),
+        "removal_reason": removal_reason,
     }
 
 
@@ -86,7 +117,6 @@ def build_unit_allotment_welcome_body_context(
         "project_name": str(allotment_row.get("project_name") or "").strip() or "—",
         "unit_display": build_unit_display(allotment_row),
         "location_label": build_allotment_location_label(allotment_row),
-        "allotment_status": ALLOTMENT_WELCOME_STATUS,
         "registered_email": registered_email,
         "registered_phone": registered_phone,
         **build_app_store_url_context(),

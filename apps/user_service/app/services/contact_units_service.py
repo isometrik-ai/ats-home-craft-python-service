@@ -35,9 +35,14 @@ from apps.user_service.app.services.unit_occupancy_turnover_service import (
     UnitOccupancyTurnoverService,
 )
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
-from apps.user_service.app.utils.email_utils import send_unit_allotment_welcome_email
+from apps.user_service.app.utils.email_utils import (
+    send_unit_allotment_removed_email,
+    send_unit_allotment_welcome_email,
+)
 from apps.user_service.app.utils.unit_allotment_email_helpers import (
+    build_unit_allotment_removed_body_context,
     build_unit_allotment_welcome_body_context,
+    find_owner_released_row,
 )
 from apps.user_service.app.utils.unit_list_serialization import (
     format_primary_contact_email,
@@ -540,6 +545,89 @@ class ContactUnitsService:
                 error,
             )
 
+    async def _maybe_send_unit_allotment_removed_email(
+        self,
+        *,
+        vacate_result: dict[str, Any],
+        removal_reason: str,
+        new_contact_id: str | None = None,
+    ) -> None:
+        """Notify the previous owner that their unit allotment was removed (non-blocking)."""
+        previous_contact_id = str(vacate_result.get("previous_contact_id") or "").strip() or None
+        if not previous_contact_id:
+            return
+        if new_contact_id and previous_contact_id == new_contact_id:
+            return
+
+        owner_row = find_owner_released_row(
+            released_rows=list(vacate_result.get("released") or []),
+            previous_contact_id=previous_contact_id,
+        )
+        if not owner_row or not owner_row.get("id"):
+            logger.info(
+                "Skipping unit allotment removed email: no owner row for contact %s",
+                previous_contact_id,
+            )
+            return
+
+        org_id = self.user_context.organization_id
+        assert org_id
+
+        try:
+            allotment_row = await self.repo.get_by_id(
+                organization_id=org_id,
+                contact_unit_id=str(owner_row["id"]),
+            )
+            if not allotment_row:
+                logger.info(
+                    "Skipping unit allotment removed email: allotment %s not found",
+                    owner_row["id"],
+                )
+                return
+
+            contacts_repo = ContactsRepository(self.db_connection)
+            contact = await contacts_repo.get_contact_details(
+                contact_id=previous_contact_id,
+                organization_id=org_id,
+            )
+            if not contact:
+                logger.info(
+                    "Skipping unit allotment removed email: contact %s not found",
+                    previous_contact_id,
+                )
+                return
+
+            recipient_email = format_primary_contact_email(contact.get("emails"))
+            if not recipient_email:
+                recipient_email = str(contact.get("email") or "").strip() or None
+            if not recipient_email:
+                logger.info(
+                    "Skipping unit allotment removed email: no email for contact %s",
+                    previous_contact_id,
+                )
+                return
+
+            org_repo = OrganizationRepository(self.db_connection)
+            organization = await org_repo.get_organization_by_id(org_id)
+            community_name = str((organization or {}).get("name") or "").strip()
+
+            body_context = build_unit_allotment_removed_body_context(
+                contact=contact,
+                allotment_row=allotment_row,
+                community_name=community_name,
+                removal_reason=removal_reason,
+            )
+            await asyncio.to_thread(
+                send_unit_allotment_removed_email,
+                email=recipient_email,
+                body_context=body_context,
+            )
+        except Exception as error:
+            logger.error(
+                "Failed to prepare or send unit allotment removed email: %s",
+                error,
+            )
+
     async def _vacate_unit_for_owner_change(
         self,
         *,
@@ -593,7 +681,7 @@ class ContactUnitsService:
         assert org_id
 
         async with self.db_connection.transaction():
-            result = await self._vacate_unit_for_owner_change(
+            vacate_result = await self._vacate_unit_for_owner_change(
                 project_id=project_id,
                 unit_id=unit_id,
                 reason="Unit owner unassigned; clearing household artifacts.",
@@ -603,10 +691,14 @@ class ContactUnitsService:
                 ),
                 require_open_links=True,
             )
+        await self._maybe_send_unit_allotment_removed_email(
+            vacate_result=vacate_result,
+            removal_reason="unassigned",
+        )
         return {
-            "released_contact_unit_ids": result["released_contact_unit_ids"],
-            "previous_contact_id": result.get("previous_contact_id"),
-            "unit_status": result.get("unit_status") or "vacant",
+            "released_contact_unit_ids": vacate_result["released_contact_unit_ids"],
+            "previous_contact_id": vacate_result.get("previous_contact_id"),
+            "unit_status": vacate_result.get("unit_status") or "vacant",
         }
 
     async def reassign_unit_owner(
@@ -646,6 +738,11 @@ class ContactUnitsService:
         full = await self.repo.get_by_id(
             organization_id=org_id,
             contact_unit_id=str(row["id"]),
+        )
+        await self._maybe_send_unit_allotment_removed_email(
+            vacate_result=vacate_result,
+            removal_reason="reassigned",
+            new_contact_id=contact_id,
         )
         await self._maybe_send_unit_allotment_welcome_email(
             contact_id=contact_id,

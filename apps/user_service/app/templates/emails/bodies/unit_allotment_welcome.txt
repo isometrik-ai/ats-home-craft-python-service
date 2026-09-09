@@ -14,7 +14,7 @@ Community : {{.community_name}}
 Project   : {{.project_name}}
 Unit      : {{.unit_display}}
 Location  : {{.location_label}}
-Status    : {{.allotment_status}}
+Status    : Assigned — pending your confirmation in the app
 
 HOW TO SIGN IN
 ──────────────
@@ -37,7 +37,7 @@ Get started by installing the app on your phone:
 
 {{.app_store_links_plain}}
 
-{{.app_download_fallback}}
+{{.app_download_fallback_plain}}
 
 YOUR NEXT STEPS
 ───────────────

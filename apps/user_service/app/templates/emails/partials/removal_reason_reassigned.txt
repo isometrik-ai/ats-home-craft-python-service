@@ -1,0 +1,1 @@
+Your unit allotment at {{.community_name}} has ended because the unit was assigned to another resident.

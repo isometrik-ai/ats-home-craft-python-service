@@ -1,0 +1,1 @@
+Update from {{.app_name}} — Unit allotment removed at {{.community_name}}

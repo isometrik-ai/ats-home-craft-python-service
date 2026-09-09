@@ -1594,3 +1594,19 @@ def send_unit_allotment_welcome_email(
         layout_context=layout_context,
         email_type="Unit allotment welcome",
     )
+
+
+def send_unit_allotment_removed_email(
+    *,
+    email: str,
+    body_context: dict[str, str],
+    layout_context: dict[str, str] | None = None,
+) -> bool:
+    """Send multipart unit allotment removed email rendered from file templates."""
+    return send_templated_email(
+        email=email,
+        template="unit_allotment_removed",
+        body_context=body_context,
+        layout_context=layout_context,
+        email_type="Unit allotment removed",
+    )
