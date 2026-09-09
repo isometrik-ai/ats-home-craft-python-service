@@ -9,6 +9,9 @@ Your home has been registered in our community management system, and your unit 
 Your allotment details:
 - Community: {{ organization_name }}
 - Project: {{ project_name }}
+{% if has_property_location -%}
+- Location: {{ property_location }}
+{% endif -%}
 - Unit: {{ unit_display }}
 - Status: Assigned — pending your confirmation in the app
 

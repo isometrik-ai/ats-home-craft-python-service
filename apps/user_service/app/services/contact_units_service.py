@@ -41,6 +41,7 @@ from apps.user_service.app.utils.common_utils import (
     parse_json_any,
 )
 from apps.user_service.app.utils.email_utils import (
+    _format_project_location,
     send_unit_assignment_welcome_email_for_org,
 )
 from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
@@ -714,6 +715,7 @@ class ContactUnitsService:
             )
             project = normalized_unit.get("project") or {}
             project_name = str(project.get("name") or project.get("code") or "").strip()
+            property_location = _format_project_location(project)
             unit_display = self._build_unit_display_label(normalized_unit)
 
             await send_unit_assignment_welcome_email_for_org(
@@ -724,6 +726,7 @@ class ContactUnitsService:
                 organization_name=organization_name,
                 project_name=project_name or organization_name,
                 unit_display=unit_display,
+                property_location=property_location or None,
                 login_phone=login_phone or None,
                 login_email=recipient_email,
                 ios_app_store_url=shared_settings.ios_app_store_url,

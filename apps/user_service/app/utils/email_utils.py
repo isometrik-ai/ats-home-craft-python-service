@@ -4,6 +4,7 @@ This module provides shared email functionality for sending emails via Supabase 
 
 import asyncio
 from datetime import datetime
+from typing import Any
 
 import asyncpg
 import httpx
@@ -1406,6 +1407,24 @@ Best regards,
         return False
 
 
+def _format_project_location(project: dict[str, Any] | None) -> str:
+    """Format a nested project summary as a single-line property address."""
+    if not project:
+        return ""
+    line1 = (project.get("address_line_1") or "").strip()
+    line2 = (project.get("address_line_2") or "").strip()
+    city = (project.get("city") or "").strip()
+    state = (project.get("state") or "").strip()
+    pin_code = (project.get("pin_code") or "").strip()
+    country = (project.get("country") or "").strip()
+
+    city_state_postal = ", ".join(
+        part for part in [city, " ".join(p for p in [state, pin_code] if p)] if part
+    )
+    parts = [part for part in [line1, line2, city_state_postal, country] if part]
+    return ", ".join(parts)
+
+
 def _normalize_store_url(url: str | None) -> str | None:
     """Return a safe http(s) store URL or None when unset/invalid."""
     if not url or not str(url).strip():
@@ -1423,6 +1442,7 @@ def _build_unit_assignment_welcome_context(
     organization_name: str,
     project_name: str,
     unit_display: str,
+    property_location: str | None = None,
     login_phone: str | None,
     login_email: str | None,
     email: str,
@@ -1436,12 +1456,15 @@ def _build_unit_assignment_welcome_context(
     """Build the Jinja context for unit assignment welcome templates."""
     app_name = shared_settings.app_name
     phone_display = (login_phone or "").strip() or "Not on file"
+    location_display = (property_location or "").strip()
     return {
         "greeting_name": (first_name or "").strip() or "there",
         "app_name": app_name,
         "organization_name": organization_name,
         "project_name": project_name,
         "unit_display": unit_display,
+        "property_location": location_display,
+        "has_property_location": bool(location_display),
         "phone_display": phone_display,
         "email_display": (login_email or email or "").strip(),
         "has_login_phone": bool(login_phone and login_phone.strip()),
@@ -1490,6 +1513,7 @@ def send_unit_assignment_welcome_email(
     organization_name: str,
     project_name: str,
     unit_display: str,
+    property_location: str | None = None,
     login_phone: str | None,
     login_email: str | None,
     ios_app_store_url: str | None = None,
@@ -1506,6 +1530,7 @@ def send_unit_assignment_welcome_email(
             organization_name=organization_name,
             project_name=project_name,
             unit_display=unit_display,
+            property_location=property_location,
             login_phone=login_phone,
             login_email=login_email,
             email=email,
@@ -1541,6 +1566,7 @@ async def send_unit_assignment_welcome_email_for_org(
     organization_name: str,
     project_name: str,
     unit_display: str,
+    property_location: str | None = None,
     login_phone: str | None,
     login_email: str | None,
     ios_app_store_url: str | None = None,
@@ -1557,6 +1583,7 @@ async def send_unit_assignment_welcome_email_for_org(
             organization_name=organization_name,
             project_name=project_name,
             unit_display=unit_display,
+            property_location=property_location,
             login_phone=login_phone,
             login_email=login_email,
             email=email,

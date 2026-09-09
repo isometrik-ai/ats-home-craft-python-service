@@ -154,6 +154,27 @@ def test_unit_assignment_welcome_email_includes_phone_and_store_links() -> None:
     assert "https://play.google.com/store/apps/details?id=com.example" in html
 
 
+def test_format_project_location_joins_address_parts() -> None:
+    """Project location is built from the assigned unit's project summary."""
+    formatted = email_utils._format_project_location(
+        {
+            "address_line_1": "1 Main Street",
+            "address_line_2": "Block A",
+            "city": "Bengaluru",
+            "state": "Karnataka",
+            "pin_code": "560001",
+            "country": "India",
+        }
+    )
+    assert formatted == "1 Main Street, Block A, Bengaluru, Karnataka 560001, India"
+
+
+def test_format_project_location_returns_empty_for_missing_project() -> None:
+    """Missing project data yields no location line in the email."""
+    assert email_utils._format_project_location(None) == ""
+    assert email_utils._format_project_location({}) == ""
+
+
 def test_normalize_store_url_rejects_non_http_schemes() -> None:
     """Store URLs must be http(s) to avoid javascript/data links in email hrefs."""
     assert email_utils._normalize_store_url("javascript:alert(1)") is None

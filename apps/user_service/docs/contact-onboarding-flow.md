@@ -841,7 +841,7 @@ the contact has a primary email on file.
 Email contents:
 
 - Warm welcome from the community team and ATS Home Craft
-- Allotment details (community, project, unit, pending confirmation status)
+- Allotment details (community, project, **property location** from the assigned unit's project address, unit, pending confirmation status)
 - Registered **phone number** and **email** (sign in with phone on the app)
 - App Store and Google Play download buttons when `IOS_APP_STORE_URL` / `ANDROID_PLAY_STORE_URL` are configured
 

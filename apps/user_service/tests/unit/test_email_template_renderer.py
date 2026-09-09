@@ -14,6 +14,8 @@ def _sample_context() -> dict:
         "app_name": "ATS Home Craft",
         "organization_name": "Green Valley Residency",
         "project_name": "Sunrise Towers",
+        "property_location": "1 Main Street, Bengaluru, Karnataka 560001, India",
+        "has_property_location": True,
         "unit_display": "Tower A — 1204",
         "phone_display": "+91 9876543210",
         "email_display": "john@example.com",
@@ -88,6 +90,23 @@ def test_render_unit_assignment_subject() -> None:
     )
     assert "Green Valley Residency" in subject
     assert "ATS Home Craft" in subject
+
+
+def test_render_unit_assignment_html_includes_property_location() -> None:
+    """HTML template includes the assigned project's address when available."""
+    _, message, html = render_transactional_email("unit_assignment_welcome", _sample_context())
+    assert "1 Main Street, Bengaluru" in html
+    assert "1 Main Street, Bengaluru" in message
+
+
+def test_render_unit_assignment_html_omits_location_when_unset() -> None:
+    """Location line is hidden when the project has no address fields."""
+    context = _sample_context()
+    context["property_location"] = ""
+    context["has_property_location"] = False
+    _, message, html = render_transactional_email("unit_assignment_welcome", context)
+    assert "Location:" not in html
+    assert "Location:" not in message
 
 
 def test_render_unit_assignment_html_includes_store_buttons() -> None:
