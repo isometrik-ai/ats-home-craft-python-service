@@ -1,16 +1,48 @@
 """Integration tests for auth endpoints."""
 
 import datetime as dt
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
+from apps.user_service.app.db.repositories.organization_repository import (
+    OrganizationRepository,
+)
 from apps.user_service.app.schemas.auth import (
     RefreshSessionResponse,
     SelectOrganizationResponse,
 )
 from apps.user_service.app.schemas.enums import SelectOrganizationType
+from apps.user_service.app.services.auth_service import AuthService
 from apps.user_service.tests.factories import user_payload
-from apps.user_service.tests.utils.assertions import assert_success
+from apps.user_service.tests.utils.assertions import assert_error, assert_success
+
+
+def _patch_login_flow(monkeypatch, *, organizations: list[dict]) -> None:
+    """Patch Supabase login and org membership lookup for login endpoint tests."""
+    session = SimpleNamespace(
+        access_token="access-token",
+        refresh_token="refresh-token",
+        expires_in=3600,
+        expires_at=dt.datetime(2024, 1, 1, 0, 0, 0, tzinfo=dt.timezone.utc),
+    )
+    user = SimpleNamespace(
+        id="user-1",
+        email="user@example.com",
+        user_metadata={"first_name": "Test", "last_name": "User"},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.login_user",
+        AsyncMock(return_value=SimpleNamespace(session=session, user=user)),
+    )
+    monkeypatch.setattr(
+        OrganizationRepository,
+        "get_user_active_organizations",
+        AsyncMock(return_value=organizations),
+    )
+    monkeypatch.setattr(AuthService, "_check_and_verify_2fa", AsyncMock())
+    monkeypatch.setattr(AuthService, "_warm_session_context_from_session", AsyncMock())
 
 
 @pytest.mark.asyncio
@@ -47,6 +79,78 @@ async def test_login_returns_tokens(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"]["access_token"] == "atk"
     assert body["data"]["user"]["email"] == "user@example.com"
+
+
+@pytest.mark.asyncio
+async def test_login_organization_member_success(monkeypatch, client):
+    """Staff/admin login succeeds when the user has active organization membership."""
+    _patch_login_flow(
+        monkeypatch,
+        organizations=[
+            {
+                "id": "org-1",
+                "name": "Green Valley",
+                "domain": "greenvalley.com",
+                "logo_url": None,
+                "description": None,
+            }
+        ],
+    )
+
+    res = await client.post(
+        "/v1/auth/login",
+        json={
+            "email": "admin@greenvalley.com",
+            "password": "Admin@123",
+            "user_type": "organization_member",
+        },
+    )
+
+    body = assert_success(res, 200)
+    assert body["data"]["access_token"] == "access-token"
+    assert body["data"]["organizations"][0]["name"] == "Green Valley"
+    assert body["data"]["user"]["org_setup_status_completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_client_on_admin_portal(monkeypatch, client):
+    """Resident/client credentials are rejected on the default staff login portal."""
+    _patch_login_flow(monkeypatch, organizations=[])
+
+    res = await client.post(
+        "/v1/auth/login",
+        json={
+            "email": "resident@greenvalley.com",
+            "password": "Resident@123",
+        },
+    )
+
+    body = assert_error(
+        res,
+        400,
+        message_fragment="Invalid email or password",
+    )
+    assert body["code"] == "4000"
+
+
+@pytest.mark.asyncio
+async def test_login_client_user_type_success(monkeypatch, client):
+    """Resident portal login succeeds when user_type is client."""
+    _patch_login_flow(monkeypatch, organizations=[])
+
+    res = await client.post(
+        "/v1/auth/login",
+        json={
+            "email": "resident@greenvalley.com",
+            "password": "Resident@123",
+            "user_type": "client",
+        },
+    )
+
+    body = assert_success(res, 200)
+    assert body["data"]["access_token"] == "access-token"
+    assert body["data"]["organizations"] == []
+    assert body["data"]["user"]["org_setup_status_completed"] is False
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,14 @@ class AuthLogin(BaseModel):
 
     email: EmailStr = Field(..., examples=["test@example.com"])
     password: str
+    user_type: SelectOrganizationType = Field(
+        default=SelectOrganizationType.ORGANIZATION_MEMBER,
+        description=(
+            "Portal membership to validate after authentication. "
+            "Staff/admin portals require an active organization_members row; "
+            "resident portals use client."
+        ),
+    )
     verification_id: str | None = Field(
         None, description="Verification code ID for 2FA (required if 2FA is enabled)"
     )
