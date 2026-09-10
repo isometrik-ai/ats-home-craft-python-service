@@ -834,6 +834,10 @@ async def test_get_review_aggregates_sections(monkeypatch):
     assert result["units"] == [{"id": "cu-1"}]
     assert result["vehicles"] == []
     assert result["household"] == []
+    svc.list_household.assert_awaited_once_with(
+        contact_id="contact-1",
+        include_caller_family_links=True,
+    )
 
 
 @pytest.mark.asyncio

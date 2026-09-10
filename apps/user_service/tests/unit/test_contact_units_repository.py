@@ -380,8 +380,46 @@ async def test_list_household_for_contact_includes_owner_for_family_member():
 
     assert rows[0]["relationship"] == ContactUnitRelationship.SELF.value
     query, args = conn.fetch_calls[0]
-    assert "caller_cu.relationship <> $5::contact_unit_relationship" in query
+    assert "occupant_role.contact_type = CASE" in query
+    assert "unit_tenant.role_type = 'Tenant'::public.contact_role_type" in query
+    assert "occupant_role.contact_type AS contact_type" in query
     assert UNIT_ID in args
+
+
+@pytest.mark.asyncio
+async def test_list_household_for_contact_prefers_tenant_when_unit_is_tenant_occupied():
+    """Tenant-occupied units expose the tenant (not the owner) to family callers."""
+    conn = _FakeConn(rows=[])
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    await repo.list_household_for_contact(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        unit_id=UNIT_ID,
+    )
+
+    query, _ = conn.fetch_calls[0]
+    assert "THEN 'Tenant'" in query
+    assert "ELSE 'Owner'" in query
+    assert "cu.relationship <> $5::contact_unit_relationship" in query
+
+
+@pytest.mark.asyncio
+async def test_list_household_for_contact_review_includes_caller_family_links():
+    """Review mode includes the caller's own family links on shared units."""
+    conn = _FakeConn(rows=[])
+    repo = ContactUnitsRepository(db_connection=conn)
+
+    await repo.list_household_for_contact(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        unit_id=UNIT_ID,
+        include_caller_family_links=True,
+    )
+
+    query, _ = conn.fetch_calls[0]
+    assert "cu.contact_id = $2::uuid" in query
+    assert "caller_cu.relationship <> $5::contact_unit_relationship" in query
 
 
 @pytest.mark.asyncio

@@ -598,6 +598,14 @@ class HouseholdMemberResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     relationship: str
+    contact_type: str | None = Field(
+        None,
+        description=(
+            "Active unit role from contact_roles (Owner, Tenant, Family). "
+            "When a unit has an active tenant, only the tenant is included as the "
+            "primary occupant alongside family members."
+        ),
+    )
     portal_access: bool = False
     member_status: str
     phones: list[Any] = Field(default_factory=list)

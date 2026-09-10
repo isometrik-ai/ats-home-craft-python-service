@@ -357,7 +357,10 @@ class ContactOnboardingService:
         contact = await contacts_service.get_contact_details(contact_id=contact_id)
         units = await self.contact_units_service.list_my_properties(contact_id=contact_id)
         vehicles = await self.vehicles_service.list_vehicles(contact_id=contact_id)
-        household = await self.list_household(contact_id=contact_id)
+        household = await self.list_household(
+            contact_id=contact_id,
+            include_caller_family_links=True,
+        )
         return {
             "contact": contact,
             "units": units,
@@ -485,6 +488,7 @@ class ContactOnboardingService:
             "first_name": row.get("first_name"),
             "last_name": row.get("last_name"),
             "relationship": row.get("relationship"),
+            "contact_type": row.get("contact_type"),
             "portal_access": portal_access,
             "member_status": member_status,
             "invitation_status": invitation_status,
@@ -509,6 +513,7 @@ class ContactOnboardingService:
         *,
         contact_id: str,
         unit_id: str | None = None,
+        include_caller_family_links: bool = False,
     ) -> list[dict[str, Any]]:
         """List household-visible contacts on units the caller actively occupies."""
         org_id = self.user_context.organization_id
@@ -517,6 +522,7 @@ class ContactOnboardingService:
             organization_id=org_id,
             contact_id=contact_id,
             unit_id=unit_id,
+            include_caller_family_links=include_caller_family_links,
         )
         return [self._format_household_member(row) for row in rows]
 
