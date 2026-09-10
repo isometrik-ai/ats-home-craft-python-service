@@ -397,6 +397,13 @@ async def test_unassign_unit_owner_marks_vacant(mock_turnover_cls, mock_move_eve
     mock_turnover = MagicMock()
     mock_turnover.vacate_unit_completely = AsyncMock(
         return_value={
+            "released": [
+                {
+                    "id": "cu-1",
+                    "contact_id": "contact-1",
+                    "relationship": "self",
+                }
+            ],
             "released_contact_unit_ids": ["cu-1"],
             "previous_contact_id": "contact-1",
             "unit_status": "vacant",
@@ -406,8 +413,11 @@ async def test_unassign_unit_owner_marks_vacant(mock_turnover_cls, mock_move_eve
     svc = _service()
     _mock_transaction(svc)
     svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc._maybe_send_unit_allotment_removed_email = AsyncMock()
 
     result = await svc.unassign_unit_owner(project_id="proj-1", unit_id="unit-1")
+
+    svc._maybe_send_unit_allotment_removed_email.assert_awaited_once()
 
     mock_move_events_cls.return_value.record_tenant_move_out_for_owner_change.assert_awaited_once_with(
         unit_id="unit-1",
@@ -498,6 +508,13 @@ async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls, mock_move_e
     mock_turnover = MagicMock()
     mock_turnover.vacate_unit_completely = AsyncMock(
         return_value={
+            "released": [
+                {
+                    "id": "cu-1",
+                    "contact_id": "contact-old",
+                    "relationship": "self",
+                }
+            ],
             "released_contact_unit_ids": ["cu-1"],
             "previous_contact_id": "contact-old",
             "unit_status": "vacant",
@@ -527,6 +544,7 @@ async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls, mock_move_e
         }
     )
     svc.units_repo.has_active_owner = AsyncMock(return_value=True)
+    svc._maybe_send_unit_allotment_removed_email = AsyncMock()
     svc._maybe_send_unit_allotment_welcome_email = AsyncMock()
 
     result = await svc.reassign_unit_owner(
@@ -536,6 +554,7 @@ async def test_reassign_unit_owner_replaces_owner(mock_turnover_cls, mock_move_e
         assign_date=ASSIGN_DATE,
     )
 
+    svc._maybe_send_unit_allotment_removed_email.assert_awaited_once()
     svc._maybe_send_unit_allotment_welcome_email.assert_awaited_once()
     mock_turnover.vacate_unit_completely.assert_awaited_once_with(
         organization_id="org-1",
@@ -747,3 +766,78 @@ async def test_maybe_send_unit_allotment_welcome_email_swallows_errors(
         contact_id="contact-1",
         allotment_row={"relationship": "self", "project_name": "Sunrise Towers"},
     )
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contact_units_service.OrganizationRepository.get_organization_by_id",
+    new_callable=AsyncMock,
+    return_value={"name": "Green Valley Residency"},
+)
+@patch(
+    "apps.user_service.app.services.contact_units_service.ContactsRepository.get_contact_details",
+    new_callable=AsyncMock,
+    return_value={
+        "first_name": "Jane",
+        "emails": [{"email": "jane@example.com", "is_primary": True}],
+    },
+)
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_allotment_removed_email",
+    return_value=True,
+)
+async def test_maybe_send_unit_allotment_removed_email_sends(
+    mock_send,
+    _mock_contact_details,
+    _mock_organization,
+):
+    """Removed email is sent to the previous owner when a unit is unassigned."""
+    svc = _service()
+    svc.repo.get_by_id = AsyncMock(
+        return_value={
+            "project_name": "Sunrise Towers",
+            "tower_name": "Tower A",
+            "code": "A-1204",
+            "floor_name": "F18",
+            "floor_level_number": 18,
+        }
+    )
+    await svc._maybe_send_unit_allotment_removed_email(
+        vacate_result={
+            "previous_contact_id": "contact-1",
+            "released": [
+                {
+                    "id": "cu-1",
+                    "contact_id": "contact-1",
+                    "relationship": "self",
+                }
+            ],
+        },
+        removal_reason="unassigned",
+    )
+
+    mock_send.assert_called_once()
+    assert mock_send.call_args.kwargs["email"] == "jane@example.com"
+    assert mock_send.call_args.kwargs["body_context"]["removal_reason"] == "unassigned"
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contact_units_service.send_unit_allotment_removed_email",
+    return_value=True,
+)
+async def test_maybe_send_unit_allotment_removed_email_skips_same_contact_reassign(
+    mock_send,
+):
+    """Removed email is skipped when the previous owner is the same as the new owner."""
+    svc = _service()
+    await svc._maybe_send_unit_allotment_removed_email(
+        vacate_result={
+            "previous_contact_id": "contact-1",
+            "released": [{"id": "cu-1", "contact_id": "contact-1", "relationship": "self"}],
+        },
+        removal_reason="reassigned",
+        new_contact_id="contact-1",
+    )
+
+    mock_send.assert_not_called()

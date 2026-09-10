@@ -1,0 +1,1 @@
+Your unit allotment at {{.community_name}} has been removed by your community administration team.

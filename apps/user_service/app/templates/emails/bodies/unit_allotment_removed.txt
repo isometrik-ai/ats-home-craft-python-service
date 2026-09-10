@@ -1,0 +1,24 @@
+Update from {{.app_name}}
+
+Hello {{.first_name}},
+
+{{.removal_reason_plain}}
+
+DETAILS
+───────
+Community : {{.community_name}}
+Project   : {{.project_name}}
+Unit      : {{.unit_display}}
+Location  : {{.location_label}}
+Status    : Removed from your account
+
+WHAT THIS MEANS
+───────────────
+You will no longer see this unit in your {{.app_name}} account. If you still have access to other units or community services, you can continue using the app with those.
+
+If you believe this change was made in error, or if you have questions, please contact your community management team.
+
+Warm regards,
+The {{.community_name}} Team
+
+Powered by {{.app_name}}

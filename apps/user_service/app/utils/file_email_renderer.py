@@ -73,9 +73,10 @@ def render_email_partial(
     context: dict[str, str],
     *,
     escape_html: bool = True,
+    extension: str = "html",
 ) -> str:
-    """Render a reusable HTML fragment from templates/emails/partials/."""
-    template = _read_template_file(str(_template_path("partials", f"{partial}.html")))
+    """Render a reusable fragment from templates/emails/partials/."""
+    template = _read_template_file(str(_template_path("partials", f"{partial}.{extension}")))
     return _substitute_placeholders(template, context, escape_html=escape_html)
 
 
@@ -119,13 +120,54 @@ def render_app_store_cards_html(ios_url: str, android_url: str) -> str:
     )
 
 
+def _render_removal_reason_blocks(context: dict[str, str]) -> tuple[str, str]:
+    """Render HTML and plain-text removal reason blocks from partial templates."""
+    removal_reason = str(context.get("removal_reason") or "").strip()
+    partial_name = (
+        "removal_reason_reassigned"
+        if removal_reason == "reassigned"
+        else "removal_reason_unassigned"
+    )
+    html_block = render_email_partial(partial_name, context)
+    plain_block = render_email_partial(
+        partial_name,
+        context,
+        escape_html=False,
+        extension="txt",
+    )
+    return html_block, plain_block.strip()
+
+
 def enrich_body_context(body_context: dict[str, str]) -> dict[str, str]:
     """Add derived template values (e.g. optional HTML sections) before render."""
     enriched = dict(body_context)
+    ios_url = str(enriched.get("ios_app_url") or "").strip()
+    android_url = str(enriched.get("android_app_url") or "").strip()
     if "app_store_cards_html" not in enriched:
-        ios_url = str(enriched.get("ios_app_url") or "").strip()
-        android_url = str(enriched.get("android_app_url") or "").strip()
         enriched["app_store_cards_html"] = render_app_store_cards_html(ios_url, android_url)
+    if not ios_url and not android_url:
+        enriched.setdefault(
+            "app_download_fallback_html",
+            render_email_partial("app_download_fallback", enriched),
+        )
+        enriched.setdefault(
+            "app_download_fallback_plain",
+            render_email_partial(
+                "app_download_fallback",
+                enriched,
+                escape_html=False,
+                extension="txt",
+            ).strip(),
+        )
+    else:
+        enriched.setdefault("app_download_fallback_html", "")
+        enriched.setdefault("app_download_fallback_plain", "")
+
+    if enriched.get("removal_reason"):
+        if "removal_reason_html" not in enriched or "removal_reason_plain" not in enriched:
+            html_block, plain_block = _render_removal_reason_blocks(enriched)
+            enriched.setdefault("removal_reason_html", html_block)
+            enriched.setdefault("removal_reason_plain", plain_block)
     return enriched
 
 

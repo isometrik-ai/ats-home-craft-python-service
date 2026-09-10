@@ -24,7 +24,6 @@ def _sample_body_context() -> dict[str, str]:
         "project_name": "Sunrise Towers",
         "unit_display": "A-1204",
         "location_label": "Tower A · F18",
-        "allotment_status": "Assigned — pending your confirmation in the app",
         "registered_email": "john.doe@example.com",
         "registered_phone": "+91 9876543210",
         **build_app_store_url_context(
@@ -50,6 +49,7 @@ def test_render_email_merges_layout_and_body() -> None:
     assert "+91 9876543210" in plain_text
     assert "john.doe@example.com" in plain_text
     assert "YOUR REGISTERED DETAILS" in plain_text
+    assert "pending your confirmation in the app" in plain_text
     assert "Accept your unit when prompted" in plain_text
     assert BODY_CONTENT_TOKEN not in html
     assert "A-1204" in html
@@ -80,7 +80,6 @@ def test_render_email_missing_template_raises() -> None:
 def test_render_email_omits_store_buttons_when_urls_unset() -> None:
     """HTML omits store cards and shows fallback when app URLs are not configured."""
     from apps.user_service.app.utils.unit_allotment_email_helpers import (
-        APP_DOWNLOAD_FALLBACK_MESSAGE,
         build_app_store_url_context,
     )
 
@@ -92,7 +91,7 @@ def test_render_email_omits_store_buttons_when_urls_unset() -> None:
         body_context=context,
     )
 
-    assert APP_DOWNLOAD_FALLBACK_MESSAGE in _plain_text
+    assert "Contact your community office for app download instructions." in _plain_text
     assert "Download on the App Store" not in html
     assert 'href="#"' not in html
 
@@ -107,6 +106,28 @@ def test_render_app_store_cards_html_partial_urls() -> None:
     assert "Download on the App Store" in html
     assert "Google Play" not in html
     assert 'href="#"' not in html
+
+
+def test_render_unit_allotment_removed_email() -> None:
+    """Removed email renders informational copy without welcome onboarding sections."""
+    plain_text, html, subject = render_email(
+        body="unit_allotment_removed",
+        body_context={
+            "app_name": "ATS Home Craft",
+            "first_name": "Jane",
+            "community_name": "Green Valley Residency",
+            "project_name": "Sunrise Towers",
+            "unit_display": "A-1204",
+            "location_label": "Tower A · F18",
+            "removal_reason": "unassigned",
+        },
+    )
+
+    assert "Unit allotment removed" in subject
+    assert "Removed from your account" in plain_text
+    assert "removed by your community administration team" in plain_text
+    assert "Download on the App Store" not in html
+    assert "What this means" in html
 
 
 def test_render_email_excludes_login_credentials_copy() -> None:

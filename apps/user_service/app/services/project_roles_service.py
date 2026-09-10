@@ -185,7 +185,7 @@ class ProjectRolesService:
             organization_id=org_id,
             project_role_id=project_role_id,
         )
-        permissions = format_permissions_data(permission_rows)
+        permission_items = format_permissions_data(permission_rows)
         member_count = await self.repo.count_members_with_role(project_role_id=project_role_id)
         return ProjectRoleDetailItem(
             id=str(role["id"]),
@@ -195,10 +195,10 @@ class ProjectRolesService:
             name=str(role["name"]),
             description=role.get("description"),
             is_system=bool(role.get("is_system")),
-            permission_count=len(permissions),
+            permission_count=len(permission_items),
             member_count=member_count,
-            permission_ids=[str(item["id"]) for item in permissions],
-            permissions=[PermissionItem.model_validate(item) for item in permissions],
+            permission_ids=[item.id for item in permission_items],
+            permissions=permission_items,
         )
 
     async def update_role(
@@ -296,8 +296,7 @@ class ProjectRolesService:
         org_id = self._require_org_id()
         await self._ensure_project(project_id=project_id)
         rows = await self.project_permissions_repo.get_all_permissions(org_id)
-        formatted = format_permissions_data(rows)
-        return [PermissionItem.model_validate(item) for item in formatted]
+        return format_permissions_data(rows)
 
     async def delete_role(
         self,
