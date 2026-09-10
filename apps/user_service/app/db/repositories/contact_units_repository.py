@@ -25,6 +25,57 @@ LEFT JOIN LATERAL (
 ) hi ON true
 """
 
+_HOUSEHOLD_OCCUPANT_ROLE_LATERAL_JOIN = """
+LEFT JOIN LATERAL (
+  SELECT cr.role_type::text AS contact_type
+  FROM contact_roles cr
+  WHERE cr.organization_id = cu.organization_id
+    AND cr.contact_id = cu.contact_id
+    AND cr.unit_id = cu.unit_id
+    AND cr.status = 'active'::public.contact_role_status
+    AND cr.ended_at IS NULL
+  ORDER BY cr.started_at DESC
+  LIMIT 1
+) occupant_role ON true
+"""
+
+_HOUSEHOLD_MEMBER_VISIBILITY_FILTER = """
+              AND (
+                cu.relationship <> $5::contact_unit_relationship
+                OR (
+                  caller_cu.relationship <> $5::contact_unit_relationship
+                  AND cu.relationship = $5::contact_unit_relationship
+                  AND occupant_role.contact_type = CASE
+                    WHEN EXISTS (
+                      SELECT 1
+                      FROM contact_roles unit_tenant
+                      WHERE unit_tenant.organization_id = cu.organization_id
+                        AND unit_tenant.unit_id = cu.unit_id
+                        AND unit_tenant.role_type = 'Tenant'::public.contact_role_type
+                        AND unit_tenant.status = 'active'::public.contact_role_status
+                        AND unit_tenant.ended_at IS NULL
+                    ) THEN 'Tenant'
+                    ELSE 'Owner'
+                  END
+                )
+              )
+"""
+
+_CALLER_EXCLUSION_FILTER = """
+              AND cu.contact_id <> $2::uuid
+"""
+
+_CALLER_EXCLUSION_WITH_FAMILY_SELF_FILTER = """
+              AND (
+                cu.contact_id <> $2::uuid
+                OR (
+                  caller_cu.relationship <> $5::contact_unit_relationship
+                  AND cu.relationship <> $5::contact_unit_relationship
+                  AND cu.contact_id = $2::uuid
+                )
+              )
+"""
+
 _CONTACT_UNIT_LIST_SQL = """
 SELECT
   cu.id::text AS id,
@@ -1016,11 +1067,15 @@ class ContactUnitsRepository(BaseRepository):
         organization_id: str,
         contact_id: str,
         unit_id: str | None = None,
+        include_caller_family_links: bool = False,
     ) -> list[dict[str, Any]]:
         """List household-visible contacts on units the caller actively occupies.
 
         Primary occupants see other family members (relationship != self).
-        Family members also see primary occupants (relationship = self) on shared units.
+        Family members see family on shared units plus one primary occupant:
+        the active tenant when the unit is tenant-occupied, otherwise the owner.
+        When include_caller_family_links is true, the caller's own family links
+        are included (for the onboarding review screen).
         """
         args: list[Any] = [
             organization_id,
@@ -1033,6 +1088,11 @@ class ContactUnitsRepository(BaseRepository):
         if unit_id:
             unit_filter = f" AND caller_cu.unit_id = ${len(args) + 1}::uuid"
             args.append(unit_id)
+        caller_exclusion_filter = (
+            _CALLER_EXCLUSION_WITH_FAMILY_SELF_FILTER
+            if include_caller_family_links
+            else _CALLER_EXCLUSION_FILTER
+        )
         rows = await self.db_connection.fetch(
             f"""
             SELECT
@@ -1050,22 +1110,21 @@ class ContactUnitsRepository(BaseRepository):
               hi.status::text AS invitation_status,
               hi.token AS invitation_token,
               hi.expires_at AS invitation_expires_at,
-              hi.updated_at AS invitation_sent_at
+              hi.updated_at AS invitation_sent_at,
+              occupant_role.contact_type AS contact_type
             FROM contact_units caller_cu
             JOIN contact_units cu
               ON cu.unit_id = caller_cu.unit_id
              AND cu.organization_id = caller_cu.organization_id
             JOIN contacts c ON c.id = cu.contact_id
             {_HOUSEHOLD_INVITATION_LATERAL_JOIN}
+            {_HOUSEHOLD_OCCUPANT_ROLE_LATERAL_JOIN}
             WHERE caller_cu.organization_id = $1::uuid
               AND caller_cu.contact_id = $2::uuid
               AND caller_cu.status = $3::contact_unit_status
-              AND cu.contact_id != $2::uuid
+              {caller_exclusion_filter}
               AND cu.status = ANY($4::contact_unit_status[])
-              AND (
-                cu.relationship <> $5::contact_unit_relationship
-                OR caller_cu.relationship <> $5::contact_unit_relationship
-              )
+              {_HOUSEHOLD_MEMBER_VISIBILITY_FILTER}
               {unit_filter}
             ORDER BY cu.created_at
             """,
