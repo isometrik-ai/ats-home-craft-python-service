@@ -11,6 +11,7 @@ import pytest
 from supabase import AuthApiError
 
 from apps.user_service.app.schemas.auth import AuthLogin
+from apps.user_service.app.schemas.enums import SelectOrganizationType
 from apps.user_service.app.services.auth_service import AuthService
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
@@ -194,11 +195,18 @@ async def test_login_success(monkeypatch):
         AsyncMock(),
     )
 
-    result = await svc.login(AuthLogin(email="user@example.com", password="Strong1!"))
+    result = await svc.login(
+        AuthLogin(
+            email="admin@example.com",
+            password="Strong1!",
+            user_type=SelectOrganizationType.ORGANIZATION_MEMBER,
+        )
+    )
 
     assert result.access_token == "access-token"
     assert result.user.email == "user@example.com"
     assert len(result.organizations) == 1
+    assert result.user.org_setup_status_completed is True
 
 
 @pytest.mark.asyncio
@@ -231,6 +239,64 @@ async def test_login_missing_access_token(monkeypatch):
 
     with pytest.raises(InternalServerErrorException):
         await svc.login(AuthLogin(email="user@example.com", password="Strong1!"))
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_user_without_organization_membership(monkeypatch):
+    """Staff login rejects valid Supabase users who are not organization members."""
+    svc = _service(org_repo=_FakeOrgRepo(organizations=[]))
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.login_user",
+        AsyncMock(return_value=_login_result()),
+    )
+    monkeypatch.setattr(
+        AuthService,
+        "_check_and_verify_2fa",
+        AsyncMock(),
+    )
+    warm_mock = AsyncMock()
+    monkeypatch.setattr(
+        AuthService,
+        "_warm_session_context_from_session",
+        warm_mock,
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await svc.login(AuthLogin(email="resident@example.com", password="Strong1!"))
+
+    assert exc_info.value.message_key == "auth.errors.invalid_credentials"
+    warm_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_login_allows_client_user_without_organization_membership(monkeypatch):
+    """Resident portal login skips organization_members validation."""
+    svc = _service(org_repo=_FakeOrgRepo(organizations=[]))
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.login_user",
+        AsyncMock(return_value=_login_result()),
+    )
+    monkeypatch.setattr(
+        AuthService,
+        "_check_and_verify_2fa",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        AuthService,
+        "_warm_session_context_from_session",
+        AsyncMock(),
+    )
+
+    result = await svc.login(
+        AuthLogin(
+            email="resident@example.com",
+            password="Strong1!",
+            user_type=SelectOrganizationType.CLIENT,
+        )
+    )
+
+    assert result.access_token == "access-token"
+    assert result.organizations == []
 
 
 @pytest.mark.asyncio
