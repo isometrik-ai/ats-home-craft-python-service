@@ -105,7 +105,12 @@ async def get_pet_catalog(
 async def list_pets(
     request: Request,
     unit_id: str = Query(..., description="Unit identifier (UUID string)."),
-    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
+    page: int = Query(
+        default=1,
+        ge=1,
+        le=21_474_836,
+        description="Page number (1-based).",
+    ),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
