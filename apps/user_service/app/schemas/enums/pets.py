@@ -23,21 +23,3 @@ class PetStatus(str, Enum):
 
     ACTIVE = "active"
     REMOVED = "removed"
-
-
-class PetEventType(str, Enum):
-    """Postgres pet_event_type enum."""
-
-    CREATED = "created"
-    UPDATED = "updated"
-    PHOTO_CHANGED = "photo_changed"
-    REMOVED = "removed"
-    RESTORED = "restored"
-
-
-class PetActorType(str, Enum):
-    """Postgres pet_actor_type enum."""
-
-    RESIDENT = "resident"
-    STAFF = "staff"
-    SYSTEM = "system"

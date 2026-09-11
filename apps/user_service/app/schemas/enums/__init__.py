@@ -221,6 +221,4 @@ __all__ = [
     "PetVaccinationStatus",
     "PetGender",
     "PetStatus",
-    "PetEventType",
-    "PetActorType",
 ]
