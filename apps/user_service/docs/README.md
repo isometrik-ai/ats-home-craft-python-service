@@ -37,6 +37,7 @@ ______________________________________________________________________
 | Daily help          | [daily-help-flow.md](./daily-help-flow.md)                 | [0013](./adr/0013-daily-help.md)                                                                    |
 | Community events    | [events-flow.md](./events-flow.md)                         | [0014](./adr/0014-community-events.md)                                                              |
 | Parking allotment   | [parking-allotment-flow.md](./parking-allotment-flow.md)   | —                                                                                                   |
+| Household pets      | [pets-flow.md](./pets-flow.md)                             | [0016](./adr/0016-pets.md)                                                                          |
 
 Full ADR index: [adr/README.md](./adr/README.md)
 

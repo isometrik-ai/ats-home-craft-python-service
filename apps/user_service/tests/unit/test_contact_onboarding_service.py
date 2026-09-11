@@ -1236,6 +1236,8 @@ async def test_get_household_summary_returns_dashboard_counts():
     svc.units_repo = MagicMock()
     svc.units_repo.count_unit_vehicles = AsyncMock(return_value=(2, 1))
     svc.contact_roles_repo.count_active_tenants_for_unit = AsyncMock(return_value=1)
+    svc.pets_repo = MagicMock()
+    svc.pets_repo.count_active_for_unit = AsyncMock(return_value=2)
 
     result = await svc.get_household_summary(
         contact_id="contact-1",
@@ -1247,6 +1249,7 @@ async def test_get_household_summary_returns_dashboard_counts():
     assert result.daily_help_count == 2
     assert result.vehicles_count == 2
     assert result.tenant_count == 1
+    assert result.pets_count == 2
 
 
 @pytest.mark.asyncio
