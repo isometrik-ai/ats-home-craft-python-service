@@ -36,6 +36,9 @@ _PROFILE_SELECT_COLUMNS = """
   p.linked_pass_id::text AS linked_pass_id,
   p.created_by_user_id::text AS created_by_user_id,
   p.submitted_by_user_id::text AS submitted_by_user_id,
+  p.submitted_by_contact_id::text AS submitted_by_contact_id,
+  p.submitted_unit_id::text AS submitted_unit_id,
+  su.unit_label AS submitted_unit_label,
   p.reviewed_by_user_id::text AS reviewed_by_user_id,
   p.reviewed_at,
   p.rejection_reason,
@@ -51,6 +54,9 @@ JOIN daily_help_categories c
   ON c.id = p.category_id
  AND c.organization_id = p.organization_id
  AND c.project_id = p.project_id
+LEFT JOIN units su
+  ON su.id = p.submitted_unit_id
+ AND su.organization_id = p.organization_id
 """
 
 _PROFILE_LIST_DOC_COUNT = """
@@ -154,6 +160,8 @@ class DailyHelpRepository(BaseRepository):
         open_to_work: bool = False,
         created_by_user_id: str | None = None,
         submitted_by_user_id: str | None = None,
+        submitted_by_contact_id: str | None = None,
+        submitted_unit_id: str | None = None,
     ) -> dict[str, Any]:
         """Insert a daily_help_profiles row."""
         row = await self.db_connection.fetchrow(
@@ -179,12 +187,14 @@ class DailyHelpRepository(BaseRepository):
                 open_to_work,
                 created_by_user_id,
                 submitted_by_user_id,
+                submitted_by_contact_id,
+                submitted_unit_id,
                 updated_by_user_id
             )
             VALUES (
                 $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11,
                 $12::uuid, $13, $14::date, $15, $16,
-                $17::daily_help_status, $18, $19::uuid, $20::uuid, $19::uuid
+                $17::daily_help_status, $18, $19::uuid, $20::uuid, $21::uuid, $22::uuid, $19::uuid
             )
             RETURNING id::text AS id
             """,
@@ -208,6 +218,8 @@ class DailyHelpRepository(BaseRepository):
             open_to_work,
             created_by_user_id,
             submitted_by_user_id,
+            submitted_by_contact_id,
+            submitted_unit_id,
         )
         return await self.get_profile(
             organization_id=organization_id,
@@ -244,6 +256,8 @@ class DailyHelpRepository(BaseRepository):
             "reviewed_by_user_id": "::uuid",
             "reviewed_at": "::timestamptz",
             "submitted_by_user_id": "::uuid",
+            "submitted_by_contact_id": "::uuid",
+            "submitted_unit_id": "::uuid",
         }
         for key, value in fields.items():
             cast = casts.get(key, "")
@@ -279,10 +293,15 @@ class DailyHelpRepository(BaseRepository):
         self,
         *,
         organization_id: str,
-        project_id: str,
         profile_id: str,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch one profile with category name."""
+        """Fetch one profile with category name, optionally scoped to a project."""
+        filters = ["p.organization_id = $1::uuid", "p.id = $2::uuid"]
+        args: list[Any] = [organization_id, profile_id]
+        if project_id:
+            args.append(project_id)
+            filters.append(f"p.project_id = ${len(args)}::uuid")
         row = await self.db_connection.fetchrow(
             f"""
             SELECT
@@ -290,14 +309,10 @@ class DailyHelpRepository(BaseRepository):
             {_PROFILE_LIST_DOC_COUNT},
             {_PROFILE_LIST_HOUSE_COUNT}
             {_PROFILE_FROM_SQL}
-            WHERE p.organization_id = $1::uuid
-              AND p.project_id = $2::uuid
-              AND p.id = $3::uuid
+            WHERE {" AND ".join(filters)}
             LIMIT 1
             """,
-            organization_id,
-            project_id,
-            profile_id,
+            *args,
         )
         return dict(row) if row else None
 
@@ -305,18 +320,25 @@ class DailyHelpRepository(BaseRepository):
     def _profile_list_where(
         *,
         organization_id: str,
-        project_id: str,
+        project_id: str | None = None,
         status: str | None = None,
         category_id: str | None = None,
         search: str | None = None,
         submitted_by_user_id: str | None = None,
+        submitted_by_contact_id: str | None = None,
     ) -> tuple[str, list[Any]]:
         """Build WHERE clause and args shared by profile list and link aggregates."""
-        filters = ["p.organization_id = $1::uuid", "p.project_id = $2::uuid"]
-        args: list[Any] = [organization_id, project_id]
+        filters = ["p.organization_id = $1::uuid"]
+        args: list[Any] = [organization_id]
+        if project_id:
+            args.append(project_id)
+            filters.append(f"p.project_id = ${len(args)}::uuid")
         if submitted_by_user_id:
             args.append(submitted_by_user_id)
             filters.append(f"p.submitted_by_user_id = ${len(args)}::uuid")
+        if submitted_by_contact_id:
+            args.append(submitted_by_contact_id)
+            filters.append(f"p.submitted_by_contact_id = ${len(args)}::uuid")
         if status:
             args.append(status)
             filters.append(f"p.status = ${len(args)}::daily_help_status")
@@ -336,11 +358,12 @@ class DailyHelpRepository(BaseRepository):
         self,
         *,
         organization_id: str,
-        project_id: str,
+        project_id: str | None = None,
         status: str | None = None,
         category_id: str | None = None,
         search: str | None = None,
         submitted_by_user_id: str | None = None,
+        submitted_by_contact_id: str | None = None,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -352,6 +375,7 @@ class DailyHelpRepository(BaseRepository):
             category_id=category_id,
             search=search,
             submitted_by_user_id=submitted_by_user_id,
+            submitted_by_contact_id=submitted_by_contact_id,
         )
 
         count = await self.db_connection.fetchval(

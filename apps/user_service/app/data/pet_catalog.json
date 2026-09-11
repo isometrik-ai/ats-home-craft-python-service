@@ -1,0 +1,83 @@
+{
+  "pet_types": [
+    {
+      "id": "dog",
+      "name": "Dog",
+      "icon": "dog",
+      "breeds": [
+        { "id": "labrador_retriever", "name": "Labrador Retriever" },
+        { "id": "german_shepherd", "name": "German Shepherd" },
+        { "id": "golden_retriever", "name": "Golden Retriever" },
+        { "id": "beagle", "name": "Beagle" },
+        { "id": "pug", "name": "Pug" },
+        { "id": "indian_pariah", "name": "Indian Pariah Dog" }
+      ]
+    },
+    {
+      "id": "cat",
+      "name": "Cat",
+      "icon": "cat",
+      "breeds": [
+        { "id": "persian", "name": "Persian" },
+        { "id": "siamese", "name": "Siamese" },
+        { "id": "maine_coon", "name": "Maine Coon" },
+        { "id": "indian_domestic", "name": "Indian Domestic Cat" }
+      ]
+    },
+    {
+      "id": "bird",
+      "name": "Bird",
+      "icon": "bird",
+      "breeds": [
+        { "id": "budgerigar", "name": "Budgerigar" },
+        { "id": "cockatiel", "name": "Cockatiel" },
+        { "id": "lovebird", "name": "Lovebird" },
+        { "id": "parrot", "name": "Parrot" }
+      ]
+    },
+    {
+      "id": "rabbit",
+      "name": "Rabbit",
+      "icon": "rabbit",
+      "breeds": [
+        { "id": "netherland_dwarf", "name": "Netherland Dwarf" },
+        { "id": "mini_lop", "name": "Mini Lop" }
+      ]
+    },
+    {
+      "id": "hamster",
+      "name": "Hamster",
+      "icon": "hamster",
+      "breeds": [
+        { "id": "syrian", "name": "Syrian" },
+        { "id": "dwarf", "name": "Dwarf" }
+      ]
+    },
+    {
+      "id": "guinea_pig",
+      "name": "Guinea Pig",
+      "icon": "guinea_pig",
+      "breeds": [
+        { "id": "american", "name": "American" },
+        { "id": "abyssinian", "name": "Abyssinian" }
+      ]
+    },
+    {
+      "id": "tortoise",
+      "name": "Tortoise",
+      "icon": "tortoise",
+      "breeds": [
+        { "id": "indian_star", "name": "Indian Star Tortoise" }
+      ]
+    },
+    {
+      "id": "fish",
+      "name": "Fish",
+      "icon": "fish",
+      "breeds": [
+        { "id": "goldfish", "name": "Goldfish" },
+        { "id": "betta", "name": "Betta" }
+      ]
+    }
+  ]
+}

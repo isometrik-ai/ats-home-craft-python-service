@@ -1,13 +1,13 @@
 # ADR 0013: Daily Help — project registry, household links, gate integration
 
-|                  |                                                                                                                                                                                                                                                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Status**       | Accepted — implemented in `user_service` (Phases 1–4 core)                                                                                                                                                                                                                                                   |
-| **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                   |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                     |
-| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access)                                       |
-| **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                                                                     |
-| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql` (`ats-home-craft-supabase`) |
+|                  |                                                                                                                                                                                                                                                                                                                                                                   |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted — implemented in `user_service` (Phases 1–5 core)                                                                                                                                                                                                                                                                                                        |
+| **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                                                                        |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                                                                          |
+| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access)                                                                                            |
+| **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                                                                                                                          |
+| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`, `20260820120000_daily_help_resident_submission.sql` (`ats-home-craft-supabase`) |
 
 ______________________________________________________________________
 
@@ -24,18 +24,18 @@ delivery, and similar recurring service providers. Product UI spans:
 
 ### Product decisions (confirmed from screens)
 
-| #   | Decision                                                                                                                                                                                                                                  |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **Daily help is not a `contacts` row and not an auth user.** Identity lives on dedicated registry tables only.                                                                                                                            |
-| 2   | **Two creation paths:** (a) admin direct create → `active` + pass immediately; (b) **security submit → admin approve** on the same `daily_help_profiles` table — no separate request table.                                               |
-| 3   | **Documents on file only** — photo, ID proof, police verification, and ad-hoc uploads. Admin approves/rejects the **whole profile** (not per-document verify like tenant requests).                                                       |
-| 4   | **Status:** `active`, `inactive`, `deleted`, **`pending_approval`**, **`rejected`**. Pending/rejected rows appear on the same admin list; filter by status tab. Soft-deleted rows retained for audit.                                     |
-| 5   | **Categories are admin-maintained per project** — not a global Postgres enum. Each project defines its own category list (Maid, Cook, …).                                                                                                 |
-| 6   | **Gate / Activities** reuse the existing **pass check-in/out + visitor logs** pipeline — not a third parallel entry system.                                                                                                               |
-| 7   | Each profile gets a **project-scoped gate passcode** (searchable in the app) backed by a **recurring pass** (`pass_type = daily_help`).                                                                                                   |
-| 8   | **Add to Household** links a daily help profile to a **unit** (and the linking resident) without creating a contact for the helper.                                                                                                       |
-| 9   | **Check-in/out notifications:** when a daily help person enters or exits at the gate, send push to **Owner and Tenant currently holding each linked unit** (via active `daily_help_household_links` + `contact_roles`).                   |
-| 10  | **Ratings, attendance calendar, availability slots, “open to work”** — implemented in Phase 3. Ratings: one row per `(profile, unit, rater)` with trait tags. Attendance: gate check-ins merged with resident-reported absences per unit. |
+| #   | Decision                                                                                                                                                                                                                                    |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Daily help is not a `contacts` row and not an auth user.** Identity lives on dedicated registry tables only.                                                                                                                              |
+| 2   | **Three creation paths:** (a) admin direct create → `active` + pass immediately; (b) **security submit → admin approve**; (c) **resident submit → admin approve** — all on the same `daily_help_profiles` table, no separate request table. |
+| 3   | **Documents on file only** — photo, ID proof, police verification, and ad-hoc uploads. Admin approves/rejects the **whole profile** (not per-document verify like tenant requests).                                                         |
+| 4   | **Status:** `active`, `inactive`, `deleted`, **`pending_approval`**, **`rejected`**. Pending/rejected rows appear on the same admin list; filter by status tab. Soft-deleted rows retained for audit.                                       |
+| 5   | **Categories are admin-maintained per project** — not a global Postgres enum. Each project defines its own category list (Maid, Cook, …).                                                                                                   |
+| 6   | **Gate / Activities** reuse the existing **pass check-in/out + visitor logs** pipeline — not a third parallel entry system.                                                                                                                 |
+| 7   | Each profile gets a **project-scoped gate passcode** (searchable in the app) backed by a **recurring pass** (`pass_type = daily_help`).                                                                                                     |
+| 8   | **Add to Household** links a daily help profile to a **unit** (and the linking resident) without creating a contact for the helper.                                                                                                         |
+| 9   | **Check-in/out notifications:** when a daily help person enters or exits at the gate, send push to **Owner and Tenant currently holding each linked unit** (via active `daily_help_household_links` + `contact_roles`).                     |
+| 10  | **Ratings, attendance calendar, availability slots, “open to work”** — implemented in Phase 3. Ratings: one row per `(profile, unit, rater)` with trait tags. Attendance: gate check-ins merged with resident-reported absences per unit.   |
 
 ### Screens (product)
 
@@ -207,6 +207,43 @@ New audit events: `submitted`, `approved`, `rejected`, `resubmitted`.
 New profile columns (migration `20260819160000_daily_help_security_submission.sql`):
 `submitted_by_user_id`, `reviewed_by_user_id`, `reviewed_at`, `rejection_reason`.
 
+### 4c. Resident submission workflow (Phase 5)
+
+Same pending/rejected lifecycle as security — one admin list, same approve/reject endpoints.
+
+| Step      | Actor    | API                                    | Result                                                         |
+| --------- | -------- | -------------------------------------- | -------------------------------------------------------------- |
+| Submit    | Resident | `POST /v1/daily-help/submissions`      | `pending_approval`, `submitted` event, `actor_type = resident` |
+| List mine | Resident | `GET /v1/daily-help/submissions`       | Rows for `submitted_by_contact_id = caller`                    |
+| View mine | Resident | `GET /v1/daily-help/{id}/submission`   | Submission detail (documents + review fields)                  |
+| Resubmit  | Resident | `PATCH /v1/daily-help/{id}/submission` | `pending_approval`, `resubmitted` event                        |
+| Approve   | Reviewer | `POST .../daily-help/{id}/approve`     | `active`, pass + **auto household link** when unit submitted   |
+| Reject    | Reviewer | `POST .../daily-help/{id}/reject`      | `rejected`                                                     |
+
+**Request body:** `SubmitResidentDailyHelpRequest` extends `CreateDailyHelpRequest` with optional
+**`unit_id` in the JSON body** (not a query param).
+
+| `unit_id` in body | Behaviour                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Set               | Validate `contact_units` access; store `submitted_unit_id`; admin sees `submitted_unit_label`; auto-link on approve                     |
+| Omitted           | Resolve project from `category_id`; require project membership via any active unit; `submitted_unit_id = NULL`; no auto-link on approve |
+
+**Resident access:** `extract_onboarding_contact_context()` — JWT contact, not staff RBAC.
+
+**Submitter tracking:**
+
+| Column                    | Security submit  | Resident submit                                  |
+| ------------------------- | ---------------- | ------------------------------------------------ |
+| `submitted_by_user_id`    | Set (staff user) | Set (resident JWT user, for approve/reject push) |
+| `submitted_by_contact_id` | NULL             | Set (resident contact)                           |
+| `submitted_unit_id`       | NULL             | Set when `unit_id` in body; else NULL            |
+
+Admin detail exposes **`submission_source`**: `security` when only `submitted_by_user_id` is set;
+`resident` when `submitted_by_contact_id` is set.
+
+Migration `20260820120000_daily_help_resident_submission.sql` adds `submitted_by_contact_id`,
+`submitted_unit_id`.
+
 ### 5. Household links (Phase 2)
 
 `daily_help_household_links` connects a profile to a **unit**:
@@ -284,9 +321,10 @@ linked to any flat yet).
 | Resident | `/v1/daily-help`                                               | `extract_onboarding_contact_context()`                                                |
 
 Resident routes cover directory, profile, household links, **open-to-work**, **ratings** (create /
-view mine / update / summary), and **attendance** (monthly calendar + mark absent). Admin routes cover
-CRUD, category management, status changes, **security submission review**, document upload metadata,
-export, summary, availability, and gate check-in attendance calendar.
+view mine / update / summary), **attendance** (monthly calendar + mark absent), and **submission**
+(submit / list / view / resubmit pending profiles). Admin routes cover CRUD, category management,
+status changes, **security and resident submission review**, document upload metadata, export, summary,
+availability, and gate check-in attendance calendar.
 
 ### 9. Visitor logs / Activities alignment
 
@@ -437,7 +475,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_passes_daily_help_id_active
 | `status`                    | daily_help_status NOT NULL               | default `active`                                                                            |
 | `open_to_work`              | boolean NOT NULL                         | default false; Phase 2 resident/admin toggle                                                |
 | `linked_pass_id`            | uuid FK → passes                         | recurring gate pass (NULL until approved/active)                                            |
-| `submitted_by_user_id`      | uuid FK → auth.users                     | security submitter                                                                          |
+| `submitted_by_user_id`      | uuid FK → auth.users                     | security or resident submitter (JWT user)                                                   |
+| `submitted_by_contact_id`   | uuid FK → contacts                       | resident submitter; NULL for security submissions (Phase 5)                                 |
+| `submitted_unit_id`         | uuid FK → units                          | optional flat context when resident includes `unit_id` in body; NULL for security           |
 | `reviewed_by_user_id`       | uuid FK → auth.users                     | admin reviewer on approve/reject                                                            |
 | `reviewed_at`               | timestamptz                              | timestamp of last review action                                                             |
 | `rejection_reason`          | text                                     | optional admin note on reject                                                               |
@@ -455,6 +495,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_passes_daily_help_id_active
 - **Unique partial** `(organization_id, project_id, gate_passcode) WHERE gate_passcode IS NOT NULL`
 
 Migration `20260819160000_daily_help_security_submission.sql` adds review columns and nullable passcode.
+Migration `20260820120000_daily_help_resident_submission.sql` adds resident submitter + unit context columns.
 
 ### `daily_help_documents`
 
@@ -579,7 +620,8 @@ ______________________________________________________________________
 - **Project-specific categories** without enum migrations when a community adds a new service type.
 - **Targeted notifications** — only Owner/Tenant holders on linked flats, not all household members.
 - **Extensible** — ratings, availability, open-to-work, and attendance absences delivered in Phase 3.
-- **Security submission without a second table** — pending/rejected on the same registry row keeps one admin list and simpler queries.
+- **Security and resident submission without a second table** — pending/rejected on the same registry row keeps one admin list and simpler queries.
+- **Resident auto-link on approve** — when a flat is specified at submit time, the helper is linked to that unit without a separate “Add to Household” step.
 
 ### Negative / trade-offs
 

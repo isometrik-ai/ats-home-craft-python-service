@@ -86,7 +86,8 @@ GET /v1/contact-onboarding/household/summary?unit_id={unit_id}
     "family_count": 2,
     "daily_help_count": 2,
     "vehicles_count": 2,
-    "tenant_count": 1
+    "tenant_count": 1,
+    "pets_count": 2
   }
 }
 ```
@@ -97,10 +98,12 @@ GET /v1/contact-onboarding/household/summary?unit_id={unit_id}
 | `daily_help_count` | Daily Help | Active `daily_help_household_links` with active daily help profiles        |
 | `vehicles_count`   | Vehicles   | Approved vehicles on unit (`vehicles.status = approved`, not soft-deleted) |
 | `tenant_count`     | Tenant     | Active `contact_roles` with `role_type = Tenant` on unit (0 or 1)          |
+| `pets_count`       | Pets       | Active pets on unit (`pets.status = active`, `deleted_at IS NULL`)         |
 
 Requires an active `contact_units` link for the caller on `unit_id`; otherwise `unit_not_assigned`.
 Drill-down uses existing list APIs (`GET /household`, `GET /daily-help/household-links`, `GET /vehicles`,
-tenant request APIs — see [tenant-requests-flow.md](./tenant-requests-flow.md)).
+`GET /pets`, tenant request APIs — see [tenant-requests-flow.md](./tenant-requests-flow.md),
+[pets-flow.md](./pets-flow.md)).
 
 > **Tenant limit:** Only **one active tenant per unit**. Enforced by DB unique indexes on
 > `contact_roles` and `tenant_requests`, and by superseding the previous tenant on approve.

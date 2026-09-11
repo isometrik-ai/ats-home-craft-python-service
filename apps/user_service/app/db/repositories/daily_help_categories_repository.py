@@ -53,23 +53,24 @@ class DailyHelpCategoriesRepository(BaseRepository):
         self,
         *,
         organization_id: str,
-        project_id: str,
         category_id: str,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
-        """Fetch one category row scoped to organization and project."""
+        """Fetch one category row scoped to organization and optional project."""
+        filters = ["c.organization_id = $1::uuid", "c.id = $2::uuid"]
+        args: list[Any] = [organization_id, category_id]
+        if project_id:
+            args.append(project_id)
+            filters.append(f"c.project_id = ${len(args)}::uuid")
         row = await self.db_connection.fetchrow(
             f"""
             SELECT
             {_CATEGORY_SELECT_COLUMNS}
             FROM daily_help_categories c
-            WHERE c.organization_id = $1::uuid
-              AND c.project_id = $2::uuid
-              AND c.id = $3::uuid
+            WHERE {" AND ".join(filters)}
             LIMIT 1
             """,
-            organization_id,
-            project_id,
-            category_id,
+            *args,
         )
         return dict(row) if row else None
 
