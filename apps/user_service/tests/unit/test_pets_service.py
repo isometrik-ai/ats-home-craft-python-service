@@ -127,7 +127,7 @@ async def test_get_pet_detail_includes_household_members():
     svc.repo.get_by_id.return_value = _pet_row()
 
     with patch(
-        "apps.user_service.app.services.pets_service.ContactOnboardingService"
+        "apps.user_service.app.services.contact_onboarding_service.ContactOnboardingService"
     ) as onboarding_cls:
         onboarding = onboarding_cls.return_value
         onboarding.list_household = AsyncMock(return_value=[{"contact_id": "contact-2"}])
@@ -272,3 +272,19 @@ def test_create_pet_request_rejects_whitespace_name():
             breed="Golden Retriever",
             vaccination_status=PetVaccinationStatus.COMPLETELY,
         )
+
+
+@pytest.mark.asyncio
+async def test_release_for_move_out_soft_removes_all_active_pets_on_unit():
+    """Unit vacate soft-removes every active pet on the unit."""
+    svc = _service()
+    svc.repo.soft_remove_all_active_for_unit = AsyncMock(return_value=[{"id": "pet-1"}])
+
+    await svc.release_for_move_out(unit_id="unit-1", reason="Unit owner unassigned")
+
+    svc.repo.soft_remove_all_active_for_unit.assert_awaited_once_with(
+        organization_id="org-1",
+        unit_id="unit-1",
+        reason="Unit owner unassigned",
+        removed_by_contact_id=None,
+    )

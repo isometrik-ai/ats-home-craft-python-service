@@ -167,6 +167,36 @@ class PetsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def soft_remove_all_active_for_unit(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        reason: str,
+        removed_by_contact_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Soft-remove every active pet profile on a unit."""
+        rows = await self.db_connection.fetch(
+            f"""
+            UPDATE pets p
+            SET status = '{PetStatus.REMOVED.value}'::pet_status,
+                removal_reason = $3,
+                removed_by_contact_id = $4::uuid,
+                deleted_at = now(),
+                updated_at = now()
+            WHERE p.organization_id = $1::uuid
+              AND p.unit_id = $2::uuid
+              AND {_ACTIVE_PET_FILTER}
+            RETURNING
+              {_PET_SELECT_COLUMNS}
+            """,
+            organization_id,
+            unit_id,
+            reason,
+            removed_by_contact_id,
+        )
+        return [dict(row) for row in rows]
+
     async def soft_remove(
         self,
         *,

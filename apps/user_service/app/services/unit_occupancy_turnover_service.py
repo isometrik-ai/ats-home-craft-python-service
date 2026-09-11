@@ -37,6 +37,7 @@ from apps.user_service.app.schemas.enums import (
     TenantRequestEventType,
     TenantRequestStatus,
 )
+from apps.user_service.app.services.pets_service import PetsService
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -345,6 +346,15 @@ class UnitOccupancyTurnoverService:
             user_context=self.user_context,
         )
         await walk_in_service.release_open_visit_units_for_unit_turnover(
+            unit_id=unit_id,
+            reason=pass_cancel_notes,
+        )
+
+        pets_service = PetsService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await pets_service.release_for_move_out(
             unit_id=unit_id,
             reason=pass_cancel_notes,
         )

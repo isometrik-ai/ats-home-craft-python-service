@@ -75,16 +75,19 @@ def _service() -> UnitOccupancyTurnoverService:
     "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
     new_callable=AsyncMock,
 )
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
 async def test_vacate_unit_completely_skips_tenant_cleanup_when_already_moved_out(
     mock_vehicles_cls: MagicMock,
     mock_walk_in_cls: MagicMock,
+    mock_pets_cls: MagicMock,
     _mock_revoke: AsyncMock,
 ) -> None:
     """When tenant move-out already ran, vacate only releases the owner."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    mock_pets_cls.return_value.release_for_move_out = AsyncMock()
     svc = _service()
     svc.contact_units_repo.release_all_open_links_for_unit = AsyncMock(
         return_value=[{"id": "cu-owner", "contact_id": "owner-1", "relationship": "self"}]
@@ -102,6 +105,7 @@ async def test_vacate_unit_completely_skips_tenant_cleanup_when_already_moved_ou
 
     svc.tenant_requests_repo.find_active_approved_for_unit.assert_not_awaited()
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover.assert_not_awaited()
+    mock_pets_cls.return_value.release_for_move_out.assert_not_awaited()
     svc.contact_units_repo.release_all_open_links_for_unit.assert_awaited_once()
 
 
@@ -110,6 +114,7 @@ async def test_vacate_unit_completely_skips_tenant_cleanup_when_already_moved_ou
     "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
     new_callable=AsyncMock,
 )
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
 @patch(
@@ -120,11 +125,13 @@ async def test_release_outgoing_tenant_household_clears_unit_artifacts(
     mock_revoke: AsyncMock,
     mock_vehicles_cls: MagicMock,
     mock_walk_in_cls: MagicMock,
+    mock_pets_cls: MagicMock,
     _mock_purge_likes: AsyncMock,
 ) -> None:
     """Household turnover preserves owner and clears unit-scoped artifacts."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    mock_pets_cls.return_value.release_for_move_out = AsyncMock()
     svc = _service()
 
     released = await svc.release_outgoing_tenant_household(
@@ -152,6 +159,10 @@ async def test_release_outgoing_tenant_household_clears_unit_artifacts(
         unit_id="unit-1",
         reason="Tenant turnover",
     )
+    mock_pets_cls.return_value.release_for_move_out.assert_awaited_once_with(
+        unit_id="unit-1",
+        reason="Tenant turnover",
+    )
     svc.contacts_repo.soft_delete_contact.assert_awaited_once_with(
         contact_id="family-1",
         organization_id="org-1",
@@ -164,6 +175,7 @@ async def test_release_outgoing_tenant_household_clears_unit_artifacts(
     "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
     new_callable=AsyncMock,
 )
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
 @patch(
@@ -174,11 +186,13 @@ async def test_vacate_unit_completely_clears_all_artifacts(
     _mock_revoke: AsyncMock,
     mock_vehicles_cls: MagicMock,
     mock_walk_in_cls: MagicMock,
+    mock_pets_cls: MagicMock,
     _mock_purge_likes: AsyncMock,
 ) -> None:
     """Full unit vacate clears occupants, roles, assets, and reconciles inventory."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    mock_pets_cls.return_value.release_for_move_out = AsyncMock()
     svc = _service()
     svc.units_repo.get_unit_owner_contact = AsyncMock(return_value={"contact_id": "owner-1"})
     svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(return_value=None)
@@ -216,20 +230,27 @@ async def test_vacate_unit_completely_clears_all_artifacts(
     )
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover.assert_awaited_once()
     svc.daily_help_repo.remove_all_active_links_for_unit.assert_awaited_once()
+    mock_pets_cls.return_value.release_for_move_out.assert_awaited_once_with(
+        unit_id="unit-1",
+        reason="Unit owner unassigned",
+    )
 
 
 @pytest.mark.asyncio
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
 async def test_vacate_unit_completely_requires_open_links(
     mock_vehicles_cls: MagicMock,
     mock_walk_in_cls: MagicMock,
+    mock_pets_cls: MagicMock,
 ) -> None:
     """Full unit vacate returns 404 when no open occupant links exist."""
     from libs.shared_utils.http_exceptions import NotFoundException
 
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    mock_pets_cls.return_value.release_for_move_out = AsyncMock()
     svc = _service()
     svc.units_repo.get_unit_owner_contact = AsyncMock(return_value=None)
     svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(return_value=None)
