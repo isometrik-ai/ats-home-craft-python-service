@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
-from apps.work_order_service.app.utils.records import record_to_dict
+from apps.work_order_service.app.utils.records import jsonb_bind, record_to_dict
 
 
 class AssetsRepository(ScopedRepository):
@@ -89,7 +89,7 @@ class AssetsRepository(ScopedRepository):
             data.get("location_text"),
             data.get("landmark_note"),
             data.get("photo_paths") or [],
-            data.get("associated_parts") or [],
+            jsonb_bind(data.get("associated_parts")),
             data.get("purchase_date"),
             data.get("purchase_cost_minor"),
             data.get("currency"),
@@ -102,14 +102,13 @@ class AssetsRepository(ScopedRepository):
             data.get("warranty_expiry"),
             data.get("warranty_terms"),
             data.get("document_paths") or [],
-            data.get("custom_fields") or [],
+            jsonb_bind(data.get("custom_fields")),
             data.get("contract_id"),
         )
         return record_to_dict(row)
 
     async def update(self, entity_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """Update."""
-        custom_fields = data["custom_fields"] if "custom_fields" in data else None
         row = await self.conn.fetchrow(
             """
             UPDATE work_order.assets
@@ -160,7 +159,7 @@ class AssetsRepository(ScopedRepository):
             data.get("location_text"),
             data.get("landmark_note"),
             data.get("photo_paths"),
-            data["associated_parts"] if "associated_parts" in data else None,
+            jsonb_bind(data["associated_parts"]) if "associated_parts" in data else None,
             data.get("purchase_date"),
             data.get("purchase_cost_minor"),
             data.get("currency"),
@@ -173,7 +172,7 @@ class AssetsRepository(ScopedRepository):
             data.get("warranty_expiry"),
             data.get("warranty_terms"),
             data.get("document_paths"),
-            custom_fields,
+            jsonb_bind(data["custom_fields"]) if "custom_fields" in data else None,
             data.get("contract_id"),
         )
         return record_to_dict(row) if row else None

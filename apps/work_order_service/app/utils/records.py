@@ -53,10 +53,26 @@ def parse_json_field(value: Any) -> Any:
     return value
 
 
-def jsonb_param(value: Any, *, default: list[Any] | dict[str, Any] | None = None) -> Any:
-    """Normalize a value for asyncpg jsonb query parameters."""
+def jsonb_bind(value: Any) -> str | None:
+    """Serialize list/dict for asyncpg jsonb parameters.
+
+    asyncpg's jsonb codec expects JSON text, not Python collections.
+    Return None for empty values so SQL COALESCE can apply column defaults.
+    """
     if value is None:
-        return default if default is not None else []
+        return None
     if isinstance(value, str):
-        return parse_json_field(value)
-    return value
+        stripped = value.strip()
+        if not stripped or stripped in ("[]", "{}"):
+            return None
+        return value
+    if isinstance(value, (list, dict)):
+        if not value:
+            return None
+        return json.dumps(value, default=str)
+    return json.dumps(value, default=str)
+
+
+def jsonb_bind_required(value: Any, *, default: str = "[]") -> str:
+    """Serialize jsonb for inserts that do not use COALESCE on the parameter."""
+    return jsonb_bind(value) or default

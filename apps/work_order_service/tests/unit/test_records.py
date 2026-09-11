@@ -3,7 +3,12 @@
 from datetime import date, datetime, timezone
 from uuid import UUID
 
-from apps.work_order_service.app.utils.records import parse_json_field, record_to_dict
+from apps.work_order_service.app.utils.records import (
+    jsonb_bind,
+    jsonb_bind_required,
+    parse_json_field,
+    record_to_dict,
+)
 
 
 class _FakeRow:
@@ -52,3 +57,12 @@ def test_record_to_dict_serializes_dates_and_uuids():
 def test_parse_json_field_leaves_plain_text_untouched():
     """Regular text fields must not be treated as JSON."""
     assert parse_json_field("Vendor token issued") == "Vendor token issued"
+
+
+def test_jsonb_bind_serializes_collections_for_asyncpg():
+    """asyncpg jsonb parameters must be JSON text, not Python lists."""
+    assert jsonb_bind([]) is None
+    assert jsonb_bind({}) is None
+    assert jsonb_bind([{"type": "created"}]) == '[{"type": "created"}]'
+    assert jsonb_bind_required(None) == "[]"
+    assert jsonb_bind_required({"a": 1}, default="{}") == '{"a": 1}'

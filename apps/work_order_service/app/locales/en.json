@@ -30,6 +30,9 @@
     }
   },
   "assets": {
+    "errors": {
+      "duplicate_code": "An asset with code \"{code}\" already exists in this project."
+    },
     "success": {
       "list_retrieved": "Assets retrieved successfully.",
       "retrieved": "Asset retrieved successfully.",

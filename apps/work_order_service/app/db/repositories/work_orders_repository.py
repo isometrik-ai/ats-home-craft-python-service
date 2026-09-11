@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
-from apps.work_order_service.app.utils.records import record_to_dict
+from apps.work_order_service.app.utils.records import (
+    jsonb_bind,
+    jsonb_bind_required,
+    record_to_dict,
+)
 
 
 class WorkOrderRepository(ScopedRepository):
@@ -119,7 +123,7 @@ class WorkOrderRepository(ScopedRepository):
             data.get("assignee_name"),
             data.get("assignee_user_id"),
             data.get("vendor_token_hash"),
-            data.get("timeline") or [],
+            jsonb_bind_required(data.get("timeline")),
             data.get("access_notes"),
             data.get("form_template_id"),
             data.get("is_recurring", False),
@@ -158,7 +162,7 @@ class WorkOrderRepository(ScopedRepository):
             data.get("state"),
             data.get("priority"),
             data.get("scheduled_date"),
-            data["timeline"] if "timeline" in data else None,
+            jsonb_bind(data["timeline"]) if "timeline" in data else None,
             data.get("company_id"),
             data.get("started_at"),
             data.get("completed_at"),
@@ -189,7 +193,7 @@ class WorkOrderRepository(ScopedRepository):
             entity_id,
             organization_id,
             project_id,
-            [evt],
+            jsonb_bind_required([evt]),
         )
         if not row:
             return None
@@ -271,13 +275,15 @@ class WorkOrderRepository(ScopedRepository):
               AND record_status = 'active'
             """,
             template_id,
-            [
-                {
-                    "type": "status_changed",
-                    "by": "Scheduler",
-                    "note": note,
-                }
-            ],
+            jsonb_bind_required(
+                [
+                    {
+                        "type": "status_changed",
+                        "by": "Scheduler",
+                        "note": note,
+                    }
+                ]
+            ),
         )
         try:
             return int(result.split()[-1])
