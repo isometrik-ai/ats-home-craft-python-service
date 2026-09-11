@@ -17,6 +17,7 @@ from asyncpg import UniqueViolationError
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
 from apps.user_service.app.db.repositories.daily_help_categories_repository import (
     DailyHelpCategoriesRepository,
 )
@@ -63,7 +64,11 @@ from apps.user_service.app.schemas.daily_help import (
     ResidentDailyHelpListQuery,
     ResidentDailyHelpProfilePreviewResponse,
     ResidentDailyHelpSearchQuery,
+    ResidentDailyHelpSubmissionDetailResponse,
+    ResidentDailyHelpSubmissionListItemResponse,
+    ResidentDailyHelpSubmissionListQuery,
     SetDailyHelpOpenToWorkRequest,
+    SubmitResidentDailyHelpRequest,
     UpdateDailyHelpCategoryRequest,
     UpdateDailyHelpRatingRequest,
     UpdateDailyHelpRequest,
@@ -110,6 +115,7 @@ class DailyHelpService:
         passes_repository: PassesRepository | None = None,
         pass_events_repository: PassEventsRepository | None = None,
         contact_units_repository: ContactUnitsRepository | None = None,
+        contacts_repository: ContactsRepository | None = None,
         push_dispatcher: PushNotificationDispatcher | None = None,
     ) -> None:
         self.db_connection = db_connection
@@ -119,6 +125,7 @@ class DailyHelpService:
         self.passes_repo = passes_repository or PassesRepository(db_connection)
         self.events_repo = pass_events_repository or PassEventsRepository(db_connection)
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
+        self.contacts_repo = contacts_repository or ContactsRepository(db_connection)
         self.members_repo = OrganizationMemberRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection,
@@ -145,14 +152,18 @@ class DailyHelpService:
         helper_name: str,
         message_key: str,
         idempotency_suffix: str,
+        extra_params: dict[str, str] | None = None,
     ) -> None:
         """Notify org admins when security submits or resubmits a profile."""
+        params: dict[str, str] = {"helper_name": helper_name}
+        if extra_params:
+            params.update(extra_params)
         await self._push().send_to_org_members(
             organization_id=self.organization_id,
             message_key=message_key,
             notification_type="NOTIFICATION_TYPE_DAILY_HELP",
             feed_type="daily_help",
-            params={"helper_name": helper_name},
+            params=params,
             data={
                 "profile_id": profile_id,
                 "project_id": project_id,
@@ -317,6 +328,38 @@ class DailyHelpService:
         name = " ".join(part for part in parts if part)
         return name or None
 
+    async def _resolve_contact_name(self, contact_id: str | None) -> str | None:
+        """Resolve resident display name from contacts."""
+        if not contact_id:
+            return None
+        contact = await self.contacts_repo.get_contact_details(
+            contact_id=str(contact_id),
+            organization_id=self.organization_id,
+        )
+        if not contact:
+            return None
+        parts = [
+            str(contact.get("first_name") or "").strip(),
+            str(contact.get("last_name") or "").strip(),
+        ]
+        name = " ".join(part for part in parts if part)
+        return name or str(contact.get("display_name") or "").strip() or None
+
+    @staticmethod
+    def _submission_source(row: dict[str, Any]) -> str | None:
+        """Derive who submitted a profile awaiting review."""
+        if row.get("submitted_by_contact_id"):
+            return "resident"
+        if row.get("submitted_by_user_id"):
+            return "security"
+        return None
+
+    async def _resolve_submitted_by_name(self, row: dict[str, Any]) -> str | None:
+        """Resolve submitter display name for admin detail."""
+        if row.get("submitted_by_contact_id"):
+            return await self._resolve_contact_name(str(row["submitted_by_contact_id"]))
+        return await self._resolve_created_by_name(row.get("submitted_by_user_id"))
+
     async def _get_active_category_or_raise(
         self,
         *,
@@ -376,6 +419,67 @@ class DailyHelpService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return row
+
+    async def _get_resident_submission_or_raise(
+        self,
+        *,
+        contact_id: str,
+        profile_id: str,
+    ) -> dict[str, Any]:
+        """Load a profile submitted by the current resident contact."""
+        row = await self.repo.get_profile(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+        )
+        if not row or str(row.get("submitted_by_contact_id") or "") != str(contact_id):
+            raise NotFoundException(
+                message_key="daily_help.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return row
+
+    async def _resolve_resident_submission_context(
+        self,
+        *,
+        contact_id: str,
+        category_id: str,
+        unit_id: str | None = None,
+    ) -> tuple[str, str | None, str | None]:
+        """Resolve project and optional unit context for a resident submission."""
+        if unit_id:
+            project_id = await self._ensure_resident_unit(
+                contact_id=contact_id,
+                unit_id=unit_id,
+            )
+            unit_row = await self.contact_units_repo.get_unit_project(
+                organization_id=self.organization_id,
+                unit_id=unit_id,
+            )
+            unit_label = str(unit_row.get("unit_label") or "").strip() if unit_row else None
+            return project_id, unit_id, unit_label or None
+
+        category = await self.categories_repo.get_by_id(
+            organization_id=self.organization_id,
+            category_id=category_id,
+        )
+        if not category or str(category.get("status")) != DailyHelpCategoryStatus.ACTIVE.value:
+            raise ValidationException(
+                message_key="daily_help.errors.invalid_category",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        project_id = str(category["project_id"])
+        has_access = await self.contact_units_repo.contact_has_active_project_membership(
+            organization_id=self.organization_id,
+            contact_id=contact_id,
+            project_id=project_id,
+        )
+        if not has_access:
+            raise ValidationException(
+                message_key="daily_help.errors.unit_not_accessible",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+        await self._ensure_project(project_id=project_id)
+        return project_id, None, None
 
     def _ensure_not_deleted(self, row: dict[str, Any]) -> None:
         """Block mutations on soft-deleted profiles."""
@@ -823,6 +927,81 @@ class DailyHelpService:
             **item.model_dump(),
             rejection_reason=row.get("rejection_reason"),
             reviewed_at=format_iso_datetime(row.get("reviewed_at")),
+            submission_source=self._submission_source(row),
+            submitted_by_contact_id=row.get("submitted_by_contact_id"),
+            submitted_unit_id=row.get("submitted_unit_id"),
+            submitted_unit_label=row.get("submitted_unit_label"),
+        )
+
+    def _serialize_resident_submission_list_item(
+        self,
+        row: dict[str, Any],
+    ) -> ResidentDailyHelpSubmissionListItemResponse:
+        """Map a profile row to resident submission list shape."""
+        created_at = format_iso_datetime(row.get("created_at"))
+        return ResidentDailyHelpSubmissionListItemResponse(
+            id=str(row["id"]),
+            display_name=str(row["display_name"]),
+            category_id=str(row["category_id"]),
+            category_name=row.get("category_name"),
+            phone=self._format_phone(
+                isd_code=row.get("phone_isd_code"),
+                phone_number=row.get("phone_number"),
+            ),
+            photo_path=row.get("photo_path"),
+            document_count=int(row.get("document_count") or 0),
+            status=str(row["status"]),
+            gate_passcode=row.get("gate_passcode"),
+            rejection_reason=row.get("rejection_reason"),
+            reviewed_at=format_iso_datetime(row.get("reviewed_at")),
+            created_at=created_at,
+            submitted_unit_id=row.get("submitted_unit_id"),
+            submitted_unit_label=row.get("submitted_unit_label"),
+        )
+
+    async def _serialize_resident_submission_detail(
+        self,
+        *,
+        row: dict[str, Any],
+    ) -> ResidentDailyHelpSubmissionDetailResponse:
+        """Map a profile row to resident submission detail."""
+        profile_id = str(row["id"])
+        doc_rows = await self.repo.list_documents(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+        )
+        documents = [self._serialize_document(doc) for doc in doc_rows]
+        phone_number = str(row.get("phone_number") or "")
+        return ResidentDailyHelpSubmissionDetailResponse(
+            id=str(row["id"]),
+            initials=row.get("initials"),
+            first_name=str(row["first_name"]),
+            middle_name=row.get("middle_name"),
+            last_name=str(row["last_name"]),
+            display_name=str(row["display_name"]),
+            phone_isd_code=str(row["phone_isd_code"]),
+            phone_number=phone_number,
+            phone=self._format_phone(
+                isd_code=row.get("phone_isd_code"),
+                phone_number=phone_number,
+            ),
+            alternate_phone_isd_code=row.get("alternate_phone_isd_code"),
+            alternate_phone_number=row.get("alternate_phone_number"),
+            category_id=str(row["category_id"]),
+            category_name=row.get("category_name"),
+            gender=row.get("gender"),
+            date_of_birth=self._format_date(row.get("date_of_birth")),
+            photo_path=row.get("photo_path"),
+            gate_passcode=str(row["gate_passcode"]) if row.get("gate_passcode") else None,
+            status=str(row["status"]),
+            open_to_work=bool(row.get("open_to_work")),
+            document_count=int(row.get("document_count") or len(documents)),
+            documents=documents,
+            rejection_reason=row.get("rejection_reason"),
+            reviewed_at=format_iso_datetime(row.get("reviewed_at")),
+            submitted_unit_id=row.get("submitted_unit_id"),
+            submitted_unit_label=row.get("submitted_unit_label"),
+            created_at=format_iso_datetime(row.get("created_at")),
         )
 
     async def _serialize_resident_list_item(
@@ -967,7 +1146,11 @@ class DailyHelpService:
             created_by_user_id=row.get("created_by_user_id"),
             created_by_name=created_by_name,
             submitted_by_user_id=row.get("submitted_by_user_id"),
-            submitted_by_name=await self._resolve_created_by_name(row.get("submitted_by_user_id")),
+            submitted_by_name=await self._resolve_submitted_by_name(row),
+            submitted_by_contact_id=row.get("submitted_by_contact_id"),
+            submitted_unit_id=row.get("submitted_unit_id"),
+            submitted_unit_label=row.get("submitted_unit_label"),
+            submission_source=self._submission_source(row),
             reviewed_by_user_id=row.get("reviewed_by_user_id"),
             reviewed_by_name=await self._resolve_created_by_name(row.get("reviewed_by_user_id")),
             reviewed_at=format_iso_datetime(row.get("reviewed_at")),
@@ -1186,6 +1369,46 @@ class DailyHelpService:
         """Return one security submission with documents and review metadata."""
         row = await self._get_submission_or_raise(project_id=project_id, profile_id=profile_id)
         return await self._serialize_detail(row=row)
+
+    async def list_resident_submissions(
+        self,
+        *,
+        contact_id: str,
+        query: ResidentDailyHelpSubmissionListQuery,
+    ) -> tuple[list[ResidentDailyHelpSubmissionListItemResponse], int]:
+        """Paginated list of daily help profiles submitted by the resident."""
+        project_id: str | None = None
+        if query.unit_id:
+            project_id = await self._ensure_resident_unit(
+                contact_id=contact_id,
+                unit_id=query.unit_id,
+            )
+        offset = (query.page - 1) * query.page_size
+        status = query.status.value if query.status else None
+        rows, total = await self.repo.list_profiles(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            status=status,
+            search=query.search,
+            submitted_by_contact_id=contact_id,
+            limit=query.page_size,
+            offset=offset,
+        )
+        items = [self._serialize_resident_submission_list_item(row) for row in rows]
+        return items, total
+
+    async def get_resident_submission(
+        self,
+        *,
+        contact_id: str,
+        profile_id: str,
+    ) -> ResidentDailyHelpSubmissionDetailResponse:
+        """Return one resident submission with documents and review metadata."""
+        row = await self._get_resident_submission_or_raise(
+            contact_id=contact_id,
+            profile_id=profile_id,
+        )
+        return await self._serialize_resident_submission_detail(row=row)
 
     async def list_household_links(
         self,
@@ -1466,28 +1689,38 @@ class DailyHelpService:
             created_by_name=created_by_name,
         )
 
-    async def submit_profile(
+    async def _submit_for_review(
         self,
         *,
         project_id: str,
         body: CreateDailyHelpRequest,
+        created_by_user_id: str | None,
+        submitted_by_user_id: str | None,
+        submitted_by_contact_id: str | None = None,
+        submitted_unit_id: str | None = None,
+        actor_type: str = DailyHelpActorType.STAFF.value,
+        actor_user_id: str | None = None,
+        actor_contact_id: str | None = None,
+        notify_extra_params: dict[str, str] | None = None,
+        submitted_by_name: str | None = None,
     ) -> CreateDailyHelpResponse:
-        """Security submits a daily help profile for admin review (no gate pass)."""
+        """Insert a pending profile, documents, and notify reviewers."""
         await self._ensure_project(project_id=project_id)
         category = await self._get_active_category_or_raise(
             project_id=project_id,
             category_id=body.category_id,
         )
         display_name, identity = self._profile_identity_from_create_body(body)
-        user_id = self.user_context.user_id
 
         profile = await self.repo.insert_profile(
             organization_id=self.organization_id,
             project_id=project_id,
             gate_passcode=None,
             status=DailyHelpStatus.PENDING_APPROVAL.value,
-            created_by_user_id=str(user_id) if user_id else None,
-            submitted_by_user_id=str(user_id) if user_id else None,
+            created_by_user_id=created_by_user_id,
+            submitted_by_user_id=submitted_by_user_id,
+            submitted_by_contact_id=submitted_by_contact_id,
+            submitted_unit_id=submitted_unit_id,
             **identity,
         )
         profile_id = str(profile["id"])
@@ -1495,23 +1728,25 @@ class DailyHelpService:
         await self._insert_profile_documents(
             profile_id=profile_id,
             documents=body.documents,
-            uploaded_by_user_id=str(user_id) if user_id else None,
+            uploaded_by_user_id=actor_user_id,
         )
         await self._append_event(
             profile_id=profile_id,
             event_type=DailyHelpEventType.SUBMITTED.value,
-            actor_user_id=str(user_id) if user_id else None,
+            actor_type=actor_type,
+            actor_user_id=actor_user_id,
+            actor_contact_id=actor_contact_id,
+            payload={"unit_id": submitted_unit_id} if submitted_unit_id else None,
         )
-
         await self._notify_reviewers_submission(
             project_id=project_id,
             profile_id=profile_id,
             helper_name=display_name,
             message_key="notifications.push.daily_help.submitted",
             idempotency_suffix="submitted",
+            extra_params=notify_extra_params,
         )
 
-        submitted_by_name = await self._resolve_created_by_name(user_id)
         return CreateDailyHelpResponse(
             id=profile_id,
             display_name=display_name,
@@ -1525,22 +1760,71 @@ class DailyHelpService:
             created_by_name=submitted_by_name,
         )
 
-    async def resubmit_profile(
+    async def submit_profile(
+        self,
+        *,
+        project_id: str,
+        body: CreateDailyHelpRequest,
+    ) -> CreateDailyHelpResponse:
+        """Security submits a daily help profile for admin review (no gate pass)."""
+        user_id = self.user_context.user_id
+        user_id_str = str(user_id) if user_id else None
+        return await self._submit_for_review(
+            project_id=project_id,
+            body=body,
+            created_by_user_id=user_id_str,
+            submitted_by_user_id=user_id_str,
+            actor_type=DailyHelpActorType.STAFF.value,
+            actor_user_id=user_id_str,
+            submitted_by_name=await self._resolve_created_by_name(user_id),
+        )
+
+    async def submit_resident_profile(
+        self,
+        *,
+        contact_id: str,
+        body: SubmitResidentDailyHelpRequest,
+    ) -> CreateDailyHelpResponse:
+        """Resident submits a daily help profile for admin review (no gate pass)."""
+        project_id, unit_id, unit_label = await self._resolve_resident_submission_context(
+            contact_id=contact_id,
+            category_id=body.category_id,
+            unit_id=body.unit_id,
+        )
+        user_id = self.user_context.user_id
+        user_id_str = str(user_id) if user_id else None
+        notify_extra = {"unit_label": unit_label} if unit_label else None
+        return await self._submit_for_review(
+            project_id=project_id,
+            body=body,
+            created_by_user_id=user_id_str,
+            submitted_by_user_id=user_id_str,
+            submitted_by_contact_id=contact_id,
+            submitted_unit_id=unit_id,
+            actor_type=DailyHelpActorType.RESIDENT.value,
+            actor_user_id=user_id_str,
+            actor_contact_id=contact_id,
+            notify_extra_params=notify_extra,
+            submitted_by_name=await self._resolve_contact_name(contact_id),
+        )
+
+    async def _resubmit_for_review(
         self,
         *,
         project_id: str,
         profile_id: str,
         body: CreateDailyHelpRequest,
-    ) -> DailyHelpDetailResponse:
-        """Security edits and resubmits a rejected profile for review."""
-        row = await self._get_submission_or_raise(project_id=project_id, profile_id=profile_id)
-        self._ensure_rejected_for_resubmit(row)
+        actor_type: str = DailyHelpActorType.STAFF.value,
+        actor_user_id: str | None = None,
+        actor_contact_id: str | None = None,
+        notify_extra_params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Move a rejected profile back to pending review."""
         await self._get_active_category_or_raise(
             project_id=project_id,
             category_id=body.category_id,
         )
         _, identity = self._profile_identity_from_create_body(body)
-        user_id = self.user_context.user_id
 
         updated = await self.repo.update_profile(
             organization_id=self.organization_id,
@@ -1553,7 +1837,7 @@ class DailyHelpService:
                 "reviewed_by_user_id": None,
                 "reviewed_at": None,
             },
-            updated_by_user_id=str(user_id) if user_id else None,
+            updated_by_user_id=actor_user_id,
         )
         if not updated:
             raise NotFoundException(
@@ -1563,7 +1847,9 @@ class DailyHelpService:
         await self._append_event(
             profile_id=profile_id,
             event_type=DailyHelpEventType.RESUBMITTED.value,
-            actor_user_id=str(user_id) if user_id else None,
+            actor_type=actor_type,
+            actor_user_id=actor_user_id,
+            actor_contact_id=actor_contact_id,
         )
         await self._notify_reviewers_submission(
             project_id=project_id,
@@ -1571,8 +1857,72 @@ class DailyHelpService:
             helper_name=self._helper_name_from_row(updated),
             message_key="notifications.push.daily_help.resubmitted",
             idempotency_suffix="resubmitted",
+            extra_params=notify_extra_params,
+        )
+        return updated
+
+    async def resubmit_profile(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+        body: CreateDailyHelpRequest,
+    ) -> DailyHelpDetailResponse:
+        """Security edits and resubmits a rejected profile for review."""
+        row = await self._get_submission_or_raise(project_id=project_id, profile_id=profile_id)
+        self._ensure_rejected_for_resubmit(row)
+        user_id = self.user_context.user_id
+        user_id_str = str(user_id) if user_id else None
+        updated = await self._resubmit_for_review(
+            project_id=project_id,
+            profile_id=profile_id,
+            body=body,
+            actor_type=DailyHelpActorType.STAFF.value,
+            actor_user_id=user_id_str,
         )
         return await self._serialize_detail(row=updated)
+
+    async def resubmit_resident_profile(
+        self,
+        *,
+        contact_id: str,
+        profile_id: str,
+        body: SubmitResidentDailyHelpRequest,
+    ) -> ResidentDailyHelpSubmissionDetailResponse:
+        """Resident edits and resubmits a rejected profile for review."""
+        row = await self._get_resident_submission_or_raise(
+            contact_id=contact_id,
+            profile_id=profile_id,
+        )
+        self._ensure_rejected_for_resubmit(row)
+        project_id, unit_id, unit_label = await self._resolve_resident_submission_context(
+            contact_id=contact_id,
+            category_id=body.category_id,
+            unit_id=body.unit_id or row.get("submitted_unit_id"),
+        )
+        user_id = self.user_context.user_id
+        user_id_str = str(user_id) if user_id else None
+        notify_extra = {"unit_label": unit_label} if unit_label else None
+        updated = await self._resubmit_for_review(
+            project_id=project_id,
+            profile_id=profile_id,
+            body=body,
+            actor_type=DailyHelpActorType.RESIDENT.value,
+            actor_user_id=user_id_str,
+            actor_contact_id=contact_id,
+            notify_extra_params=notify_extra,
+        )
+        if unit_id and str(updated.get("submitted_unit_id") or "") != str(unit_id):
+            refreshed = await self.repo.update_profile(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                profile_id=profile_id,
+                fields={"submitted_unit_id": unit_id},
+                updated_by_user_id=user_id_str,
+            )
+            if refreshed:
+                updated = refreshed
+        return await self._serialize_resident_submission_detail(row=updated)
 
     async def approve_profile(
         self,
@@ -1619,6 +1969,31 @@ class DailyHelpService:
             gate_passcode=gate_passcode,
             actor_user_id=str(user_id) if user_id else None,
         )
+        submitted_unit_id = str(updated.get("submitted_unit_id") or "").strip()
+        submitted_contact_id = str(updated.get("submitted_by_contact_id") or "").strip()
+        if submitted_unit_id and submitted_contact_id:
+            if not await self.repo.has_active_link(
+                organization_id=self.organization_id,
+                profile_id=profile_id,
+                unit_id=submitted_unit_id,
+            ):
+                link = await self.repo.insert_link(
+                    organization_id=self.organization_id,
+                    project_id=project_id,
+                    profile_id=profile_id,
+                    unit_id=submitted_unit_id,
+                    linked_by_contact_id=submitted_contact_id,
+                )
+                await self._append_event(
+                    profile_id=profile_id,
+                    event_type=DailyHelpEventType.HOUSEHOLD_LINKED.value,
+                    actor_type=DailyHelpActorType.SYSTEM.value,
+                    payload={
+                        "unit_id": submitted_unit_id,
+                        "link_id": str(link["id"]),
+                        "linked_by": "approval",
+                    },
+                )
         await self._append_event(
             profile_id=profile_id,
             event_type=DailyHelpEventType.APPROVED.value,

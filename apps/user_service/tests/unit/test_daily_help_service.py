@@ -1312,6 +1312,177 @@ async def test_get_my_submission_not_found_for_other_submitter():
         await svc.get_my_submission(project_id="project-1", profile_id="profile-pending")
 
 
+def _stub_resident_unit_access(svc: DailyHelpService) -> None:
+    svc.contact_units_repo = MagicMock()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.get_unit_project = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "project_id": "project-1",
+            "unit_label": "A-1204",
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_submit_resident_profile_sets_contact_and_unit():
+    """Resident submit stores contact/unit context and notifies admins."""
+    push = _FakePushDispatcher()
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=push,
+    )
+    _stub_category_lookup(svc)
+    _stub_resident_unit_access(svc)
+    svc.repo = MagicMock()
+    svc.repo.insert_profile = AsyncMock(
+        return_value={
+            "id": "profile-pending",
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
+    svc.repo.insert_document = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+    svc._resolve_contact_name = AsyncMock(return_value="Resident User")
+
+    from apps.user_service.app.schemas.daily_help import SubmitResidentDailyHelpRequest
+
+    result = await svc.submit_resident_profile(
+        contact_id="contact-1",
+        body=SubmitResidentDailyHelpRequest(
+            unit_id="unit-1",
+            **_create_body().model_dump(),
+        ),
+    )
+
+    assert result.status == DailyHelpStatus.PENDING_APPROVAL.value
+    insert_kwargs = svc.repo.insert_profile.await_args.kwargs
+    assert insert_kwargs["submitted_by_contact_id"] == "contact-1"
+    assert insert_kwargs["submitted_unit_id"] == "unit-1"
+    assert len(push.org_calls) == 1
+    assert push.org_calls[0]["params"]["unit_label"] == "A-1204"
+
+
+@pytest.mark.asyncio
+async def test_list_resident_submissions_filters_by_contact():
+    """Resident list scopes rows to the current contact."""
+    from apps.user_service.app.schemas.daily_help import (
+        ResidentDailyHelpSubmissionListQuery,
+    )
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    _stub_resident_unit_access(svc)
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_profiles = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "profile-pending",
+                    "display_name": "Mrs. Lakshmi Devi",
+                    "category_id": "cat-1",
+                    "category_name": "Maid",
+                    "phone_isd_code": "+91",
+                    "phone_number": "9655011223",
+                    "document_count": 1,
+                    "status": DailyHelpStatus.PENDING_APPROVAL.value,
+                    "gate_passcode": None,
+                    "photo_path": None,
+                    "created_at": datetime.now(timezone.utc),
+                    "rejection_reason": None,
+                    "reviewed_at": None,
+                    "submitted_unit_id": "unit-1",
+                    "submitted_unit_label": "A-1204",
+                }
+            ],
+            1,
+        )
+    )
+
+    items, total = await svc.list_resident_submissions(
+        contact_id="contact-1",
+        query=ResidentDailyHelpSubmissionListQuery(
+            unit_id="unit-1",
+            status=DailyHelpStatus.PENDING_APPROVAL,
+        ),
+    )
+
+    assert total == 1
+    assert items[0].submitted_unit_label == "A-1204"
+    svc.repo.list_profiles.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="project-1",
+        status=DailyHelpStatus.PENDING_APPROVAL.value,
+        search=None,
+        submitted_by_contact_id="contact-1",
+        limit=20,
+        offset=0,
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_resident_submission_auto_links_household():
+    """Admin approve auto-links resident submission to submitting unit."""
+    svc = DailyHelpService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+        push_dispatcher=_FakePushDispatcher(),
+    )
+    _stub_category_lookup(svc)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        side_effect=[
+            _detail_row(
+                id="profile-pending",
+                status=DailyHelpStatus.PENDING_APPROVAL.value,
+                submitted_by_contact_id="contact-1",
+                submitted_unit_id="unit-1",
+            ),
+            _detail_row(
+                id="profile-pending",
+                status=DailyHelpStatus.ACTIVE.value,
+                gate_passcode="4821",
+                linked_pass_id="pass-1",
+                submitted_by_user_id="staff-1",
+                submitted_by_contact_id="contact-1",
+                submitted_unit_id="unit-1",
+            ),
+        ]
+    )
+    svc.repo.generate_unique_passcode = AsyncMock(return_value="4821")
+    svc.repo.update_profile = AsyncMock(
+        return_value=_detail_row(
+            id="profile-pending",
+            status=DailyHelpStatus.ACTIVE.value,
+            gate_passcode="4821",
+            submitted_by_contact_id="contact-1",
+            submitted_unit_id="unit-1",
+        )
+    )
+    svc.repo.has_active_link = AsyncMock(return_value=False)
+    svc.repo.insert_link = AsyncMock(return_value={"id": "link-1"})
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.link_pass_id = AsyncMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.passes_repo = MagicMock()
+    svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
+    svc._resolve_created_by_name = AsyncMock(return_value="Admin User")
+    svc._resolve_submitted_by_name = AsyncMock(return_value="Resident User")
+
+    await svc.approve_profile(project_id="project-1", profile_id="profile-pending")
+
+    svc.repo.insert_link.assert_awaited_once()
+    link_kwargs = svc.repo.insert_link.await_args.kwargs
+    assert link_kwargs["unit_id"] == "unit-1"
+    assert link_kwargs["linked_by_contact_id"] == "contact-1"
+
+
 @pytest.mark.asyncio
 async def test_export_csv_success_and_invalid_format():
     from apps.user_service.app.schemas.daily_help import DailyHelpExportQuery

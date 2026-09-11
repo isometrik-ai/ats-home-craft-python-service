@@ -16,13 +16,17 @@ from apps.user_service.app.api.daily_help_resident import (
     get_resident_daily_help_attendance,
     get_resident_daily_help_profile,
     get_resident_daily_help_rating,
+    get_resident_daily_help_submission,
     list_resident_daily_help_categories,
     list_resident_daily_help_household_links,
     list_resident_daily_help_profiles,
+    list_resident_daily_help_submissions,
     mark_resident_daily_help_attendance_absence,
     remove_daily_help_household_link,
+    resubmit_resident_daily_help_profile,
     search_resident_daily_help_profiles,
     set_resident_daily_help_open_to_work,
+    submit_resident_daily_help_profile,
     update_daily_help_rating,
 )
 from apps.user_service.app.schemas.daily_help import (
@@ -31,9 +35,12 @@ from apps.user_service.app.schemas.daily_help import (
     RemoveDailyHelpHouseholdLinkRequest,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpSearchQuery,
+    ResidentDailyHelpSubmissionListQuery,
     SetDailyHelpOpenToWorkRequest,
+    SubmitResidentDailyHelpRequest,
     UpdateDailyHelpRatingRequest,
 )
+from apps.user_service.app.schemas.enums import DailyHelpStatus
 from apps.user_service.app.utils.common_utils import UserContext
 
 PROFILE_ID = "22222222-2222-2222-2222-222222222222"
@@ -246,6 +253,77 @@ async def test_resident_daily_help_write_endpoints(mock_service_cls, mock_contac
             profile_id=PROFILE_ID,
             unit_id=UNIT_ID,
             body=MarkDailyHelpAttendanceAbsenceRequest(attendance_date=date(2026, 8, 1)),
+            db_connection=db,
+            current_user=user,
+        )
+    ).status_code == 200
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.api.daily_help_resident.extract_onboarding_contact_context",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.api.daily_help_resident.DailyHelpService")
+async def test_resident_daily_help_submission_endpoints(mock_service_cls, mock_contact_ctx):
+    mock_contact_ctx.return_value = _contact_context()
+    service = mock_service_cls.return_value
+    service.submit_resident_profile = AsyncMock(
+        return_value=MagicMock(
+            model_dump=lambda **_: {
+                "id": PROFILE_ID,
+                "status": DailyHelpStatus.PENDING_APPROVAL.value,
+            }
+        )
+    )
+    service.list_resident_submissions = AsyncMock(return_value=([], 0))
+    service.get_resident_submission = AsyncMock(
+        return_value=MagicMock(model_dump=lambda **_: {"id": PROFILE_ID})
+    )
+    service.resubmit_resident_profile = AsyncMock(
+        return_value=MagicMock(model_dump=lambda **_: {"id": PROFILE_ID})
+    )
+
+    db = MagicMock()
+    user = {"sub": "user-1"}
+    body = SubmitResidentDailyHelpRequest(
+        first_name="Lakshmi",
+        last_name="Devi",
+        phone_isd_code="+91",
+        phone_number="9655011223",
+        category_id="cat-1",
+        unit_id=UNIT_ID,
+    )
+
+    assert (
+        await submit_resident_daily_help_profile(
+            request=_request(),
+            body=body,
+            db_connection=db,
+            current_user=user,
+        )
+    ).status_code == 201
+    assert (
+        await list_resident_daily_help_submissions(
+            request=_request(),
+            query=ResidentDailyHelpSubmissionListQuery(unit_id=UNIT_ID),
+            db_connection=db,
+            current_user=user,
+        )
+    ).status_code == 200
+    assert (
+        await get_resident_daily_help_submission(
+            request=_request(),
+            profile_id=PROFILE_ID,
+            db_connection=db,
+            current_user=user,
+        )
+    ).status_code == 200
+    assert (
+        await resubmit_resident_daily_help_profile(
+            request=_request(),
+            profile_id=PROFILE_ID,
+            body=body,
             db_connection=db,
             current_user=user,
         )
