@@ -461,6 +461,7 @@ def _cascade_with_turnover_repo_mocks() -> tuple[ContactDeleteCascadeService, di
     "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
     new_callable=AsyncMock,
 )
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.ContactsRepository")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.DailyHelpRepository")
@@ -489,11 +490,13 @@ async def test_tenant_delete_executes_real_turnover_household_cleanup(
     mock_daily_help_repo_cls: MagicMock,
     mock_contacts_repo_cls: MagicMock,
     mock_walk_in_cls: MagicMock,
+    mock_pets_cls: MagicMock,
     _mock_purge_likes: AsyncMock,
 ) -> None:
     """Tenant delete runs the real turnover service and clears unit household artifacts."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    mock_pets_cls.return_value.release_for_move_out = AsyncMock()
     cascade, turnover_repos = _cascade_with_turnover_repo_mocks()
     mock_contact_units_repo_cls.return_value = turnover_repos["contact_units"]
     mock_contact_roles_repo_cls.return_value = turnover_repos["contact_roles"]
@@ -534,6 +537,10 @@ async def test_tenant_delete_executes_real_turnover_household_cleanup(
         removal_reason="Contact deleted; clearing outgoing household.",
     )
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover.assert_awaited_once_with(
+        unit_id="unit-1",
+        reason="Contact deleted; clearing outgoing household.",
+    )
+    mock_pets_cls.return_value.release_for_move_out.assert_awaited_once_with(
         unit_id="unit-1",
         reason="Contact deleted; clearing outgoing household.",
     )

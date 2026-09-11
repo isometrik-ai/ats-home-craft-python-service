@@ -449,7 +449,17 @@ sequenceDiagram
 1. Remove button enabled only when `reason` non-empty.
 1. `POST /pets/{id}/remove` — sets `status = removed`, stores reason, hides from lists.
 
-### 7d. Household count refresh
+### 7d. Unit vacate / move-out cleanup
+
+When a unit is vacated or a tenant household moves out, turnover clears unit-scoped pets
+alongside vehicles, passes, daily help, and walk-ins:
+
+- Hook: `PetsService.release_for_move_out(unit_id, reason)`
+- Called from: `UnitOccupancyTurnoverService._clear_unit_scoped_assets`
+- Effect: all active pets on the unit → `status = removed` with system `removal_reason`
+- **Not** cleared on family-only move-out (same as daily help)
+
+### 7e. Household count refresh
 
 After create/remove, client refreshes:
 

@@ -52,3 +52,28 @@ async def test_list_slots_slot_type_filter_uses_normalized_subtype_sql():
     assert "basement" in count_args
     assert count_args[2] == "basement"
     assert list_args[2] == "basement"
+
+
+@pytest.mark.asyncio
+async def test_list_slots_search_uses_slot_code_label_sql():
+    """Search must match the same slot_code_label shown in the by-slot UI."""
+    conn = _FakeConn(total=1)
+    repo = ParkingAllotmentRepository(db_connection=conn)
+
+    await repo.list_slots(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        search="LUX-A-B1-2",
+        page=1,
+        page_size=20,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    list_query, list_args = conn.fetch_calls[0]
+    assert "CONCAT_WS(" in count_query
+    assert "NULLIF(TRIM(COALESCE(t.code, '')), '')" in count_query
+    assert "NULLIF(TRIM(COALESCE(fps.slot_code, '')), '')" in count_query
+    assert "LPAD(fps.slot_number::text, 3, '0')" in count_query
+    assert "CONCAT(" not in count_query
+    assert count_args[2] == "%LUX-A-B1-2%"
+    assert list_args[2] == "%LUX-A-B1-2%"

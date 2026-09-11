@@ -363,8 +363,22 @@ async def test_resident_booking_helpers():
         organization_id=ORG,
         project_id=PROJECT,
         contact_id="contact-1",
+        timeframe="upcoming",
     )
     assert bookings[0]["booking_id"] == BOOKING
+    query, _ = conn.fetch_calls[-1]
+    assert "e.end_date >= CURRENT_DATE" in query
+    assert "e.start_date ASC" in query
+
+    await repo.list_my_bookings(
+        organization_id=ORG,
+        project_id=PROJECT,
+        contact_id="contact-1",
+        timeframe="past",
+    )
+    past_query, _ = conn.fetch_calls[-1]
+    assert "e.end_date < CURRENT_DATE" in past_query
+    assert "e.start_date DESC" in past_query
 
     conn.row = {"id": BOOKING}
     mine = await repo.get_my_booking_for_event(

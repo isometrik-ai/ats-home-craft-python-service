@@ -20,6 +20,7 @@ from apps.user_service.app.api.community_events_resident import (
 from apps.user_service.app.schemas.community_events import (
     CreateEventBookingRequest,
     ResidentEventListQuery,
+    ResidentMyBookingsQuery,
     VerifyBookingRequest,
 )
 from apps.user_service.app.utils.common_utils import UserContext
@@ -86,6 +87,7 @@ async def test_resident_event_read_endpoints(mock_service_cls, mock_contact_ctx)
         await list_my_community_event_bookings(
             request=_request(),
             project_id=PROJECT_ID,
+            query=ResidentMyBookingsQuery(),
             db_connection=db,
             current_user=user,
         )
