@@ -540,10 +540,18 @@ async def test_remove_vehicle(monkeypatch, client):
 
     _patch_contact_context(monkeypatch)
 
-    async def fake_remove(_self, *, contact_id: str, vehicle_id: str):
-        del _self
+    async def fake_remove(
+        _self,
+        *,
+        contact_id: str,
+        vehicle_id: str,
+        removed_by_contact_id: str | None = None,
+        **kwargs,
+    ):
+        del _self, kwargs
         assert contact_id == CONTACT_ID
         assert vehicle_id == "veh-1"
+        assert removed_by_contact_id == CONTACT_ID
         return {**_FAKE_VEHICLE, "status": "removed"}
 
     monkeypatch.setattr(

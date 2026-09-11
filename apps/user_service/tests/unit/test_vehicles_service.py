@@ -276,8 +276,43 @@ async def test_remove_approved_soft_deletes_without_releasing_slot():
     result = await svc.remove_vehicle(contact_id="c1", vehicle_id="v1")
 
     svc.parking_slots_repo.release_slot.assert_not_awaited()
-    svc.repo.soft_remove.assert_awaited_once()
+    svc.repo.soft_remove.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason=None,
+        removed_by_user_id=None,
+        removed_by_contact_id=None,
+    )
     assert result["status"] == VehicleStatus.REMOVED.value
+
+
+@pytest.mark.asyncio
+async def test_remove_approved_sets_removed_by_contact():
+    """Resident soft-remove records removed_by_contact_id."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = {
+        "id": "v1",
+        "status": VehicleStatus.APPROVED.value,
+        "project_id": "p1",
+        "unit_id": "u1",
+    }
+    svc.repo.soft_remove.return_value = {"id": "v1", "status": VehicleStatus.REMOVED.value}
+
+    await svc.remove_vehicle(
+        contact_id="c1",
+        vehicle_id="v1",
+        removed_by_contact_id="c1",
+    )
+
+    svc.repo.soft_remove.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="c1",
+        vehicle_id="v1",
+        rejection_reason=None,
+        removed_by_user_id=None,
+        removed_by_contact_id="c1",
+    )
 
 
 @pytest.mark.asyncio
@@ -358,6 +393,7 @@ async def test_list_project_vehicles_includes_owner_and_unit():
     assert items[0]["approved_by"]["phone"] == "+919000000001"
     assert items[0]["approved_by"]["avatar_url"] == "https://cdn.example.com/admins/amit.jpg"
     assert items[0]["rejected_by"] is None
+    assert items[0]["removed_by"] is None
 
     assert items[0]["owner"]["contact_id"] == "owner-1"
     assert items[0]["owner"]["display_name"] == "Mr. Rajesh Kapoor"
@@ -1601,7 +1637,48 @@ async def test_admin_delete_vehicle_approved_soft_removes():
         contact_id="c1",
         vehicle_id="v1",
         rejection_reason="Invalid documents",
+        removed_by_user_id="user-1",
+        removed_by_contact_id=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_list_project_vehicles_includes_removed_by_admin():
+    """Removed vehicles include nested removed_by org-member summary."""
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "MH56AS8636",
+            "photo_paths": [],
+            "status": VehicleStatus.REMOVED.value,
+            "rejection_reason": "No longer associated with unit",
+            "status_updated_at": "2026-09-11T05:20:41.734698+00:00",
+            "created_at": "2026-09-02T11:16:38.512064+00:00",
+            "updated_at": "2026-09-11T05:20:41.734698+00:00",
+            "sort_order": 0,
+            "removed_by_user_id": "admin-1",
+            "removed_by_salutation": "Mr.",
+            "removed_by_first_name": "ATS",
+            "removed_by_last_name": "HomeKraft",
+            "removed_by_email": "tech@homecraft.app",
+            "removed_by_phone_isd_code": "+91",
+            "removed_by_phone_number": "9876543212",
+            "removed_by_avatar_url": "https://cdn.example.com/admins/ats.jpg",
+        }
+    ]
+
+    items = await svc.list_project_vehicles(project_id="p1", status=VehicleStatus.REMOVED)
+
+    assert items[0]["removed_by"]["user_id"] == "admin-1"
+    assert items[0]["removed_by"]["display_name"] == "Mr. ATS HomeKraft"
+    assert items[0]["removed_by"]["email"] == "tech@homecraft.app"
+    assert items[0]["rejected_by"] is None
 
 
 @pytest.mark.asyncio

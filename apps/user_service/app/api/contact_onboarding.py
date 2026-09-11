@@ -828,6 +828,7 @@ async def remove_vehicle(
     data = await vehicles_service.remove_vehicle(
         contact_id=str(contact["id"]),
         vehicle_id=vehicle_id,
+        removed_by_contact_id=str(contact["id"]),
     )
     set_audit_context(
         request,
