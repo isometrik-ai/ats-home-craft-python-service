@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
-from apps.user_service.app.schemas.enums.pets import (
-    PetActorType,
-    PetEventType,
-    PetStatus,
-)
+from apps.user_service.app.schemas.enums.pets import PetStatus
 
 _PET_SELECT_COLUMNS = """
               p.id::text AS id,
@@ -70,47 +65,6 @@ _ACTIVE_PET_FILTER = f"p.status = '{PetStatus.ACTIVE.value}'::pet_status AND p.d
 class PetsRepository(BaseRepository):
     """Database operations for public.pets."""
 
-    async def insert_event(
-        self,
-        *,
-        organization_id: str,
-        pet_id: str,
-        event_type: str,
-        actor_contact_id: str | None = None,
-        actor_user_id: str | None = None,
-        payload: dict[str, Any] | None = None,
-    ) -> None:
-        """Append a pet audit event."""
-        await self.db_connection.execute(
-            """
-            INSERT INTO pet_events (
-                organization_id,
-                pet_id,
-                event_type,
-                actor_type,
-                actor_contact_id,
-                actor_user_id,
-                payload
-            )
-            VALUES (
-                $1::uuid,
-                $2::uuid,
-                $3::pet_event_type,
-                $4::pet_actor_type,
-                $5::uuid,
-                $6::uuid,
-                $7::jsonb
-            )
-            """,
-            organization_id,
-            pet_id,
-            event_type,
-            PetActorType.RESIDENT.value,
-            actor_contact_id,
-            actor_user_id,
-            json.dumps(payload or {}),
-        )
-
     async def create(
         self,
         *,
@@ -125,9 +79,8 @@ class PetsRepository(BaseRepository):
         date_of_birth,
         vaccination_status: str,
         photo_paths: list[str],
-        actor_contact_id: str,
     ) -> dict[str, Any]:
-        """Insert a pet and record a created event."""
+        """Insert a pet profile."""
         row = await self.db_connection.fetchrow(
             f"""
             INSERT INTO pets AS p (
@@ -173,14 +126,7 @@ class PetsRepository(BaseRepository):
             vaccination_status,
             photo_paths,
         )
-        pet = dict(row)
-        await self.insert_event(
-            organization_id=organization_id,
-            pet_id=str(pet["id"]),
-            event_type=PetEventType.CREATED.value,
-            actor_contact_id=actor_contact_id,
-        )
-        return pet
+        return dict(row)
 
     async def update(
         self,
@@ -188,10 +134,8 @@ class PetsRepository(BaseRepository):
         organization_id: str,
         pet_id: str,
         update_data: dict[str, Any],
-        event_type: str,
-        actor_contact_id: str,
     ) -> dict[str, Any] | None:
-        """Patch a pet row and append an audit event."""
+        """Patch a pet row."""
         if not update_data:
             return await self.get_by_id(organization_id=organization_id, pet_id=pet_id)
 
@@ -221,15 +165,7 @@ class PetsRepository(BaseRepository):
             """,
             *values,
         )
-        if not row:
-            return None
-        await self.insert_event(
-            organization_id=organization_id,
-            pet_id=pet_id,
-            event_type=event_type,
-            actor_contact_id=actor_contact_id,
-        )
-        return dict(row)
+        return dict(row) if row else None
 
     async def soft_remove(
         self,
@@ -259,16 +195,7 @@ class PetsRepository(BaseRepository):
             reason,
             removed_by_contact_id,
         )
-        if not row:
-            return None
-        await self.insert_event(
-            organization_id=organization_id,
-            pet_id=pet_id,
-            event_type=PetEventType.REMOVED.value,
-            actor_contact_id=removed_by_contact_id,
-            payload={"reason": reason},
-        )
-        return dict(row)
+        return dict(row) if row else None
 
     async def get_by_id(
         self,

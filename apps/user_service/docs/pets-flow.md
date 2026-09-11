@@ -84,11 +84,11 @@ vehicles/household wizard steps). See [contact-onboarding-flow.md](./contact-onb
 
 **Remove confirmation**
 
-| Rule            | Enforcement                                               |
-| --------------- | --------------------------------------------------------- |
-| Reason required | `reason` min 3 chars; Remove button disabled until filled |
-| Soft delete     | `status = removed`, `deleted_at`, `removal_reason` stored |
-| Audit           | `pet_events` row with `event_type = removed`              |
+| Rule            | Enforcement                                                          |
+| --------------- | -------------------------------------------------------------------- |
+| Reason required | `reason` min 3 chars; Remove button disabled until filled            |
+| Soft delete     | `status = removed`, `deleted_at`, `removal_reason` stored            |
+| Audit           | API audit log + `removal_reason` / `removed_by_contact_id` on `pets` |
 
 ______________________________________________________________________
 
@@ -126,10 +126,9 @@ See [ADR 0016 § Schema](./adr/0016-pets.md#schema-proposed) for full DDL.
 
 ### New tables summary
 
-| Table            | Purpose                                                                              |
-| ---------------- | ------------------------------------------------------------------------------------ |
-| **`pets`**       | Pet profile: name, pet_type, breed, vaccination, gender, DOB, photo_paths, unit link |
-| **`pet_events`** | Append-only audit (created, updated, photo_changed, removed)                         |
+| Table      | Purpose                                                                              |
+| ---------- | ------------------------------------------------------------------------------------ |
+| **`pets`** | Pet profile: name, pet_type, breed, vaccination, gender, DOB, photo_paths, unit link |
 
 ### No new Postgres tables for catalog
 
@@ -189,9 +188,7 @@ and admin views. Same pattern as `vehicles.contact_id` + `owner` summary on vehi
 - **Not** accepted in create/update request bodies — clients must not send it.
 - **Immutable** after create (editing the pet does not change who created it).
 - `PATCH` and remove actions do not overwrite `created_by_contact_id`.
-- `pet_events(created)` stores the same contact in `actor_contact_id`.
-
-**Example (detail response fragment):**
+  **Example (detail response fragment):**
 
 ```json
 {
@@ -433,7 +430,7 @@ sequenceDiagram
     App->>API: POST /pets { unit_id, name, ... }
     API->>API: Validate unit membership + catalog type/breed names
     API->>API: Set created_by_contact_id = caller contact
-    API->>DB: INSERT pets + pet_events(created)
+    API->>DB: INSERT pets
     DB-->>API: row
     API-->>App: PetResponse
 
@@ -444,7 +441,7 @@ sequenceDiagram
 
 1. `GET /pets/{id}?unit_id=` — load current values + resolved labels.
 1. User edits form (type/breed pickers from catalog; add/remove/reorder photos via `photo_paths`).
-1. `PATCH /pets/{id}?unit_id=` — partial update; `pet_events(updated)` or `photo_changed` when only photos change.
+1. `PATCH /pets/{id}?unit_id=` — partial update; audited via `@audit_api_call`.
 
 ### 7c. Remove pet
 
