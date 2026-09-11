@@ -1095,6 +1095,23 @@
       "open_to_work_updated": "Open to work status updated successfully."
     }
   },
+  "pets": {
+    "errors": {
+      "not_found": "The pet profile could not be found.",
+      "invalid_pet_type": "The selected pet type is not valid.",
+      "invalid_breed": "The selected breed is not valid for this pet type.",
+      "invalid_photo_path": "One or more photo paths are invalid.",
+      "invalid_date_of_birth": "Date of birth cannot be in the future."
+    },
+    "success": {
+      "catalog_retrieved": "Pet options retrieved successfully.",
+      "list_retrieved": "Pet profiles retrieved successfully.",
+      "detail_retrieved": "Pet profile retrieved successfully.",
+      "created": "Pet profile created successfully.",
+      "updated": "Pet profile updated successfully.",
+      "removed": "Pet profile removed successfully."
+    }
+  },
   "parking_allotment": {
     "errors": {
       "slot_not_found": "The parking slot could not be found.",
