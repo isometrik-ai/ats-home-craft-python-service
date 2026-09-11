@@ -30,6 +30,8 @@ def record_to_dict(row: Any) -> dict[str, Any]:
             out[key] = str(val)
         elif isinstance(val, (list, dict)):
             out[key] = val
+        elif isinstance(val, str):
+            out[key] = parse_json_field(val)
         else:
             out[key] = val
     return out
@@ -42,5 +44,35 @@ def parse_json_field(value: Any) -> Any:
     if isinstance(value, (list, dict)):
         return value
     if isinstance(value, str):
-        return json.loads(value)
+        if not value or value[0] not in "[{":
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
     return value
+
+
+def jsonb_bind(value: Any) -> str | None:
+    """Serialize list/dict for asyncpg jsonb parameters.
+
+    asyncpg's jsonb codec expects JSON text, not Python collections.
+    Return None for empty values so SQL COALESCE can apply column defaults.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or stripped in ("[]", "{}"):
+            return None
+        return value
+    if isinstance(value, (list, dict)):
+        if not value:
+            return None
+        return json.dumps(value, default=str)
+    return json.dumps(value, default=str)
+
+
+def jsonb_bind_required(value: Any, *, default: str = "[]") -> str:
+    """Serialize jsonb for inserts that do not use COALESCE on the parameter."""
+    return jsonb_bind(value) or default

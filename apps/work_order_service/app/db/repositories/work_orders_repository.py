@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
-from apps.work_order_service.app.utils.records import record_to_dict
+from apps.work_order_service.app.utils.records import (
+    jsonb_bind,
+    jsonb_bind_required,
+    record_to_dict,
+)
 
 
 class WorkOrderRepository(ScopedRepository):
@@ -120,7 +123,7 @@ class WorkOrderRepository(ScopedRepository):
             data.get("assignee_name"),
             data.get("assignee_user_id"),
             data.get("vendor_token_hash"),
-            json.dumps(data.get("timeline") or []),
+            jsonb_bind_required(data.get("timeline")),
             data.get("access_notes"),
             data.get("form_template_id"),
             data.get("is_recurring", False),
@@ -159,7 +162,7 @@ class WorkOrderRepository(ScopedRepository):
             data.get("state"),
             data.get("priority"),
             data.get("scheduled_date"),
-            json.dumps(data["timeline"]) if "timeline" in data else None,
+            jsonb_bind(data["timeline"]) if "timeline" in data else None,
             data.get("company_id"),
             data.get("started_at"),
             data.get("completed_at"),
@@ -190,12 +193,13 @@ class WorkOrderRepository(ScopedRepository):
             entity_id,
             organization_id,
             project_id,
-            json.dumps([evt]),
+            jsonb_bind_required([evt]),
         )
         if not row:
             return None
-        timeline = row["timeline"]
-        return timeline if isinstance(timeline, list) else json.loads(timeline)
+        from apps.work_order_service.app.utils.records import parse_json_field
+
+        return parse_json_field(row["timeline"])
 
     async def cancel_contract_work_orders(self, contract_id: str) -> int:
         """Cancel contract work orders."""
@@ -271,7 +275,7 @@ class WorkOrderRepository(ScopedRepository):
               AND record_status = 'active'
             """,
             template_id,
-            json.dumps(
+            jsonb_bind_required(
                 [
                     {
                         "type": "status_changed",

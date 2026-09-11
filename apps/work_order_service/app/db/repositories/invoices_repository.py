@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
-from apps.work_order_service.app.utils.records import record_to_dict
+from apps.work_order_service.app.utils.records import (
+    jsonb_bind,
+    jsonb_bind_required,
+    record_to_dict,
+)
 
 
 class InvoicesRepository(ScopedRepository):
@@ -79,15 +82,15 @@ class InvoicesRepository(ScopedRepository):
             data["company_id"],
             data["invoice_number"],
             data.get("invoice_date"),
-            json.dumps(data.get("line_items") or []),
+            jsonb_bind(data.get("line_items")),
             data.get("subtotal_minor"),
             data.get("tax_minor"),
             data.get("total_minor"),
             data.get("currency"),
             data.get("status"),
             data.get("file_paths") or [],
-            json.dumps(data.get("timeline") or []),
-            json.dumps(data.get("revisions") or []),
+            jsonb_bind(data.get("timeline")),
+            jsonb_bind(data.get("revisions")),
         )
         return record_to_dict(row)
 
@@ -118,15 +121,15 @@ class InvoicesRepository(ScopedRepository):
             data["project_id"],
             data.get("invoice_number"),
             data.get("invoice_date"),
-            json.dumps(data["line_items"]) if "line_items" in data else None,
+            jsonb_bind(data["line_items"]) if "line_items" in data else None,
             data.get("subtotal_minor"),
             data.get("tax_minor"),
             data.get("total_minor"),
             data.get("currency"),
             data.get("status"),
             data.get("file_paths"),
-            json.dumps(data["timeline"]) if "timeline" in data else None,
-            json.dumps(data["revisions"]) if "revisions" in data else None,
+            jsonb_bind(data["timeline"]) if "timeline" in data else None,
+            jsonb_bind(data["revisions"]) if "revisions" in data else None,
             data.get("payment_id"),
         )
         return record_to_dict(row) if row else None
@@ -154,9 +157,10 @@ class InvoicesRepository(ScopedRepository):
             entity_id,
             organization_id,
             project_id,
-            json.dumps([evt]),
+            jsonb_bind_required([evt]),
         )
         if not row:
             return None
-        timeline = row["timeline"]
-        return timeline if isinstance(timeline, list) else json.loads(timeline)
+        from apps.work_order_service.app.utils.records import parse_json_field
+
+        return parse_json_field(row["timeline"])

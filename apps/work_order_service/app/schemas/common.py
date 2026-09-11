@@ -20,5 +20,5 @@ class TimelineEventRequest(BaseModel):
 def dump_request(model: BaseModel, *, partial: bool = False) -> dict[str, Any]:
     """Serialize a request model for repository/service layers."""
     if partial:
-        return model.model_dump(exclude_unset=True, mode="json", by_alias=True)
-    return model.model_dump(mode="json", by_alias=True)
+        return model.model_dump(exclude_unset=True, by_alias=True)
+    return model.model_dump(by_alias=True)
