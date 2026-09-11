@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from apps.work_order_service.app.utils.records import record_to_dict
+from apps.work_order_service.app.utils.records import jsonb_bind, record_to_dict
 
 
 class IntegrationRepository:
@@ -43,8 +42,8 @@ class IntegrationRepository:
             data.get("actor_name"),
             data.get("actor_user_id"),
             data.get("source", "fm"),
-            json.dumps(data.get("changes") or []),
-            json.dumps(data.get("snapshot") or {}),
+            jsonb_bind(data.get("changes")),
+            jsonb_bind(data.get("snapshot")),
         )
         return record_to_dict(row)
 
@@ -331,7 +330,7 @@ class IntegrationRepository:
             data.get("entity"),
             data.get("entity_id"),
             data["event"],
-            json.dumps(data.get("request_payload") or {}),
+            jsonb_bind(data.get("request_payload")),
             data.get("response_status"),
             data.get("error"),
             data.get("attempt", 1),

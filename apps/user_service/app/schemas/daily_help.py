@@ -61,6 +61,15 @@ class CreateDailyHelpRequest(BaseModel):
     documents: list[DailyHelpDocumentInput] = Field(default_factory=list, max_length=20)
 
 
+class SubmitResidentDailyHelpRequest(CreateDailyHelpRequest):
+    """Resident submits a daily help profile for admin review."""
+
+    unit_id: str | None = Field(
+        None,
+        description="Optional resident unit. When set, links the submission to that flat.",
+    )
+
+
 class SetDailyHelpOpenToWorkRequest(BaseModel):
     """Resident toggles whether a household-linked helper is open to work."""
 
@@ -203,6 +212,18 @@ class DailyHelpSubmissionListQuery(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    status: DailyHelpStatus | None = None
+    search: str | None = Field(None, max_length=200)
+    page: int = Field(1, ge=1)
+    page_size: int = Field(20, ge=1, le=100)
+
+
+class ResidentDailyHelpSubmissionListQuery(BaseModel):
+    """Resident list filters for GET /daily-help/submissions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str | None = None
     status: DailyHelpStatus | None = None
     search: str | None = Field(None, max_length=200)
     page: int = Field(1, ge=1)
@@ -433,6 +454,31 @@ class DailyHelpSubmissionListItemResponse(DailyHelpListItemResponse):
 
     rejection_reason: str | None = None
     reviewed_at: str | None = None
+    submission_source: str | None = None
+    submitted_by_contact_id: str | None = None
+    submitted_unit_id: str | None = None
+    submitted_unit_label: str | None = None
+
+
+class ResidentDailyHelpSubmissionListItemResponse(BaseModel):
+    """Resident submission row for my-submissions list."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    display_name: str
+    category_id: str
+    category_name: str | None = None
+    phone: str | None = None
+    photo_path: str | None = None
+    document_count: int = 0
+    status: str
+    gate_passcode: str | None = None
+    rejection_reason: str | None = None
+    reviewed_at: str | None = None
+    created_at: str | None = None
+    submitted_unit_id: str | None = None
+    submitted_unit_label: str | None = None
 
 
 class CreateDailyHelpResponse(BaseModel):
@@ -490,6 +536,10 @@ class DailyHelpDetailResponse(BaseModel):
     created_by_name: str | None = None
     submitted_by_user_id: str | None = None
     submitted_by_name: str | None = None
+    submitted_by_contact_id: str | None = None
+    submitted_unit_id: str | None = None
+    submitted_unit_label: str | None = None
+    submission_source: str | None = None
     reviewed_by_user_id: str | None = None
     reviewed_by_name: str | None = None
     reviewed_at: str | None = None
@@ -564,6 +614,39 @@ class ResidentDailyHelpHouseholdLinksCategoryResponse(BaseModel):
     inside_count: int = 0
     open_to_work_count: int = 0
     linked_profiles: list[ResidentDailyHelpHouseholdLinkItemResponse] = Field(default_factory=list)
+
+
+class ResidentDailyHelpSubmissionDetailResponse(BaseModel):
+    """Resident view of a profile they submitted for admin review."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    initials: str | None = None
+    first_name: str
+    middle_name: str | None = None
+    last_name: str
+    display_name: str
+    phone_isd_code: str
+    phone_number: str
+    phone: str | None = None
+    alternate_phone_isd_code: str | None = None
+    alternate_phone_number: str | None = None
+    category_id: str
+    category_name: str | None = None
+    gender: str | None = None
+    date_of_birth: str | None = None
+    photo_path: str | None = None
+    gate_passcode: str | None = None
+    status: str
+    open_to_work: bool = False
+    document_count: int = 0
+    documents: list[DailyHelpDocumentResponse] = Field(default_factory=list)
+    rejection_reason: str | None = None
+    reviewed_at: str | None = None
+    submitted_unit_id: str | None = None
+    submitted_unit_label: str | None = None
+    created_at: str | None = None
 
 
 class ResidentDailyHelpDetailResponse(BaseModel):
@@ -743,6 +826,30 @@ class ResidentDailyHelpDetailApiResponse(BaseModel):
     statusCode: int
     code: str
     data: ResidentDailyHelpDetailResponse
+
+
+class ResidentDailyHelpSubmissionListApiResponse(BaseModel):
+    """API envelope for GET /daily-help/submissions (resident)."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[ResidentDailyHelpSubmissionListItemResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ResidentDailyHelpSubmissionDetailApiResponse(BaseModel):
+    """API envelope for GET /daily-help/{profile_id}/submission (resident)."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ResidentDailyHelpSubmissionDetailResponse
 
 
 class CreateDailyHelpApiResponse(BaseModel):

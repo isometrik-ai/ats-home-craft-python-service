@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
-from apps.work_order_service.app.utils.records import record_to_dict
+from apps.work_order_service.app.utils.records import (
+    jsonb_bind,
+    jsonb_bind_required,
+    record_to_dict,
+)
 
 
 class FormTemplatesRepository(ScopedRepository):
@@ -61,13 +64,12 @@ class FormTemplatesRepository(ScopedRepository):
             data["project_id"],
             data["name"],
             data.get("description") or "",
-            json.dumps(data.get("schema") or {}),
+            jsonb_bind_required(data.get("schema"), default="{}"),
         )
         return record_to_dict(row)
 
     async def update(self, entity_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """Update."""
-        schema_json = json.dumps(data["schema"]) if "schema" in data else None
         row = await self.conn.fetchrow(
             """
             UPDATE work_order.form_templates
@@ -84,6 +86,6 @@ class FormTemplatesRepository(ScopedRepository):
             data["project_id"],
             data.get("name"),
             data.get("description"),
-            schema_json,
+            jsonb_bind(data["schema"]) if "schema" in data else None,
         )
         return record_to_dict(row) if row else None

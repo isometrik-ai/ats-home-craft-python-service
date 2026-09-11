@@ -341,14 +341,17 @@ ______________________________________________________________________
 
 ### 6.5 Daily help
 
-#### Security submission review (`DailyHelpService` — `daily_help.py`)
+#### Submission review (`DailyHelpService` — security + resident)
 
-| Event       | Message key                                 | Trigger                         | Recipient                                   | API                                    |
-| ----------- | ------------------------------------------- | ------------------------------- | ------------------------------------------- | -------------------------------------- |
-| Submitted   | `notifications.push.daily_help.submitted`   | Security submits for review     | Active org members (admins)                 | `POST .../daily-help/submissions`      |
-| Resubmitted | `notifications.push.daily_help.resubmitted` | Security resubmits after reject | Active org members (admins)                 | `PATCH .../daily-help/{id}/submission` |
-| Approved    | `notifications.push.daily_help.approved`    | Admin approves pending profile  | Security submitter (`submitted_by_user_id`) | `POST .../daily-help/{id}/approve`     |
-| Rejected    | `notifications.push.daily_help.rejected`    | Admin rejects pending profile   | Security submitter                          | `POST .../daily-help/{id}/reject`      |
+| Event       | Message key                                 | Trigger                                     | Recipient                          | API                                                                           |
+| ----------- | ------------------------------------------- | ------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------- |
+| Submitted   | `notifications.push.daily_help.submitted`   | Security or resident submits for review     | Active org members (admins)        | `POST .../daily-help/submissions` or `POST /daily-help/submissions`           |
+| Resubmitted | `notifications.push.daily_help.resubmitted` | Security or resident resubmits after reject | Active org members (admins)        | `PATCH .../daily-help/{id}/submission` or `PATCH /daily-help/{id}/submission` |
+| Approved    | `notifications.push.daily_help.approved`    | Admin approves pending profile              | Submitter (`submitted_by_user_id`) | `POST .../daily-help/{id}/approve`                                            |
+| Rejected    | `notifications.push.daily_help.rejected`    | Admin rejects pending profile               | Submitter (`submitted_by_user_id`) | `POST .../daily-help/{id}/reject`                                             |
+
+Resident submit/resubmit may include **`unit_label`** in admin notification params when `unit_id` was
+provided in the request body.
 
 **Params:** `{helper_name}` (profile display name).
 

@@ -9,6 +9,7 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.daily_help import (
+    CreateDailyHelpApiResponse,
     CreateDailyHelpRatingRequest,
     DailyHelpAttendanceApiResponse,
     DailyHelpHouseholdLinkApiResponse,
@@ -24,7 +25,11 @@ from apps.user_service.app.schemas.daily_help import (
     ResidentDailyHelpListApiResponse,
     ResidentDailyHelpListQuery,
     ResidentDailyHelpSearchQuery,
+    ResidentDailyHelpSubmissionDetailApiResponse,
+    ResidentDailyHelpSubmissionListApiResponse,
+    ResidentDailyHelpSubmissionListQuery,
     SetDailyHelpOpenToWorkRequest,
+    SubmitResidentDailyHelpRequest,
     UpdateDailyHelpRatingRequest,
 )
 from apps.user_service.app.services.daily_help_service import DailyHelpService
@@ -122,6 +127,18 @@ ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
 ATTENDANCE_ABSENCE_SUCCESS_RESPONSES = _ok_response(
     MarkDailyHelpAttendanceAbsenceApiResponse,
     "Calendar day marked absent for the household-linked helper.",
+)
+SUBMISSION_CREATED_RESPONSES = _created_response(
+    CreateDailyHelpApiResponse,
+    "Daily help profile submitted for admin review.",
+)
+SUBMISSIONS_LIST_SUCCESS_RESPONSES = _ok_response(
+    ResidentDailyHelpSubmissionListApiResponse,
+    "Paginated daily help profiles submitted by the resident.",
+)
+SUBMISSION_DETAIL_SUCCESS_RESPONSES = _ok_response(
+    ResidentDailyHelpSubmissionDetailApiResponse,
+    "Daily help submission detail for the resident.",
 )
 
 
@@ -259,6 +276,74 @@ async def list_resident_daily_help_household_links(
     )
 
 
+@handle_api_exceptions("submit resident daily help profile")
+@router.post(
+    "/submissions",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Resident submits a daily help profile for admin review",
+    response_model=None,
+    responses=SUBMISSION_CREATED_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def submit_resident_daily_help_profile(
+    request: Request,
+    body: SubmitResidentDailyHelpRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Register a helper pending admin approval (no gate pass issued)."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.submit_resident_profile(
+        contact_id=str(contact["id"]),
+        body=body,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.submitted",
+        custom_code=CustomStatusCode.CREATED,
+        data=data.model_dump(),
+        status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("list resident daily help submissions")
+@router.get(
+    "/submissions",
+    status_code=http_status.HTTP_200_OK,
+    summary="List daily help profiles submitted by the resident",
+    response_model=None,
+    responses=SUBMISSIONS_LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def list_resident_daily_help_submissions(
+    request: Request,
+    query: ResidentDailyHelpSubmissionListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return paginated submissions created by the caller (pending, rejected, or approved)."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items, total = await service.list_resident_submissions(
+        contact_id=str(contact["id"]),
+        query=query,
+    )
+    return list_response(
+        request=request,
+        items=[item.model_dump() for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="daily_help.success.submissions_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
 @handle_api_exceptions("get resident daily help profile")
 @router.get(
     "/{profile_id}",
@@ -288,6 +373,72 @@ async def get_resident_daily_help_profile(
     return success_response(
         request=request,
         message_key="daily_help.success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("get resident daily help submission")
+@router.get(
+    "/{profile_id}/submission",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get a daily help profile submitted by the resident",
+    response_model=None,
+    responses=SUBMISSION_DETAIL_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def get_resident_daily_help_submission(
+    request: Request,
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return one resident submission with documents and review metadata."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_resident_submission(
+        contact_id=str(contact["id"]),
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.submission_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("resubmit resident daily help profile")
+@router.patch(
+    "/{profile_id}/submission",
+    status_code=http_status.HTTP_200_OK,
+    summary="Resident resubmits a rejected daily help profile",
+    response_model=None,
+    responses=SUBMISSION_DETAIL_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def resubmit_resident_daily_help_profile(
+    request: Request,
+    profile_id: str = Path(...),
+    body: SubmitResidentDailyHelpRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Edit and resubmit a rejected profile for admin review."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.resubmit_resident_profile(
+        contact_id=str(contact["id"]),
+        profile_id=profile_id,
+        body=body,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.resubmitted",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
     )

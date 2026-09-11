@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import asyncpg
+from asyncpg.exceptions import UniqueViolationError
 
 from apps.user_service.app.schemas.enums import EntityType
 from apps.user_service.app.services.custom_field_service import CustomFieldService
@@ -12,6 +13,8 @@ from apps.user_service.app.utils.common_utils import UserContext
 from apps.work_order_service.app.db.repositories.assets_repository import (
     AssetsRepository,
 )
+from libs.shared_utils.http_exceptions import ConflictException
+from libs.shared_utils.status_codes import CustomStatusCode
 
 
 class AssetsService:
@@ -70,7 +73,16 @@ class AssetsService:
                 "custom_fields": await self._validate_custom_fields(data.get("custom_fields")),
             }
         payload = {**self._scope(project_id), **data}
-        record = await self.repo.create(payload)
+        try:
+            record = await self.repo.create(payload)
+        except UniqueViolationError as exc:
+            if exc.constraint_name == "assets_code_project_uq":
+                raise ConflictException(
+                    message_key="assets.errors.duplicate_code",
+                    custom_code=CustomStatusCode.CONFLICT,
+                    params={"code": payload.get("code", "")},
+                ) from exc
+            raise
         return record
 
     async def update(
@@ -87,7 +99,16 @@ class AssetsService:
             )
             data = {**data, "custom_fields": merged}
         payload = {**self._scope(project_id), **data}
-        record = await self.repo.update(entity_id, payload)
+        try:
+            record = await self.repo.update(entity_id, payload)
+        except UniqueViolationError as exc:
+            if exc.constraint_name == "assets_code_project_uq":
+                raise ConflictException(
+                    message_key="assets.errors.duplicate_code",
+                    custom_code=CustomStatusCode.CONFLICT,
+                    params={"code": payload.get("code", "")},
+                ) from exc
+            raise
         return record
 
     async def delete(self, *, project_id: str, entity_id: str) -> bool:
