@@ -16,9 +16,6 @@ from apps.user_service.app.schemas.pets import (
     RemovePetRequest,
     UpdatePetRequest,
 )
-from apps.user_service.app.services.contact_onboarding_service import (
-    ContactOnboardingService,
-)
 from apps.user_service.app.services.pet_catalog_service import PetCatalogService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.user_utils import build_full_name
@@ -81,6 +78,10 @@ class PetsService:
                 message_key="pets.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+
+        from apps.user_service.app.services.contact_onboarding_service import (
+            ContactOnboardingService,
+        )
 
         onboarding = ContactOnboardingService(
             db_connection=self.db_connection,
@@ -170,6 +171,22 @@ class PetsService:
             )
         detail = await self.repo.get_by_id(organization_id=org_id, pet_id=pet_id)
         return self._serialize_pet(detail or row)
+
+    async def release_for_move_out(
+        self,
+        *,
+        unit_id: str,
+        reason: str,
+    ) -> None:
+        """Soft-remove all active pets when a unit is vacated or tenant household leaves."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        await self.repo.soft_remove_all_active_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+            reason=reason,
+            removed_by_contact_id=None,
+        )
 
     async def remove_pet(
         self,
