@@ -87,6 +87,8 @@ class VehiclesService:
             "parking_slot_id",
             "approved_by_user_id",
             "rejected_by_user_id",
+            "removed_by_user_id",
+            "removed_by_contact_id",
         ):
             if out.get(key) is not None:
                 out[key] = str(out[key])
@@ -156,6 +158,22 @@ class VehiclesService:
         "rejected_by_phone_isd_code",
         "rejected_by_phone_number",
         "rejected_by_avatar_url",
+    )
+
+    _REMOVED_BY_ROW_KEYS = (
+        "removed_by_salutation",
+        "removed_by_first_name",
+        "removed_by_last_name",
+        "removed_by_email",
+        "removed_by_phone_isd_code",
+        "removed_by_phone_number",
+        "removed_by_avatar_url",
+        "removed_by_contact_prefix",
+        "removed_by_contact_first_name",
+        "removed_by_contact_last_name",
+        "removed_by_contact_emails",
+        "removed_by_contact_phones",
+        "removed_by_contact_profile_photo_url",
     )
 
     def _build_unit_owner(self, row: dict[str, Any]) -> dict[str, Any] | None:
@@ -272,6 +290,60 @@ class VehiclesService:
             "avatar_url": avatar_url,
         }
 
+    def _build_vehicle_removed_by(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build org-member or resident summary for who soft-removed the vehicle."""
+        user_id = row.get("removed_by_user_id")
+        if user_id:
+            display_name = (
+                build_full_name(
+                    str(row.get("removed_by_salutation") or "").strip(),
+                    str(row.get("removed_by_first_name") or "").strip(),
+                    str(row.get("removed_by_last_name") or "").strip(),
+                ).strip()
+                or None
+            )
+            isd = str(row.get("removed_by_phone_isd_code") or "").strip()
+            number = str(row.get("removed_by_phone_number") or "").strip()
+            phone = f"{isd}{number}".strip() or None
+            email = str(row.get("removed_by_email") or "").strip() or None
+            avatar_url = str(row.get("removed_by_avatar_url") or "").strip() or None
+            return {
+                "user_id": str(user_id),
+                "contact_id": None,
+                "display_name": display_name,
+                "email": email,
+                "phone": phone,
+                "avatar_url": avatar_url,
+            }
+
+        contact_id = row.get("removed_by_contact_id")
+        if contact_id:
+            display_name = (
+                build_full_name(
+                    str(row.get("removed_by_contact_prefix") or "").strip(),
+                    str(row.get("removed_by_contact_first_name") or "").strip(),
+                    str(row.get("removed_by_contact_last_name") or "").strip(),
+                ).strip()
+                or None
+            )
+            phone = format_primary_contact_phone(
+                parse_json_any(row.get("removed_by_contact_phones"), default=[])
+            )
+            email = format_primary_contact_email(
+                parse_json_any(row.get("removed_by_contact_emails"), default=[])
+            )
+            avatar_url = str(row.get("removed_by_contact_profile_photo_url") or "").strip() or None
+            return {
+                "user_id": None,
+                "contact_id": str(contact_id),
+                "display_name": display_name,
+                "email": email,
+                "phone": phone,
+                "avatar_url": avatar_url,
+            }
+
+        return None
+
     def _serialize_contact_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact vehicle list row to API shape with parking allotment only."""
         out = self._normalize_vehicle(row)
@@ -296,11 +368,13 @@ class VehiclesService:
         out["parking_allotment"] = self._build_parking_allotment(row)
         out["approved_by"] = self._build_vehicle_reviewer(row, kind="approved")
         out["rejected_by"] = self._build_vehicle_reviewer(row, kind="rejected")
+        out["removed_by"] = self._build_vehicle_removed_by(row)
         for key in (
             *self._OWNER_ROW_KEYS,
             *self._UNIT_ROW_KEYS,
             *self._PARKING_ROW_KEYS,
             *self._REVIEWER_ROW_KEYS,
+            *self._REMOVED_BY_ROW_KEYS,
         ):
             out.pop(key, None)
         return out
@@ -967,6 +1041,8 @@ class VehiclesService:
         contact_id: str,
         vehicle_id: str,
         rejection_reason: str | None = None,
+        removed_by_user_id: str | None = None,
+        removed_by_contact_id: str | None = None,
     ) -> dict[str, Any]:
         """Soft-remove an approved vehicle (status removed, row retained)."""
         org_id = self.user_context.organization_id
@@ -1001,6 +1077,8 @@ class VehiclesService:
             contact_id=contact_id,
             vehicle_id=vehicle_id,
             rejection_reason=rejection_reason,
+            removed_by_user_id=removed_by_user_id,
+            removed_by_contact_id=removed_by_contact_id,
         )
         if not row:
             raise NotFoundException(
@@ -1052,6 +1130,7 @@ class VehiclesService:
                 contact_id=contact_id,
                 vehicle_id=vehicle_id,
                 rejection_reason=rejection_reason,
+                removed_by_user_id=self.user_context.user_id,
             )
         if status == VehicleStatus.REJECTED.value:
             await self.repo.update(
