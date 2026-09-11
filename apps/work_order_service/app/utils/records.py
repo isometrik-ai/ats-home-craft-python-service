@@ -30,6 +30,8 @@ def record_to_dict(row: Any) -> dict[str, Any]:
             out[key] = str(val)
         elif isinstance(val, (list, dict)):
             out[key] = val
+        elif isinstance(val, str):
+            out[key] = parse_json_field(val)
         else:
             out[key] = val
     return out
@@ -42,5 +44,19 @@ def parse_json_field(value: Any) -> Any:
     if isinstance(value, (list, dict)):
         return value
     if isinstance(value, str):
-        return json.loads(value)
+        if not value or value[0] not in "[{":
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    return value
+
+
+def jsonb_param(value: Any, *, default: list[Any] | dict[str, Any] | None = None) -> Any:
+    """Normalize a value for asyncpg jsonb query parameters."""
+    if value is None:
+        return default if default is not None else []
+    if isinstance(value, str):
+        return parse_json_field(value)
     return value

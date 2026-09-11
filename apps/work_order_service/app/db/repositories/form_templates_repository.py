@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
@@ -61,13 +60,13 @@ class FormTemplatesRepository(ScopedRepository):
             data["project_id"],
             data["name"],
             data.get("description") or "",
-            json.dumps(data.get("schema") or {}),
+            data.get("schema") or {},
         )
         return record_to_dict(row)
 
     async def update(self, entity_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """Update."""
-        schema_json = json.dumps(data["schema"]) if "schema" in data else None
+        schema_json = data["schema"] if "schema" in data else None
         row = await self.conn.fetchrow(
             """
             UPDATE work_order.form_templates

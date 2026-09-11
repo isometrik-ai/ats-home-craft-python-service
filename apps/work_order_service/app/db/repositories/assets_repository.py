@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
@@ -90,7 +89,7 @@ class AssetsRepository(ScopedRepository):
             data.get("location_text"),
             data.get("landmark_note"),
             data.get("photo_paths") or [],
-            json.dumps(data.get("associated_parts") or []),
+            data.get("associated_parts") or [],
             data.get("purchase_date"),
             data.get("purchase_cost_minor"),
             data.get("currency"),
@@ -103,14 +102,14 @@ class AssetsRepository(ScopedRepository):
             data.get("warranty_expiry"),
             data.get("warranty_terms"),
             data.get("document_paths") or [],
-            json.dumps(data.get("custom_fields") or []),
+            data.get("custom_fields") or [],
             data.get("contract_id"),
         )
         return record_to_dict(row)
 
     async def update(self, entity_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
         """Update."""
-        custom_fields = json.dumps(data["custom_fields"]) if "custom_fields" in data else None
+        custom_fields = data["custom_fields"] if "custom_fields" in data else None
         row = await self.conn.fetchrow(
             """
             UPDATE work_order.assets
@@ -161,7 +160,7 @@ class AssetsRepository(ScopedRepository):
             data.get("location_text"),
             data.get("landmark_note"),
             data.get("photo_paths"),
-            json.dumps(data["associated_parts"]) if "associated_parts" in data else None,
+            data["associated_parts"] if "associated_parts" in data else None,
             data.get("purchase_date"),
             data.get("purchase_cost_minor"),
             data.get("currency"),

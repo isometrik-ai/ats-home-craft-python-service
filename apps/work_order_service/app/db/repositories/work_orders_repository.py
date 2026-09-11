@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
@@ -120,7 +119,7 @@ class WorkOrderRepository(ScopedRepository):
             data.get("assignee_name"),
             data.get("assignee_user_id"),
             data.get("vendor_token_hash"),
-            json.dumps(data.get("timeline") or []),
+            data.get("timeline") or [],
             data.get("access_notes"),
             data.get("form_template_id"),
             data.get("is_recurring", False),
@@ -159,7 +158,7 @@ class WorkOrderRepository(ScopedRepository):
             data.get("state"),
             data.get("priority"),
             data.get("scheduled_date"),
-            json.dumps(data["timeline"]) if "timeline" in data else None,
+            data["timeline"] if "timeline" in data else None,
             data.get("company_id"),
             data.get("started_at"),
             data.get("completed_at"),
@@ -190,12 +189,13 @@ class WorkOrderRepository(ScopedRepository):
             entity_id,
             organization_id,
             project_id,
-            json.dumps([evt]),
+            [evt],
         )
         if not row:
             return None
-        timeline = row["timeline"]
-        return timeline if isinstance(timeline, list) else json.loads(timeline)
+        from apps.work_order_service.app.utils.records import parse_json_field
+
+        return parse_json_field(row["timeline"])
 
     async def cancel_contract_work_orders(self, contract_id: str) -> int:
         """Cancel contract work orders."""
@@ -271,15 +271,13 @@ class WorkOrderRepository(ScopedRepository):
               AND record_status = 'active'
             """,
             template_id,
-            json.dumps(
-                [
-                    {
-                        "type": "status_changed",
-                        "by": "Scheduler",
-                        "note": note,
-                    }
-                ]
-            ),
+            [
+                {
+                    "type": "status_changed",
+                    "by": "Scheduler",
+                    "note": note,
+                }
+            ],
         )
         try:
             return int(result.split()[-1])
