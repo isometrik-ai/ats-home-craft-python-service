@@ -55,6 +55,19 @@ CASE
 END
 """
 
+# Match ParkingAllotmentService._build_slot_code_label ({tower}-{floor}-{slot_code}).
+_SLOT_CODE_LABEL_SQL = """
+CONCAT_WS(
+    '-',
+    NULLIF(TRIM(COALESCE(t.code, '')), ''),
+    NULLIF(TRIM(COALESCE(f.floor_level, '')), ''),
+    COALESCE(
+        NULLIF(TRIM(COALESCE(fps.slot_code, '')), ''),
+        LPAD(fps.slot_number::text, 3, '0')
+    )
+)
+"""
+
 
 class ParkingAllotmentRepository(BaseRepository):
     """Database operations for parking allotment admin screens."""
@@ -230,11 +243,7 @@ class ParkingAllotmentRepository(BaseRepository):
             conditions.append(
                 f"""(
                     COALESCE(fps.slot_code, '') ILIKE ${idx}
-                    OR CONCAT(
-                        COALESCE(t.code, ''), '-',
-                        COALESCE(f.floor_level, ''), '-',
-                        LPAD(fps.slot_number::text, 3, '0')
-                    ) ILIKE ${idx}
+                    OR {_SLOT_CODE_LABEL_SQL} ILIKE ${idx}
                     OR COALESCE(u.code, '') ILIKE ${idx}
                 )"""
             )

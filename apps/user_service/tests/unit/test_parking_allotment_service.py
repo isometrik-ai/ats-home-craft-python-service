@@ -68,6 +68,21 @@ def test_build_slot_code_label_uses_slot_code_when_present():
     )
 
 
+def test_build_slot_code_label_matches_custom_parking_search_example():
+    """Exact slot search must target the same label shown in the by-slot table."""
+    assert (
+        ParkingAllotmentService._build_slot_code_label(
+            {
+                "tower_code": "LUX",
+                "floor_level": "A",
+                "slot_code": "B1-2",
+                "slot_number": 2,
+            }
+        )
+        == "LUX-A-B1-2"
+    )
+
+
 def test_build_slot_code_label_omits_missing_tower_and_floor():
     assert (
         ParkingAllotmentService._build_slot_code_label(
