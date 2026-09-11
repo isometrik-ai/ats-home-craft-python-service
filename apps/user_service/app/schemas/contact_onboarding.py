@@ -627,6 +627,7 @@ class HouseholdSummaryCountsResponse(BaseModel):
     daily_help_count: int = 0
     vehicles_count: int = 0
     tenant_count: int = 0
+    pets_count: int = 0
 
 
 class AcceptHouseholdInvitationRequest(BaseModel):

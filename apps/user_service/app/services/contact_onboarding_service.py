@@ -21,6 +21,7 @@ from apps.user_service.app.db.repositories.contacts_repository import ContactsRe
 from apps.user_service.app.db.repositories.daily_help_repository import (
     DailyHelpRepository,
 )
+from apps.user_service.app.db.repositories.pets_repository import PetsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
@@ -88,6 +89,7 @@ class ContactOnboardingService:
         self.contacts_repo = ContactsRepository(db_connection)
         self.contact_roles_repo = ContactRolesRepository(db_connection)
         self.daily_help_repo = DailyHelpRepository(db_connection)
+        self.pets_repo = PetsRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
         self.contact_units_service = ContactUnitsService(
             db_connection=db_connection,
@@ -590,12 +592,17 @@ class ContactOnboardingService:
             organization_id=org_id,
             unit_id=unit_id,
         )
+        pets_count = await self.pets_repo.count_active_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
         return HouseholdSummaryCountsResponse(
             unit_id=unit_id,
             family_count=family_count,
             daily_help_count=daily_help_count,
             vehicles_count=vehicles_count,
             tenant_count=tenant_count,
+            pets_count=pets_count,
         )
 
     async def _load_household_member(

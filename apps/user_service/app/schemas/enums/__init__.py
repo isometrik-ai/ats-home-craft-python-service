@@ -7,6 +7,7 @@ from apps.user_service.app.schemas.enums.auth_org import *
 from apps.user_service.app.schemas.enums.billing_notices import *
 from apps.user_service.app.schemas.enums.community_events import *
 from apps.user_service.app.schemas.enums.crm import *
+from apps.user_service.app.schemas.enums.pets import *
 from apps.user_service.app.schemas.enums.project_fields import *
 from apps.user_service.app.schemas.enums.property import *
 from apps.user_service.app.schemas.enums.resident_services import *
@@ -217,4 +218,9 @@ __all__ = [
     "WalkInVisitUnitStatus",
     "WalkInEventType",
     "WalkInActorType",
+    "PetVaccinationStatus",
+    "PetGender",
+    "PetStatus",
+    "PetEventType",
+    "PetActorType",
 ]
