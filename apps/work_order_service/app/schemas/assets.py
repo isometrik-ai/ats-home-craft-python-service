@@ -52,7 +52,7 @@ class CreateAssetRequest(BaseModel):
     purchase_cost_minor: int | None = Field(None, ge=0)
     currency: str | None = Field(None, max_length=10)
     supplier_name: str | None = Field(None, max_length=255)
-    company_id: str | None = None
+    vendor_id: str | None = None
     purchase_order_number: str | None = Field(None, max_length=100)
     invoice_ref: str | None = Field(None, max_length=100)
     install_date: date | None = None
@@ -86,7 +86,7 @@ class UpdateAssetRequest(BaseModel):
     purchase_cost_minor: int | None = Field(None, ge=0)
     currency: str | None = Field(None, max_length=10)
     supplier_name: str | None = Field(None, max_length=255)
-    company_id: str | None = None
+    vendor_id: str | None = None
     purchase_order_number: str | None = Field(None, max_length=100)
     invoice_ref: str | None = Field(None, max_length=100)
     install_date: date | None = None

@@ -10,11 +10,20 @@ from apps.user_service.app.utils.common_utils import UserContext
 from apps.work_order_service.app.db.repositories.work_orders_repository import (
     WorkOrderRepository,
 )
+from apps.work_order_service.app.schemas.enums import WorkOrderState
 from apps.work_order_service.app.services.events_service import (
     EventsService,
     diff_records,
 )
 from apps.work_order_service.app.utils.tokens import generate_vendor_token
+
+RECURRING_FIELDS = (
+    "is_recurring",
+    "recurring_frequency",
+    "recurring_days",
+    "scheduled_date",
+    "recurring_end_date",
+)
 
 
 class WorkOrdersService:
@@ -99,8 +108,7 @@ class WorkOrdersService:
     ) -> dict[str, Any] | None:
         """Update."""
         payload_data = dict(data)
-        if not self.ctx:
-            payload_data.pop("timeline", None)
+        payload_data.pop("timeline", None)
         if self.ctx and self.ctx.organization_id:
             payload = {**self._scope(project_id), **payload_data}
         else:
@@ -112,7 +120,20 @@ class WorkOrdersService:
         before = None
         if self.ctx and self.ctx.organization_id:
             before = await self.get(project_id=project_id, entity_id=entity_id)
+        was_template = bool(before and before.get("is_recurring"))
+        change_keys = set(payload_data.keys())
+        recurring_changed = was_template and any(k in change_keys for k in RECURRING_FIELDS)
+        terminating = _is_terminated(payload_data.get("state"))
         record = await self.repo.update(entity_id, payload)
+        if record:
+            if was_template and recurring_changed and record.get("is_recurring"):
+                await self.repo.cancel_recurring_children(entity_id, "Recurring schedule changed")
+            elif was_template and payload_data.get("is_recurring") is False:
+                await self.repo.cancel_recurring_children(entity_id, "Recurring schedule disabled")
+            elif was_template and terminating:
+                await self.repo.cancel_recurring_children(
+                    entity_id, "Cancelled — template terminated"
+                )
         if record and before:
             await self.events.record_and_dispatch(
                 entity="work_order",
@@ -136,6 +157,8 @@ class WorkOrdersService:
         """Delete."""
         before = await self.get(project_id=project_id, entity_id=entity_id)
         assert self.ctx and self.ctx.organization_id
+        if before and before.get("is_recurring"):
+            await self.repo.cancel_recurring_children(entity_id, "Cancelled — template deleted")
         ok = await self.repo.soft_delete(
             entity_id=entity_id,
             organization_id=self.ctx.organization_id,
@@ -176,3 +199,11 @@ class WorkOrdersService:
                     actor_user_id=self.ctx.user_id,
                 )
         return timeline
+
+
+def _is_terminated(state: Any) -> bool:
+    if state is None:
+        return False
+    if isinstance(state, WorkOrderState):
+        return state == WorkOrderState.TERMINATED
+    return str(state) == WorkOrderState.TERMINATED.value

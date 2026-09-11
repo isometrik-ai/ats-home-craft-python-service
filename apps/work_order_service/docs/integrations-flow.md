@@ -83,7 +83,7 @@ Background workers started in `app/lifespan.py`:
 | API keys API     | `app/api/api_keys.py`                           |
 | Integration repo | `app/db/repositories/integration_repository.py` |
 | Push adapter     | `app/adapters/notifications.py`                 |
-| CRM adapter      | `app/adapters/companies_client.py`              |
+| CRM adapter      | `app/adapters/vendors_client.py`                |
 
 ______________________________________________________________________
 
@@ -207,7 +207,7 @@ ______________________________________________________________________
 
 | Integration    | Mechanism                                                           |
 | -------------- | ------------------------------------------------------------------- |
-| CRM vendors    | `company_id` FK; optional HTTP fetch via `companies_client.py`      |
+| CRM vendors    | `vendor_id` FK; optional HTTP fetch via `vendors_client.py`         |
 | Custom fields  | Direct import of `CustomFieldService` from user_service (shared DB) |
 | JWT auth       | `libs/shared_middleware/jwt_auth.py`                                |
 | Project access | `ensure_staff_project_access` from user_service utils               |

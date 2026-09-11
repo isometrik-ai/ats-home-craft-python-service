@@ -4,8 +4,10 @@ from datetime import date, datetime, timezone
 from uuid import UUID
 
 from apps.work_order_service.app.utils.records import (
+    coerce_date,
     jsonb_bind,
     jsonb_bind_required,
+    jsonb_bind_update,
     parse_json_field,
     record_to_dict,
 )
@@ -66,3 +68,15 @@ def test_jsonb_bind_serializes_collections_for_asyncpg():
     assert jsonb_bind([{"type": "created"}]) == '[{"type": "created"}]'
     assert jsonb_bind_required(None) == "[]"
     assert jsonb_bind_required({"a": 1}, default="{}") == '{"a": 1}'
+
+
+def test_coerce_date_accepts_iso_strings():
+    """Scheduler and API layers may pass ISO date strings to repositories."""
+    assert coerce_date("2026-10-22") == date(2026, 10, 22)
+    assert coerce_date(date(2026, 10, 22)) == date(2026, 10, 22)
+
+
+def test_jsonb_bind_update_preserves_empty_collections():
+    """PATCH must be able to clear jsonb fields to empty objects or arrays."""
+    assert jsonb_bind_update({}) == "{}"
+    assert jsonb_bind_update([]) == "[]"
