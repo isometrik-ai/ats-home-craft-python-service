@@ -11,7 +11,6 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
 from apps.user_service.app.db.repositories.pets_repository import PetsRepository
-from apps.user_service.app.schemas.enums.pets import PetEventType
 from apps.user_service.app.schemas.pets import (
     CreatePetRequest,
     RemovePetRequest,
@@ -131,7 +130,6 @@ class PetsService:
             date_of_birth=body.date_of_birth,
             vaccination_status=body.vaccination_status.value,
             photo_paths=list(body.photo_paths),
-            actor_contact_id=contact_id,
         )
         detail = await self.repo.get_by_id(organization_id=org_id, pet_id=str(row["id"]))
         return self._serialize_pet(detail or row)
@@ -160,14 +158,10 @@ class PetsService:
         if not update_data:
             return self._serialize_pet(existing)
 
-        photo_only = set(update_data.keys()) == {"photo_paths"}
-        event_type = PetEventType.PHOTO_CHANGED.value if photo_only else PetEventType.UPDATED.value
         row = await self.repo.update(
             organization_id=org_id,
             pet_id=pet_id,
             update_data=update_data,
-            event_type=event_type,
-            actor_contact_id=contact_id,
         )
         if not row:
             raise NotFoundException(

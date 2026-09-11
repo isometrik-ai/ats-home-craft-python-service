@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
-from apps.work_order_service.app.utils.records import jsonb_bind, record_to_dict
+from apps.work_order_service.app.utils.records import (
+    jsonb_bind,
+    jsonb_bind_update,
+    record_to_dict,
+)
 
 
 class AssetsRepository(ScopedRepository):
@@ -62,7 +66,7 @@ class AssetsRepository(ScopedRepository):
                 organization_id, project_id, name, code, make, model, serial_number,
                 description, category_id, status, facility_id, location_text,
                 landmark_note, photo_paths, associated_parts, purchase_date,
-                purchase_cost_minor, currency, supplier_name, company_id,
+                purchase_cost_minor, currency, supplier_name, vendor_id,
                 purchase_order_number, invoice_ref, install_date, warranty_start,
                 warranty_expiry, warranty_terms, document_paths, custom_fields, contract_id
             ) VALUES (
@@ -94,7 +98,7 @@ class AssetsRepository(ScopedRepository):
             data.get("purchase_cost_minor"),
             data.get("currency"),
             data.get("supplier_name"),
-            data.get("company_id"),
+            data.get("vendor_id"),
             data.get("purchase_order_number"),
             data.get("invoice_ref"),
             data.get("install_date"),
@@ -129,7 +133,7 @@ class AssetsRepository(ScopedRepository):
                 purchase_cost_minor = COALESCE($18, purchase_cost_minor),
                 currency = COALESCE($19, currency),
                 supplier_name = COALESCE($20, supplier_name),
-                company_id = COALESCE($21::uuid, company_id),
+                vendor_id = COALESCE($21::uuid, vendor_id),
                 purchase_order_number = COALESCE($22, purchase_order_number),
                 invoice_ref = COALESCE($23, invoice_ref),
                 install_date = COALESCE($24::date, install_date),
@@ -158,21 +162,21 @@ class AssetsRepository(ScopedRepository):
             data.get("facility_id"),
             data.get("location_text"),
             data.get("landmark_note"),
-            data.get("photo_paths"),
-            jsonb_bind(data["associated_parts"]) if "associated_parts" in data else None,
+            data["photo_paths"] if "photo_paths" in data else None,
+            jsonb_bind_update(data["associated_parts"]) if "associated_parts" in data else None,
             data.get("purchase_date"),
             data.get("purchase_cost_minor"),
             data.get("currency"),
             data.get("supplier_name"),
-            data.get("company_id"),
+            data.get("vendor_id"),
             data.get("purchase_order_number"),
             data.get("invoice_ref"),
             data.get("install_date"),
             data.get("warranty_start"),
             data.get("warranty_expiry"),
             data.get("warranty_terms"),
-            data.get("document_paths"),
-            jsonb_bind(data["custom_fields"]) if "custom_fields" in data else None,
+            data["document_paths"] if "document_paths" in data else None,
+            jsonb_bind_update(data["custom_fields"]) if "custom_fields" in data else None,
             data.get("contract_id"),
         )
         return record_to_dict(row) if row else None

@@ -60,6 +60,9 @@
     }
   },
   "invoices": {
+    "errors": {
+      "duplicate_number": "An invoice with number \"{invoice_number}\" already exists in this project."
+    },
     "success": {
       "list_retrieved": "Vendor invoices retrieved successfully.",
       "retrieved": "Vendor invoice retrieved successfully.",

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
-from apps.work_order_service.app.utils.records import record_to_dict
+from apps.work_order_service.app.utils.records import coerce_date, record_to_dict
 
 
 class ContractsRepository(ScopedRepository):
@@ -70,7 +71,7 @@ class ContractsRepository(ScopedRepository):
         row = await self.conn.fetchrow(
             """
             INSERT INTO work_order.maintenance_contracts (
-                organization_id, project_id, title, company_id, asset_ids, start_date,
+                organization_id, project_id, title, vendor_id, asset_ids, start_date,
                 end_date, visit_frequency, payment_frequency, value_minor, currency,
                 status, next_visit_date, last_serviced_date, auto_generate_lead_days,
                 scope_included, scope_excluded, form_template_id, pre_start_form_template_id,
@@ -90,17 +91,17 @@ class ContractsRepository(ScopedRepository):
             data["organization_id"],
             data["project_id"],
             data["title"],
-            data["company_id"],
+            data["vendor_id"],
             data.get("asset_ids") or [],
-            data["start_date"],
-            data.get("end_date"),
+            coerce_date(data["start_date"]),
+            coerce_date(data.get("end_date")),
             data.get("visit_frequency"),
             data.get("payment_frequency"),
             data.get("value_minor"),
             data.get("currency"),
             data.get("status"),
-            data.get("next_visit_date"),
-            data.get("last_serviced_date"),
+            coerce_date(data.get("next_visit_date")),
+            coerce_date(data.get("last_serviced_date")),
             data.get("auto_generate_lead_days"),
             data.get("scope_included"),
             data.get("scope_excluded"),
@@ -116,7 +117,7 @@ class ContractsRepository(ScopedRepository):
             """
             UPDATE work_order.maintenance_contracts
             SET title = COALESCE($4, title),
-                company_id = COALESCE($5::uuid, company_id),
+                vendor_id = COALESCE($5::uuid, vendor_id),
                 asset_ids = COALESCE($6::uuid[], asset_ids),
                 start_date = COALESCE($7::date, start_date),
                 end_date = COALESCE($8::date, end_date),
@@ -147,28 +148,30 @@ class ContractsRepository(ScopedRepository):
             data["organization_id"],
             data["project_id"],
             data.get("title"),
-            data.get("company_id"),
-            data.get("asset_ids"),
-            data.get("start_date"),
-            data.get("end_date"),
+            data.get("vendor_id"),
+            data["asset_ids"] if "asset_ids" in data else None,
+            coerce_date(data.get("start_date")),
+            coerce_date(data.get("end_date")),
             data.get("visit_frequency"),
             data.get("payment_frequency"),
             data.get("value_minor"),
             data.get("currency"),
             data.get("status"),
-            data.get("next_visit_date"),
-            data.get("last_serviced_date"),
+            coerce_date(data.get("next_visit_date")),
+            coerce_date(data.get("last_serviced_date")),
             data.get("auto_generate_lead_days"),
             data.get("scope_included"),
             data.get("scope_excluded"),
             data.get("form_template_id"),
             data.get("pre_start_form_template_id"),
-            data.get("document_paths"),
+            data["document_paths"] if "document_paths" in data else None,
             data.get("termination_reason"),
         )
         return record_to_dict(row) if row else None
 
-    async def update_next_visit_date(self, contract_id: str, next_visit_date: str | None) -> None:
+    async def update_next_visit_date(
+        self, contract_id: str, next_visit_date: date | str | None
+    ) -> None:
         """Update next visit date."""
         await self.conn.execute(
             """
@@ -177,5 +180,5 @@ class ContractsRepository(ScopedRepository):
             WHERE id = $1::uuid
             """,
             contract_id,
-            next_visit_date,
+            coerce_date(next_visit_date),
         )
