@@ -638,6 +638,16 @@ class AuthService:
             for org in organizations_data
         ]
 
+        if data.user_type == SelectOrganizationType.ORGANIZATION_MEMBER and not organizations:
+            logger.error(
+                "Login rejected for email %s: no active organization membership",
+                data.email,
+            )
+            raise BadRequestException(
+                message_key="auth.errors.invalid_credentials",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+
         await self._warm_session_context_from_session(session, organization_id=None)
 
         return AuthResponse(
