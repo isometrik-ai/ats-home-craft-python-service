@@ -50,13 +50,20 @@ class PetsService:
         *,
         contact_id: str,
         unit_id: str,
-    ) -> list[dict[str, Any]]:
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
         """List active pets on a unit the contact can access."""
         org_id = self.user_context.organization_id
         assert org_id
         await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
-        rows = await self.repo.list_for_unit(organization_id=org_id, unit_id=unit_id)
-        return [self._serialize_pet(row) for row in rows]
+        rows, total = await self.repo.list_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+            page=page,
+            page_size=page_size,
+        )
+        return [self._serialize_pet(row) for row in rows], total
 
     async def get_pet_detail(
         self,
@@ -117,7 +124,7 @@ class PetsService:
             project_id=str(unit["project_id"]),
             unit_id=body.unit_id,
             created_by_contact_id=contact_id,
-            name=body.name.strip(),
+            name=body.name,
             pet_type=pet_type,
             breed=breed,
             gender=body.gender.value if body.gender else None,
@@ -210,7 +217,7 @@ class PetsService:
         """Build patch fields from request body and existing row."""
         update_data: dict[str, Any] = {}
         if body.name is not None:
-            update_data["name"] = body.name.strip()
+            update_data["name"] = body.name
         if body.pet_type is not None or body.breed is not None:
             pet_type = body.pet_type if body.pet_type is not None else str(existing["pet_type"])
             breed = body.breed if body.breed is not None else str(existing["breed"])

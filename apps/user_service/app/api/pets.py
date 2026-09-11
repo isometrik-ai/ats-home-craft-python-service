@@ -105,6 +105,8 @@ async def get_pet_catalog(
 async def list_pets(
     request: Request,
     unit_id: str = Query(..., description="Unit identifier (UUID string)."),
+    page: int = Query(default=1, ge=1, description="Page number (1-based)."),
+    page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -113,11 +115,18 @@ async def list_pets(
         current_user, db_connection, request=request
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)
-    items = await service.list_pets(contact_id=str(contact["id"]), unit_id=unit_id)
+    items, total = await service.list_pets(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        page=page,
+        page_size=page_size,
+    )
     return list_response(
         request=request,
         items=items,
-        total=len(items),
+        total=total,
+        page=page,
+        page_size=page_size,
         message_key="pets.success.list_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
     )

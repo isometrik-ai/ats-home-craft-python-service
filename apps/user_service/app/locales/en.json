@@ -1101,7 +1101,8 @@
       "invalid_pet_type": "The selected pet type is not valid.",
       "invalid_breed": "The selected breed is not valid for this pet type.",
       "invalid_photo_path": "One or more photo paths are invalid.",
-      "invalid_date_of_birth": "Date of birth cannot be in the future."
+      "invalid_date_of_birth": "Date of birth cannot be in the future.",
+      "invalid_name": "Pet name is required."
     },
     "success": {
       "catalog_retrieved": "Pet options retrieved successfully.",

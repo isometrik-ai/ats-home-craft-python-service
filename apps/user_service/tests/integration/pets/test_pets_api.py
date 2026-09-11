@@ -75,11 +75,13 @@ async def test_list_pets(monkeypatch, client):
     """GET /pets lists pets for a unit."""
     _patch_contact_context(monkeypatch)
 
-    async def fake_list_pets(_self, *, contact_id, unit_id):
+    async def fake_list_pets(_self, *, contact_id, unit_id, page=1, page_size=20):
         del _self
         assert contact_id == CONTACT_ID
         assert unit_id == UNIT_ID
-        return [_FAKE_PET]
+        assert page == 1
+        assert page_size == 20
+        return [_FAKE_PET], 1
 
     monkeypatch.setattr(
         "apps.user_service.app.services.pets_service.PetsService.list_pets",
@@ -89,6 +91,9 @@ async def test_list_pets(monkeypatch, client):
     response = await client.get("/v1/pets", params={"unit_id": UNIT_ID})
     payload = assert_success(response)
     assert payload["data"][0]["name"] == "Romeo"
+    assert payload["total"] == 1
+    assert payload["page"] == 1
+    assert payload["page_size"] == 20
 
 
 @pytest.mark.asyncio
@@ -269,8 +274,8 @@ async def test_list_pets_unit_not_assigned(monkeypatch, client):
     """GET /pets returns 422 when contact lacks unit access."""
     _patch_contact_context(monkeypatch)
 
-    async def fake_list_pets(_self, *, contact_id, unit_id):
-        del _self, contact_id, unit_id
+    async def fake_list_pets(_self, *, contact_id, unit_id, page=1, page_size=20):
+        del _self, contact_id, unit_id, page, page_size
         raise ValidationException(
             message_key="contact_onboarding.errors.unit_not_assigned",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -282,6 +287,24 @@ async def test_list_pets_unit_not_assigned(monkeypatch, client):
     )
 
     response = await client.get("/v1/pets", params={"unit_id": UNIT_ID})
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_pet_whitespace_name_rejected(monkeypatch, client):
+    """POST /pets returns 422 when name is whitespace only."""
+    _patch_contact_context(monkeypatch)
+
+    response = await client.post(
+        "/v1/pets",
+        json={
+            "unit_id": UNIT_ID,
+            "name": "   ",
+            "pet_type": "Dog",
+            "breed": "Golden Retriever",
+            "vaccination_status": "completely",
+        },
+    )
     assert response.status_code == 422
 
 

@@ -12,6 +12,17 @@ from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
+def _validate_pet_name(name: str) -> str:
+    """Trim and reject empty pet names."""
+    trimmed = name.strip()
+    if not trimmed:
+        raise ValidationException(
+            message_key="pets.errors.invalid_name",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+    return trimmed
+
+
 def _validate_photo_paths(photo_paths: list[str] | None) -> list[str] | None:
     """Validate storage paths for pet images."""
     if photo_paths is None:
@@ -88,6 +99,14 @@ class CreatePetRequest(BaseModel):
     date_of_birth: date | None = None
     photo_paths: list[str] = Field(default_factory=list, max_length=10)
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        """Trim and reject whitespace-only names."""
+        if not isinstance(name, str):
+            return name
+        return _validate_pet_name(name)
+
     @field_validator("photo_paths")
     @classmethod
     def validate_photo_paths(cls, photo_paths: list[str]) -> list[str]:
@@ -107,6 +126,14 @@ class UpdatePetRequest(BaseModel):
     gender: PetGender | None = None
     date_of_birth: date | None = None
     photo_paths: list[str] | None = Field(None, max_length=10)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, name: str | None) -> str | None:
+        """Trim and reject whitespace-only names."""
+        if name is None or not isinstance(name, str):
+            return name
+        return _validate_pet_name(name)
 
     @field_validator("photo_paths")
     @classmethod

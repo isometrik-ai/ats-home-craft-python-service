@@ -130,7 +130,7 @@ class PetsRepository(BaseRepository):
         """Insert a pet and record a created event."""
         row = await self.db_connection.fetchrow(
             f"""
-            INSERT INTO pets (
+            INSERT INTO pets AS p (
                 organization_id,
                 project_id,
                 unit_id,
@@ -303,8 +303,15 @@ class PetsRepository(BaseRepository):
         *,
         organization_id: str,
         unit_id: str,
-    ) -> list[dict[str, Any]]:
-        """List active pets for a unit."""
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List active pets for a unit with pagination."""
+        offset = (page - 1) * page_size
+        total = await self.count_active_for_unit(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
         rows = await self.db_connection.fetch(
             f"""
             SELECT
@@ -318,11 +325,14 @@ class PetsRepository(BaseRepository):
               AND p.unit_id = $2::uuid
               AND {_ACTIVE_PET_FILTER}
             ORDER BY p.sort_order, p.created_at
+            LIMIT $3::int OFFSET $4::int
             """,
             organization_id,
             unit_id,
+            page_size,
+            offset,
         )
-        return [dict(row) for row in rows]
+        return [dict(row) for row in rows], total
 
     async def count_active_for_unit(
         self,

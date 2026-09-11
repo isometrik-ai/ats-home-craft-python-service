@@ -248,11 +248,27 @@ async def test_update_pet_rejects_future_dob():
 async def test_list_pets_returns_serialized_rows():
     """List returns active pets for an accessible unit."""
     svc = _service()
-    svc.repo.list_for_unit.return_value = [_pet_row(), _pet_row(id="pet-2", name="Luna")]
+    svc.repo.list_for_unit.return_value = (
+        [_pet_row(), _pet_row(id="pet-2", name="Luna")],
+        2,
+    )
 
-    result = await svc.list_pets(contact_id="contact-1", unit_id="unit-1")
+    items, total = await svc.list_pets(contact_id="contact-1", unit_id="unit-1")
 
-    assert len(result) == 2
-    assert result[0]["name"] == "Romeo"
-    assert result[0]["created_by"]["display_name"] == "Mr. Ajay Thakur"
-    assert result[1]["name"] == "Luna"
+    assert total == 2
+    assert len(items) == 2
+    assert items[0]["name"] == "Romeo"
+    assert items[0]["created_by"]["display_name"] == "Mr. Ajay Thakur"
+    assert items[1]["name"] == "Luna"
+
+
+def test_create_pet_request_rejects_whitespace_name():
+    """Whitespace-only names fail schema validation."""
+    with pytest.raises(ValidationException):
+        CreatePetRequest(
+            unit_id="unit-1",
+            name="   ",
+            pet_type="Dog",
+            breed="Golden Retriever",
+            vaccination_status=PetVaccinationStatus.COMPLETELY,
+        )
