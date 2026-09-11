@@ -970,10 +970,17 @@ class CommunityEventsRepository(BaseRepository):
         organization_id: str,
         project_id: str,
         contact_id: str,
+        timeframe: str = ResidentEventTimeframe.UPCOMING.value,
     ) -> list[dict[str, Any]]:
-        """All active bookings for resident."""
+        """Upcoming/past active bookings for resident."""
+        if timeframe == ResidentEventTimeframe.UPCOMING.value:
+            timeframe_filter = "AND e.end_date >= CURRENT_DATE"
+            order = "e.start_date ASC"
+        else:
+            timeframe_filter = "AND e.end_date < CURRENT_DATE"
+            order = "e.start_date DESC"
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               b.id::text AS booking_id,
               b.display_code,
@@ -992,7 +999,8 @@ class CommunityEventsRepository(BaseRepository):
               AND e.project_id = $2::uuid
               AND b.contact_id = $3::uuid
               AND b.booking_status IN ('confirmed', 'waitlisted')
-            ORDER BY e.start_date ASC
+              {timeframe_filter}
+            ORDER BY {order}
             """,
             organization_id,
             project_id,
