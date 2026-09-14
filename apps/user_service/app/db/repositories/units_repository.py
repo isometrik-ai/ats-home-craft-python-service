@@ -45,6 +45,7 @@ LEFT JOIN LATERAL (
         c.id AS owner_contact_id,
         c.prefix AS owner_prefix,
         c.first_name AS owner_first_name,
+        c.middle_name AS owner_middle_name,
         c.last_name AS owner_last_name,
         c.phones AS owner_phones,
         c.emails AS owner_emails,
@@ -70,6 +71,7 @@ _UNIT_OWNER_SELECT_COLUMNS = """
               owner_row.owner_contact_id,
               owner_row.owner_prefix,
               owner_row.owner_first_name,
+              owner_row.owner_middle_name,
               owner_row.owner_last_name,
               owner_row.owner_phones,
               owner_row.owner_emails
@@ -203,7 +205,7 @@ class UnitsRepository(BaseRepository):
             where.append(
                 f"(u.code ILIKE ${next_param} OR COALESCE(u.unit_label, '') ILIKE ${next_param}"
                 f" OR CONCAT_WS(' ', owner_row.owner_prefix, owner_row.owner_first_name,"
-                f" owner_row.owner_last_name) ILIKE ${next_param})"
+                f" owner_row.owner_middle_name, owner_row.owner_last_name) ILIKE ${next_param})"
             )
             args.append(f"%{search.strip()}%")
             next_param += 1
@@ -365,6 +367,7 @@ class UnitsRepository(BaseRepository):
                 owner_row.owner_contact_id::text AS owner_contact_id,
                 owner_row.owner_prefix,
                 owner_row.owner_first_name,
+                owner_row.owner_middle_name,
                 owner_row.owner_last_name,
                 owner_row.owner_phones,
                 owner_row.owner_emails,

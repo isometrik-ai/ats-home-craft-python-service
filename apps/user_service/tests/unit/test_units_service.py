@@ -180,6 +180,28 @@ def test_build_unit_list_owner_from_join_columns():
     assert owner["phone"] == "+919876543210"
 
 
+def test_build_unit_list_owner_includes_middle_name():
+    """Owner summary helper includes middle name when present."""
+    from apps.user_service.app.utils.unit_list_serialization import (
+        build_unit_list_owner,
+    )
+
+    owner = build_unit_list_owner(
+        {
+            "owner_contact_id": "c-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_middle_name": "Kumar",
+            "owner_last_name": "Kapoor",
+            "owner_phones": [],
+            "owner_emails": [],
+        }
+    )
+
+    assert owner is not None
+    assert owner["display_name"] == "Mr. Rajesh Kumar Kapoor"
+
+
 def test_serialize_unit_list_item_builds_registry_row():
     """Registry list row includes UI fields and owner summary."""
     item = serialize_unit_list_item(

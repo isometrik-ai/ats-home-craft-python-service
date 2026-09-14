@@ -230,6 +230,7 @@ class TypesenseContactDocument(BaseModel):
     organization_id: str
     status: str | None = None
     first_name: str | None = None
+    middle_name: str | None = None
     last_name: str | None = None
     full_name: str
     title: str | None = None

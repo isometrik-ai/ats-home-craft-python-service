@@ -1230,8 +1230,8 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if search:
             search_stripped = search.strip()
             search_parts = [
-                f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.middle_name,'') || ' '"
-                f" || COALESCE(ct.last_name,'')) ILIKE ${next_param_index}",
+                f"CONCAT_WS(' ', NULLIF(ct.first_name, ''), NULLIF(ct.middle_name, ''), "
+                f"NULLIF(ct.last_name, '')) ILIKE ${next_param_index}",
                 f"""EXISTS (
                   SELECT 1
                   FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) AS e(email)
