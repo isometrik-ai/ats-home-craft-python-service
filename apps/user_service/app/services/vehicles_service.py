@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Any
 
 import asyncpg
@@ -23,6 +25,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ResubmitVehicleRequest,
     ReviewVehicleRequest,
     UpdateVehicleRequest,
+    VehicleRequestsExportQuery,
     VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import (
@@ -1122,6 +1125,124 @@ class VehiclesService:
             search=normalized_search,
         )
         return [self._serialize_admin_vehicle(row) for row in rows]
+
+    @staticmethod
+    def _csv_safe(value: Any) -> Any:
+        """Neutralize spreadsheet formula injection in CSV cell values."""
+        if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+            return "'" + value
+        return value
+
+    @staticmethod
+    def _vehicle_type_label(value: str | None) -> str:
+        """Map vehicle type enum to admin UI label."""
+        labels = {
+            VehicleType.TWO_WHEELER.value: "2 Wheeler",
+            VehicleType.FOUR_WHEELER.value: "4 Wheeler",
+        }
+        return labels.get(value or "", value or "")
+
+    @staticmethod
+    def _fuel_type_label(value: str | None) -> str:
+        """Map fuel type enum to admin UI label."""
+        labels = {
+            VehicleFuelType.NON_EV.value: "Non-EV",
+            VehicleFuelType.EV.value: "EV",
+        }
+        return labels.get(value or "", value or "")
+
+    @staticmethod
+    def _status_label(value: str | None) -> str:
+        """Map vehicle status enum to title-case label."""
+        if not value:
+            return ""
+        return value.replace("_", " ").title()
+
+    @staticmethod
+    def _vehicle_description(item: dict[str, Any]) -> str:
+        """Build make/model/color description for export."""
+        parts = [item.get("make"), item.get("model"), item.get("color")]
+        return " - ".join(part for part in parts if part)
+
+    @staticmethod
+    def _parking_slot_label(item: dict[str, Any]) -> str:
+        """Build parking slot label from nested allotment summary."""
+        allotment = item.get("parking_allotment") or {}
+        slot_number = allotment.get("slot_number")
+        if slot_number is None:
+            return ""
+        facility = allotment.get("facility") or {}
+        facility_name = facility.get("name")
+        if facility_name:
+            return f"{slot_number} ({facility_name})"
+        return str(slot_number)
+
+    async def export_project_vehicles_csv(
+        self,
+        *,
+        project_id: str,
+        query: VehicleRequestsExportQuery,
+    ) -> str:
+        """Export filtered vehicle requests as CSV text."""
+        if query.format != "csv":
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unsupported_export_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        items = await self.list_project_vehicles(
+            project_id=project_id,
+            status=query.status,
+            vehicle_type=query.vehicle_type,
+            fuel_type=query.fuel_type,
+            search=query.search,
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "registration_number",
+                "vehicle_description",
+                "unit_code",
+                "unit_label",
+                "vehicle_type",
+                "fuel_type",
+                "requested_on",
+                "updated_on",
+                "approved_on",
+                "status",
+                "owner_name",
+                "owner_phone",
+                "owner_email",
+                "parking_slot",
+                "rejection_reason",
+            ]
+        )
+        for item in items:
+            owner = item.get("owner") or {}
+            unit = item.get("unit") or {}
+            approved_on = ""
+            if item.get("status") == VehicleStatus.APPROVED.value:
+                approved_on = item.get("status_updated_at") or ""
+            writer.writerow(
+                [
+                    self._csv_safe(item.get("registration_number") or ""),
+                    self._csv_safe(self._vehicle_description(item)),
+                    self._csv_safe(unit.get("code") or ""),
+                    self._csv_safe(unit.get("location_label") or unit.get("unit_label") or ""),
+                    self._vehicle_type_label(item.get("vehicle_type")),
+                    self._fuel_type_label(item.get("fuel_type")),
+                    item.get("created_at") or "",
+                    item.get("updated_at") or "",
+                    approved_on,
+                    self._status_label(item.get("status")),
+                    self._csv_safe(owner.get("display_name") or ""),
+                    self._csv_safe(owner.get("phone") or ""),
+                    self._csv_safe(owner.get("email") or ""),
+                    self._csv_safe(self._parking_slot_label(item)),
+                    self._csv_safe(item.get("rejection_reason") or ""),
+                ]
+            )
+        return buffer.getvalue()
 
     async def review_vehicle(
         self,

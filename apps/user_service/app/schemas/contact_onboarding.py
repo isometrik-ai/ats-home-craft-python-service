@@ -428,6 +428,18 @@ class DeleteProjectVehicleRequest(BaseModel):
     rejection_reason: str = Field(..., min_length=1, max_length=500)
 
 
+class VehicleRequestsExportQuery(BaseModel):
+    """Export filters aligned with the admin vehicle requests list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: VehicleStatus | None = None
+    vehicle_type: VehicleType | None = None
+    fuel_type: VehicleFuelType | None = None
+    search: str | None = Field(None, min_length=1, max_length=200)
+    format: str = Field("csv", pattern="^(csv|xlsx)$")
+
+
 class VehicleModelOption(BaseModel):
     """Vehicle model picker option."""
 
