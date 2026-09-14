@@ -73,8 +73,8 @@ async def test_estimate_reach_staff_manager_and_security_counts_two():
 
 
 @pytest.mark.asyncio
-async def test_estimate_reach_legacy_staff_label_is_ignored():
-    """Failure case: old UI value 'Staff' is no longer resolved and counts as zero."""
+async def test_estimate_reach_unknown_group_is_ignored_at_resolver_layer():
+    """Resolver ignores unknown groups; API validates before calling estimate_reach."""
     db = MagicMock()
     db.fetch = AsyncMock()
     service = NoticeRecipientResolutionService(db_connection=db)

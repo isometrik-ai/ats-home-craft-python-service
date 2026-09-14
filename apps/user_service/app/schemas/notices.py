@@ -148,6 +148,11 @@ class ReachEstimateQuery(BaseModel):
         """Parse comma-separated groups."""
         return [part.strip() for part in self.groups.split(",") if part.strip()]
 
+    def invalid_recipient_groups(self) -> list[str]:
+        """Return unsupported group names from the parsed query string."""
+        allowed = {group.value for group in NoticeRecipientGroup}
+        return sorted({group for group in self.parsed_groups() if group not in allowed})
+
     def parsed_tower_ids(self) -> list[str]:
         """Parse comma-separated tower ids."""
         if not self.tower_ids:
