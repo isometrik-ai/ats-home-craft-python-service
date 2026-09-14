@@ -419,6 +419,23 @@ async def test_list_by_project_with_vehicle_type_and_fuel_type():
 
 
 @pytest.mark.asyncio
+async def test_list_by_project_with_limit():
+    """list_by_project applies SQL LIMIT when limit is provided."""
+    conn = _mock_conn(rows=[_vehicle_row()])
+    repo = VehiclesRepository(db_connection=conn)
+
+    await repo.list_by_project(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        limit=10_000,
+    )
+
+    query, args = _sql_args(conn.fetch)
+    assert "LIMIT $6" in query
+    assert args == (ORG_ID, PROJECT_ID, None, None, None, 10_000)
+
+
+@pytest.mark.asyncio
 async def test_get_by_project():
     """get_by_project fetches active vehicle in project scope."""
     conn = _mock_conn(row=_vehicle_row())

@@ -131,6 +131,9 @@ class VehicleStatus(str, Enum):
     REMOVED = "removed"
 
 
+VEHICLE_REQUESTS_EXPORT_MAX_ROWS = 10_000
+
+
 class ClientUserStatus(str, Enum):
     """Client user status enumeration."""
 

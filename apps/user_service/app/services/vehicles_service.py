@@ -29,6 +29,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
     VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import (
+    VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
     VehicleFuelType,
     VehicleStatus,
     VehicleType,
@@ -1109,6 +1110,7 @@ class VehiclesService:
         vehicle_type: VehicleType | None = None,
         fuel_type: VehicleFuelType | None = None,
         search: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """List vehicles for a project (admin)."""
         org_id = self.user_context.organization_id
@@ -1123,6 +1125,7 @@ class VehiclesService:
             vehicle_type=vehicle_type.value if vehicle_type else None,
             fuel_type=fuel_type.value if fuel_type else None,
             search=normalized_search,
+            limit=limit,
         )
         return [self._serialize_admin_vehicle(row) for row in rows]
 
@@ -1195,6 +1198,7 @@ class VehiclesService:
             vehicle_type=query.vehicle_type,
             fuel_type=query.fuel_type,
             search=query.search,
+            limit=VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
         )
         buffer = io.StringIO()
         writer = csv.writer(buffer)

@@ -1101,6 +1101,7 @@ async def test_list_project_vehicles_passes_search():
         vehicle_type=None,
         fuel_type=None,
         search="A-101",
+        limit=None,
     )
 
 
@@ -1119,6 +1120,7 @@ async def test_list_project_vehicles_filters_status():
         vehicle_type=None,
         fuel_type=None,
         search=None,
+        limit=None,
     )
 
 
@@ -1143,6 +1145,7 @@ async def test_list_project_vehicles_passes_vehicle_type_and_fuel_type():
         vehicle_type=VehicleType.FOUR_WHEELER.value,
         fuel_type=VehicleFuelType.EV.value,
         search=None,
+        limit=None,
     )
 
 
@@ -1825,6 +1828,7 @@ async def test_export_project_vehicles_csv_empty_result():
     from apps.user_service.app.schemas.contact_onboarding import (
         VehicleRequestsExportQuery,
     )
+    from apps.user_service.app.schemas.enums import VEHICLE_REQUESTS_EXPORT_MAX_ROWS
 
     svc = _service()
     svc.repo.list_by_project.return_value = []
@@ -1844,6 +1848,7 @@ async def test_export_project_vehicles_csv_empty_result():
         vehicle_type=None,
         fuel_type=None,
         search=None,
+        limit=VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
     )
 
 
@@ -1853,7 +1858,11 @@ async def test_export_project_vehicles_csv_forwards_filters_to_list():
     from apps.user_service.app.schemas.contact_onboarding import (
         VehicleRequestsExportQuery,
     )
-    from apps.user_service.app.schemas.enums import VehicleFuelType, VehicleType
+    from apps.user_service.app.schemas.enums import (
+        VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
+        VehicleFuelType,
+        VehicleType,
+    )
 
     svc = _service()
     svc.repo.list_by_project.return_value = []
@@ -1876,6 +1885,7 @@ async def test_export_project_vehicles_csv_forwards_filters_to_list():
         vehicle_type=VehicleType.TWO_WHEELER.value,
         fuel_type=VehicleFuelType.EV.value,
         search="MH07",
+        limit=VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
     )
 
 

@@ -612,6 +612,7 @@ class VehiclesRepository(BaseRepository):
         fuel_type: str | None = None,
         include_removed: bool = True,
         search: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """List vehicles for a project (admin view)."""
         removed_filter = "" if include_removed else f"AND {_ACTIVE_VEHICLE_FILTER}"
@@ -627,6 +628,11 @@ class VehiclesRepository(BaseRepository):
                   OR COALESCE(u.unit_label, '') ILIKE ${idx}
               )
             """
+        limit_clause = ""
+        if limit is not None:
+            args.append(limit)
+            limit_idx = len(args)
+            limit_clause = f"LIMIT ${limit_idx}"
         rows = await self.db_connection.fetch(
             f"""
             SELECT
@@ -648,6 +654,7 @@ class VehiclesRepository(BaseRepository):
               {removed_filter}
               {search_filter}
             ORDER BY v.created_at DESC, v.sort_order
+            {limit_clause}
             """,
             *args,
         )
