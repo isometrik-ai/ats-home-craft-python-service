@@ -24,6 +24,7 @@ class AuditLogFilter(BaseModel):
         table_name: Filter by table name
         user_id: Filter by user ID
         category: Filter by audit category
+        project_id: Filter by project ID
         risk_level: Filter by risk level (low, medium, high)
         start_date: Inclusive start date filter on timestamp
         end_date: Inclusive end date filter on timestamp
@@ -36,6 +37,7 @@ class AuditLogFilter(BaseModel):
     action_type: AuditLogActionType | None = Field(None, description="Action type filter")
     table_name: str | None = Field(None, description="Table name filter")
     user_id: str | None = Field(None, description="User ID filter")
+    project_id: str | None = Field(None, description="Project ID filter")
     category: str | None = Field(None, description="Category filter")
     risk_level: AuditLogRiskLevel | None = Field(None, description="Risk level filter")
     start_date: date | None = Field(None, description="Inclusive start date filter")
@@ -83,10 +85,12 @@ class AuditLogBase(BaseModel):
         actor_name (str | None): Display name of the actor (derived from user profile)
         status_code (int | None): HTTP status code of the API call
         category (str | None): Category classification for the audit log
+        project_id (str | None): Project ID associated with the audit log
     """
 
     id: str = Field(..., description="Unique identifier for the audit log")
     organization_id: str = Field(..., description="Organization ID where the audit log was created")
+    project_id: str | None = Field(None, description="Project ID associated with the audit log")
     user_id: str = Field(..., description="User ID who performed the action")
     user_email: str = Field(..., description="Email of the user who performed the action")
     user_role: str = Field(..., description="Role of the user who performed the action")

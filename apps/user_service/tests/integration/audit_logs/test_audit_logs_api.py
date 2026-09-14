@@ -55,6 +55,7 @@ async def test_get_audit_logs_with_filters(monkeypatch, client):
         "?page=1&page_size=10"
         "&action_type=UPDATE"
         "&category=CONTACT"
+        "&project_id=proj-1"
         "&risk_level=medium"
         "&start_date=2026-01-01"
         "&end_date=2026-01-31"
@@ -66,6 +67,7 @@ async def test_get_audit_logs_with_filters(monkeypatch, client):
     filters = captured["filter_params"]
     assert filters.action_type.value == "UPDATE"
     assert filters.category == "CONTACT"
+    assert filters.project_id == "proj-1"
     assert filters.risk_level.value == "medium"
     assert filters.start_date == date(2026, 1, 1)
     assert filters.end_date == date(2026, 1, 31)

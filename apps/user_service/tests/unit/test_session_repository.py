@@ -148,6 +148,35 @@ async def test_get_sessions_with_count_no_search():
     assert result["data"][0]["id"] == "s2"
 
 
+def test_build_session_filters_project_id():
+    """Project filter scopes sessions to active project members."""
+    repo = SessionRepository(db_connection=None)
+    where, params = repo._build_session_filters(  # pylint: disable=protected-access
+        organization_id="org1",
+        user_id="u1",
+        filters=SessionFilter(project_id="proj-1"),
+        include_search=False,
+    )
+
+    assert "project_members pm" in where
+    assert "pm.project_id = $3::uuid" in where
+    assert params[-1] == "proj-1"
+
+
+def test_build_org_session_filters_project_id():
+    """Org-wide project filter scopes sessions to active project members."""
+    repo = SessionRepository(db_connection=None)
+    where, params = repo._build_org_session_filters(  # pylint: disable=protected-access
+        organization_id="org1",
+        filters=SessionFilter(project_id="proj-1"),
+        include_search=False,
+    )
+
+    assert "project_members pm" in where
+    assert "pm.project_id = $2::uuid" in where
+    assert params[-1] == "proj-1"
+
+
 def test_build_org_session_filters_search():
     """Org-wide search adds om/au predicates and ip/user_agent."""
     repo = SessionRepository(db_connection=None)

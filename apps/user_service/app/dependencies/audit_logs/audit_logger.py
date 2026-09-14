@@ -57,6 +57,7 @@ class AuditEventData:
     description: str
     status_code: int | None = None
     category: str | None = None
+    project_id: str | None = None
 
 
 class AuditLogger:
@@ -145,6 +146,7 @@ class AuditLogger:
         """
         return {
             "organization_id": event_data.user_context.get("organization_id"),
+            "project_id": event_data.project_id,
             "user_id": event_data.user_context.get("user_id"),
             "user_email": event_data.user_context.get("user_email", "unknown"),
             "user_role": event_data.user_context.get("user_role", "unknown"),

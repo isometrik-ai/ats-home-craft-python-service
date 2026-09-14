@@ -51,6 +51,7 @@ logger = get_logger("sessions-api")
 )
 @limiter.limit("100/minute")
 async def get_sessions_list(
+    *,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
@@ -65,6 +66,9 @@ async def get_sessions_list(
     ),
     login_method: str | None = Query(
         None, description="Filter by login method (password, sso, mfa)"
+    ),
+    project_id: str | None = Query(
+        None, description="Filter sessions by project ID (users who are project members)"
     ),
 ):
     """Get all sessions for the current organization."""
@@ -83,6 +87,7 @@ async def get_sessions_list(
         search=search,
         session_status=session_status,
         login_method=login_method,
+        project_id=project_id,
         limit=page_size,
         offset=(page - 1) * page_size,
     )
@@ -136,6 +141,7 @@ async def get_sessions_list(
 )
 @limiter.limit("100/minute")
 async def get_organization_sessions(
+    *,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
@@ -150,6 +156,9 @@ async def get_organization_sessions(
     ),
     login_method: str | None = Query(
         None, description="Filter by login method (password, sso, mfa)"
+    ),
+    project_id: str | None = Query(
+        None, description="Filter sessions by project ID (users who are project members)"
     ),
 ):
     """Get all sessions for all users in the current organization.
@@ -167,6 +176,7 @@ async def get_organization_sessions(
         search=search,
         session_status=session_status,
         login_method=login_method,
+        project_id=project_id,
         limit=page_size,
         offset=(page - 1) * page_size,
     )

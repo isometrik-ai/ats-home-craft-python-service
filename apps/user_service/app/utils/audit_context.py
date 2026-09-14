@@ -16,6 +16,7 @@ def set_audit_context(
     table: str,
     description: str,
     requested_id: str = "",
+    project_id: str | None = None,
     risk_level: str = "low",
     old_data: Any | None = None,
     new_data: Any | None = None,
@@ -25,6 +26,8 @@ def set_audit_context(
     request.state.audit_requested_id = requested_id
     request.state.audit_description = description
     request.state.audit_risk_level = risk_level
+    if project_id:
+        request.state.audit_project_id = project_id
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
         "user_email": user_context.email,

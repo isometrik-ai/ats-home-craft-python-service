@@ -112,6 +112,7 @@ class AuditLogService:
         """
         return {
             "organization_id": audit_data["organization_id"],
+            "project_id": audit_data.get("project_id"),
             "user_id": audit_data["user_id"],
             "user_email": audit_data["user_email"],
             "user_role": audit_data["user_role"],
@@ -264,9 +265,11 @@ class AuditLogService:
         Returns:
             AuditLogItem: Formatted audit log item
         """
+        project_id = audit_log_data.get("project_id")
         return AuditLogItem(
             id=str(audit_log_data["id"]),
             organization_id=str(audit_log_data["organization_id"]),
+            project_id=str(project_id) if project_id else None,
             user_id=str(audit_log_data["user_id"]),
             user_email=AuditLogService._format_user_email(audit_log_data.get("user_email")),
             user_role=audit_log_data["user_role"],
@@ -303,9 +306,11 @@ class AuditLogService:
         Returns:
             AuditLogDetailItem: Formatted audit log detail item
         """
+        project_id = audit_log_data.get("project_id")
         return AuditLogDetailItem(
             id=str(audit_log_data["id"]),
             organization_id=str(audit_log_data["organization_id"]),
+            project_id=str(project_id) if project_id else None,
             user_id=str(audit_log_data["user_id"]),
             user_email=AuditLogService._format_user_email(audit_log_data.get("user_email")),
             user_role=audit_log_data["user_role"],

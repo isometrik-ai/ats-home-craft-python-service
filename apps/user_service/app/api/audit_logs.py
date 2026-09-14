@@ -71,6 +71,10 @@ async def get_audit_logs(
         None,
         description="Filter by audit category (e.g. CONTACT, PROJECT_SETUP, DAILY_HELP)",
     ),
+    project_id: str | None = Query(
+        None,
+        description="Filter audit logs by project ID",
+    ),
     risk_level: AuditLogRiskLevel | None = Query(
         None,
         description="Filter by risk level (low, medium, high)",
@@ -108,6 +112,7 @@ async def get_audit_logs(
         user_id=effective_user_id,
         action_type=action_type,
         category=category,
+        project_id=project_id,
         risk_level=risk_level,
         start_date=start_date,
         end_date=end_date,

@@ -133,9 +133,28 @@ async def _log_audit_event(
         description=audit_state["description"],
         status_code=status_code,
         category=category,
+        project_id=_resolve_audit_project_id(request, audit_state),
     )
 
     await audit_logger.log_audit_event(audit_event_data, request)
+
+
+def _resolve_audit_project_id(request: Request, audit_state: dict) -> str | None:
+    """Resolve project_id from explicit audit context, route params, or record."""
+    explicit_project_id = getattr(request.state, "audit_project_id", None)
+    if explicit_project_id:
+        return str(explicit_project_id)
+
+    path_project_id = request.path_params.get("project_id")
+    if path_project_id:
+        return str(path_project_id)
+
+    table_name = audit_state.get("table") or ""
+    requested_id = audit_state.get("requested_id") or ""
+    if table_name == "projects" and requested_id:
+        return str(requested_id)
+
+    return None
 
 
 def _collect_audit_state(request: Request, table_name: str | None) -> dict:

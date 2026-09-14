@@ -69,6 +69,7 @@ def _filter(**overrides):
         "action_type": None,
         "table_name": None,
         "user_id": None,
+        "project_id": None,
         "category": None,
         "risk_level": None,
         "start_date": None,
@@ -132,6 +133,7 @@ def test_build_filters_with_search_and_dates():
         ("risk_level", AuditLogRiskLevel.HIGH, "al.risk_level = $2", "high"),
         ("start_date", date(2026, 8, 1), "al.timestamp::date >= $2::date", date(2026, 8, 1)),
         ("end_date", date(2026, 8, 20), "al.timestamp::date <= $2::date", date(2026, 8, 20)),
+        ("project_id", "proj-1", "al.project_id = $2::uuid", "proj-1"),
     ],
 )
 def test_build_filters_individual_fields(field, value, sql_fragment, expected_param):

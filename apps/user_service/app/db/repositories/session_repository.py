@@ -97,6 +97,23 @@ class SessionRepository:
             params.append(filters.login_method)
             param_index += 1
 
+        if filters.project_id:
+            project_param = f"${param_index}"
+            org_ref = f"{table_prefix}organization_id"
+            user_ref = f"{table_prefix}user_id"
+            conditions.append(
+                f"""EXISTS (
+                    SELECT 1
+                    FROM project_members pm
+                    WHERE pm.user_id = {user_ref}
+                      AND pm.project_id = {project_param}::uuid
+                      AND pm.organization_id = {org_ref}
+                      AND pm.status = 'active'
+                )"""
+            )
+            params.append(filters.project_id)
+            param_index += 1
+
         # Handle search (email/name) across organization_members + auth.users
         if include_search and filters.search:
             search_term = f"%{filters.search}%"
@@ -247,6 +264,21 @@ class SessionRepository:
         if filters.login_method:
             conditions.append(f"us.login_method = ${param_index}")
             params.append(filters.login_method)
+            param_index += 1
+
+        if filters.project_id:
+            project_param = f"${param_index}"
+            conditions.append(
+                f"""EXISTS (
+                    SELECT 1
+                    FROM project_members pm
+                    WHERE pm.user_id = us.user_id
+                      AND pm.project_id = {project_param}::uuid
+                      AND pm.organization_id = us.organization_id
+                      AND pm.status = 'active'
+                )"""
+            )
+            params.append(filters.project_id)
             param_index += 1
 
         # Handle search with organization_members join if search is provided

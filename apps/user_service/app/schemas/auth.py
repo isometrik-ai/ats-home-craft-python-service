@@ -40,6 +40,7 @@ class SessionFilter(BaseModel):
     search: str | None = None
     session_status: SessionStatus | None = None
     login_method: LoginMethod | None = None
+    project_id: str | None = None
     limit: int = 20
     offset: int = 0
 

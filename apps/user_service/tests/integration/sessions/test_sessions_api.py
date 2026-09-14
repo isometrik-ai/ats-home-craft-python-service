@@ -66,6 +66,7 @@ async def test_get_sessions_list(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_get_organization_sessions(monkeypatch, client):
     """List sessions across organization."""
+    captured: dict = {}
 
     async def fake_check_permissions(current_user, db_connection, permission_codes):
         del current_user, db_connection, permission_codes
@@ -74,7 +75,8 @@ async def test_get_organization_sessions(monkeypatch, client):
         )
 
     async def fake_get_org_sessions(self, filters: SessionFilter):
-        del self, filters
+        del self
+        captured["filters"] = filters
         return {
             "sessions": [
                 {
@@ -96,12 +98,13 @@ async def test_get_organization_sessions(monkeypatch, client):
         fake_get_org_sessions,
     )
 
-    res = await client.get("/v1/sessions/all?page=1&page_size=10")
+    res = await client.get("/v1/sessions/all?page=1&page_size=10&project_id=proj-1")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == "s2"
     assert body["data"][0]["user_email"] == "u2@example.com"
     assert body["data"][0]["user_name"] == "User Two"
     assert body["total"] == 1
+    assert captured["filters"].project_id == "proj-1"
 
 
 @pytest.mark.asyncio

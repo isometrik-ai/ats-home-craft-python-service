@@ -16,6 +16,7 @@ def _filter(**overrides):
         "action_type": None,
         "table_name": None,
         "user_id": None,
+        "project_id": None,
         "category": None,
         "risk_level": None,
         "start_date": None,
