@@ -37,6 +37,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 class SessionFilter(BaseModel):
     """Request model for Session Filter"""
 
+    project_id: str
     search: str | None = None
     session_status: SessionStatus | None = None
     login_method: LoginMethod | None = None

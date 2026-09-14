@@ -65,6 +65,7 @@ def _filter(**overrides):
     """Build AuditLogFilter with defaults."""
     base = {
         "organization_id": "org-1",
+        "project_id": "proj-1",
         "search": None,
         "action_type": None,
         "table_name": None,
@@ -86,7 +87,18 @@ def test_build_filters_org_only():
     where, params = repo._build_audit_log_filters(_filter())  # pylint: disable=protected-access
 
     assert "al.organization_id = $1" in where
-    assert params == ["org-1"]
+    assert "al.project_id = $2::uuid" in where
+    assert params[:2] == ["org-1", "proj-1"]
+
+
+def test_build_filters_project_id_legacy_fallback():
+    """Project filter includes legacy JSON path fallback for older rows."""
+    repo = AuditLogRepository(db_connection=None)
+    where, params = repo._build_audit_log_filters(_filter(project_id="proj-99"))  # pylint: disable=protected-access
+
+    assert "al.project_id IS NULL" in where
+    assert "new_values->'meta'->>'path'" in where
+    assert params[1] == "proj-99"
 
 
 def test_build_filters_with_search_and_dates():
@@ -107,31 +119,31 @@ def test_build_filters_with_search_and_dates():
         )
     )
 
-    assert "al.user_id = $2" in where
-    assert "al.action_type = $3" in where
-    assert "al.table_name = $4" in where
-    assert "al.category = $5" in where
-    assert "al.risk_level = $6" in where
+    assert "al.user_id = $3" in where
+    assert "al.action_type = $4" in where
+    assert "al.table_name = $5" in where
+    assert "al.category = $6" in where
+    assert "al.risk_level = $7" in where
     assert "al.timestamp::date >=" in where
     assert "al.timestamp::date <=" in where
     assert "ILIKE" in where
     assert "al.user_email ILIKE" in where
     assert "au.email" in where
-    assert params[2] == "UPDATE"
-    assert params[4] == "CONTACT"
-    assert params[5] == "medium"
+    assert params[3] == "UPDATE"
+    assert params[5] == "CONTACT"
+    assert params[6] == "medium"
     assert params[-1] == "%alpha%"
 
 
 @pytest.mark.parametrize(
     ("field", "value", "sql_fragment", "expected_param"),
     [
-        ("action_type", AuditLogActionType.CREATE, "al.action_type = $2", "CREATE"),
-        ("action_type", AuditLogActionType.DELETE, "al.action_type = $2", "DELETE"),
-        ("category", "DAILY_HELP", "al.category = $2", "DAILY_HELP"),
-        ("risk_level", AuditLogRiskLevel.HIGH, "al.risk_level = $2", "high"),
-        ("start_date", date(2026, 8, 1), "al.timestamp::date >= $2::date", date(2026, 8, 1)),
-        ("end_date", date(2026, 8, 20), "al.timestamp::date <= $2::date", date(2026, 8, 20)),
+        ("action_type", AuditLogActionType.CREATE, "al.action_type = $3", "CREATE"),
+        ("action_type", AuditLogActionType.DELETE, "al.action_type = $3", "DELETE"),
+        ("category", "DAILY_HELP", "al.category = $3", "DAILY_HELP"),
+        ("risk_level", AuditLogRiskLevel.HIGH, "al.risk_level = $3", "high"),
+        ("start_date", date(2026, 8, 1), "al.timestamp::date >= $3::date", date(2026, 8, 1)),
+        ("end_date", date(2026, 8, 20), "al.timestamp::date <= $3::date", date(2026, 8, 20)),
     ],
 )
 def test_build_filters_individual_fields(field, value, sql_fragment, expected_param):
@@ -140,7 +152,7 @@ def test_build_filters_individual_fields(field, value, sql_fragment, expected_pa
     where, params = repo._build_audit_log_filters(_filter(**{field: value}))  # pylint: disable=protected-access
 
     assert sql_fragment in where
-    assert params[1] == expected_param
+    assert params[2] == expected_param
 
 
 @pytest.mark.asyncio
@@ -164,7 +176,11 @@ async def test_list_and_count_queries_share_filters():
     list_where = list_query.split("WHERE", 1)[1].split("ORDER BY", 1)[0].strip()
     count_where = count_query.split("WHERE", 1)[1].strip()
     assert list_where == count_where
-    assert conn.fetch_calls[0][1][:6] == conn.fetchval_calls[0][1]
+    filter_param_count = 7
+    assert (
+        conn.fetch_calls[0][1][:filter_param_count]
+        == conn.fetchval_calls[0][1][:filter_param_count]
+    )
 
 
 def test_build_filters_search_email_only():
@@ -208,8 +224,9 @@ async def test_get_audit_logs_count():
     query, args = conn.fetchval_calls[0]
     assert "SELECT COUNT(*)" in query
     assert "LEFT JOIN auth.users au" in query
-    assert "al.table_name = $2" in query
+    assert "al.table_name = $3" in query
     assert args[0] == "org-1"
+    assert args[1] == "proj-1"
 
 
 @pytest.mark.asyncio

@@ -7,14 +7,21 @@ import pytest
 from apps.user_service.app.schemas.auth import SessionFilter
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.tests.utils.assertions import assert_success
+from libs.shared_utils.http_exceptions import ForbiddenException
+from libs.shared_utils.status_codes import CustomStatusCode
+
+PROJECT_ID = "550e8400-e29b-41d4-a716-446655440000"
 
 
 @pytest.mark.asyncio
 async def test_get_sessions_list(monkeypatch, client):
     """List sessions for current user/org."""
 
-    async def fake_extract_user_context(current_user, db_connection):
-        del current_user, db_connection
+    captured: dict = {}
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args
+        captured["project_id"] = kwargs.get("project_id")
         return UserContext(
             user_id="u1", email="u1@example.com", organization_id="org-1", user_type="member"
         )
@@ -29,7 +36,8 @@ async def test_get_sessions_list(monkeypatch, client):
         )
 
     async def fake_get_user_sessions(self, filters: SessionFilter):
-        del self, filters
+        del self
+        captured["filters"] = filters
         return {
             "sessions": [
                 {
@@ -43,8 +51,8 @@ async def test_get_sessions_list(monkeypatch, client):
         }
 
     monkeypatch.setattr(
-        "apps.user_service.app.api.sessions.extract_user_context",
-        fake_extract_user_context,
+        "apps.user_service.app.api.sessions.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
     )
     monkeypatch.setattr(
         "apps.user_service.app.api.sessions.check_permissions",
@@ -55,17 +63,57 @@ async def test_get_sessions_list(monkeypatch, client):
         fake_get_user_sessions,
     )
 
-    res = await client.get("/v1/sessions?page=1&page_size=10")
+    res = await client.get(f"/v1/sessions?page=1&page_size=10&project_id={PROJECT_ID}")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == "s1"
     assert body["data"][0]["user_email"] == "u1@example.com"
     assert body["data"][0]["user_name"] == "User One"
     assert body["total"] == 1
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["filters"].project_id == PROJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_list_rejects_missing_project_id(client):
+    """Missing project_id returns 422 validation error."""
+    res = await client.get("/v1/sessions?page=1&page_size=10")
+
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_list_rejects_forbidden_project_access(monkeypatch, client):
+    """Project access failure returns 403 before listing sessions."""
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args, kwargs
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+
+    res = await client.get(f"/v1/sessions?page=1&page_size=10&project_id={PROJECT_ID}")
+
+    assert res.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_get_organization_sessions(monkeypatch, client):
     """List sessions across organization."""
+
+    captured: dict = {}
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args
+        captured["project_id"] = kwargs.get("project_id")
+        return UserContext(
+            user_id="admin", email="admin@example.com", organization_id="org-1", user_type="admin"
+        )
 
     async def fake_check_permissions(current_user, db_connection, permission_codes):
         del current_user, db_connection, permission_codes
@@ -74,7 +122,8 @@ async def test_get_organization_sessions(monkeypatch, client):
         )
 
     async def fake_get_org_sessions(self, filters: SessionFilter):
-        del self, filters
+        del self
+        captured["filters"] = filters
         return {
             "sessions": [
                 {
@@ -88,6 +137,10 @@ async def test_get_organization_sessions(monkeypatch, client):
         }
 
     monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+    monkeypatch.setattr(
         "apps.user_service.app.api.sessions.check_permissions",
         fake_check_permissions,
     )
@@ -96,26 +149,48 @@ async def test_get_organization_sessions(monkeypatch, client):
         fake_get_org_sessions,
     )
 
-    res = await client.get("/v1/sessions/all?page=1&page_size=10")
+    res = await client.get(f"/v1/sessions/all?page=1&page_size=10&project_id={PROJECT_ID}")
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == "s2"
     assert body["data"][0]["user_email"] == "u2@example.com"
     assert body["data"][0]["user_name"] == "User Two"
     assert body["total"] == 1
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["filters"].project_id == PROJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_get_organization_sessions_rejects_missing_project_id(client):
+    """Missing project_id returns 422 validation error."""
+    res = await client.get("/v1/sessions/all?page=1&page_size=10")
+
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_organization_sessions_rejects_forbidden_project_access(monkeypatch, client):
+    """Project access failure returns 403 before listing org sessions."""
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args, kwargs
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+
+    res = await client.get(f"/v1/sessions/all?page=1&page_size=10&project_id={PROJECT_ID}")
+
+    assert res.status_code == 403
 
 
 @pytest.mark.asyncio
 async def test_revoke_session(monkeypatch, client):
     """Revoke a specific session."""
-
-    async def fake_extract_user_context(current_user, db_connection):
-        del current_user, db_connection
-        return UserContext(
-            user_id="admin",
-            email="admin@example.com",
-            organization_id="org-1",
-            user_type="admin",
-        )
 
     async def fake_check_permissions(current_user, db_connection, permission_codes):
         del current_user, db_connection, permission_codes
@@ -139,10 +214,6 @@ async def test_revoke_session(monkeypatch, client):
         del self
         assert kwargs["session_id"] == "sess-1"
 
-    monkeypatch.setattr(
-        "apps.user_service.app.api.sessions.extract_user_context",
-        fake_extract_user_context,
-    )
     monkeypatch.setattr(
         "apps.user_service.app.api.sessions.check_permissions",
         fake_check_permissions,
