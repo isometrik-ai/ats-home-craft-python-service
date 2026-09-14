@@ -589,6 +589,7 @@ class ContactSummaryResponse(BaseModel):
     role_types: list[str] = Field(default_factory=list)
     portal_access: bool = True
     first_name: str | None = None
+    middle_name: str | None = None
     last_name: str | None = None
     title: str | None = None
     email: str | None = None

@@ -500,6 +500,7 @@ async def test_get_contacts_by_ids_maps_names():
             {
                 "id": CONTACT_ID,
                 "first_name": "Jane",
+                "middle_name": "Q",
                 "last_name": "Doe",
                 "email": "jane@example.com",
                 "external_contact_id": "ext-1",
@@ -511,7 +512,7 @@ async def test_get_contacts_by_ids_maps_names():
     result = await svc.get_contacts_by_ids(contact_ids=[CONTACT_ID, CONTACT_ID])
 
     assert len(result) == 1
-    assert result[0]["name"] == "Jane Doe"
+    assert result[0]["name"] == "Jane Q Doe"
     assert result[0]["external_contact_id"] == "ext-1"
     assert repo.last_by_ids_kwargs["contact_ids"] == [CONTACT_ID]
 
@@ -662,6 +663,7 @@ def test_typesense_hits_to_summaries():
                 "organization_id": ORG_ID,
                 "status": ClientStatus.ACTIVE.value,
                 "first_name": "Jane",
+                "middle_name": "Q",
                 "last_name": "Doe",
                 "email": "jane@example.com",
                 "phones_display": [],
@@ -674,12 +676,17 @@ def test_typesense_hits_to_summaries():
     ]
     items = ContactsService.typesense_hits_to_contact_summaries(hits)
     assert items[0]["first_name"] == "Jane"
+    assert items[0]["middle_name"] == "Q"
 
 
 def test_format_contact_display_name():
-    """Display name joins first and last name."""
-    name = ContactsService._format_contact_display_name(first_name="Jane", last_name="Doe")
-    assert name == "Jane Doe"
+    """Display name joins first, middle, and last name."""
+    name = ContactsService._format_contact_display_name(
+        first_name="Jane",
+        middle_name="Q",
+        last_name="Doe",
+    )
+    assert name == "Jane Q Doe"
 
 
 def test_normalize_external_contact_id():

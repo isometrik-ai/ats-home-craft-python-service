@@ -325,6 +325,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.user_id::text AS user_id,
               ct.prefix,
               ct.first_name,
+              ct.middle_name,
               ct.last_name
             FROM contacts ct
             WHERE ct.organization_id = $1::uuid
@@ -340,6 +341,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             parts = [
                 str(row.get("prefix") or "").strip(),
                 str(row.get("first_name") or "").strip(),
+                str(row.get("middle_name") or "").strip(),
                 str(row.get("last_name") or "").strip(),
             ]
             name = " ".join(part for part in parts if part)
@@ -1228,8 +1230,8 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         if search:
             search_stripped = search.strip()
             search_parts = [
-                f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.last_name,'')) "
-                f"ILIKE ${next_param_index}",
+                f"(COALESCE(ct.first_name,'') || ' ' || COALESCE(ct.middle_name,'') || ' '"
+                f" || COALESCE(ct.last_name,'')) ILIKE ${next_param_index}",
                 f"""EXISTS (
                   SELECT 1
                   FROM jsonb_array_elements(COALESCE(ct.emails, '[]'::jsonb)) AS e(email)
@@ -1299,6 +1301,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
               ct.status,
               COALESCE(roles.role_types, ARRAY[]::text[]) AS role_types,
               ct.first_name,
+              ct.middle_name,
               ct.last_name,
               ct.title,
               ct.emails,
@@ -1434,6 +1437,7 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
             SELECT
               ct.id::text AS id,
               ct.first_name,
+              ct.middle_name,
               ct.last_name,
               NULLIF(au.email::text, '') AS email,
               ct.external_contact_id

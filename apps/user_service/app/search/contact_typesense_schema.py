@@ -14,8 +14,9 @@ CONTACTS_COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "id", "type": "string"},
         {"name": "organization_id", "type": "string", "facet": True},
         {"name": "status", "type": "string", "facet": True},
-        # Contact identity (first/last are display-only; search uses full_name)
+        # Contact identity (name parts are display-only; search uses full_name)
         {"name": "first_name", "type": "string", "index": False, "optional": True},
+        {"name": "middle_name", "type": "string", "index": False, "optional": True},
         {"name": "last_name", "type": "string", "index": False, "optional": True},
         {"name": "full_name", "type": "string"},
         {"name": "title", "type": "string", "optional": True},

@@ -10,6 +10,7 @@ def format_contact_display_name(
     *,
     prefix: str | None,
     first_name: str | None,
+    middle_name: str | None = None,
     last_name: str | None,
 ) -> str:
     """Build a display name from contact name parts."""
@@ -18,6 +19,7 @@ def format_contact_display_name(
         for part in [
             (prefix or "").strip(),
             (first_name or "").strip(),
+            (middle_name or "").strip(),
             (last_name or "").strip(),
         ]
         if part
@@ -93,6 +95,7 @@ def build_unit_list_owner(row: dict[str, Any]) -> dict[str, Any] | None:
     owner_display_name = format_contact_display_name(
         prefix=row.get("owner_prefix"),
         first_name=row.get("owner_first_name"),
+        middle_name=row.get("owner_middle_name"),
         last_name=row.get("owner_last_name"),
     )
     return {
