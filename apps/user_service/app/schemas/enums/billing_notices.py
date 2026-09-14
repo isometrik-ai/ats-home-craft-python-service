@@ -107,7 +107,7 @@ class NoticeRecipientGroup(str, Enum):
 
     OWNER = "Owner"
     TENANT = "Tenant"
-    STAFF = "Staff"
+    STAFF_MANAGER = "Staff Manager"
     SECURITY = "Security"
 
 

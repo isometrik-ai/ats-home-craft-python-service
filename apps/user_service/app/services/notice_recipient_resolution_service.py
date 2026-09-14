@@ -6,14 +6,21 @@ from typing import Any
 
 import asyncpg
 
-from apps.user_service.app.schemas.enums import ProjectMemberRole, ProjectMemberStatus
+from apps.user_service.app.schemas.enums import (
+    ClientStatus,
+    NoticeRecipientGroup,
+    ProjectMemberRole,
+    ProjectMemberStatus,
+)
 
 
 class NoticeRecipientResolutionService:
     """Audience sizing and recipient resolution for notices."""
 
-    _STAFF_PROJECT_ROLES = tuple(
-        role.value for role in ProjectMemberRole if role != ProjectMemberRole.SECURITY
+    _STAFF_MANAGER_GROUP = NoticeRecipientGroup.STAFF_MANAGER.value
+    _STAFF_MANAGER_ROLE_SLUGS = (
+        "staff_manager",
+        ProjectMemberRole.COMMUNITY_ADMIN.value,
     )
 
     def __init__(self, db_connection: asyncpg.Connection) -> None:
@@ -30,45 +37,41 @@ class NoticeRecipientResolutionService:
     ) -> tuple[int, dict[str, int]]:
         """Return total distinct recipients and per-group breakdown."""
         breakdown: dict[str, int] = {}
-        user_ids: set[str] = set()
+        contact_ids: set[str] = set()
+        staff_security_user_ids: set[str] = set()
 
         for group in recipient_groups:
             if group in {"Owner", "Tenant"}:
-                contact_ids = await self._owner_tenant_contact_ids(
+                group_contact_ids = await self._owner_tenant_contact_ids(
                     organization_id=organization_id,
                     project_id=project_id,
                     role_type=group,
                     scope_type=scope_type,
                     tower_ids=tower_ids,
                 )
-                breakdown[group] = len(contact_ids)
-                user_ids.update(
-                    await self._user_ids_for_contacts(
-                        organization_id=organization_id,
-                        contact_ids=contact_ids,
-                    )
-                )
-            elif group == "Staff":
-                staff_user_ids = await self._project_staff_user_ids(
+                breakdown[group] = len(group_contact_ids)
+                contact_ids.update(group_contact_ids)
+            elif group == self._STAFF_MANAGER_GROUP:
+                staff_manager_user_ids = await self._project_staff_manager_user_ids(
                     organization_id=organization_id,
                     project_id=project_id,
                 )
-                security_user_ids = await self._project_security_user_ids(
-                    organization_id=organization_id,
-                    project_id=project_id,
-                )
-                staff_audience = staff_user_ids | security_user_ids
-                breakdown[group] = len(staff_audience)
-                user_ids.update(staff_audience)
+                breakdown[group] = len(staff_manager_user_ids)
+                staff_security_user_ids.update(staff_manager_user_ids)
             elif group == "Security":
                 security_user_ids = await self._project_security_user_ids(
                     organization_id=organization_id,
                     project_id=project_id,
                 )
                 breakdown[group] = len(security_user_ids)
-                user_ids.update(security_user_ids)
+                staff_security_user_ids.update(security_user_ids)
 
-        return len(user_ids), breakdown
+        total = await self._count_distinct_recipients(
+            organization_id=organization_id,
+            contact_ids=contact_ids,
+            staff_security_user_ids=staff_security_user_ids,
+        )
+        return total, breakdown
 
     async def resolve_recipient_user_ids(
         self,
@@ -99,15 +102,9 @@ class NoticeRecipientResolutionService:
                         contact_ids=contact_ids,
                     )
                 )
-            elif group == "Staff":
+            elif group == self._STAFF_MANAGER_GROUP:
                 user_ids.update(
-                    await self._project_staff_user_ids(
-                        organization_id=organization_id,
-                        project_id=project_id,
-                    )
-                )
-                user_ids.update(
-                    await self._project_security_user_ids(
+                    await self._project_staff_manager_user_ids(
                         organization_id=organization_id,
                         project_id=project_id,
                     )
@@ -121,6 +118,52 @@ class NoticeRecipientResolutionService:
                 )
 
         return list(user_ids)
+
+    async def _count_distinct_recipients(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: set[str],
+        staff_security_user_ids: set[str],
+    ) -> int:
+        """Count unique people across resident contacts and staff/security users."""
+        if not contact_ids and not staff_security_user_ids:
+            return 0
+
+        portal_contact_ids, contacts_without_portal = await self._partition_contacts_by_portal(
+            organization_id=organization_id,
+            contact_ids=contact_ids,
+        )
+        portal_user_ids = await self._user_ids_for_contacts(
+            organization_id=organization_id,
+            contact_ids=portal_contact_ids,
+        )
+        return len(portal_user_ids | staff_security_user_ids) + len(contacts_without_portal)
+
+    async def _partition_contacts_by_portal(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: set[str],
+    ) -> tuple[set[str], set[str]]:
+        """Split contact ids into those with and without linked portal user accounts."""
+        if not contact_ids:
+            return set(), set()
+
+        rows = await self.db_connection.fetch(
+            """
+            SELECT id::text AS contact_id
+            FROM contacts
+            WHERE organization_id = $1::uuid
+              AND id = ANY($2::uuid[])
+              AND user_id IS NOT NULL
+            """,
+            organization_id,
+            list(contact_ids),
+        )
+        portal_contact_ids = {str(row["contact_id"]) for row in rows if row["contact_id"]}
+        contacts_without_portal = contact_ids - portal_contact_ids
+        return portal_contact_ids, contacts_without_portal
 
     async def _user_ids_for_contacts(
         self,
@@ -145,13 +188,13 @@ class NoticeRecipientResolutionService:
         )
         return {str(row["user_id"]) for row in rows if row["user_id"]}
 
-    async def _project_staff_user_ids(
+    async def _project_staff_manager_user_ids(
         self,
         *,
         organization_id: str,
         project_id: str,
     ) -> set[str]:
-        """Active project members assigned as staff (non-security roles)."""
+        """Active project members assigned with the Staff Manager role."""
         rows = await self.db_connection.fetch(
             """
             SELECT DISTINCT pm.user_id::text AS user_id
@@ -162,12 +205,16 @@ class NoticeRecipientResolutionService:
             WHERE pm.organization_id = $1::uuid
               AND pm.project_id = $2::uuid
               AND pm.status = $3
-              AND pr.slug = ANY($4::text[])
+              AND (
+                pr.slug = ANY($4::text[])
+                OR lower(trim(pr.name)) = lower($5)
+              )
             """,
             organization_id,
             project_id,
             ProjectMemberStatus.ACTIVE.value,
-            list(self._STAFF_PROJECT_ROLES),
+            list(self._STAFF_MANAGER_ROLE_SLUGS),
+            self._STAFF_MANAGER_GROUP,
         )
         return {str(row["user_id"]) for row in rows if row["user_id"]}
 
@@ -206,38 +253,60 @@ class NoticeRecipientResolutionService:
         scope_type: str,
         tower_ids: list[str],
     ) -> set[str]:
-        """Distinct owner/tenant contacts with active roles in scope."""
+        """Distinct owner/tenant contacts scoped like the contacts list API."""
         tower_filter = ""
-        values: list[Any] = [organization_id, project_id, role_type]
+        values: list[Any] = [
+            organization_id,
+            ClientStatus.DELETED.value,
+            role_type,
+            project_id,
+        ]
         if scope_type == "by_tower" and tower_ids:
-            tower_filter = "AND u.tower_id = ANY($4::uuid[])"
+            tower_filter = """
+              AND EXISTS (
+                SELECT 1
+                FROM units u
+                WHERE u.id = cu.unit_id
+                  AND u.organization_id = cu.organization_id
+                  AND u.tower_id = ANY($5::uuid[])
+              )
+            """
             values.append(tower_ids)
 
         rows = await self.db_connection.fetch(
             f"""
             SELECT DISTINCT cr.contact_id::text AS contact_id
-            FROM contact_roles cr
-            JOIN units u
-              ON u.id = cr.unit_id
-             AND u.organization_id = cr.organization_id
-            WHERE cr.organization_id = $1::uuid
-              AND u.project_id = $2::uuid
-              AND cr.role_type = $3
-              AND cr.status = 'active'
-              {tower_filter}
+            FROM contacts ct
+            INNER JOIN contact_roles cr
+              ON cr.contact_id = ct.id
+             AND cr.organization_id = ct.organization_id
+            WHERE ct.organization_id = $1::uuid
+              AND ct.status <> $2
+              AND cr.role_type = $3::public.contact_role_type
+              AND cr.status = 'active'::public.contact_role_status
+              AND cr.ended_at IS NULL
+              AND EXISTS (
+                SELECT 1
+                FROM contact_units cu
+                WHERE cu.contact_id = ct.id
+                  AND cu.organization_id = ct.organization_id
+                  AND cu.project_id = $4::uuid
+                  AND cu.status IN ('active', 'pending')
+                  {tower_filter}
+              )
             """,
             *values,
         )
         return {str(row["contact_id"]) for row in rows}
 
-    async def _user_is_project_staff(
+    async def _user_is_project_staff_manager(
         self,
         *,
         organization_id: str,
         project_id: str,
         user_id: str,
     ) -> bool:
-        """Return whether the user is an active non-security project member."""
+        """Return whether the user is an active Staff Manager project member."""
         row = await self.db_connection.fetchrow(
             """
             SELECT 1
@@ -249,14 +318,18 @@ class NoticeRecipientResolutionService:
               AND pm.project_id = $2::uuid
               AND pm.user_id = $3::uuid
               AND pm.status = $4
-              AND pr.slug = ANY($5::text[])
+              AND (
+                pr.slug = ANY($5::text[])
+                OR lower(trim(pr.name)) = lower($6)
+              )
             LIMIT 1
             """,
             organization_id,
             project_id,
             user_id,
             ProjectMemberStatus.ACTIVE.value,
-            list(self._STAFF_PROJECT_ROLES),
+            list(self._STAFF_MANAGER_ROLE_SLUGS),
+            self._STAFF_MANAGER_GROUP,
         )
         return row is not None
 
@@ -321,12 +394,8 @@ class NoticeRecipientResolutionService:
                     tower_ids=tower_ids,
                 ):
                     return True
-            elif group == "Staff" and contact_user_id:
-                if await self._user_is_project_staff(
-                    organization_id=organization_id,
-                    project_id=project_id,
-                    user_id=contact_user_id,
-                ) or await self._user_is_project_security(
+            elif group == self._STAFF_MANAGER_GROUP and contact_user_id:
+                if await self._user_is_project_staff_manager(
                     organization_id=organization_id,
                     project_id=project_id,
                     user_id=contact_user_id,
@@ -357,24 +426,47 @@ class NoticeRecipientResolutionService:
             return False
 
         tower_filter = ""
-        values: list[Any] = [organization_id, project_id, contact_id, role_type]
+        values: list[Any] = [
+            organization_id,
+            ClientStatus.DELETED.value,
+            contact_id,
+            role_type,
+            project_id,
+        ]
         if scope_type == "by_tower" and tower_ids:
-            tower_filter = "AND u.tower_id = ANY($5::uuid[])"
+            tower_filter = """
+              AND EXISTS (
+                SELECT 1
+                FROM units u
+                WHERE u.id = cu.unit_id
+                  AND u.organization_id = cu.organization_id
+                  AND u.tower_id = ANY($6::uuid[])
+              )
+            """
             values.append(tower_ids)
 
         row = await self.db_connection.fetchrow(
             f"""
             SELECT 1
-            FROM contact_roles cr
-            JOIN units u
-              ON u.id = cr.unit_id
-             AND u.organization_id = cr.organization_id
-            WHERE cr.organization_id = $1::uuid
-              AND u.project_id = $2::uuid
+            FROM contacts ct
+            INNER JOIN contact_roles cr
+              ON cr.contact_id = ct.id
+             AND cr.organization_id = ct.organization_id
+            WHERE ct.organization_id = $1::uuid
+              AND ct.status <> $2
               AND cr.contact_id = $3::uuid
-              AND cr.role_type = $4
-              AND cr.status = 'active'
-              {tower_filter}
+              AND cr.role_type = $4::public.contact_role_type
+              AND cr.status = 'active'::public.contact_role_status
+              AND cr.ended_at IS NULL
+              AND EXISTS (
+                SELECT 1
+                FROM contact_units cu
+                WHERE cu.contact_id = ct.id
+                  AND cu.organization_id = ct.organization_id
+                  AND cu.project_id = $5::uuid
+                  AND cu.status IN ('active', 'pending')
+                  {tower_filter}
+              )
             LIMIT 1
             """,
             *values,

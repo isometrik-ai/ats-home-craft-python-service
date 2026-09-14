@@ -247,7 +247,7 @@ ______________________________________________________________________
   "live_by_group": {
     "Owner": 4,
     "Tenant": 4,
-    "Staff": 2,
+    "Staff Manager": 2,
     "Security": 1
   }
 }
@@ -330,7 +330,7 @@ POST /v1/projects/{project_id}/notices
   "title": "Independence Day flag hoisting at 8 AM",
   "description": "Join us at the central lawn...",
   "category": "event",
-  "recipient_groups": ["Owner", "Tenant", "Staff", "Security"],
+  "recipient_groups": ["Owner", "Tenant", "Staff Manager", "Security"],
   "scope_type": "whole_society",
   "publish_mode": "schedule",
   "publish_at": "2026-08-15T09:00:00+05:30"
@@ -541,14 +541,14 @@ GET /v1/projects/{project_id}/notices/reach-estimate
 
 Returns approximate recipient count for the create form ("**N** people will receive this notice").
 
-| Group              | Resolution sketch                                                                                                                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Owner / Tenant** | Distinct `contact_id` from active `contact_roles` on units in the project; tower scope applies when `scope_type = by_tower`. Resolved to portal `user_id` via `contacts.user_id` for push. |
-| **Staff**          | Active non-`security` `project_members` **plus** all active `security` project members (security also receives staff notices)                                                              |
-| **Security**       | Active `project_members` with `role = security` only — staff roles do **not** receive security-only notices                                                                                |
+| Group              | Resolution sketch                                                                                                                                                                                                                                                                                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Owner / Tenant** | Distinct active contacts with matching `contact_roles` and `contact_units` in the project (same filters as `POST /contacts/list`); tower scope applies when `scope_type = by_tower`. Reach total counts every contact plus portal users for Staff/Security (deduped). Push still resolves portal `user_id`s only. |
+| **Staff Manager**  | Active `project_members` with slug `staff_manager` or `community_admin`, or role name **Staff Manager**                                                                                                                                                                                                           |
+| **Security**       | Active `project_members` with `role = security` only — staff manager roles do **not** receive security-only notices                                                                                                                                                                                               |
 
-Staff and Security counts ignore tower scope in Phase 1 (org/project scoped). Owner/Tenant scale
-by tower selection.
+Staff Manager and Security counts ignore tower scope in Phase 1 (org/project scoped). Owner/Tenant
+scale by tower selection.
 
 ### 4.11 Engagement metrics — views & likes
 
