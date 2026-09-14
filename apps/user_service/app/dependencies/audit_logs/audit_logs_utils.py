@@ -30,7 +30,7 @@ def extract_project_id_from_request(request: Request) -> str | None:
         try:
             return str(UUID(str(query_project_id).strip()))
         except (ValueError, AttributeError, TypeError):
-            return str(query_project_id).strip() or None
+            return None
 
     return None
 

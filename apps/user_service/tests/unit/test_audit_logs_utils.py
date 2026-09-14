@@ -79,6 +79,21 @@ def test_extract_project_id_from_request_state_and_query():
     assert extract_project_id_from_request(request) == "990e8400-e29b-41d4-a716-446655440004"
 
 
+def test_extract_project_id_from_request_rejects_invalid_query_value():
+    """Invalid project_id query values are ignored instead of persisted raw."""
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/audit-logs",
+            "headers": [],
+            "query_string": b"project_id=not-a-uuid",
+        }
+    )
+
+    assert extract_project_id_from_request(request) is None
+
+
 def test_format_audit_log_data_parses_json_fields():
     """Valid JSON columns are parsed into response objects."""
     result = format_audit_log_data(_row())
