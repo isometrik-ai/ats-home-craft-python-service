@@ -10,7 +10,7 @@ import pytest
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
     CONTACT_LEVEL_STEP_KEYS,
 )
-from apps.user_service.app.schemas.common import Phone
+from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contact_onboarding import (
     CompleteOnboardingRequest,
     CompleteProfileRequest,
@@ -597,6 +597,29 @@ def test_format_household_member_revoked_invitation():
     assert item["portal_access"] is False
     assert item["invitation_status"] == HouseholdInvitationStatus.CANCELLED.value
     assert item["can_resend_invitation"] is True
+    assert item["can_edit_email"] is True
+
+
+def test_format_household_member_can_edit_email_when_missing():
+    """Members without email can add one unless an invite is pending."""
+    item = ContactOnboardingService._format_household_member(_household_row())
+    assert item["can_edit_email"] is True
+
+
+def test_format_household_member_cannot_edit_email_when_pending():
+    """Pending invites lock email edits."""
+    item = ContactOnboardingService._format_household_member(
+        _household_row(invitation_status=HouseholdInvitationStatus.PENDING.value)
+    )
+    assert item["can_edit_email"] is False
+
+
+def test_format_household_member_cannot_edit_email_when_already_set():
+    """Existing email addresses cannot be changed from household edit."""
+    item = ContactOnboardingService._format_household_member(
+        _household_row(emails=[{"email": "sam@example.com", "is_primary": True}])
+    )
+    assert item["can_edit_email"] is False
 
 
 def test_format_household_member_never_invited():
@@ -736,14 +759,19 @@ async def test_add_household_member_requires_primary_occupant():
 
 
 @pytest.mark.asyncio
-async def test_update_household_member_updates_name():
+async def test_update_household_member_updates_name(monkeypatch):
     """update_household_member patches contact fields and returns formatted row."""
     units_repo = _FakeContactUnitsRepo(
         household_link={"contact_id": "family-1"},
         household_member=_household_row(first_name="Old", last_name="Name"),
     )
     svc = _service(contact_units_repo=units_repo)
-    svc.contacts_repo.update_contact = AsyncMock(return_value={"id": "family-1"})
+    contacts_service = MagicMock()
+    contacts_service.update_contact = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
 
     result = await svc.update_household_member(
         primary_contact_id="contact-1",
@@ -752,7 +780,91 @@ async def test_update_household_member_updates_name():
     )
 
     assert result["first_name"] == "Old"
-    svc.contacts_repo.update_contact.assert_awaited_once()
+    contacts_service.update_contact.assert_awaited_once()
+    update_body = contacts_service.update_contact.await_args.kwargs["body"]
+    assert update_body.first_name == "New"
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_adds_email(monkeypatch):
+    """update_household_member can add email when none exists and invite is not pending."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(
+            invitation_status=HouseholdInvitationStatus.CANCELLED.value,
+            emails=[],
+        ),
+    )
+    svc = _service(contact_units_repo=units_repo)
+    contacts_service = MagicMock()
+    contacts_service.update_contact = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+
+    await svc.update_household_member(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+        body=UpdateHouseholdMemberRequest(
+            emails=[Email(email="sam@example.com", is_primary=True)],
+        ),
+    )
+
+    update_body = contacts_service.update_contact.await_args.kwargs["body"]
+    assert update_body.emails[0].email == "sam@example.com"
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_rejects_email_when_pending():
+    """update_household_member blocks email changes while invitation is pending."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(
+            invitation_status=HouseholdInvitationStatus.PENDING.value,
+            emails=[],
+        ),
+    )
+    svc = _service(contact_units_repo=units_repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.update_household_member(
+            primary_contact_id="contact-1",
+            contact_unit_id="cu-1",
+            body=UpdateHouseholdMemberRequest(
+                emails=[Email(email="sam@example.com", is_primary=True)],
+            ),
+        )
+
+    assert (
+        exc_info.value.message_key
+        == "contact_onboarding.errors.household_member_email_pending_invitation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_rejects_email_when_already_set():
+    """update_household_member blocks replacing an existing email address."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(
+            emails=[{"email": "existing@example.com", "is_primary": True}],
+        ),
+    )
+    svc = _service(contact_units_repo=units_repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.update_household_member(
+            primary_contact_id="contact-1",
+            contact_unit_id="cu-1",
+            body=UpdateHouseholdMemberRequest(
+                emails=[Email(email="sam@example.com", is_primary=True)],
+            ),
+        )
+
+    assert (
+        exc_info.value.message_key == "contact_onboarding.errors.household_member_email_already_set"
+    )
 
 
 @pytest.mark.asyncio

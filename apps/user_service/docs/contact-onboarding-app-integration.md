@@ -456,6 +456,7 @@ POST /v1/contact-onboarding/vehicles
 ```http
 GET /v1/contact-onboarding/household?unit_id=<unit_id>
 POST /v1/contact-onboarding/household
+PATCH /v1/contact-onboarding/household/{contact_unit_id}
 ```
 
 ```json
@@ -466,6 +467,19 @@ POST /v1/contact-onboarding/household
   "relationship": "spouse",
   "portal_access": false,
   "phones": [{ "number": "+919811122233", "is_primary": true, "type": "mobile" }]
+}
+```
+
+**Edit family member** — enable the email field when `can_edit_email` is `true` (member has no
+email and no pending portal invitation). Example PATCH body to add email after a revoked invite:
+
+```json
+{
+  "first_name": "Sam",
+  "last_name": "Kumar",
+  "relationship": "child",
+  "portal_access": true,
+  "emails": [{ "email": "sam@example.com", "is_primary": true, "label": "personal" }]
 }
 ```
 

@@ -257,7 +257,7 @@ most endpoints take **no** contact id in the path.
 | GET    | `/v1/contact-onboarding/household`                                     | List household/family members (`?unit_id=` optional)                |
 | GET    | `/v1/contact-onboarding/household/summary`                             | Dashboard counts for Family / Daily Help / Vehicles / Tenant        |
 | POST   | `/v1/contact-onboarding/household`                                     | Add a family member to a unit                                       |
-| PATCH  | `/v1/contact-onboarding/household/{contact_unit_id}`                   | Update a family member (name, relationship, portal_access)          |
+| PATCH  | `/v1/contact-onboarding/household/{contact_unit_id}`                   | Update a family member (name, email, relationship, portal_access)   |
 | DELETE | `/v1/contact-onboarding/household/{contact_unit_id}`                   | Remove a family member (deletes orphaned family contact)            |
 | POST   | `/v1/contact-onboarding/household/{contact_unit_id}/revoke-invitation` | Primary revokes a pending portal invite (member kept)               |
 | POST   | `/v1/contact-onboarding/household/{contact_unit_id}/resend-invitation` | Resend SMS for a pending portal invite                              |
@@ -363,9 +363,11 @@ in `contact_onboarding_service.py`, `contact_units_service.py`, and related serv
     the member on the unit; primary `DELETE /household/{contact_unit_id}` removes the member and
     cancels the invite; invitee decline sets invitation `declined` and removes the member link.
   - **Update:** `PATCH /household/{contact_unit_id}` can change `first_name`, `last_name`,
-    `relationship`, and `portal_access`. Enabling `portal_access` requires a primary phone on the
-    member, sets the unit link to `pending`, and sends an SMS invite. Disabling `portal_access`
-    cancels any pending invitation and reactivates the unit link.
+    `emails`, `relationship`, and `portal_access`. Email can be **added** only when the member has
+    no existing email and no pending portal invitation (`can_edit_email` on list/detail responses).
+    Enabling `portal_access` requires a primary phone on the member, sets the unit link to
+    `pending`, and sends an SMS invite. Disabling `portal_access` cancels any pending invitation
+    and reactivates the unit link.
   - SMS provider: wire in `app/utils/household_invitation_sms.py` (currently logs in dev).
 - **Household summary counts:** `GET /household/summary?unit_id=` aggregates four dashboard
   card totals for the manage screen. Implemented in `ContactOnboardingService.get_household_summary`.

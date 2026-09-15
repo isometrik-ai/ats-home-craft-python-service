@@ -471,6 +471,44 @@ class ContactOnboardingService:
         return False
 
     @staticmethod
+    def _can_edit_household_member_email(
+        *,
+        emails: list[Any],
+        invitation_status: str | None,
+    ) -> bool:
+        """True when the primary can add an email that was omitted at create time."""
+        if emails:
+            return False
+        if invitation_status == HouseholdInvitationStatus.PENDING.value:
+            return False
+        return True
+
+    @staticmethod
+    def _assert_household_member_email_can_be_added(
+        *,
+        member_row: dict[str, Any],
+        emails: list[Any],
+    ) -> None:
+        """Reject email updates that are blocked by invitation or existing email state."""
+        invitation_status = member_row.get("invitation_status")
+        if invitation_status == HouseholdInvitationStatus.PENDING.value:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_email_pending_invitation",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        current_emails = parse_json_any(member_row.get("emails"), default=[])
+        if current_emails:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_email_already_set",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if not emails:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_email_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    @staticmethod
     def _format_household_member(row: dict[str, Any]) -> dict[str, Any]:
         """Map a household member query row to API response shape."""
         portal_access = bool(row.get("portal_access", False))
@@ -483,6 +521,7 @@ class ContactOnboardingService:
             invitation_status=invitation_status,
             has_user=has_user,
         )
+        emails = parse_json_any(row.get("emails"), default=[])
         item: dict[str, Any] = {
             "contact_id": str(row["contact_id"]),
             "contact_unit_id": str(row["contact_unit_id"]),
@@ -497,8 +536,12 @@ class ContactOnboardingService:
             "can_resend_invitation": ContactOnboardingService._can_resend_household_invitation(
                 invitation_status=invitation_status,
             ),
+            "can_edit_email": ContactOnboardingService._can_edit_household_member_email(
+                emails=emails,
+                invitation_status=invitation_status,
+            ),
             "phones": parse_json_any(row.get("phones"), default=[]),
-            "emails": parse_json_any(row.get("emails"), default=[]),
+            "emails": emails,
         }
         if invitation_status == HouseholdInvitationStatus.PENDING.value and row.get(
             "invitation_token"
@@ -757,23 +800,31 @@ class ContactOnboardingService:
             contact_unit_id=contact_unit_id,
         )
         family_contact_id = str(link["contact_id"])
-        contact_update: dict[str, Any] = {}
-        if body.first_name is not None:
-            contact_update["first_name"] = body.first_name
-        if body.last_name is not None:
-            contact_update["last_name"] = body.last_name
-
-        if contact_update:
-            updated = await self.contacts_repo.update_contact(
-                contact_id=family_contact_id,
-                organization_id=org_id,
-                update_data=contact_update,
+        contact_fields_changed = (
+            body.first_name is not None or body.last_name is not None or body.emails is not None
+        )
+        if body.emails is not None:
+            self._assert_household_member_email_can_be_added(
+                member_row=member_row,
+                emails=body.emails,
             )
-            if not updated:
-                raise NotFoundException(
-                    message_key="contacts.errors.contact_not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
+
+        if contact_fields_changed:
+            contact_update = UpdateContactRequest(
+                **body.model_dump(
+                    include={"first_name", "last_name", "emails"},
+                    exclude_unset=True,
                 )
+            )
+            contacts_service = ContactsService(
+                db_connection=self.db_connection,
+                user_context=self.user_context,
+                supabase_client=self.supabase_client,
+            )
+            await contacts_service.update_contact(
+                contact_id=family_contact_id,
+                body=contact_update,
+            )
 
         if body.relationship is not None:
             await self.contact_units_repo.update_household_relationship(
