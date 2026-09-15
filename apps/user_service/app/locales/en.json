@@ -1152,6 +1152,7 @@
       "title_too_long": "Notice title cannot exceed 70 characters.",
       "description_too_long": "Notice description cannot exceed 600 characters.",
       "recipients_required": "Select at least one recipient group to publish or schedule.",
+      "invalid_recipient_groups": "Invalid recipient group(s): {groups}. Use Owner, Tenant, Staff, or Security.",
       "towers_required": "Select at least one tower when scope is by tower.",
       "schedule_too_far": "Scheduled publish date cannot be more than 2 months ahead.",
       "schedule_required": "Publish date is required when scheduling a notice.",
