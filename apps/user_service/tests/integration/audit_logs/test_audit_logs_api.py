@@ -19,6 +19,12 @@ def _patch_audit_list_auth(monkeypatch, *, can_view_system: bool = True, user_ty
         del args, kwargs
         return {"sub": "u1", "email": "u1@example.com", "session_id": "sess-1"}
 
+    async def fake_extract_user_context(current_user, db_connection):
+        del current_user, db_connection
+        return UserContext(
+            user_id="u1", email="u1@example.com", organization_id="org-1", user_type=user_type
+        )
+
     async def fake_ensure_staff_project_access(*args, **kwargs):
         del args, kwargs
         return UserContext(
@@ -32,6 +38,10 @@ def _patch_audit_list_auth(monkeypatch, *, can_view_system: bool = True, user_ty
     monkeypatch.setattr(
         "apps.user_service.app.api.audit_logs.get_user_from_auth",
         fake_get_user_from_auth,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.audit_logs.extract_user_context",
+        fake_extract_user_context,
     )
     monkeypatch.setattr(
         "apps.user_service.app.api.audit_logs.ensure_staff_project_access",
@@ -107,11 +117,26 @@ async def test_get_audit_logs_accepts_each_action_type(monkeypatch, client, acti
 
 
 @pytest.mark.asyncio
-async def test_get_audit_logs_rejects_missing_project_id(client):
-    """Missing project_id returns 422 validation error."""
-    res = await client.get("/v1/audit-logs?page=1&page_size=10")
+async def test_get_audit_logs_without_project_id(monkeypatch, client):
+    """Org-wide admin view works without project_id."""
+    captured: dict = {}
+    _patch_audit_list_auth(monkeypatch)
 
-    assert res.status_code == 422
+    async def fake_get_audit_logs(self, filter_params):
+        del self
+        captured["filter_params"] = filter_params
+        return {"audit_logs": [], "total_count": 0}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.audit_log_service.AuditLogService.get_audit_logs",
+        fake_get_audit_logs,
+    )
+
+    res = await client.get("/v1/audit-logs?page=1&page_size=10")
+    body = assert_success(res, 200)
+
+    assert body["total"] == 0
+    assert captured["filter_params"].project_id is None
 
 
 @pytest.mark.asyncio

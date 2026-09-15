@@ -63,7 +63,7 @@ class _FakeConn:
         return None
 
 
-def _filters(search=None, project_id="proj-1"):
+def _filters(search=None, project_id=None):
     """Helper to build SessionFilter with defaults."""
     return SessionFilter(project_id=project_id, limit=10, offset=0, search=search)
 
@@ -99,8 +99,8 @@ def test_build_session_filters_no_org():
     )
 
     assert "user_id = $1" in where
-    assert "project_members pm" in where
-    assert params == ["u1", "proj-1"]
+    assert "project_members pm" not in where
+    assert params == ["u1"]
 
 
 @pytest.mark.asyncio
