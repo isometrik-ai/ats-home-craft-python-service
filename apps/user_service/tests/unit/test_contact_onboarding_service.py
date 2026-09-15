@@ -773,6 +773,9 @@ async def test_update_household_member_adds_email(monkeypatch):
         ),
     )
     svc = _service(contact_units_repo=units_repo)
+    svc.contacts_repo.get_contact_for_update = AsyncMock(
+        return_value={"id": "family-1", "emails": []},
+    )
     contacts_service = MagicMock()
     contacts_service.update_contact = AsyncMock()
     monkeypatch.setattr(
@@ -790,6 +793,95 @@ async def test_update_household_member_adds_email(monkeypatch):
 
     update_body = contacts_service.update_contact.await_args.kwargs["body"]
     assert update_body.emails[0].email == "sam@example.com"
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_rejects_email_when_pending():
+    """update_household_member blocks email changes while invitation is pending."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(
+            invitation_status=HouseholdInvitationStatus.PENDING.value,
+            emails=[],
+        ),
+    )
+    svc = _service(contact_units_repo=units_repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.update_household_member(
+            primary_contact_id="contact-1",
+            contact_unit_id="cu-1",
+            body=UpdateHouseholdMemberRequest(
+                emails=[Email(email="sam@example.com", is_primary=True)],
+            ),
+        )
+
+    assert (
+        exc_info.value.message_key
+        == "contact_onboarding.errors.household_member_email_pending_invitation"
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_preflight_portal_before_email(monkeypatch):
+    """Portal access validation runs before contact fields are persisted."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(portal_access=False, emails=[]),
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.household_invitation_service.invitations_repo = MagicMock()
+    svc.household_invitation_service.invitations_repo.get_pending_by_contact_unit = AsyncMock(
+        return_value=None,
+    )
+    svc.contacts_repo.get_contact_details = AsyncMock(return_value={"phones": []})
+    contacts_service = MagicMock()
+    contacts_service.update_contact = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.update_household_member(
+            primary_contact_id="contact-1",
+            contact_unit_id="cu-1",
+            body=UpdateHouseholdMemberRequest(
+                portal_access=True,
+                emails=[Email(email="sam@example.com", is_primary=True)],
+            ),
+        )
+
+    assert (
+        exc_info.value.message_key
+        == "contact_onboarding.errors.household_portal_access_requires_phone"
+    )
+    contacts_service.update_contact.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_rejects_email_when_already_set():
+    """update_household_member blocks replacing an existing email address."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(
+            emails=[{"email": "existing@example.com", "is_primary": True}],
+        ),
+    )
+    svc = _service(contact_units_repo=units_repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.update_household_member(
+            primary_contact_id="contact-1",
+            contact_unit_id="cu-1",
+            body=UpdateHouseholdMemberRequest(
+                emails=[Email(email="sam@example.com", is_primary=True)],
+            ),
+        )
+
+    assert (
+        exc_info.value.message_key == "contact_onboarding.errors.household_member_email_already_set"
+    )
 
 
 @pytest.mark.asyncio

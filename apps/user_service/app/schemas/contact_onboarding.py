@@ -36,6 +36,17 @@ def _validate_exactly_one_primary_phone(phones: list[Phone]) -> list[Phone]:
     return phones
 
 
+def _validate_exactly_one_primary_email(emails: list[Email]) -> list[Email]:
+    """Require exactly one primary email in the list."""
+    primary_count = sum(1 for email in emails if email.is_primary)
+    if primary_count != 1:
+        raise ValidationException(
+            message_key="contact_onboarding.errors.household_member_email_primary_required",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+    return emails
+
+
 class ContactPropertyProjectSummary(BaseModel):
     """Project display fields embedded on a contact property row."""
 
@@ -525,6 +536,19 @@ class UpdateHouseholdMemberRequest(BaseModel):
     emails: list[Email] | None = Field(None, max_length=20)
     relationship: ContactUnitRelationship | None = None
     portal_access: bool | None = None
+
+    @field_validator("emails")
+    @classmethod
+    def validate_emails(cls, emails: list[Email] | None) -> list[Email] | None:
+        """Require a non-empty emails list with exactly one primary address."""
+        if emails is None:
+            return emails
+        if not emails:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_email_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return _validate_exactly_one_primary_email(emails)
 
     @model_validator(mode="after")
     def validate_non_empty_patch(self) -> UpdateHouseholdMemberRequest:

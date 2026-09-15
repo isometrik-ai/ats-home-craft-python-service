@@ -198,10 +198,20 @@ class _FakeContactsRepo:
             return self.address_rows_created
         return [{"id": f"addr-{index}", **row} for index, row in enumerate(rows)]
 
-    async def update_contact(self, *, contact_id: str, organization_id: str, update_data: dict):
+    async def update_contact(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+        update_data: dict,
+        only_if_emails_empty: bool = False,
+    ):
         """Return configured updated row."""
         del contact_id, organization_id
-        self.last_update_kwargs = {"update_data": update_data}
+        self.last_update_kwargs = {
+            "update_data": update_data,
+            "only_if_emails_empty": only_if_emails_empty,
+        }
         if self.echo_update:
             return dict(update_data)
         return self.updated_row

@@ -418,6 +418,23 @@ async def test_get_contact_for_update():
 
 
 @pytest.mark.asyncio
+async def test_update_contact_only_if_emails_empty_adds_predicate():
+    """Email add-only updates require the current emails column to be empty."""
+    conn = _async_mock_conn(row={"id": "c1", "emails": []})
+    repo = ContactsRepository(db_connection=conn)
+
+    await repo.update_contact(
+        contact_id="c1",
+        organization_id=ORG_ID,
+        update_data={"emails": [{"email": "sam@example.com", "is_primary": True}]},
+        only_if_emails_empty=True,
+    )
+
+    query, _ = _sql_args(conn.fetchrow)
+    assert "jsonb_array_length(COALESCE(emails, '[]'::jsonb)) = 0" in query
+
+
+@pytest.mark.asyncio
 async def test_get_contact_for_update_by_enrichment_request_id():
     """Enrichment lookup scopes by request id with FOR UPDATE."""
     conn = _async_mock_conn(row={"id": "c1", "enrichment_request_id": "req-1"})

@@ -2058,6 +2058,7 @@ class ContactsService:
         *,
         contact_id: str,
         body: UpdateContactRequest,
+        only_if_emails_empty: bool = False,
     ) -> dict[str, Any]:
         """Patch a contact and optionally apply one company association change.
 
@@ -2164,8 +2165,16 @@ class ContactsService:
                 contact_id=contact_id,
                 organization_id=org_id,
                 update_data=update_data,
+                only_if_emails_empty=only_if_emails_empty and body.emails is not None,
             )
             if not updated_row:
+                if only_if_emails_empty and body.emails is not None:
+                    raise ValidationException(
+                        message_key=(
+                            "contact_onboarding.errors.household_member_email_already_set"
+                        ),
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
                 raise NotFoundException(
                     message_key="contacts.errors.contact_not_found",
                     custom_code=CustomStatusCode.NOT_FOUND,

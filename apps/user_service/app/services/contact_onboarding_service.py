@@ -471,6 +471,31 @@ class ContactOnboardingService:
         return False
 
     @staticmethod
+    def _assert_household_member_email_can_be_added(
+        *,
+        member_row: dict[str, Any],
+        emails: list[Any],
+    ) -> None:
+        """Reject email updates blocked by invitation state or an existing address."""
+        invitation_status = member_row.get("invitation_status")
+        if invitation_status == HouseholdInvitationStatus.PENDING.value:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_email_pending_invitation",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        current_emails = parse_json_any(member_row.get("emails"), default=[])
+        if current_emails:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_email_already_set",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if not emails:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_member_email_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    @staticmethod
     def _format_household_member(row: dict[str, Any]) -> dict[str, Any]:
         """Map a household member query row to API response shape."""
         portal_access = bool(row.get("portal_access", False))
@@ -633,6 +658,54 @@ class ContactOnboardingService:
         primary = next((phone for phone in phones if phone.get("is_primary")), None)
         return primary or (phones[0] if phones else None)
 
+    async def _preflight_household_portal_access_change(
+        self,
+        *,
+        contact_unit_id: str,
+        family_contact_id: str,
+        member_row: dict[str, Any],
+        portal_access: bool,
+    ) -> None:
+        """Validate portal access changes before any household member mutations."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        current_portal_access = bool(member_row.get("portal_access", False))
+        if portal_access == current_portal_access:
+            return
+
+        if not portal_access:
+            return
+
+        invitations_repo = self.household_invitation_service.invitations_repo
+        pending_invitation = await invitations_repo.get_pending_by_contact_unit(
+            organization_id=org_id,
+            contact_unit_id=contact_unit_id,
+        )
+        if pending_invitation:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_portal_access_invite_pending",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        if member_row.get("user_id"):
+            return
+
+        contact = await self.contacts_repo.get_contact_details(
+            contact_id=family_contact_id,
+            organization_id=org_id,
+        )
+        if not contact:
+            raise NotFoundException(
+                message_key="contacts.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        primary_phone = self._primary_phone_from_contact(contact)
+        if not primary_phone:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.household_portal_access_requires_phone",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     async def _apply_household_portal_access_change(
         self,
         *,
@@ -650,16 +723,12 @@ class ContactOnboardingService:
             return
 
         if portal_access:
-            invitations_repo = self.household_invitation_service.invitations_repo
-            pending_invitation = await invitations_repo.get_pending_by_contact_unit(
-                organization_id=org_id,
+            await self._preflight_household_portal_access_change(
                 contact_unit_id=contact_unit_id,
+                family_contact_id=family_contact_id,
+                member_row=member_row,
+                portal_access=portal_access,
             )
-            if pending_invitation:
-                raise ValidationException(
-                    message_key="contact_onboarding.errors.household_portal_access_invite_pending",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
-                )
 
             if member_row.get("user_id"):
                 # Member already has Supabase auth (e.g. created with portal_access=false).
@@ -761,6 +830,36 @@ class ContactOnboardingService:
             body.first_name is not None or body.last_name is not None or body.emails is not None
         )
 
+        if body.portal_access is not None:
+            await self._preflight_household_portal_access_change(
+                contact_unit_id=contact_unit_id,
+                family_contact_id=family_contact_id,
+                member_row=member_row,
+                portal_access=body.portal_access,
+            )
+
+        if body.emails is not None:
+            self._assert_household_member_email_can_be_added(
+                member_row=member_row,
+                emails=body.emails,
+            )
+            locked_contact = await self.contacts_repo.get_contact_for_update(
+                contact_id=family_contact_id,
+                organization_id=org_id,
+            )
+            if not locked_contact:
+                raise NotFoundException(
+                    message_key="contacts.errors.contact_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+            self._assert_household_member_email_can_be_added(
+                member_row={
+                    **member_row,
+                    "emails": parse_json_any(locked_contact.get("emails"), default=[]),
+                },
+                emails=body.emails,
+            )
+
         if contact_fields_changed:
             contact_update = UpdateContactRequest(
                 **body.model_dump(
@@ -776,6 +875,7 @@ class ContactOnboardingService:
             await contacts_service.update_contact(
                 contact_id=family_contact_id,
                 body=contact_update,
+                only_if_emails_empty=body.emails is not None,
             )
 
         if body.relationship is not None:

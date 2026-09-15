@@ -804,23 +804,31 @@ class ContactsRepository(BaseRepository):  # pylint: disable=too-many-public-met
         )
         return dict(fetched_row) if fetched_row else None
 
+    _CONTACT_EMAILS_EMPTY_SQL = (
+        " AND (emails IS NULL OR emails = '[]'::jsonb "
+        "OR jsonb_array_length(COALESCE(emails, '[]'::jsonb)) = 0)"
+    )
+
     async def update_contact(
         self,
         *,
         contact_id: str,
         organization_id: str,
         update_data: dict[str, Any],
+        only_if_emails_empty: bool = False,
     ) -> dict | None:
         """Update a contact."""
         id_param = len(update_data) + 1
         org_param = len(update_data) + 2
         status_param = len(update_data) + 3
+        emails_empty_sql = self._CONTACT_EMAILS_EMPTY_SQL if only_if_emails_empty else ""
         return await self.update_returning(
             table="contacts",
             where_sql=(
                 f"WHERE id = ${id_param}::uuid "
                 f"AND organization_id = ${org_param}::uuid "
                 f"AND status != ${status_param}"
+                f"{emails_empty_sql}"
             ),
             where_params=[contact_id, organization_id, ClientStatus.DELETED.value],
             update_data=update_data,
