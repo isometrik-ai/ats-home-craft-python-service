@@ -20,7 +20,7 @@ logger = get_logger("audit_log_repository")
 
 # Common field list for audit log list queries
 AUDIT_LOG_LIST_FIELDS = (
-    "id, organization_id, user_id, user_email, user_role, "
+    "id, organization_id, project_id, user_id, user_email, user_role, "
     "action_type, data_classification, table_name, record_id, "
     "old_values, new_values, changed_fields, compliance_tags, "
     "risk_level, ip_address, description, timestamp, "
@@ -29,8 +29,8 @@ AUDIT_LOG_LIST_FIELDS = (
 
 # Same fields, but qualified for joined queries (keeps output keys stable).
 AUDIT_LOG_LIST_FIELDS_ALIASED = (
-    "al.id AS id, al.organization_id AS organization_id, al.user_id AS user_id, "
-    "al.user_email AS user_email, al.user_role AS user_role, "
+    "al.id AS id, al.organization_id AS organization_id, al.project_id AS project_id, "
+    "al.user_id AS user_id, al.user_email AS user_email, al.user_role AS user_role, "
     "al.action_type AS action_type, al.data_classification AS data_classification, "
     "al.table_name AS table_name, al.record_id AS record_id, "
     "al.old_values AS old_values, al.new_values AS new_values, "
@@ -42,7 +42,7 @@ AUDIT_LOG_LIST_FIELDS_ALIASED = (
 
 # Common field list for audit log detail queries (includes hash fields)
 AUDIT_LOG_DETAIL_FIELDS = (
-    "id, organization_id, user_id, user_email, user_role, "
+    "id, organization_id, project_id, user_id, user_email, user_role, "
     "action_type, data_classification, table_name, record_id, "
     "old_values, new_values, changed_fields, compliance_tags, "
     "risk_level, ip_address, description, timestamp, "
@@ -56,6 +56,7 @@ JSONB_COLUMNS = {"old_values", "new_values"}
 # Standard column order for consistent query building
 COLUMN_ORDER = [
     "organization_id",
+    "project_id",
     "user_id",
     "user_email",
     "user_role",
@@ -107,6 +108,25 @@ class AuditLogRepository:
         ]
         params = [filter_params.organization_id]
         param_index = 2
+
+        # Apply project_id filter (required for project-scoped audit views)
+        if filter_params.project_id:
+            project_param = f"${param_index}"
+            conditions.append(
+                f"""(
+                    al.project_id = {project_param}::uuid
+                    OR (
+                        al.project_id IS NULL
+                        AND (
+                            al.new_values->'meta'->>'path' LIKE '%/projects/' || {project_param} || '/%'
+                            OR al.new_values->'meta'->'query_params'->>'project_id' = {project_param}
+                            OR al.new_values->'data'->>'project_id' = {project_param}
+                        )
+                    )
+                )"""
+            )
+            params.append(filter_params.project_id)
+            param_index += 1
 
         # Apply user_id filter
         if filter_params.user_id:

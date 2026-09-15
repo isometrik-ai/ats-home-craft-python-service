@@ -222,7 +222,9 @@ async def test_get_audit_logs_paginated():
     repo = _FakeAuditLogRepo(list_rows=[_db_row()], total=1)
     svc = _service(repo=repo)
 
-    result = await svc.get_audit_logs(AuditLogFilter(organization_id=ORG_ID, limit=10, offset=0))
+    result = await svc.get_audit_logs(
+        AuditLogFilter(organization_id=ORG_ID, project_id="proj-1", limit=10, offset=0)
+    )
 
     assert result["total_count"] == 1
     assert len(result["audit_logs"]) == 1
@@ -237,6 +239,7 @@ async def test_get_audit_logs_forwards_filter_params():
     svc = _service(repo=repo)
     filt = AuditLogFilter(
         organization_id=ORG_ID,
+        project_id="proj-1",
         action_type=AuditLogActionType.CREATE,
         category="CONTACT",
         risk_level=AuditLogRiskLevel.HIGH,

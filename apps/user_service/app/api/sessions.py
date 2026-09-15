@@ -12,12 +12,17 @@ from apps.user_service.app.schemas.auth import SessionFilter
 from apps.user_service.app.services.session_service import SessionService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
-    extract_user_context,
+    ensure_staff_project_access,
     handle_api_exceptions,
     require_organization_creator,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import SETTINGS_SYSTEM_MANAGE, SETTINGS_USERS_VIEW
+from libs.shared_utils.common_query import (
+    PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    SETTINGS_SYSTEM_MANAGE,
+    SETTINGS_USERS_VIEW,
+)
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     ForbiddenException,
@@ -51,6 +56,7 @@ logger = get_logger("sessions-api")
 )
 @limiter.limit("100/minute")
 async def get_sessions_list(
+    *,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
@@ -66,10 +72,16 @@ async def get_sessions_list(
     login_method: str | None = Query(
         None, description="Filter by login method (password, sso, mfa)"
     ),
+    project_id: str = Query(..., description="Project identifier (UUID string)."),
 ):
     """Get all sessions for the current organization."""
-    # Extract user context from JWT token
-    user_context = await extract_user_context(current_user, db_connection)
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+        request=request,
+    )
 
     if user_context.organization_id:
         await check_permissions(
@@ -80,6 +92,7 @@ async def get_sessions_list(
 
     # Create SessionFilter from query params
     filters = SessionFilter(
+        project_id=project_id,
         search=search,
         session_status=session_status,
         login_method=login_method,
@@ -136,6 +149,7 @@ async def get_sessions_list(
 )
 @limiter.limit("100/minute")
 async def get_organization_sessions(
+    *,
     request: Request,
     current_user: dict = Depends(get_user_from_auth),
     db_connection: asyncpg.Connection = Depends(db_conn),
@@ -151,11 +165,18 @@ async def get_organization_sessions(
     login_method: str | None = Query(
         None, description="Filter by login method (password, sso, mfa)"
     ),
+    project_id: str = Query(..., description="Project identifier (UUID string)."),
 ):
     """Get all sessions for all users in the current organization.
     Intended for org-level admins with settings management permission.
     """
-    # Extract context and enforce permissions
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+        request=request,
+    )
     user_context = await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
@@ -164,6 +185,7 @@ async def get_organization_sessions(
 
     # Create SessionFilter from query params
     filters = SessionFilter(
+        project_id=project_id,
         search=search,
         session_status=session_status,
         login_method=login_method,

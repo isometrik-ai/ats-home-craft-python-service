@@ -88,7 +88,7 @@ async def test_get_user_sessions_formats(monkeypatch):
     )
 
     service = SessionService(user_context=_ctx(), db_connection=None)
-    filters = SessionFilter(page=1, page_size=10)
+    filters = SessionFilter(project_id="proj-1", limit=10, offset=0)
 
     result = await service.get_user_sessions(filters)
 
@@ -110,7 +110,7 @@ async def test_get_organization_sessions_requires_org(monkeypatch):
     )
 
     service = SessionService(user_context=_ctx(org_id=None), db_connection=None)
-    filters = SessionFilter(page=1, page_size=10)
+    filters = SessionFilter(project_id="proj-1", limit=10, offset=0)
 
     with pytest.raises(BadRequestException):
         await service.get_organization_sessions(filters)
@@ -127,7 +127,7 @@ async def test_get_organization_sessions_formats(monkeypatch):
     )
 
     service = SessionService(user_context=_ctx(org_id="org-9"), db_connection=None)
-    filters = SessionFilter(page=1, page_size=5)
+    filters = SessionFilter(project_id="proj-1", limit=5, offset=0)
 
     result = await service.get_organization_sessions(filters)
 

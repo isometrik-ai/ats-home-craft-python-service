@@ -27,11 +27,13 @@ class AuditLogFilter(BaseModel):
         risk_level: Filter by risk level (low, medium, high)
         start_date: Inclusive start date filter on timestamp
         end_date: Inclusive end date filter on timestamp
+        project_id: Project ID filter (required for project-scoped audit views)
         limit: Maximum number of results to return
         offset: Number of results to skip for pagination
     """
 
     organization_id: str = Field(..., description="Organization ID")
+    project_id: str = Field(..., description="Project ID filter")
     search: str | None = Field(None, description="Search term")
     action_type: AuditLogActionType | None = Field(None, description="Action type filter")
     table_name: str | None = Field(None, description="Table name filter")
@@ -87,6 +89,9 @@ class AuditLogBase(BaseModel):
 
     id: str = Field(..., description="Unique identifier for the audit log")
     organization_id: str = Field(..., description="Organization ID where the audit log was created")
+    project_id: str | None = Field(
+        None, description="Project ID when the action was project-scoped"
+    )
     user_id: str = Field(..., description="User ID who performed the action")
     user_email: str = Field(..., description="Email of the user who performed the action")
     user_role: str = Field(..., description="Role of the user who performed the action")
