@@ -95,6 +95,7 @@ async def test_build_contact_document(monkeypatch):
             "organization_id": "org-1",
             "status": "active",
             "first_name": "Jane",
+            "middle_name": "Q",
             "last_name": "Doe",
             "email": "Jane@Example.com",
             "phones": [],
@@ -140,6 +141,7 @@ async def test_build_contact_document(monkeypatch):
     assert doc is not None
     assert doc["id"] == "c-1"
     assert doc["email"] == "jane@example.com"
+    assert doc["middle_name"] == "Q"
     assert doc["project_ids"] == ["proj-1", "proj-2"]
 
 
