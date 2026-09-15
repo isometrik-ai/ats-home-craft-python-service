@@ -1102,10 +1102,12 @@
       "invalid_breed": "The selected breed is not valid for this pet type.",
       "invalid_photo_path": "One or more photo paths are invalid.",
       "invalid_date_of_birth": "Date of birth cannot be in the future.",
-      "invalid_name": "Pet name is required."
+      "invalid_name": "Pet name is required.",
+      "unit_has_no_contact_for_pet": "Assign an owner to this unit before adding a pet."
     },
     "success": {
       "catalog_retrieved": "Pet options retrieved successfully.",
+      "summary_retrieved": "Pet summary retrieved successfully.",
       "list_retrieved": "Pet profiles retrieved successfully.",
       "detail_retrieved": "Pet profile retrieved successfully.",
       "created": "Pet profile created successfully.",

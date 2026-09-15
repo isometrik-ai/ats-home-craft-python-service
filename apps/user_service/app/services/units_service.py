@@ -10,6 +10,7 @@ from asyncpg import UniqueViolationError
 from apps.user_service.app.db.repositories.maintenance_fee_invoices_repository import (
     MaintenanceFeeInvoicesRepository,
 )
+from apps.user_service.app.db.repositories.pets_repository import PetsRepository
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import (
@@ -223,6 +224,23 @@ def build_unit_owner_detail(row: dict[str, Any]) -> dict[str, Any]:
     return owner
 
 
+def _compact_unit_pet(row: dict[str, Any]) -> dict[str, Any]:
+    """Build a compact pet card for unit detail and registry side panels."""
+    photo_paths = list(row.get("photo_paths") or [])
+    dob = row.get("date_of_birth")
+    return {
+        "id": str(row["id"]),
+        "name": row.get("name") or "",
+        "pet_type": row.get("pet_type") or "",
+        "breed": row.get("breed") or "",
+        "gender": row.get("gender"),
+        "vaccination_status": row.get("vaccination_status") or "",
+        "date_of_birth": dob.isoformat() if hasattr(dob, "isoformat") else dob,
+        "primary_photo_path": photo_paths[0] if photo_paths else None,
+        "status": row.get("status") or "",
+    }
+
+
 class UnitsService:
     """Business logic for the floor plans / units step."""
 
@@ -380,6 +398,18 @@ class UnitsService:
             organization_id=self._org_id,
             unit_id=unit_id,
         )
+        pets_repo = PetsRepository(self.db_connection)
+        pets_count = await pets_repo.count_active_for_unit(
+            organization_id=self._org_id,
+            unit_id=unit_id,
+        )
+        pets_rows, _ = await pets_repo.list_for_unit(
+            organization_id=self._org_id,
+            unit_id=unit_id,
+            page=1,
+            page_size=50,
+        )
+        pets = [_compact_unit_pet(row) for row in pets_rows]
 
         status = str(row.get("status") or "")
         residents = [build_unit_detail_person(resident) for resident in residents_raw]
@@ -499,6 +529,8 @@ class UnitsService:
             "documents": documents,
             "residents": residents,
             "vehicles_count": vehicles_count,
+            "pets_count": pets_count,
+            "pets": pets,
             "financials": {
                 "base_fee_monthly": (
                     convert_minor_to_major(latest_fee_minor)

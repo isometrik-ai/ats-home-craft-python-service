@@ -7,7 +7,11 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from apps.user_service.app.schemas.contact_onboarding import HouseholdMemberResponse
-from apps.user_service.app.schemas.enums.pets import PetGender, PetVaccinationStatus
+from apps.user_service.app.schemas.enums.pets import (
+    AdminPetListStatusFilter,
+    PetGender,
+    PetVaccinationStatus,
+)
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -85,6 +89,66 @@ class PetUnitSummary(BaseModel):
     unit_label: str | None = None
 
 
+class PetAdminUnitSummary(PetUnitSummary):
+    """Unit summary with tower context for admin registry views."""
+
+    tower_id: str | None = None
+    tower_name: str | None = None
+
+
+class AdminCreatePetRequest(BaseModel):
+    """Admin create payload — unit is selected from the project registry."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str
+    name: str = Field(..., min_length=1, max_length=100)
+    pet_type: str = Field(..., min_length=1, max_length=100)
+    breed: str = Field(..., min_length=1, max_length=100)
+    vaccination_status: PetVaccinationStatus
+    gender: PetGender | None = None
+    date_of_birth: date | None = None
+    photo_paths: list[str] = Field(default_factory=list, max_length=10)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, name: str) -> str:
+        """Trim and reject whitespace-only names."""
+        if not isinstance(name, str):
+            return name
+        return _validate_pet_name(name)
+
+    @field_validator("photo_paths")
+    @classmethod
+    def validate_photo_paths(cls, photo_paths: list[str]) -> list[str]:
+        """Validate storage paths for pet images."""
+        return _validate_photo_paths(photo_paths) or []
+
+
+class AdminPetListQuery(BaseModel):
+    """Admin list filters for GET /projects/{project_id}/pets."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    search: str | None = Field(None, max_length=200)
+    unit_id: str | None = None
+    tower_id: str | None = None
+    pet_type: str | None = Field(None, max_length=100)
+    breed: str | None = Field(None, max_length=100)
+    status: AdminPetListStatusFilter = AdminPetListStatusFilter.ACTIVE
+    page: int = Field(1, ge=1, le=21_474_836)
+    page_size: int = Field(20, ge=1, le=100)
+
+
+class PetSummaryResponse(BaseModel):
+    """Admin dashboard summary counts for project pets."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    active_count: int
+    total_count: int
+
+
 class CreatePetRequest(BaseModel):
     """Create a household pet profile."""
 
@@ -126,6 +190,8 @@ class UpdatePetRequest(BaseModel):
     gender: PetGender | None = None
     date_of_birth: date | None = None
     photo_paths: list[str] | None = Field(None, max_length=10)
+
+    unit_id: str | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -176,6 +242,14 @@ class PetResponse(BaseModel):
     unit: PetUnitSummary | None = None
 
 
+class AdminPetResponse(PetResponse):
+    """Pet profile row for admin registry views."""
+
+    unit: PetAdminUnitSummary | None = None
+    removal_reason: str | None = None
+    deleted_at: str | None = None
+
+
 class PetDetailResponse(PetResponse):
     """Pet profile with household members on the unit."""
 
@@ -215,3 +289,30 @@ class PetListApiResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class PetSummaryApiResponse(BaseModel):
+    """API envelope for admin pet summary."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    data: PetSummaryResponse
+
+
+class AdminPetListApiResponse(BaseModel):
+    """API envelope for admin pet list."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    data: list[AdminPetResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class AdminPetApiResponse(BaseModel):
+    """API envelope for admin single pet."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    data: AdminPetResponse

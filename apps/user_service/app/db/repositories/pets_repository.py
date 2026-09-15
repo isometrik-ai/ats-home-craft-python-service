@@ -59,7 +59,19 @@ _UNIT_SELECT = """
               u.unit_label
 """
 
+_TOWER_JOIN = """
+LEFT JOIN towers t
+    ON t.id = u.tower_id
+   AND t.organization_id = p.organization_id
+"""
+
+_TOWER_SELECT = """
+              t.id::text AS tower_id,
+              t.name AS tower_name
+"""
+
 _ACTIVE_PET_FILTER = f"p.status = '{PetStatus.ACTIVE.value}'::pet_status AND p.deleted_at IS NULL"
+_REMOVED_PET_FILTER = f"p.status = '{PetStatus.REMOVED.value}'::pet_status"
 
 
 class PetsRepository(BaseRepository):
@@ -203,7 +215,7 @@ class PetsRepository(BaseRepository):
         organization_id: str,
         pet_id: str,
         reason: str,
-        removed_by_contact_id: str,
+        removed_by_contact_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Soft-remove a pet profile."""
         row = await self.db_connection.fetchrow(
@@ -232,28 +244,177 @@ class PetsRepository(BaseRepository):
         *,
         organization_id: str,
         pet_id: str,
+        project_id: str | None = None,
         active_only: bool = True,
     ) -> dict[str, Any] | None:
         """Load one pet with creator and unit summary."""
         status_filter = f"AND {_ACTIVE_PET_FILTER}" if active_only else ""
+        project_filter = "AND p.project_id = $3::uuid" if project_id else ""
+        args: list[Any] = [organization_id, pet_id]
+        if project_id:
+            args.append(project_id)
         row = await self.db_connection.fetchrow(
             f"""
             SELECT
               {_PET_SELECT_COLUMNS},
               {_CREATED_BY_SELECT},
-              {_UNIT_SELECT}
+              {_UNIT_SELECT},
+              {_TOWER_SELECT}
             FROM pets p
             {_CREATED_BY_JOIN}
             {_UNIT_JOIN}
+            {_TOWER_JOIN}
             WHERE p.organization_id = $1::uuid
               AND p.id = $2::uuid
+              {project_filter}
               {status_filter}
             LIMIT 1
             """,
-            organization_id,
-            pet_id,
+            *args,
         )
         return dict(row) if row else None
+
+    def _project_list_filters(
+        self,
+        *,
+        search: str | None,
+        unit_id: str | None,
+        tower_id: str | None,
+        pet_type: str | None,
+        breed: str | None,
+        status: str,
+        start_index: int,
+    ) -> tuple[str, list[Any], int]:
+        """Build dynamic WHERE clauses for project-scoped pet list/count."""
+        clauses: list[str] = []
+        values: list[Any] = []
+        idx = start_index
+
+        if status == PetStatus.ACTIVE.value:
+            clauses.append(_ACTIVE_PET_FILTER)
+        elif status == PetStatus.REMOVED.value:
+            clauses.append(_REMOVED_PET_FILTER)
+
+        if unit_id:
+            clauses.append(f"p.unit_id = ${idx}::uuid")
+            values.append(unit_id)
+            idx += 1
+
+        if tower_id:
+            clauses.append(f"u.tower_id = ${idx}::uuid")
+            values.append(tower_id)
+            idx += 1
+
+        if pet_type:
+            clauses.append(f"lower(p.pet_type) = lower(${idx})")
+            values.append(pet_type.strip())
+            idx += 1
+
+        if breed:
+            clauses.append(f"lower(p.breed) = lower(${idx})")
+            values.append(breed.strip())
+            idx += 1
+
+        if search:
+            term = f"%{search.strip()}%"
+            clauses.append(
+                f"(p.name ILIKE ${idx} OR u.code ILIKE ${idx} OR u.unit_label ILIKE ${idx})"
+            )
+            values.append(term)
+            idx += 1
+
+        where_sql = f"AND {' AND '.join(clauses)}" if clauses else ""
+        return where_sql, values, idx
+
+    async def list_for_project(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        search: str | None = None,
+        unit_id: str | None = None,
+        tower_id: str | None = None,
+        pet_type: str | None = None,
+        breed: str | None = None,
+        status: str = PetStatus.ACTIVE.value,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List pets in a project with admin registry filters."""
+        offset = (page - 1) * page_size
+        filter_sql, filter_values, next_param = self._project_list_filters(
+            search=search,
+            unit_id=unit_id,
+            tower_id=tower_id,
+            pet_type=pet_type,
+            breed=breed,
+            status=status,
+            start_index=4,
+        )
+        total = await self.db_connection.fetchval(
+            f"""
+            SELECT COUNT(*)::int
+            FROM pets p
+            {_UNIT_JOIN}
+            {_TOWER_JOIN}
+            WHERE p.organization_id = $1::uuid
+              AND p.project_id = $2::uuid
+              {filter_sql}
+            """,
+            organization_id,
+            project_id,
+            *filter_values,
+        )
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              {_PET_SELECT_COLUMNS},
+              {_CREATED_BY_SELECT},
+              {_UNIT_SELECT},
+              {_TOWER_SELECT}
+            FROM pets p
+            {_CREATED_BY_JOIN}
+            {_UNIT_JOIN}
+            {_TOWER_JOIN}
+            WHERE p.organization_id = $1::uuid
+              AND p.project_id = $2::uuid
+              {filter_sql}
+            ORDER BY p.status, p.sort_order, p.created_at DESC
+            LIMIT ${next_param}::int OFFSET ${next_param + 1}::int
+            """,
+            organization_id,
+            project_id,
+            *filter_values,
+            page_size,
+            offset,
+        )
+        return [dict(row) for row in rows], int(total or 0)
+
+    async def get_project_summary(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+    ) -> dict[str, int]:
+        """Return active and total pet counts for a project."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+              COUNT(*) FILTER (WHERE {_ACTIVE_PET_FILTER})::int AS active_count,
+              COUNT(*)::int AS total_count
+            FROM pets p
+            WHERE p.organization_id = $1::uuid
+              AND p.project_id = $2::uuid
+            """,
+            organization_id,
+            project_id,
+        )
+        if not row:
+            return {"active_count": 0, "total_count": 0}
+        return {
+            "active_count": int(row["active_count"] or 0),
+            "total_count": int(row["total_count"] or 0),
+        }
 
     async def list_for_unit(
         self,

@@ -1,13 +1,15 @@
 # Pets Flow — Context & Change Guide
 
-> **Status: Implemented** (Phase 1 resident APIs in `user_service`).
+> **Status: Implemented** (Phase 1 resident + Phase 2 admin APIs in `user_service`).
 > Schema and decisions: [ADR 0016](./adr/0016-pets.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Resident API prefix:** `/v1/pets`
+- **Admin API prefix:** `/v1/projects/{project_id}/pets`
+- **Unit detail pets:** `GET /v1/projects/{project_id}/units/{unit_id}/detail` → `pets_count`, `pets[]`
 - **Household summary:** `/v1/contact-onboarding/household/summary` (extended with `pets_count`)
 - **Static catalog:** `app/data/pet_catalog.json`
-- **DB schema:** `ats-home-craft-supabase` (migrations `20260910120000_*`, `20260910121000_*` — proposed)
+- **DB schema:** `ats-home-craft-supabase` (migrations `20260911120000_*`, `20260911121000_*`)
 
 ______________________________________________________________________
 
@@ -107,7 +109,9 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | Concern            | File                                                                                                                   |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
 | Resident routes    | `app/api/pets.py`                                                                                                      |
+| Admin routes       | `app/api/pets_admin.py`                                                                                                |
 | Route registration | `app/api/routes.py`                                                                                                    |
+| Unit detail pets   | `app/services/units_service.py` (`get_unit_detail`)                                                                    |
 | Orchestration      | `app/services/pets_service.py`                                                                                         |
 | Catalog reader     | `app/services/pet_catalog_service.py`                                                                                  |
 | SQL                | `app/db/repositories/pets_repository.py`                                                                               |
@@ -245,7 +249,9 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 5. API catalog (proposed)
+## 5. API catalog
+
+### 5a. Resident routes (`/v1/pets`)
 
 All resident routes require authentication + onboarding contact context.
 
@@ -374,6 +380,45 @@ GET /v1/contact-onboarding/household/summary?unit_id={unit_id}
 | ------------ | --------------------------------------------------------------------------------------- |
 | `pets_count` | `COUNT(*)` from `pets` where `unit_id` matches, `status = active`, `deleted_at IS NULL` |
 
+### 5b. Admin routes (`/v1/projects/{project_id}/pets`)
+
+Staff JWT + project membership. Permissions: `resident_management.view` (read),
+`resident_management.edit` (create/update/remove).
+
+| Method | Path                                             | Purpose                                        |
+| ------ | ------------------------------------------------ | ---------------------------------------------- |
+| GET    | `/v1/projects/{project_id}/pets/summary`         | Header counts: `{ active_count, total_count }` |
+| GET    | `/v1/projects/{project_id}/pets`                 | Paginated registry list                        |
+| GET    | `/v1/projects/{project_id}/pets/catalog`         | Type/breed catalog for forms                   |
+| GET    | `/v1/projects/{project_id}/pets/{pet_id}`        | Detail (includes removed pets)                 |
+| POST   | `/v1/projects/{project_id}/pets`                 | Create pet for a unit                          |
+| PATCH  | `/v1/projects/{project_id}/pets/{pet_id}`        | Update active pet                              |
+| POST   | `/v1/projects/{project_id}/pets/{pet_id}/remove` | Soft-remove with reason                        |
+
+**List query params** (Homes & Residents → Pets registry):
+
+| Param                | Notes                                    |
+| -------------------- | ---------------------------------------- |
+| `search`             | Pet name or unit code/label              |
+| `unit_id`            | Filter to one unit (unit detail refresh) |
+| `tower_id`           | Filter by tower                          |
+| `pet_type`           | Catalog display name (e.g. `Dog`)        |
+| `breed`              | Catalog display name                     |
+| `status`             | `active` (default) · `all` · `removed`   |
+| `page` / `page_size` | Pagination                               |
+
+**Admin create** uses the same body as resident create (`unit_id`, name, type, breed,
+vaccination, optional gender/DOB/photos). `created_by_contact_id` is set to the **unit owner**
+contact (unit must have an owner assigned).
+
+**Unit detail integration** — when admin opens a unit from inventory/registry:
+
+1. `GET /v1/projects/{project_id}/units/{unit_id}/detail` returns `pets_count` and compact `pets[]`.
+1. **+ Add Pet** drawer posts to `POST /v1/projects/{project_id}/pets` with `unit_id` pre-filled
+   (tower/unit read-only from detail context).
+1. Edit/remove call `PATCH` / `POST .../remove` on the admin pet routes, then refresh unit detail
+   or `GET .../pets?unit_id={unit_id}`.
+
 ______________________________________________________________________
 
 ## 6. Validation reference
@@ -469,6 +514,22 @@ GET /contact-onboarding/household/summary?unit_id=
 
 to update the Pets tile count on Household and My Profile.
 
+### 7f. Admin registry list
+
+1. Admin opens **Homes & Residents → Pets**.
+1. `GET /projects/{id}/pets/summary` — header “N active pets across the community”.
+1. `GET /projects/{id}/pets?status=active&search=&tower_id=&pet_type=&breed=` — table rows.
+1. **+ Add Pet** — tower/unit pickers from project APIs + `GET .../pets/catalog`.
+1. Save → `POST /projects/{id}/pets`.
+
+### 7g. Admin unit detail pets
+
+1. Admin clicks a unit in inventory → `GET /projects/{id}/units/{unit_id}/detail`.
+1. Left column **Pets** card reads `pets_count` and `pets[]` from the detail payload.
+1. **+** opens Add Pet drawer with tower/unit locked to the open unit.
+1. Remove opens reason modal → `POST /projects/{id}/pets/{pet_id}/remove`.
+1. Refresh unit detail (or `GET .../pets?unit_id=`).
+
 ______________________________________________________________________
 
 ## 8. Cross-cutting conventions
@@ -491,19 +552,20 @@ ______________________________________________________________________
 | Change type/breed validation | `app/services/pets_service.py` + `app/schemas/pets.py`       |
 | Add a DB column              | migration in `ats-home-craft-supabase` + repository + schema |
 | Extend household summary     | `contact_onboarding_service.py` + `HouseholdSummaryResponse` |
-| Add admin vaccination review | Phase 2 — `app/api/projects.py` + ADR 0016 follow-up         |
+| Add admin vaccination review | Phase 3 — verify columns on `pets` + admin verify route      |
 | Change user-facing message   | `app/locales/en.json` under `pets.*`                         |
 
 ______________________________________________________________________
 
-## 10. Tests (planned)
+## 10. Tests
 
-| Test file                     | Coverage                                                                                                                    |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `test_pet_catalog_service.py` | JSON load, search filter, invalid type id                                                                                   |
-| `test_pets_service.py`        | Create with catalog type/breed names, `created_by_contact_id` from caller, invalid name rejection, remove reason, unit gate |
-| `test_pets_repository.py`     | SQL insert/list/summary count                                                                                               |
-| Integration                   | `tests/integration/pets/test_pets_api.py`                                                                                   |
+| Test file                     | Coverage                                                              |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `test_pet_catalog_service.py` | JSON load, search filter, invalid type id                             |
+| `test_pets_service.py`        | Resident + admin service paths, validation failures, move-out cleanup |
+| `test_pets_admin_api.py`      | Admin routes — success and failure envelopes                          |
+| `test_pets_api.py`            | Resident routes — success and failure envelopes                       |
+| `test_units_service.py`       | Unit detail includes `pets_count` and `pets[]`                        |
 
 Run: `ENVIRONMENT=test PYTHONPATH=. pytest apps/user_service/tests -q`
 
