@@ -1137,6 +1137,7 @@ async def test_list_project_vehicles_passes_search():
         vehicle_type=None,
         fuel_type=None,
         search="A-101",
+        limit=None,
     )
 
 
@@ -1155,6 +1156,7 @@ async def test_list_project_vehicles_filters_status():
         vehicle_type=None,
         fuel_type=None,
         search=None,
+        limit=None,
     )
 
 
@@ -1179,6 +1181,7 @@ async def test_list_project_vehicles_passes_vehicle_type_and_fuel_type():
         vehicle_type=VehicleType.FOUR_WHEELER.value,
         fuel_type=VehicleFuelType.EV.value,
         search=None,
+        limit=None,
     )
 
 
@@ -1752,3 +1755,321 @@ async def test_admin_delete_project_vehicle_delegates_to_contact_delete():
         vehicle_id="v1",
     )
     assert result["status"] == VehicleStatus.REMOVED.value
+
+
+@pytest.mark.asyncio
+async def test_export_project_vehicles_csv_success_and_invalid_format():
+    """Export vehicle requests as CSV with admin list filters."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        VehicleRequestsExportQuery,
+    )
+    from apps.user_service.app.schemas.enums import VehicleFuelType, VehicleType
+
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": VehicleType.FOUR_WHEELER.value,
+            "fuel_type": VehicleFuelType.NON_EV.value,
+            "registration_number": "MH07JJ8990",
+            "make": "Bajaj",
+            "model": "Avenger",
+            "color": "Grey",
+            "photo_paths": [],
+            "status": VehicleStatus.APPROVED.value,
+            "status_updated_at": "2026-09-10T10:00:00Z",
+            "created_at": "2026-09-10T09:00:00Z",
+            "updated_at": "2026-09-10T10:00:00Z",
+            "sort_order": 0,
+            "owner_contact_id": "owner-1",
+            "owner_prefix": "Mr.",
+            "owner_first_name": "Rajesh",
+            "owner_last_name": "Kapoor",
+            "owner_phones": [
+                {
+                    "phone_isd_code": "+91",
+                    "phone_number": "9876543210",
+                    "is_primary": True,
+                }
+            ],
+            "owner_emails": [{"email": "rajesh@example.com", "is_primary": True}],
+            "owner_profile_photo_url": None,
+            "unit_code": "LUX-B2101",
+            "unit_label": "3 BHK - Le Premier",
+            "unit_status": "occupied",
+            "unit_tower_id": "tower-1",
+            "unit_config_id": "cfg-1",
+            "unit_plot_item_id": None,
+            "unit_sort_order": 1,
+            "unit_tower_name": "Le Premier",
+            "unit_tower_type": "residential",
+            "unit_floor_display_name": "F21",
+            "unit_floor_level_number": 21,
+            "unit_config_kind": "apartment",
+            "unit_config_display_label": "3 BHK",
+            "unit_config_name": "3 BHK",
+            "unit_plot_description": None,
+            "unit_resolved_property_type": "residential",
+            "unit_resolved_config_kind": "apartment",
+            "parking_slot_id": "slot-1",
+            "parking_slot_row_id": "slot-1",
+            "parking_slot_number": 12,
+            "parking_slot_status": "assigned",
+            "parking_facility_id": "fac-1",
+            "parking_facility_name": "Basement Parking",
+            "parking_facility_location_type": "tower",
+            "parking_facility_floor_level": "B1",
+            "parking_facility_wing": "A",
+            "parking_facility_tower_id": "tower-1",
+        }
+    ]
+
+    csv_text = await svc.export_project_vehicles_csv(
+        project_id="p1",
+        query=VehicleRequestsExportQuery(format="csv"),
+    )
+    assert "MH07JJ8990" in csv_text
+    assert "Bajaj - Avenger - Grey" in csv_text
+    assert "LUX-B2101" in csv_text
+    assert "4 Wheeler" in csv_text
+    assert "Non-EV" in csv_text
+    assert "Approved" in csv_text
+    assert "2026-09-10T10:00:00Z" in csv_text
+    assert "Mr. Rajesh Kapoor" in csv_text
+    assert "12 (Basement Parking)" in csv_text
+
+    with pytest.raises(ValidationException):
+        await svc.export_project_vehicles_csv(
+            project_id="p1",
+            query=VehicleRequestsExportQuery(format="xlsx"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_export_project_vehicles_csv_sanitizes_formula_injection():
+    """CSV export neutralizes spreadsheet formula injection."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        VehicleRequestsExportQuery,
+    )
+
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "two_wheeler",
+            "registration_number": "=CMD|'/C calc'!A0",
+            "photo_paths": [],
+            "status": VehicleStatus.PENDING.value,
+            "status_updated_at": "2026-09-10T10:00:00Z",
+            "created_at": "2026-09-10T09:00:00Z",
+            "updated_at": "2026-09-10T10:00:00Z",
+            "sort_order": 0,
+            "unit_code": "A-101",
+            "unit_label": None,
+            "unit_status": "occupied",
+            "unit_tower_id": "tower-1",
+            "unit_config_id": "cfg-1",
+            "unit_plot_item_id": None,
+            "unit_sort_order": 1,
+            "unit_tower_name": "Tower A",
+            "unit_tower_type": "residential",
+            "unit_floor_display_name": "F1",
+            "unit_floor_level_number": 1,
+            "unit_config_kind": "apartment",
+            "unit_config_display_label": "2BHK",
+            "unit_config_name": "2BHK",
+            "unit_plot_description": None,
+            "unit_resolved_property_type": "residential",
+            "unit_resolved_config_kind": "apartment",
+        }
+    ]
+
+    csv_text = await svc.export_project_vehicles_csv(
+        project_id="p1",
+        query=VehicleRequestsExportQuery(format="csv"),
+    )
+    assert "'=CMD|'/C calc'!A0" in csv_text
+
+
+@pytest.mark.asyncio
+async def test_export_project_vehicles_csv_empty_result():
+    """Export returns header row when no vehicles match filters."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        VehicleRequestsExportQuery,
+    )
+    from apps.user_service.app.schemas.enums import VEHICLE_REQUESTS_EXPORT_MAX_ROWS
+
+    svc = _service()
+    svc.repo.list_by_project.return_value = []
+
+    csv_text = await svc.export_project_vehicles_csv(
+        project_id="p1",
+        query=VehicleRequestsExportQuery(format="csv", status=VehicleStatus.PENDING),
+    )
+
+    lines = csv_text.strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("registration_number,vehicle_description,unit_code")
+    svc.repo.list_by_project.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        status=VehicleStatus.PENDING.value,
+        vehicle_type=None,
+        fuel_type=None,
+        search=None,
+        limit=VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_project_vehicles_csv_forwards_filters_to_list():
+    """Export passes list filters through to the repository query."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        VehicleRequestsExportQuery,
+    )
+    from apps.user_service.app.schemas.enums import (
+        VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
+        VehicleFuelType,
+        VehicleType,
+    )
+
+    svc = _service()
+    svc.repo.list_by_project.return_value = []
+
+    await svc.export_project_vehicles_csv(
+        project_id="p1",
+        query=VehicleRequestsExportQuery(
+            format="csv",
+            status=VehicleStatus.REJECTED,
+            vehicle_type=VehicleType.TWO_WHEELER,
+            fuel_type=VehicleFuelType.EV,
+            search="MH07",
+        ),
+    )
+
+    svc.repo.list_by_project.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="p1",
+        status=VehicleStatus.REJECTED.value,
+        vehicle_type=VehicleType.TWO_WHEELER.value,
+        fuel_type=VehicleFuelType.EV.value,
+        search="MH07",
+        limit=VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_project_vehicles_csv_pending_has_empty_approved_on():
+    """Pending and rejected rows do not populate approved_on."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        VehicleRequestsExportQuery,
+    )
+
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "two_wheeler",
+            "registration_number": "MH01AB1234",
+            "photo_paths": [],
+            "status": VehicleStatus.PENDING.value,
+            "status_updated_at": "2026-09-10T10:00:00Z",
+            "created_at": "2026-09-10T09:00:00Z",
+            "updated_at": "2026-09-10T10:00:00Z",
+            "sort_order": 0,
+            "unit_code": "A-101",
+            "unit_label": None,
+            "unit_status": "occupied",
+            "unit_tower_id": "tower-1",
+            "unit_config_id": "cfg-1",
+            "unit_plot_item_id": None,
+            "unit_sort_order": 1,
+            "unit_tower_name": "Tower A",
+            "unit_tower_type": "residential",
+            "unit_floor_display_name": "F1",
+            "unit_floor_level_number": 1,
+            "unit_config_kind": "apartment",
+            "unit_config_display_label": "2BHK",
+            "unit_config_name": "2BHK",
+            "unit_plot_description": None,
+            "unit_resolved_property_type": "residential",
+            "unit_resolved_config_kind": "apartment",
+        }
+    ]
+
+    csv_text = await svc.export_project_vehicles_csv(
+        project_id="p1",
+        query=VehicleRequestsExportQuery(format="csv"),
+    )
+
+    assert "MH01AB1234" in csv_text
+    assert "Pending" in csv_text
+    data_row = csv_text.strip().splitlines()[1]
+    columns = data_row.split(",")
+    assert columns[8] == ""
+
+
+@pytest.mark.asyncio
+async def test_export_project_vehicles_csv_rejected_includes_reason():
+    """Rejected vehicles include rejection reason in export."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        VehicleRequestsExportQuery,
+    )
+
+    svc = _service()
+    svc.repo.list_by_project.return_value = [
+        {
+            "id": "v1",
+            "organization_id": "org-1",
+            "project_id": "p1",
+            "contact_id": "c1",
+            "unit_id": "u1",
+            "vehicle_type": "four_wheeler",
+            "registration_number": "MH02CD5678",
+            "photo_paths": [],
+            "status": VehicleStatus.REJECTED.value,
+            "rejection_reason": "Invalid registration documents",
+            "status_updated_at": "2026-09-11T10:00:00Z",
+            "created_at": "2026-09-11T09:00:00Z",
+            "updated_at": "2026-09-11T10:00:00Z",
+            "sort_order": 0,
+            "unit_code": "B-202",
+            "unit_label": "2 BHK",
+            "unit_status": "occupied",
+            "unit_tower_id": "tower-1",
+            "unit_config_id": "cfg-1",
+            "unit_plot_item_id": None,
+            "unit_sort_order": 1,
+            "unit_tower_name": "Tower B",
+            "unit_tower_type": "residential",
+            "unit_floor_display_name": "F2",
+            "unit_floor_level_number": 2,
+            "unit_config_kind": "apartment",
+            "unit_config_display_label": "2BHK",
+            "unit_config_name": "2BHK",
+            "unit_plot_description": None,
+            "unit_resolved_property_type": "residential",
+            "unit_resolved_config_kind": "apartment",
+        }
+    ]
+
+    csv_text = await svc.export_project_vehicles_csv(
+        project_id="p1",
+        query=VehicleRequestsExportQuery(format="csv", status=VehicleStatus.REJECTED),
+    )
+
+    assert "MH02CD5678" in csv_text
+    assert "Rejected" in csv_text
+    assert "Invalid registration documents" in csv_text
