@@ -191,8 +191,6 @@ class UpdatePetRequest(BaseModel):
     date_of_birth: date | None = None
     photo_paths: list[str] | None = Field(None, max_length=10)
 
-    unit_id: str | None = None
-
     @field_validator("name", mode="before")
     @classmethod
     def validate_name(cls, name: str | None) -> str | None:

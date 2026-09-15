@@ -349,7 +349,7 @@ class PetsRepository(BaseRepository):
             pet_type=pet_type,
             breed=breed,
             status=status,
-            start_index=4,
+            start_index=3,
         )
         total = await self.db_connection.fetchval(
             f"""
