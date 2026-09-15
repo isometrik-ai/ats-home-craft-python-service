@@ -19,7 +19,15 @@ _VEHICLE_ENUM_CASTS: dict[str, str] = {
     "status": "::vehicle_status",
 }
 
-_VEHICLE_UUID_COLUMNS = frozenset({"parking_slot_id", "approved_by_user_id", "rejected_by_user_id"})
+_VEHICLE_UUID_COLUMNS = frozenset(
+    {
+        "parking_slot_id",
+        "approved_by_user_id",
+        "rejected_by_user_id",
+        "removed_by_user_id",
+        "removed_by_contact_id",
+    }
+)
 
 _ACTIVE_VEHICLE_FILTER = "v.deleted_at IS NULL"
 
@@ -156,6 +164,32 @@ _VEHICLE_REVIEWER_SELECT_COLUMNS = """
               rejected_by_om.avatar_url AS rejected_by_avatar_url
 """
 
+_VEHICLE_REMOVED_BY_JOINS = """
+LEFT JOIN organization_members removed_by_om
+    ON removed_by_om.user_id = v.removed_by_user_id
+   AND removed_by_om.organization_id = v.organization_id
+   AND removed_by_om.status <> 'deleted'
+LEFT JOIN contacts removed_by_contact
+    ON removed_by_contact.id = v.removed_by_contact_id
+   AND removed_by_contact.organization_id = v.organization_id
+"""
+
+_VEHICLE_REMOVED_BY_SELECT_COLUMNS = """
+              removed_by_om.salutation AS removed_by_salutation,
+              removed_by_om.first_name AS removed_by_first_name,
+              removed_by_om.last_name AS removed_by_last_name,
+              removed_by_om.email AS removed_by_email,
+              removed_by_om.phone_isd_code AS removed_by_phone_isd_code,
+              removed_by_om.phone_number AS removed_by_phone_number,
+              removed_by_om.avatar_url AS removed_by_avatar_url,
+              removed_by_contact.prefix AS removed_by_contact_prefix,
+              removed_by_contact.first_name AS removed_by_contact_first_name,
+              removed_by_contact.last_name AS removed_by_contact_last_name,
+              removed_by_contact.emails AS removed_by_contact_emails,
+              removed_by_contact.phones AS removed_by_contact_phones,
+              removed_by_contact.profile_photo_url AS removed_by_contact_profile_photo_url
+"""
+
 
 class VehiclesRepository(BaseRepository):
     """Database operations for public.vehicles."""
@@ -177,6 +211,8 @@ class VehiclesRepository(BaseRepository):
               v.rejection_reason,
               v.approved_by_user_id::text AS approved_by_user_id,
               v.rejected_by_user_id::text AS rejected_by_user_id,
+              v.removed_by_user_id::text AS removed_by_user_id,
+              v.removed_by_contact_id::text AS removed_by_contact_id,
               v.parking_slot_id::text AS parking_slot_id,
               v.status_updated_at,
               v.sort_order,
@@ -201,6 +237,8 @@ class VehiclesRepository(BaseRepository):
               rejection_reason,
               approved_by_user_id::text AS approved_by_user_id,
               rejected_by_user_id::text AS rejected_by_user_id,
+              removed_by_user_id::text AS removed_by_user_id,
+              removed_by_contact_id::text AS removed_by_contact_id,
               parking_slot_id::text AS parking_slot_id,
               status_updated_at,
               sort_order,
@@ -577,6 +615,8 @@ class VehiclesRepository(BaseRepository):
         contact_id: str,
         vehicle_id: str,
         rejection_reason: str | None = None,
+        removed_by_user_id: str | None = None,
+        removed_by_contact_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Soft-delete an approved vehicle (status removed)."""
         row = await self.db_connection.fetchrow(
@@ -585,6 +625,8 @@ class VehiclesRepository(BaseRepository):
             SET status = 'removed'::vehicle_status,
                 parking_slot_id = NULL,
                 rejection_reason = COALESCE($4, rejection_reason),
+                removed_by_user_id = $5::uuid,
+                removed_by_contact_id = $6::uuid,
                 deleted_at = now(),
                 status_updated_at = now(),
                 updated_at = now()
@@ -599,6 +641,8 @@ class VehiclesRepository(BaseRepository):
             contact_id,
             vehicle_id,
             rejection_reason,
+            removed_by_user_id,
+            removed_by_contact_id,
         )
         return dict(row) if row else None
 
@@ -634,12 +678,14 @@ class VehiclesRepository(BaseRepository):
               {_VEHICLE_UNIT_SELECT_COLUMNS},
               {_VEHICLE_OWNER_SELECT_COLUMNS},
               {_VEHICLE_PARKING_SELECT_COLUMNS},
-              {_VEHICLE_REVIEWER_SELECT_COLUMNS}
+              {_VEHICLE_REVIEWER_SELECT_COLUMNS},
+              {_VEHICLE_REMOVED_BY_SELECT_COLUMNS}
             FROM vehicles v
             {_VEHICLE_UNIT_JOINS}
             {_VEHICLE_PARKING_JOINS}
             {_VEHICLE_OWNER_LATERAL_JOIN}
             {_VEHICLE_REVIEWER_JOINS}
+            {_VEHICLE_REMOVED_BY_JOINS}
             WHERE v.organization_id = $1::uuid
               AND v.project_id = $2::uuid
               AND ($3::vehicle_status IS NULL OR v.status = $3::vehicle_status)
@@ -693,12 +739,14 @@ class VehiclesRepository(BaseRepository):
               {_VEHICLE_UNIT_SELECT_COLUMNS},
               {_VEHICLE_OWNER_SELECT_COLUMNS},
               {_VEHICLE_PARKING_SELECT_COLUMNS},
-              {_VEHICLE_REVIEWER_SELECT_COLUMNS}
+              {_VEHICLE_REVIEWER_SELECT_COLUMNS},
+              {_VEHICLE_REMOVED_BY_SELECT_COLUMNS}
             FROM vehicles v
             {_VEHICLE_UNIT_JOINS}
             {_VEHICLE_PARKING_JOINS}
             {_VEHICLE_OWNER_LATERAL_JOIN}
             {_VEHICLE_REVIEWER_JOINS}
+            {_VEHICLE_REMOVED_BY_JOINS}
             WHERE v.organization_id = $1::uuid
               AND v.project_id = $2::uuid
               AND v.id = $3::uuid

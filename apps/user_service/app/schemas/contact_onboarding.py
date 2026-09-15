@@ -357,6 +357,19 @@ class VehicleReviewerSummary(BaseModel):
     avatar_url: str | None = None
 
 
+class VehicleRemovedBySummary(BaseModel):
+    """Org member or resident contact who soft-removed an approved vehicle."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    user_id: str | None = None
+    contact_id: str | None = None
+    display_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    avatar_url: str | None = None
+
+
 class VehicleResponse(BaseModel):
     """Vehicle row."""
 
@@ -378,6 +391,8 @@ class VehicleResponse(BaseModel):
     rejection_reason: str | None = None
     approved_by_user_id: str | None = None
     rejected_by_user_id: str | None = None
+    removed_by_user_id: str | None = None
+    removed_by_contact_id: str | None = None
     parking_slot_id: str | None = None
     status_updated_at: str
     sort_order: int = 0
@@ -388,6 +403,7 @@ class VehicleResponse(BaseModel):
     parking_allotment: VehicleParkingAllotmentSummary | None = None
     approved_by: VehicleReviewerSummary | None = None
     rejected_by: VehicleReviewerSummary | None = None
+    removed_by: VehicleRemovedBySummary | None = None
 
 
 class ReviewVehicleRequest(BaseModel):

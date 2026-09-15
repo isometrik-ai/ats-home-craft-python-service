@@ -4104,7 +4104,8 @@ async def remove_project_member(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
         "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
         "status), `parking_allotment` (slot number, status, facility) when assigned, and "
-        "`approved_by` / `rejected_by` org-member summaries when reviewed. "
+        "`approved_by` / `rejected_by` org-member summaries when reviewed, and "
+        "`removed_by` (org member or resident) when soft-removed. "
         "Optional `search` matches registration number or unit code/label. "
         "Filter by `status`, `vehicle_type`, and `fuel_type`."
     ),
@@ -4173,7 +4174,8 @@ async def list_project_vehicle_requests(
         "two-wheeler/four-wheeler vehicle entitlement, auto-allots the slot when allowed, then "
         "approves the request. "
         "On rejection, stores rejection_reason. Response includes nested "
-        "`approved_by` / `rejected_by` org-member summaries when applicable."
+        "`approved_by` / `rejected_by` org-member summaries when applicable, "
+        "and `removed_by` when the vehicle was soft-removed."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
