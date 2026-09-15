@@ -17,8 +17,8 @@ from apps.user_service.app.schemas.enums import (
 class NoticeRecipientResolutionService:
     """Audience sizing and recipient resolution for notices."""
 
-    _STAFF_MANAGER_GROUP = NoticeRecipientGroup.STAFF_MANAGER.value
-    _STAFF_MANAGER_ROLE_SLUGS = (
+    _STAFF_GROUP = NoticeRecipientGroup.STAFF.value
+    _STAFF_ROLE_SLUGS = (
         "staff_manager",
         ProjectMemberRole.COMMUNITY_ADMIN.value,
     )
@@ -51,13 +51,13 @@ class NoticeRecipientResolutionService:
                 )
                 breakdown[group] = len(group_contact_ids)
                 contact_ids.update(group_contact_ids)
-            elif group == self._STAFF_MANAGER_GROUP:
-                staff_manager_user_ids = await self._project_staff_manager_user_ids(
+            elif group == self._STAFF_GROUP:
+                staff_user_ids = await self._project_staff_user_ids(
                     organization_id=organization_id,
                     project_id=project_id,
                 )
-                breakdown[group] = len(staff_manager_user_ids)
-                staff_security_user_ids.update(staff_manager_user_ids)
+                breakdown[group] = len(staff_user_ids)
+                staff_security_user_ids.update(staff_user_ids)
             elif group == "Security":
                 security_user_ids = await self._project_security_user_ids(
                     organization_id=organization_id,
@@ -102,9 +102,9 @@ class NoticeRecipientResolutionService:
                         contact_ids=contact_ids,
                     )
                 )
-            elif group == self._STAFF_MANAGER_GROUP:
+            elif group == self._STAFF_GROUP:
                 user_ids.update(
-                    await self._project_staff_manager_user_ids(
+                    await self._project_staff_user_ids(
                         organization_id=organization_id,
                         project_id=project_id,
                     )
@@ -188,13 +188,13 @@ class NoticeRecipientResolutionService:
         )
         return {str(row["user_id"]) for row in rows if row["user_id"]}
 
-    async def _project_staff_manager_user_ids(
+    async def _project_staff_user_ids(
         self,
         *,
         organization_id: str,
         project_id: str,
     ) -> set[str]:
-        """Active project members assigned with the Staff Manager role."""
+        """Active project members assigned with staff manager roles."""
         rows = await self.db_connection.fetch(
             """
             SELECT DISTINCT pm.user_id::text AS user_id
@@ -207,14 +207,15 @@ class NoticeRecipientResolutionService:
               AND pm.status = $3
               AND (
                 pr.slug = ANY($4::text[])
-                OR lower(trim(pr.name)) = lower($5)
+                OR lower(trim(pr.name)) IN (lower($5), lower($6))
               )
             """,
             organization_id,
             project_id,
             ProjectMemberStatus.ACTIVE.value,
-            list(self._STAFF_MANAGER_ROLE_SLUGS),
-            self._STAFF_MANAGER_GROUP,
+            list(self._STAFF_ROLE_SLUGS),
+            self._STAFF_GROUP,
+            "Staff Manager",
         )
         return {str(row["user_id"]) for row in rows if row["user_id"]}
 
@@ -299,14 +300,14 @@ class NoticeRecipientResolutionService:
         )
         return {str(row["contact_id"]) for row in rows}
 
-    async def _user_is_project_staff_manager(
+    async def _user_is_project_staff(
         self,
         *,
         organization_id: str,
         project_id: str,
         user_id: str,
     ) -> bool:
-        """Return whether the user is an active Staff Manager project member."""
+        """Return whether the user is an active staff project member."""
         row = await self.db_connection.fetchrow(
             """
             SELECT 1
@@ -320,7 +321,7 @@ class NoticeRecipientResolutionService:
               AND pm.status = $4
               AND (
                 pr.slug = ANY($5::text[])
-                OR lower(trim(pr.name)) = lower($6)
+                OR lower(trim(pr.name)) IN (lower($6), lower($7))
               )
             LIMIT 1
             """,
@@ -328,8 +329,9 @@ class NoticeRecipientResolutionService:
             project_id,
             user_id,
             ProjectMemberStatus.ACTIVE.value,
-            list(self._STAFF_MANAGER_ROLE_SLUGS),
-            self._STAFF_MANAGER_GROUP,
+            list(self._STAFF_ROLE_SLUGS),
+            self._STAFF_GROUP,
+            "Staff Manager",
         )
         return row is not None
 
@@ -394,8 +396,8 @@ class NoticeRecipientResolutionService:
                     tower_ids=tower_ids,
                 ):
                     return True
-            elif group == self._STAFF_MANAGER_GROUP and contact_user_id:
-                if await self._user_is_project_staff_manager(
+            elif group == self._STAFF_GROUP and contact_user_id:
+                if await self._user_is_project_staff(
                     organization_id=organization_id,
                     project_id=project_id,
                     user_id=contact_user_id,

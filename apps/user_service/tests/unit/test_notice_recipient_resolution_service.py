@@ -16,7 +16,7 @@ from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
 
-STAFF_MANAGER = NoticeRecipientGroup.STAFF_MANAGER.value
+STAFF = NoticeRecipientGroup.STAFF.value
 
 
 @pytest.mark.asyncio
@@ -38,12 +38,12 @@ async def test_estimate_reach_staff_manager_counts_one_not_three():
     total, breakdown = await service.estimate_reach(
         organization_id="org-1",
         project_id="project-1",
-        recipient_groups=[STAFF_MANAGER],
+        recipient_groups=[STAFF],
         scope_type="whole_society",
         tower_ids=[],
     )
 
-    assert breakdown == {STAFF_MANAGER: 1}
+    assert breakdown == {STAFF: 1}
     assert total == 1
     assert db.fetch.await_count == 1
 
@@ -63,12 +63,12 @@ async def test_estimate_reach_staff_manager_and_security_counts_two():
     total, breakdown = await service.estimate_reach(
         organization_id="org-1",
         project_id="project-1",
-        recipient_groups=[STAFF_MANAGER, "Security"],
+        recipient_groups=[STAFF, "Security"],
         scope_type="whole_society",
         tower_ids=[],
     )
 
-    assert breakdown == {STAFF_MANAGER: 1, "Security": 1}
+    assert breakdown == {STAFF: 1, "Security": 1}
     assert total == 2
 
 
@@ -82,7 +82,7 @@ async def test_estimate_reach_unknown_group_is_ignored_at_resolver_layer():
     total, breakdown = await service.estimate_reach(
         organization_id="org-1",
         project_id="project-1",
-        recipient_groups=["Staff"],
+        recipient_groups=["Staff Manager"],
         scope_type="whole_society",
         tower_ids=[],
     )
@@ -93,28 +93,28 @@ async def test_estimate_reach_unknown_group_is_ignored_at_resolver_layer():
 
 
 @pytest.mark.asyncio
-async def test_create_notice_rejects_legacy_staff_recipient_group():
-    """Failure case: API schema rejects deprecated 'Staff' recipient group."""
+async def test_create_notice_rejects_deprecated_staff_manager_label():
+    """Failure case: API schema rejects deprecated 'Staff Manager' recipient group."""
     with pytest.raises(ValidationError):
         CreateNoticeRequest(
             title="Maintenance update",
-            recipient_groups=["Staff"],
+            recipient_groups=["Staff Manager"],
         )
 
 
-def test_create_notice_accepts_staff_manager_recipient_group():
-    """Success case: API schema accepts 'Staff Manager' recipient group."""
+def test_create_notice_accepts_staff_recipient_group():
+    """Success case: API schema accepts 'Staff' recipient group."""
     body = CreateNoticeRequest(
         title="Maintenance update",
-        recipient_groups=[NoticeRecipientGroup.STAFF_MANAGER],
+        recipient_groups=[NoticeRecipientGroup.STAFF],
     )
-    assert body.recipient_groups == [NoticeRecipientGroup.STAFF_MANAGER]
+    assert body.recipient_groups == [NoticeRecipientGroup.STAFF]
 
 
-def test_reach_estimate_query_parses_staff_manager_group():
-    """Success case: reach-estimate query string accepts Staff Manager."""
-    query = ReachEstimateQuery(groups="Staff Manager,Security")
-    assert query.parsed_groups() == ["Staff Manager", "Security"]
+def test_reach_estimate_query_parses_staff_group():
+    """Success case: reach-estimate query string accepts Staff."""
+    query = ReachEstimateQuery(groups="Staff,Security")
+    assert query.parsed_groups() == ["Staff", "Security"]
 
 
 @pytest.mark.asyncio
@@ -127,15 +127,15 @@ async def test_estimate_reach_staff_manager_uses_project_members():
     total, breakdown = await service.estimate_reach(
         organization_id="org-1",
         project_id="project-1",
-        recipient_groups=[STAFF_MANAGER],
+        recipient_groups=[STAFF],
         scope_type="whole_society",
         tower_ids=[],
     )
 
     assert total == 1
-    assert breakdown == {STAFF_MANAGER: 1}
+    assert breakdown == {STAFF: 1}
     assert "staff_manager" in db.fetch.await_args.args[4]
-    assert "Staff Manager" in db.fetch.await_args.args[5]
+    assert "Staff" in db.fetch.await_args.args[5]
 
 
 @pytest.mark.asyncio
@@ -199,7 +199,7 @@ async def test_is_visible_to_contact_staff_manager_checks_project_members():
         project_id="project-1",
         notice={
             "status": "live",
-            "recipient_groups": [NoticeRecipientGroup.STAFF_MANAGER.value],
+            "recipient_groups": [NoticeRecipientGroup.STAFF.value],
             "scope_type": "whole_society",
             "tower_ids": [],
         },
@@ -250,7 +250,7 @@ async def test_is_visible_staff_manager_notice_hidden_from_security_user():
         project_id="project-1",
         notice={
             "status": "live",
-            "recipient_groups": [NoticeRecipientGroup.STAFF_MANAGER.value],
+            "recipient_groups": [NoticeRecipientGroup.STAFF.value],
             "scope_type": "whole_society",
             "tower_ids": [],
         },
@@ -295,7 +295,7 @@ async def test_resolve_recipient_user_ids_staff_manager_only():
         organization_id="org-1",
         project_id="project-1",
         notice_id="notice-1",
-        recipient_groups=[STAFF_MANAGER],
+        recipient_groups=[STAFF],
         scope_type="whole_society",
         tower_ids=[],
     )
@@ -337,7 +337,7 @@ async def test_is_visible_returns_false_for_non_live_notice():
     visible = await service.is_visible_to_contact(
         organization_id="org-1",
         project_id="project-1",
-        notice={"status": "draft", "recipient_groups": [NoticeRecipientGroup.STAFF_MANAGER.value]},
+        notice={"status": "draft", "recipient_groups": [NoticeRecipientGroup.STAFF.value]},
         contact_id=None,
         contact_user_id="staff-1",
     )
@@ -399,13 +399,13 @@ async def test_filter_visible_notice_ids():
             {
                 "id": "n-1",
                 "status": "live",
-                "recipient_groups": [NoticeRecipientGroup.STAFF_MANAGER.value],
+                "recipient_groups": [NoticeRecipientGroup.STAFF.value],
                 "scope_type": "whole_society",
             },
             {
                 "id": "n-2",
                 "status": "draft",
-                "recipient_groups": [NoticeRecipientGroup.STAFF_MANAGER.value],
+                "recipient_groups": [NoticeRecipientGroup.STAFF.value],
             },
         ],
         contact_id=None,

@@ -725,14 +725,14 @@ async def test_get_reach_estimate_towers_required():
 
 
 @pytest.mark.asyncio
-async def test_get_reach_estimate_rejects_legacy_staff_group():
+async def test_get_reach_estimate_rejects_deprecated_staff_manager_label():
     from apps.user_service.app.schemas.notices import ReachEstimateQuery
 
     svc = _service()
     with pytest.raises(ValidationException) as exc_info:
         await svc.get_reach_estimate(
             project_id=PROJECT_ID,
-            query=ReachEstimateQuery(groups="Staff"),
+            query=ReachEstimateQuery(groups="Staff Manager"),
         )
     assert exc_info.value.message_key == "notices.errors.invalid_recipient_groups"
 

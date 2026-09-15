@@ -42,7 +42,7 @@ async def test_list_notices_for_security_viewer():
                 "id": "notice-1",
                 "project_id": "project-1",
                 "status": "live",
-                "recipient_groups": ["Staff Manager"],
+                "recipient_groups": ["Staff"],
                 "scope_type": "whole_society",
                 "tower_ids": [],
             }
@@ -247,7 +247,7 @@ async def test_staff_like_uses_user_id():
             "id": "notice-1",
             "project_id": "project-1",
             "status": "live",
-            "recipient_groups": ["Staff Manager"],
+            "recipient_groups": ["Staff"],
             "scope_type": "whole_society",
             "tower_ids": [],
         }
