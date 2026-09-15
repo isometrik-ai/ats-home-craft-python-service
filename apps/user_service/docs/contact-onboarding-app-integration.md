@@ -470,8 +470,7 @@ PATCH /v1/contact-onboarding/household/{contact_unit_id}
 }
 ```
 
-**Edit family member** — enable the email field when `can_edit_email` is `true` (member has no
-email and no pending portal invitation). Example PATCH body to add email after a revoked invite:
+**Edit family member** example PATCH body:
 
 ```json
 {

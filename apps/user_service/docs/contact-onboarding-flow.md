@@ -363,11 +363,9 @@ in `contact_onboarding_service.py`, `contact_units_service.py`, and related serv
     the member on the unit; primary `DELETE /household/{contact_unit_id}` removes the member and
     cancels the invite; invitee decline sets invitation `declined` and removes the member link.
   - **Update:** `PATCH /household/{contact_unit_id}` can change `first_name`, `last_name`,
-    `emails`, `relationship`, and `portal_access`. Email can be **added** only when the member has
-    no existing email and no pending portal invitation (`can_edit_email` on list/detail responses).
-    Enabling `portal_access` requires a primary phone on the member, sets the unit link to
-    `pending`, and sends an SMS invite. Disabling `portal_access` cancels any pending invitation
-    and reactivates the unit link.
+    `emails`, `relationship`, and `portal_access`. Enabling `portal_access` requires a primary
+    phone on the member, sets the unit link to `pending`, and sends an SMS invite. Disabling
+    `portal_access` cancels any pending invitation and reactivates the unit link.
   - SMS provider: wire in `app/utils/household_invitation_sms.py` (currently logs in dev).
 - **Household summary counts:** `GET /household/summary?unit_id=` aggregates four dashboard
   card totals for the manage screen. Implemented in `ContactOnboardingService.get_household_summary`.
