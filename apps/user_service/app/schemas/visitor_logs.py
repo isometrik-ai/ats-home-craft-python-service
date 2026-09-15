@@ -153,6 +153,14 @@ class VisitorLogOverviewQuery(VisitorLogDateRangeQuery):
     unit_id: str | None = None
 
 
+class VisitorLogDetailQuery(BaseModel):
+    """Query params for GET /visitor-logs/{pass_id}."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(..., description="Project identifier (UUID string).")
+
+
 class VisitorLogExportQuery(VisitorLogDateRangeQuery):
     """Export filters aligned with GET /visitor-logs (without pagination)."""
 

@@ -3,7 +3,6 @@
 import pytest
 
 from apps.user_service.tests.integration.helpers import (
-    patch_check_permissions,
     patch_ensure_staff_project_access,
 )
 from apps.user_service.tests.utils.assertions import assert_success
@@ -144,11 +143,12 @@ async def test_get_visitor_log_overview(monkeypatch, client):
 async def test_get_visitor_log_detail(monkeypatch, client):
     """GET visitor-logs/{pass_id} returns pass detail with timeline."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.visitor_logs")
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.visitor_logs")
 
-    async def fake_get_log_detail(_self, *, pass_id: str):
+    async def fake_get_log_detail(_self, *, pass_id: str, project_id: str):
         del _self
         assert pass_id == PASS_ID
+        assert project_id == PROJECT_ID
         return _FAKE_DETAIL
 
     monkeypatch.setattr(
@@ -156,10 +156,20 @@ async def test_get_visitor_log_detail(monkeypatch, client):
         fake_get_log_detail,
     )
 
-    res = await client.get(f"/v1/visitor-logs/{PASS_ID}")
+    res = await client.get(
+        f"/v1/visitor-logs/{PASS_ID}",
+        params={"project_id": PROJECT_ID},
+    )
     body = assert_success(res, 200)
     assert body["data"]["id"] == PASS_ID
     assert body["data"]["events"][0]["event_type"] == "check_in"
+
+
+@pytest.mark.asyncio
+async def test_get_visitor_log_detail_requires_project_id(client):
+    """GET visitor-logs/{pass_id} requires project_id query param."""
+    res = await client.get(f"/v1/visitor-logs/{PASS_ID}")
+    assert res.status_code == 422
 
 
 @pytest.mark.asyncio

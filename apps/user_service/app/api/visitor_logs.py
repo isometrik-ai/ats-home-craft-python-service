@@ -10,6 +10,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.schemas.visitor_logs import (
     VisitorLogDetailApiResponse,
+    VisitorLogDetailQuery,
     VisitorLogExportQuery,
     VisitorLogListApiResponse,
     VisitorLogMonthlyReportQuery,
@@ -19,7 +20,6 @@ from apps.user_service.app.schemas.visitor_logs import (
 )
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
     ensure_staff_project_access,
     handle_api_exceptions,
 )
@@ -271,13 +271,15 @@ async def export_visitor_logs_monthly_report(
 async def get_visitor_log_detail(
     request: Request,
     pass_id: str = Path(..., description="Pass or walk-in entry UUID"),
+    query: VisitorLogDetailQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return pass detail with full timeline for admin."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=query.project_id,
         permission_codes=VISITOR_MANAGEMENT_VIEW,
         request=request,
     )
@@ -285,7 +287,10 @@ async def get_visitor_log_detail(
         db_connection=db_connection,
         user_context=user_context,
     )
-    result = await service.get_log_detail(pass_id=pass_id)
+    result = await service.get_log_detail(
+        pass_id=pass_id,
+        project_id=query.project_id,
+    )
     return success_response(
         request=request,
         message_key="visitor_logs.success.detail_retrieved",
