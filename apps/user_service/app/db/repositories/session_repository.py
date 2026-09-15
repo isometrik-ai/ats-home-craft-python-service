@@ -108,13 +108,14 @@ class SessionRepository:
             params.append(organization_id)
             param_index += 1
 
-        param_index = self._append_project_member_filter(
-            conditions,
-            params,
-            param_index,
-            table_prefix=table_prefix,
-            project_id=filters.project_id,
-        )
+        if filters.project_id:
+            param_index = self._append_project_member_filter(
+                conditions,
+                params,
+                param_index,
+                table_prefix=table_prefix,
+                project_id=filters.project_id,
+            )
 
         # Apply session status filter
         if filters.session_status:
@@ -268,13 +269,14 @@ class SessionRepository:
         params = [organization_id]
         param_index = 2
 
-        param_index = self._append_project_member_filter(
-            conditions,
-            params,
-            param_index,
-            table_prefix="us.",
-            project_id=filters.project_id,
-        )
+        if filters.project_id:
+            param_index = self._append_project_member_filter(
+                conditions,
+                params,
+                param_index,
+                table_prefix="us.",
+                project_id=filters.project_id,
+            )
 
         # Apply session status filter
         if filters.session_status:

@@ -533,6 +533,18 @@ class NoticesService:
     ) -> ReachEstimateResponse:
         """Estimate audience size for targeting selections."""
         groups = query.parsed_groups()
+        if not groups:
+            raise ValidationException(
+                message_key="notices.errors.recipients_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        invalid_groups = query.invalid_recipient_groups()
+        if invalid_groups:
+            raise ValidationException(
+                message_key="notices.errors.invalid_recipient_groups",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"groups": ", ".join(invalid_groups)},
+            )
         tower_ids = query.parsed_tower_ids()
         if query.scope_type == NoticeScopeType.BY_TOWER and not tower_ids:
             raise ValidationException(

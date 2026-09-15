@@ -906,7 +906,20 @@ class VisitorLogsService:
             "end_at": format_iso_datetime(result.get("end_at")),
         }
 
-    async def get_log_detail(self, *, pass_id: str) -> dict[str, Any]:
+    def _assert_log_belongs_to_project(
+        self,
+        *,
+        row_project_id: str | None,
+        project_id: str,
+    ) -> None:
+        """Reject pass/walk-in rows that belong to a different project."""
+        if row_project_id and row_project_id != project_id:
+            raise NotFoundException(
+                message_key="visitor_logs.errors.pass_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def get_log_detail(self, *, pass_id: str, project_id: str) -> dict[str, Any]:
         """Return pass or walk-in detail with full timeline for admin."""
         org_id = self.user_context.organization_id
         assert org_id
@@ -916,6 +929,10 @@ class VisitorLogsService:
             pass_id=pass_id,
         )
         if row:
+            self._assert_log_belongs_to_project(
+                row_project_id=self._optional_id(row.get("project_id")),
+                project_id=project_id,
+            )
             event_rows = await self.events_repo.list_by_pass(
                 organization_id=org_id,
                 pass_id=pass_id,
@@ -957,6 +974,10 @@ class VisitorLogsService:
             walk_in_entry_id=pass_id,
         )
         if walk_in_row:
+            self._assert_log_belongs_to_project(
+                row_project_id=self._optional_id(walk_in_row.get("project_id")),
+                project_id=project_id,
+            )
             raw_events = await self._walk_in_service.repo.list_events(
                 organization_id=org_id,
                 walk_in_entry_id=pass_id,

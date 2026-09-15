@@ -229,8 +229,10 @@ POST /v1/projects/{project_id}/site-map/overlays
 
 - **Grid / sidebar:** `GET /inventory/summary?tower_id=...` — towers, floors, slim unit rows.
 - **Unit click (slide-out / registry):** `GET /units/{unit_id}/detail` — tower/floor, config,
-  owner, residents, vehicles; `financials.base_fee_monthly` and `financials.outstanding_amount`
-  are `null` until billing is implemented.
+  owner, residents, vehicles, **`pets_count` + `pets[]`** (compact active pet cards); see
+  [`pets-flow.md`](pets-flow.md) §7g for admin add/edit/remove from the unit detail drawer.
+  `financials.base_fee_monthly` and `financials.outstanding_amount` are `null` until billing is
+  implemented.
 
 ### Conditional fields (UI-driven validation)
 

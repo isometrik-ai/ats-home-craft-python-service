@@ -20,6 +20,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.visitor_logs_service import VisitorLogsService
 from apps.user_service.app.utils.common_utils import UserContext
+from libs.shared_utils.http_exceptions import NotFoundException
 
 
 def _user_context() -> UserContext:
@@ -403,7 +404,7 @@ async def test_get_log_detail_returns_pass_timeline():
             ),
         },
     )()
-    detail = await svc.get_log_detail(pass_id="pass-1")
+    detail = await svc.get_log_detail(pass_id="pass-1", project_id="project-1")
     assert detail["source"] == "pass"
     assert detail["id"] == "pass-1"
     assert detail["include_events"] is True
@@ -504,7 +505,7 @@ async def test_get_log_detail_returns_walk_in_when_pass_missing():
     )
     svc = _service(passes_repo=passes_repo, units_repo=units_repo)
     svc._walk_in_service = _FakeWalkInService()
-    detail = await svc.get_log_detail(pass_id="walk-in-1")
+    detail = await svc.get_log_detail(pass_id="walk-in-1", project_id="project-1")
     assert detail["source"] == "walk_in"
     assert detail["id"] == "walk-in-1"
     assert detail["status"] == "exited"
@@ -561,7 +562,7 @@ async def test_get_log_detail_guard_name_missing_without_user_id():
             ),
         },
     )()
-    detail = await svc.get_log_detail(pass_id="pass-1")
+    detail = await svc.get_log_detail(pass_id="pass-1", project_id="project-1")
     assert detail["guard_user_id"] is None
     assert detail["guard_name"] is None
 
@@ -668,7 +669,7 @@ async def test_get_log_detail_shows_creator_without_unit_role():
             ),
         },
     )()
-    detail = await svc.get_log_detail(pass_id="pass-rasika")
+    detail = await svc.get_log_detail(pass_id="pass-rasika", project_id="project-1")
     assert detail["resident"]["person_name"] == "Rasika Bharati"
     assert detail["resident"]["role"] is None
     assert detail["visit_status"] == VisitorLogVisitStatus.EXPIRED.value
@@ -736,11 +737,28 @@ async def test_get_log_detail_daily_help_pass_null_unit_id():
         user_context=_user_context(),
     )
 
-    detail = await svc.get_log_detail(pass_id="pass-dh-1")
+    detail = await svc.get_log_detail(pass_id="pass-dh-1", project_id="project-1")
     assert detail["source"] == "pass"
     assert detail["unit_id"] is None
     assert detail["resident"] is None
     assert detail["visitor_type"] == VisitorType.VISITOR.value
+
+
+@pytest.mark.asyncio
+async def test_get_log_detail_rejects_pass_from_different_project():
+    """Pass detail rejects rows that belong to another project."""
+    pass_row = {
+        "id": "pass-1",
+        "project_id": "project-a",
+        "unit_id": "unit-1",
+        "created_by_contact_id": "owner-1",
+        "pass_type": "guest",
+        "status": "approved",
+    }
+    svc = _service(passes_repo=_FakePassesRepo(row=pass_row))
+
+    with pytest.raises(NotFoundException):
+        await svc.get_log_detail(pass_id="pass-1", project_id="project-b")
 
 
 def test_build_resident_without_unit_role():

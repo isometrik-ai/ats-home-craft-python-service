@@ -7,8 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from apps.user_service.app.schemas.enums.pets import PetGender, PetVaccinationStatus
+from apps.user_service.app.schemas.enums.pets import (
+    AdminPetListStatusFilter,
+    PetGender,
+    PetVaccinationStatus,
+)
 from apps.user_service.app.schemas.pets import (
+    AdminCreatePetRequest,
+    AdminPetListQuery,
     CreatePetRequest,
     RemovePetRequest,
     UpdatePetRequest,
@@ -33,6 +39,15 @@ def _service() -> PetsService:
             "unit_label": "Tower A - 101",
         }
     )
+    svc.units_repo = AsyncMock()
+    svc.units_repo.get_unit = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "organization_id": "org-1",
+            "project_id": "project-1",
+        }
+    )
+    svc.units_repo.get_unit_owner_contact = AsyncMock(return_value={"contact_id": "owner-1"})
     return svc
 
 
@@ -288,3 +303,144 @@ async def test_release_for_move_out_soft_removes_all_active_pets_on_unit():
         reason="Unit owner unassigned",
         removed_by_contact_id=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_get_project_summary_returns_counts():
+    """Admin summary returns active and total counts."""
+    svc = _service()
+    svc.repo.get_project_summary = AsyncMock(return_value={"active_count": 3, "total_count": 4})
+
+    result = await svc.get_project_summary(project_id="project-1")
+
+    assert result == {"active_count": 3, "total_count": 4}
+
+
+@pytest.mark.asyncio
+async def test_list_pets_for_project_applies_filters():
+    """Admin list serializes rows with tower context."""
+    svc = _service()
+    svc.repo.list_for_project = AsyncMock(
+        return_value=(
+            [
+                _pet_row(
+                    tower_id="tower-1",
+                    tower_name="Tower A",
+                )
+            ],
+            1,
+        )
+    )
+    query = AdminPetListQuery(
+        search="romeo",
+        tower_id="tower-1",
+        pet_type="Dog",
+        breed="Golden Retriever",
+        status=AdminPetListStatusFilter.ACTIVE,
+    )
+
+    items, total = await svc.list_pets_for_project(project_id="project-1", query=query)
+
+    assert total == 1
+    assert items[0]["unit"]["tower_name"] == "Tower A"
+    svc.repo.list_for_project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_pet_admin_uses_unit_owner_as_creator():
+    """Admin create stores owner contact as created_by_contact_id."""
+    svc = _service()
+    svc.repo.create.return_value = _pet_row(created_by_contact_id="owner-1")
+    svc.repo.get_by_id.return_value = _pet_row(created_by_contact_id="owner-1")
+
+    body = AdminCreatePetRequest(
+        unit_id="unit-1",
+        name="Romeo",
+        pet_type="Dog",
+        breed="Golden Retriever",
+        vaccination_status=PetVaccinationStatus.COMPLETELY,
+        gender=PetGender.MALE,
+    )
+    result = await svc.create_pet_admin(project_id="project-1", body=body)
+
+    assert result["created_by_contact_id"] == "owner-1"
+    svc.repo.create.assert_awaited_once()
+    assert svc.repo.create.await_args.kwargs["created_by_contact_id"] == "owner-1"
+
+
+@pytest.mark.asyncio
+async def test_create_pet_admin_rejects_unit_without_owner():
+    """Admin create fails when the unit has no owner contact."""
+    svc = _service()
+    svc.units_repo.get_unit_owner_contact = AsyncMock(return_value=None)
+
+    body = AdminCreatePetRequest(
+        unit_id="unit-1",
+        name="Romeo",
+        pet_type="Dog",
+        breed="Golden Retriever",
+        vaccination_status=PetVaccinationStatus.COMPLETELY,
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.create_pet_admin(project_id="project-1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_remove_pet_admin_soft_removes_without_contact_actor():
+    """Admin remove allows null removed_by_contact_id."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = _pet_row()
+    svc.repo.soft_remove.return_value = _pet_row(status="removed")
+
+    body = RemovePetRequest(reason="Moved out of community")
+    result = await svc.remove_pet_admin(project_id="project-1", pet_id="pet-1", body=body)
+
+    assert result["status"] == "removed"
+    svc.repo.soft_remove.assert_awaited_once_with(
+        organization_id="org-1",
+        pet_id="pet-1",
+        reason="Moved out of community",
+        removed_by_contact_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_pet_detail_admin_not_found():
+    """Admin detail raises when pet is missing from project."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await svc.get_pet_detail_admin(project_id="project-1", pet_id="missing")
+
+
+@pytest.mark.asyncio
+async def test_update_pet_admin_not_found():
+    """Admin update raises when pet is not active in project."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await svc.update_pet_admin(
+            project_id="project-1",
+            pet_id="pet-1",
+            body=UpdatePetRequest(name="Luna"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_pet_admin_rejects_invalid_catalog():
+    """Admin create validates catalog type and breed."""
+    svc = _service()
+
+    body = AdminCreatePetRequest(
+        unit_id="unit-1",
+        name="Romeo",
+        pet_type="Dragon",
+        breed="Golden Retriever",
+        vaccination_status=PetVaccinationStatus.COMPLETELY,
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.create_pet_admin(project_id="project-1", body=body)

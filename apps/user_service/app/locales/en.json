@@ -1103,10 +1103,12 @@
       "invalid_breed": "The selected breed is not valid for this pet type.",
       "invalid_photo_path": "One or more photo paths are invalid.",
       "invalid_date_of_birth": "Date of birth cannot be in the future.",
-      "invalid_name": "Pet name is required."
+      "invalid_name": "Pet name is required.",
+      "unit_has_no_contact_for_pet": "Assign an owner to this unit before adding a pet."
     },
     "success": {
       "catalog_retrieved": "Pet options retrieved successfully.",
+      "summary_retrieved": "Pet summary retrieved successfully.",
       "list_retrieved": "Pet profiles retrieved successfully.",
       "detail_retrieved": "Pet profile retrieved successfully.",
       "created": "Pet profile created successfully.",
@@ -1152,6 +1154,7 @@
       "title_too_long": "Notice title cannot exceed 70 characters.",
       "description_too_long": "Notice description cannot exceed 600 characters.",
       "recipients_required": "Select at least one recipient group to publish or schedule.",
+      "invalid_recipient_groups": "Invalid recipient group(s): {groups}. Use Owner, Tenant, Staff, or Security.",
       "towers_required": "Select at least one tower when scope is by tower.",
       "schedule_too_far": "Scheduled publish date cannot be more than 2 months ahead.",
       "schedule_required": "Publish date is required when scheduling a notice.",

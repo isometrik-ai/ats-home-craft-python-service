@@ -573,13 +573,42 @@ async def test_get_unit_detail_builds_payload():
     mock_docs_service = MagicMock()
     mock_docs_service.list_documents_for_owner_contact_unit = AsyncMock(return_value=[])
 
-    with patch(
-        "apps.user_service.app.services.units_service.ContactUnitDocumentsService",
-        return_value=mock_docs_service,
+    mock_pets_repo = MagicMock()
+    mock_pets_repo.count_active_for_unit = AsyncMock(return_value=1)
+    mock_pets_repo.list_for_unit = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "pet-1",
+                    "name": "Romeo",
+                    "pet_type": "Dog",
+                    "breed": "Golden Retriever",
+                    "gender": "male",
+                    "vaccination_status": "completely",
+                    "date_of_birth": None,
+                    "photo_paths": [],
+                    "status": "active",
+                }
+            ],
+            1,
+        )
+    )
+
+    with (
+        patch(
+            "apps.user_service.app.services.units_service.ContactUnitDocumentsService",
+            return_value=mock_docs_service,
+        ),
+        patch(
+            "apps.user_service.app.services.units_service.PetsRepository",
+            return_value=mock_pets_repo,
+        ),
     ):
         data = await service.get_unit_detail(project_id="proj-1", unit_id="unit-1")
 
     assert data["code"] == "A-1802"
+    assert data["pets_count"] == 1
+    assert data["pets"][0]["name"] == "Romeo"
     assert data["documents"] == []
     assert data["occupancy_label"] == "sold"
     assert data["owner"]["display_name"] == "Mr. Rajesh Kapoor"
