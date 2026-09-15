@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.community_events import (
     ResidentEventDetailResponse,
     ResidentEventListItemResponse,
     ResidentEventListQuery,
+    ResidentMyBookingsQuery,
 )
 from apps.user_service.app.schemas.enums import (
     COMMUNITY_EVENT_CATEGORY_LABELS,
@@ -250,16 +251,19 @@ class CommunityEventsResidentService:
         *,
         project_id: str,
         contact_id: str,
+        query: ResidentMyBookingsQuery | None = None,
     ) -> list[MyBookingItemResponse]:
-        """All active bookings for resident in a project."""
+        """Upcoming/past active bookings for resident in a project."""
         await self.booking_service._ensure_resident_project(
             contact_id=contact_id,
             project_id=project_id,
         )
+        resolved_query = query or ResidentMyBookingsQuery()
         rows = await self.repo.list_my_bookings(
             organization_id=self.organization_id,
             project_id=project_id,
             contact_id=contact_id,
+            timeframe=resolved_query.timeframe.value,
         )
         return [
             MyBookingItemResponse(

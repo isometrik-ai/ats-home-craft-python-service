@@ -63,7 +63,7 @@ async def test_generate_due_work_orders_skips_existing(monkeypatch) -> None:
         "visit_frequency": "monthly",
         "auto_generate_lead_days": 5,
         "asset_ids": [],
-        "company_id": "co-1",
+        "vendor_id": "co-1",
     }
     service.contracts.list_active_for_scheduler = AsyncMock(return_value=[contract])
     service.work_orders.existing_contract_schedule_dates = AsyncMock(return_value={"2026-01-01"})

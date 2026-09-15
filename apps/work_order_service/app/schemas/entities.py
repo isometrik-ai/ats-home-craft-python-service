@@ -32,7 +32,7 @@ class WorkOrderResponse(BaseModel):
     description: str | None = None
     asset_ids: list[str] = Field(default_factory=list)
     contract_id: str | None = None
-    company_id: str | None = None
+    vendor_id: str | None = None
     form_template_id: str | None = None
     pre_start_form_template_id: str | None = None
     state: WorkOrderState
@@ -102,7 +102,7 @@ class AssetResponse(BaseModel):
     purchase_cost_minor: int | None = None
     currency: str = "INR"
     supplier_name: str | None = None
-    company_id: str | None = None
+    vendor_id: str | None = None
     purchase_order_number: str | None = None
     invoice_ref: str | None = None
     install_date: str | None = None
@@ -125,7 +125,7 @@ class ContractResponse(BaseModel):
     organization_id: str
     project_id: str
     title: str
-    company_id: str
+    vendor_id: str
     asset_ids: list[str] = Field(default_factory=list)
     start_date: str
     end_date: str | None = None
@@ -173,7 +173,7 @@ class InvoiceResponse(BaseModel):
     organization_id: str
     project_id: str
     work_order_id: str
-    company_id: str
+    vendor_id: str
     invoice_number: str
     invoice_date: str | None = None
     line_items: list[Any] = Field(default_factory=list)

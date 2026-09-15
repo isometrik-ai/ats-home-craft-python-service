@@ -12,6 +12,7 @@ from libs.shared_utils.http_exceptions import ValidationException
 def _filter(**overrides):
     base = {
         "organization_id": "org-1",
+        "project_id": "proj-1",
         "search": None,
         "action_type": None,
         "table_name": None,

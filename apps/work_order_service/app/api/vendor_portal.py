@@ -95,7 +95,7 @@ async def vendor_submit_invoice(
         "organization_id": work_order["organization_id"],
         "project_id": work_order["project_id"],
         "work_order_id": work_order["id"],
-        "company_id": work_order.get("company_id") or body.company_id,
+        "vendor_id": work_order.get("vendor_id") or body.vendor_id,
     }
     record = await InvoicesService(db_connection).create(
         project_id=work_order["project_id"],

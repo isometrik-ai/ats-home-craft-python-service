@@ -277,6 +277,7 @@ class UnitConfigsService:
                 "owner_contact_id",
                 "owner_prefix",
                 "owner_first_name",
+                "owner_middle_name",
                 "owner_last_name",
                 "owner_phones",
                 "owner_emails",

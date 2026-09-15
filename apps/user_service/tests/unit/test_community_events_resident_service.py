@@ -10,6 +10,7 @@ import pytest
 from apps.user_service.app.schemas.community_events import (
     CreateEventBookingRequest,
     ResidentEventListQuery,
+    ResidentMyBookingsQuery,
 )
 from apps.user_service.app.schemas.enums import (
     CommunityEventPublishStatus,
@@ -207,8 +208,15 @@ async def test_my_bookings_summary_and_list():
     bookings = await svc.list_my_bookings(
         project_id=PROJECT_ID,
         contact_id=CONTACT_ID,
+        query=ResidentMyBookingsQuery(timeframe=ResidentEventTimeframe.UPCOMING),
     )
     assert bookings[0].display_code == "BKG-1"
+    svc.repo.list_my_bookings.assert_awaited_once_with(
+        organization_id=svc.organization_id,
+        project_id=PROJECT_ID,
+        contact_id=CONTACT_ID,
+        timeframe="upcoming",
+    )
 
 
 @pytest.mark.asyncio

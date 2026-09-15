@@ -19,7 +19,7 @@ class CreateContractRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = Field(..., min_length=1, max_length=500)
-    company_id: str
+    vendor_id: str
     start_date: date
     asset_ids: list[str] = Field(default_factory=list)
     end_date: date | None = None
@@ -44,7 +44,7 @@ class UpdateContractRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(None, min_length=1, max_length=500)
-    company_id: str | None = None
+    vendor_id: str | None = None
     asset_ids: list[str] | None = None
     start_date: date | None = None
     end_date: date | None = None

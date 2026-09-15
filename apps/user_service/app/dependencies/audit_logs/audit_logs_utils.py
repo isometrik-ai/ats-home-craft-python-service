@@ -5,6 +5,34 @@ These functions handle validation, query building, and data formatting.
 """
 
 import json
+import re
+from uuid import UUID
+
+from fastapi import Request
+
+_PROJECT_PATH_PATTERN = re.compile(
+    r"/projects/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+
+
+def extract_project_id_from_request(request: Request) -> str | None:
+    """Resolve project_id from explicit audit state, URL path, or query params."""
+    explicit = getattr(request.state, "audit_project_id", None)
+    if explicit:
+        return str(explicit)
+
+    path_match = _PROJECT_PATH_PATTERN.search(str(request.url.path))
+    if path_match:
+        return path_match.group(1)
+
+    query_project_id = request.query_params.get("project_id")
+    if query_project_id:
+        try:
+            return str(UUID(str(query_project_id).strip()))
+        except (ValueError, AttributeError, TypeError):
+            return None
+
+    return None
 
 
 def format_audit_log_data(audit_log_row: dict) -> dict:

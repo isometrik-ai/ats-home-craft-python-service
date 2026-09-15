@@ -9,6 +9,9 @@ from uuid import uuid4
 from fastapi import Request
 from fastapi import status as http_status
 
+from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
+    extract_project_id_from_request,
+)
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("audit_logs")
@@ -133,6 +136,7 @@ async def _log_audit_event(
         description=audit_state["description"],
         status_code=status_code,
         category=category,
+        project_id=extract_project_id_from_request(request),
     )
 
     await audit_logger.log_audit_event(audit_event_data, request)
@@ -317,6 +321,7 @@ async def maybe_log_audit_on_error(
             description=request.state.audit_description,
             status_code=status_code,
             category=metadata.get("category"),
+            project_id=extract_project_id_from_request(request),
         )
 
         await audit_logger.log_audit_event(audit_event_data, request)

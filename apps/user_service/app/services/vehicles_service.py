@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Any
 
 import asyncpg
@@ -23,9 +25,11 @@ from apps.user_service.app.schemas.contact_onboarding import (
     ResubmitVehicleRequest,
     ReviewVehicleRequest,
     UpdateVehicleRequest,
+    VehicleRequestsExportQuery,
     VehicleResponse,
 )
 from apps.user_service.app.schemas.enums import (
+    VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
     VehicleFuelType,
     VehicleStatus,
     VehicleType,
@@ -87,6 +91,8 @@ class VehiclesService:
             "parking_slot_id",
             "approved_by_user_id",
             "rejected_by_user_id",
+            "removed_by_user_id",
+            "removed_by_contact_id",
         ):
             if out.get(key) is not None:
                 out[key] = str(out[key])
@@ -156,6 +162,22 @@ class VehiclesService:
         "rejected_by_phone_isd_code",
         "rejected_by_phone_number",
         "rejected_by_avatar_url",
+    )
+
+    _REMOVED_BY_ROW_KEYS = (
+        "removed_by_salutation",
+        "removed_by_first_name",
+        "removed_by_last_name",
+        "removed_by_email",
+        "removed_by_phone_isd_code",
+        "removed_by_phone_number",
+        "removed_by_avatar_url",
+        "removed_by_contact_prefix",
+        "removed_by_contact_first_name",
+        "removed_by_contact_last_name",
+        "removed_by_contact_emails",
+        "removed_by_contact_phones",
+        "removed_by_contact_profile_photo_url",
     )
 
     def _build_unit_owner(self, row: dict[str, Any]) -> dict[str, Any] | None:
@@ -272,6 +294,60 @@ class VehiclesService:
             "avatar_url": avatar_url,
         }
 
+    def _build_vehicle_removed_by(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        """Build org-member or resident summary for who soft-removed the vehicle."""
+        user_id = row.get("removed_by_user_id")
+        if user_id:
+            display_name = (
+                build_full_name(
+                    str(row.get("removed_by_salutation") or "").strip(),
+                    str(row.get("removed_by_first_name") or "").strip(),
+                    str(row.get("removed_by_last_name") or "").strip(),
+                ).strip()
+                or None
+            )
+            isd = str(row.get("removed_by_phone_isd_code") or "").strip()
+            number = str(row.get("removed_by_phone_number") or "").strip()
+            phone = f"{isd}{number}".strip() or None
+            email = str(row.get("removed_by_email") or "").strip() or None
+            avatar_url = str(row.get("removed_by_avatar_url") or "").strip() or None
+            return {
+                "user_id": str(user_id),
+                "contact_id": None,
+                "display_name": display_name,
+                "email": email,
+                "phone": phone,
+                "avatar_url": avatar_url,
+            }
+
+        contact_id = row.get("removed_by_contact_id")
+        if contact_id:
+            display_name = (
+                build_full_name(
+                    str(row.get("removed_by_contact_prefix") or "").strip(),
+                    str(row.get("removed_by_contact_first_name") or "").strip(),
+                    str(row.get("removed_by_contact_last_name") or "").strip(),
+                ).strip()
+                or None
+            )
+            phone = format_primary_contact_phone(
+                parse_json_any(row.get("removed_by_contact_phones"), default=[])
+            )
+            email = format_primary_contact_email(
+                parse_json_any(row.get("removed_by_contact_emails"), default=[])
+            )
+            avatar_url = str(row.get("removed_by_contact_profile_photo_url") or "").strip() or None
+            return {
+                "user_id": None,
+                "contact_id": str(contact_id),
+                "display_name": display_name,
+                "email": email,
+                "phone": phone,
+                "avatar_url": avatar_url,
+            }
+
+        return None
+
     def _serialize_contact_vehicle(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a contact vehicle list row to API shape with parking allotment only."""
         out = self._normalize_vehicle(row)
@@ -296,11 +372,13 @@ class VehiclesService:
         out["parking_allotment"] = self._build_parking_allotment(row)
         out["approved_by"] = self._build_vehicle_reviewer(row, kind="approved")
         out["rejected_by"] = self._build_vehicle_reviewer(row, kind="rejected")
+        out["removed_by"] = self._build_vehicle_removed_by(row)
         for key in (
             *self._OWNER_ROW_KEYS,
             *self._UNIT_ROW_KEYS,
             *self._PARKING_ROW_KEYS,
             *self._REVIEWER_ROW_KEYS,
+            *self._REMOVED_BY_ROW_KEYS,
         ):
             out.pop(key, None)
         return out
@@ -967,6 +1045,8 @@ class VehiclesService:
         contact_id: str,
         vehicle_id: str,
         rejection_reason: str | None = None,
+        removed_by_user_id: str | None = None,
+        removed_by_contact_id: str | None = None,
     ) -> dict[str, Any]:
         """Soft-remove an approved vehicle (status removed, row retained)."""
         org_id = self.user_context.organization_id
@@ -1001,6 +1081,8 @@ class VehiclesService:
             contact_id=contact_id,
             vehicle_id=vehicle_id,
             rejection_reason=rejection_reason,
+            removed_by_user_id=removed_by_user_id,
+            removed_by_contact_id=removed_by_contact_id,
         )
         if not row:
             raise NotFoundException(
@@ -1052,6 +1134,7 @@ class VehiclesService:
                 contact_id=contact_id,
                 vehicle_id=vehicle_id,
                 rejection_reason=rejection_reason,
+                removed_by_user_id=self.user_context.user_id,
             )
         if status == VehicleStatus.REJECTED.value:
             await self.repo.update(
@@ -1106,6 +1189,7 @@ class VehiclesService:
         vehicle_type: VehicleType | None = None,
         fuel_type: VehicleFuelType | None = None,
         search: str | None = None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """List vehicles for a project (admin)."""
         org_id = self.user_context.organization_id
@@ -1120,8 +1204,128 @@ class VehiclesService:
             vehicle_type=vehicle_type.value if vehicle_type else None,
             fuel_type=fuel_type.value if fuel_type else None,
             search=normalized_search,
+            limit=limit,
         )
         return [self._serialize_admin_vehicle(row) for row in rows]
+
+    @staticmethod
+    def _csv_safe(value: Any) -> Any:
+        """Neutralize spreadsheet formula injection in CSV cell values."""
+        if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+            return "'" + value
+        return value
+
+    @staticmethod
+    def _vehicle_type_label(value: str | None) -> str:
+        """Map vehicle type enum to admin UI label."""
+        labels = {
+            VehicleType.TWO_WHEELER.value: "2 Wheeler",
+            VehicleType.FOUR_WHEELER.value: "4 Wheeler",
+        }
+        return labels.get(value or "", value or "")
+
+    @staticmethod
+    def _fuel_type_label(value: str | None) -> str:
+        """Map fuel type enum to admin UI label."""
+        labels = {
+            VehicleFuelType.NON_EV.value: "Non-EV",
+            VehicleFuelType.EV.value: "EV",
+        }
+        return labels.get(value or "", value or "")
+
+    @staticmethod
+    def _status_label(value: str | None) -> str:
+        """Map vehicle status enum to title-case label."""
+        if not value:
+            return ""
+        return value.replace("_", " ").title()
+
+    @staticmethod
+    def _vehicle_description(item: dict[str, Any]) -> str:
+        """Build make/model/color description for export."""
+        parts = [item.get("make"), item.get("model"), item.get("color")]
+        return " - ".join(part for part in parts if part)
+
+    @staticmethod
+    def _parking_slot_label(item: dict[str, Any]) -> str:
+        """Build parking slot label from nested allotment summary."""
+        allotment = item.get("parking_allotment") or {}
+        slot_number = allotment.get("slot_number")
+        if slot_number is None:
+            return ""
+        facility = allotment.get("facility") or {}
+        facility_name = facility.get("name")
+        if facility_name:
+            return f"{slot_number} ({facility_name})"
+        return str(slot_number)
+
+    async def export_project_vehicles_csv(
+        self,
+        *,
+        project_id: str,
+        query: VehicleRequestsExportQuery,
+    ) -> str:
+        """Export filtered vehicle requests as CSV text."""
+        if query.format != "csv":
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unsupported_export_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        items = await self.list_project_vehicles(
+            project_id=project_id,
+            status=query.status,
+            vehicle_type=query.vehicle_type,
+            fuel_type=query.fuel_type,
+            search=query.search,
+            limit=VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "registration_number",
+                "vehicle_description",
+                "unit_code",
+                "unit_label",
+                "vehicle_type",
+                "fuel_type",
+                "requested_on",
+                "updated_on",
+                "approved_on",
+                "status",
+                "owner_name",
+                "owner_phone",
+                "owner_email",
+                "parking_slot",
+                "rejection_reason",
+            ]
+        )
+        for item in items:
+            owner = item.get("owner") or {}
+            unit = item.get("unit") or {}
+            approved_on = ""
+            if item.get("status") == VehicleStatus.APPROVED.value:
+                approved_on = item.get("status_updated_at") or ""
+            writer.writerow(
+                [
+                    self._csv_safe(item.get("registration_number") or ""),
+                    self._csv_safe(self._vehicle_description(item)),
+                    self._csv_safe(unit.get("code") or ""),
+                    self._csv_safe(unit.get("location_label") or unit.get("unit_label") or ""),
+                    self._vehicle_type_label(item.get("vehicle_type")),
+                    self._fuel_type_label(item.get("fuel_type")),
+                    item.get("created_at") or "",
+                    item.get("updated_at") or "",
+                    approved_on,
+                    self._status_label(item.get("status")),
+                    self._csv_safe(owner.get("display_name") or ""),
+                    self._csv_safe(owner.get("phone") or ""),
+                    self._csv_safe(owner.get("email") or ""),
+                    self._csv_safe(self._parking_slot_label(item)),
+                    self._csv_safe(item.get("rejection_reason") or ""),
+                ]
+            )
+        return buffer.getvalue()
 
     async def review_vehicle(
         self,

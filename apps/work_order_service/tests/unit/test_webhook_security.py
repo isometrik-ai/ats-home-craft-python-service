@@ -47,6 +47,14 @@ def test_vendor_update_accepts_state_only():
     assert dumped == {"state": "in_progress"}
 
 
+def test_vendor_update_accepts_line_items():
+    """Vendor portal can submit cost breakdown line items."""
+    body = VendorUpdateWorkOrderRequest.model_validate(
+        {"line_items": [{"description": "Labor", "total_minor": 1000}]}
+    )
+    assert body.line_items is not None
+
+
 @pytest.mark.parametrize(
     "url",
     [

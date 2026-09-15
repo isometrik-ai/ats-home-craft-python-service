@@ -289,6 +289,14 @@ class ResidentEventListQuery(BaseModel):
     page_size: int = Field(20, ge=1, le=50)
 
 
+class ResidentMyBookingsQuery(BaseModel):
+    """Resident my-bookings list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timeframe: ResidentEventTimeframe = ResidentEventTimeframe.UPCOMING
+
+
 class CreateEventBookingRequest(BaseModel):
     """Resident book tickets."""
 

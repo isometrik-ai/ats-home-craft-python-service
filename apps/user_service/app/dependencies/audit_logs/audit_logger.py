@@ -57,6 +57,7 @@ class AuditEventData:
     description: str
     status_code: int | None = None
     category: str | None = None
+    project_id: str | None = None
 
 
 class AuditLogger:
@@ -162,6 +163,7 @@ class AuditLogger:
             "timestamp": datetime.now(timezone.utc),
             "status_code": event_data.status_code,
             "category": event_data.category,
+            "project_id": event_data.project_id,
         }
 
     async def _collect_batch_events(self, timeout_duration: float) -> tuple[list[dict], bool]:

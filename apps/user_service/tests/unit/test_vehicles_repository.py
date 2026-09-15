@@ -345,13 +345,19 @@ async def test_soft_remove_vehicle():
         contact_id=CONTACT_ID,
         vehicle_id=VEHICLE_ID,
         rejection_reason="Invalid documents",
+        removed_by_user_id="admin-user-1",
+        removed_by_contact_id="contact-user-1",
     )
 
     assert removed["status"] == "removed"
     query, args = _sql_args(conn.fetchrow)
     assert "status = 'removed'::vehicle_status" in query
     assert "rejection_reason = COALESCE($4, rejection_reason)" in query
+    assert "removed_by_user_id = $5::uuid" in query
+    assert "removed_by_contact_id = $6::uuid" in query
     assert args[3] == "Invalid documents"
+    assert args[4] == "admin-user-1"
+    assert args[5] == "contact-user-1"
 
 
 @pytest.mark.asyncio
@@ -416,6 +422,23 @@ async def test_list_by_project_with_vehicle_type_and_fuel_type():
     assert "v.vehicle_type = $4::vehicle_type" in query
     assert "v.fuel_type = $5::vehicle_fuel_type" in query
     assert args == (ORG_ID, PROJECT_ID, None, "four_wheeler", "ev")
+
+
+@pytest.mark.asyncio
+async def test_list_by_project_with_limit():
+    """list_by_project applies SQL LIMIT when limit is provided."""
+    conn = _mock_conn(rows=[_vehicle_row()])
+    repo = VehiclesRepository(db_connection=conn)
+
+    await repo.list_by_project(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        limit=10_000,
+    )
+
+    query, args = _sql_args(conn.fetch)
+    assert "LIMIT $6" in query
+    assert args == (ORG_ID, PROJECT_ID, None, None, None, 10_000)
 
 
 @pytest.mark.asyncio

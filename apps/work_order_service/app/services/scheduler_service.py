@@ -173,12 +173,12 @@ class SchedulerService:
             "description": contract.get("scope_included"),
             "asset_ids": contract.get("asset_ids") or [],
             "contract_id": contract["id"],
-            "company_id": contract.get("company_id"),
+            "vendor_id": contract.get("vendor_id"),
             "form_template_id": contract.get("form_template_id"),
             "state": "upcoming",
             "priority": "medium",
             "source": "contract",
-            "scheduled_date": visit.isoformat(),
+            "scheduled_date": visit,
             "vendor_token_hash": token_hash,
             "timeline": [
                 {
@@ -214,7 +214,7 @@ class SchedulerService:
 
         await self.contracts.update_next_visit_date(
             contract["id"],
-            next_future.isoformat() if next_future else None,
+            next_future,
         )
         return created, skipped, next_future
 
@@ -282,12 +282,12 @@ class SchedulerService:
                             "description": template.get("description"),
                             "asset_ids": template.get("asset_ids") or [],
                             "contract_id": template.get("contract_id"),
-                            "company_id": template.get("company_id"),
+                            "vendor_id": template.get("vendor_id"),
                             "form_template_id": template.get("form_template_id"),
                             "state": "upcoming",
                             "priority": template.get("priority") or "medium",
                             "source": template.get("source") or "ad_hoc",
-                            "scheduled_date": next_date.isoformat(),
+                            "scheduled_date": next_date,
                             "assignee_name": template.get("assignee_name"),
                             "access_notes": template.get("access_notes"),
                             "is_recurring": False,
@@ -307,7 +307,7 @@ class SchedulerService:
                     counts["created"] += 1
                 await self.work_orders.update_recurring_next_date(
                     template["id"],
-                    next_date.isoformat() if not (end and next_date > end) else None,
+                    next_date if not (end and next_date > end) else None,
                 )
             except Exception:
                 continue

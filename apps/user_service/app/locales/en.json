@@ -697,6 +697,7 @@
       "vehicle_resubmit_not_allowed": "Only rejected vehicle requests can be resubmitted.",
       "vehicle_use_withdraw": "Use withdraw to cancel a pending vehicle request.",
       "vehicle_remove_not_allowed": "Only approved vehicles can be removed.",
+      "unsupported_export_format": "Only CSV export is supported.",
       "no_default_unit": "Please choose a default unit before completing onboarding.",
       "no_active_units": "At least one confirmed property is required to complete onboarding.",
       "invalid_step": "The onboarding step is not valid.",

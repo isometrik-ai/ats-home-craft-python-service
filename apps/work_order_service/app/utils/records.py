@@ -76,3 +76,26 @@ def jsonb_bind(value: Any) -> str | None:
 def jsonb_bind_required(value: Any, *, default: str = "[]") -> str:
     """Serialize jsonb for inserts that do not use COALESCE on the parameter."""
     return jsonb_bind(value) or default
+
+
+def coerce_date(value: Any) -> date | None:
+    """Normalize date values for asyncpg date columns."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def jsonb_bind_update(value: Any) -> str:
+    """Serialize jsonb for PATCH when the client explicitly sent the field."""
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return "{}"
+    return json.dumps(value, default=str)

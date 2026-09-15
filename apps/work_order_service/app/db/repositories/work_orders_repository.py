@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
 from apps.work_order_service.app.utils.records import (
+    coerce_date,
     jsonb_bind,
     jsonb_bind_required,
+    jsonb_bind_update,
     record_to_dict,
 )
 
@@ -84,7 +87,7 @@ class WorkOrderRepository(ScopedRepository):
             LIMIT 1
             """,
             contract_id,
-            scheduled_date,
+            coerce_date(scheduled_date),
         )
         return val is not None
 
@@ -94,18 +97,20 @@ class WorkOrderRepository(ScopedRepository):
             """
             INSERT INTO work_order.work_orders (
                 organization_id, project_id, title, description, asset_ids, contract_id,
-                company_id, state, priority, source, scheduled_date, assignee_name,
+                vendor_id, state, priority, source, scheduled_date, assignee_name,
                 assignee_user_id, vendor_token_hash, timeline, access_notes,
-                form_template_id, is_recurring, recurring_frequency, recurring_days,
-                recurring_end_date, recurring_parent_id
+                form_template_id, pre_start_form_template_id, estimated_cost_minor,
+                line_items, form_values, pre_start_form_values, is_recurring,
+                recurring_frequency, recurring_days, recurring_end_date, recurring_parent_id
             ) VALUES (
                 $1::uuid, $2::uuid, $3, $4, $5::uuid[], $6::uuid, $7::uuid,
                 COALESCE($8::work_order.work_order_work_order_state, 'upcoming'),
                 COALESCE($9::work_order.work_order_work_order_priority, 'medium'),
                 COALESCE($10::work_order.work_order_work_order_source, 'ad_hoc'),
-                $11::date, $12, $13::uuid, $14, $15::jsonb, $16, $17::uuid,
-                COALESCE($18, false), $19::work_order.work_order_visit_frequency,
-                $20::smallint[], $21::date, $22::uuid
+                $11::date, $12, $13::uuid, $14, $15::jsonb, $16, $17::uuid, $18::uuid,
+                $19, COALESCE($20::jsonb, '[]'::jsonb), COALESCE($21::jsonb, '{}'::jsonb),
+                COALESCE($22::jsonb, '{}'::jsonb), COALESCE($23, false),
+                $24::work_order.work_order_visit_frequency, $25::smallint[], $26::date, $27::uuid
             )
             RETURNING *
             """,
@@ -115,17 +120,22 @@ class WorkOrderRepository(ScopedRepository):
             data.get("description"),
             data.get("asset_ids") or [],
             data.get("contract_id"),
-            data.get("company_id"),
+            data.get("vendor_id"),
             data.get("state"),
             data.get("priority"),
             data.get("source"),
-            data.get("scheduled_date"),
+            coerce_date(data.get("scheduled_date")),
             data.get("assignee_name"),
             data.get("assignee_user_id"),
             data.get("vendor_token_hash"),
             jsonb_bind_required(data.get("timeline")),
             data.get("access_notes"),
             data.get("form_template_id"),
+            data.get("pre_start_form_template_id"),
+            data.get("estimated_cost_minor"),
+            jsonb_bind(data.get("line_items")),
+            jsonb_bind(data.get("form_values")),
+            jsonb_bind(data.get("pre_start_form_values")),
             data.get("is_recurring", False),
             data.get("recurring_frequency"),
             data.get("recurring_days") or [],
@@ -144,11 +154,27 @@ class WorkOrderRepository(ScopedRepository):
                 state = COALESCE($6::work_order.work_order_work_order_state, state),
                 priority = COALESCE($7::work_order.work_order_work_order_priority, priority),
                 scheduled_date = COALESCE($8::date, scheduled_date),
-                timeline = COALESCE($9::jsonb, timeline),
-                company_id = COALESCE($10::uuid, company_id),
-                started_at = COALESCE($11::timestamptz, started_at),
-                completed_at = COALESCE($12::timestamptz, completed_at),
-                termination_reason = COALESCE($13, termination_reason),
+                vendor_id = COALESCE($9::uuid, vendor_id),
+                started_at = COALESCE($10::timestamptz, started_at),
+                completed_at = COALESCE($11::timestamptz, completed_at),
+                termination_reason = COALESCE($12, termination_reason),
+                asset_ids = COALESCE($13::uuid[], asset_ids),
+                assignee_name = COALESCE($14, assignee_name),
+                assignee_user_id = COALESCE($15::uuid, assignee_user_id),
+                access_notes = COALESCE($16, access_notes),
+                form_template_id = COALESCE($17::uuid, form_template_id),
+                pre_start_form_template_id = COALESCE($18::uuid, pre_start_form_template_id),
+                estimated_cost_minor = COALESCE($19, estimated_cost_minor),
+                line_items = COALESCE($20::jsonb, line_items),
+                form_values = COALESCE($21::jsonb, form_values),
+                pre_start_form_values = COALESCE($22::jsonb, pre_start_form_values),
+                is_recurring = COALESCE($23, is_recurring),
+                recurring_frequency = COALESCE(
+                    $24::work_order.work_order_visit_frequency, recurring_frequency
+                ),
+                recurring_days = COALESCE($25::smallint[], recurring_days),
+                recurring_end_date = COALESCE($26::date, recurring_end_date),
+                invoice_ids = COALESCE($27::uuid[], invoice_ids),
                 updated_at = now()
             WHERE id = $1::uuid AND organization_id = $2::uuid AND project_id = $3::uuid
               AND record_status = 'active'
@@ -161,12 +187,28 @@ class WorkOrderRepository(ScopedRepository):
             data.get("description"),
             data.get("state"),
             data.get("priority"),
-            data.get("scheduled_date"),
-            jsonb_bind(data["timeline"]) if "timeline" in data else None,
-            data.get("company_id"),
+            coerce_date(data.get("scheduled_date")),
+            data.get("vendor_id"),
             data.get("started_at"),
             data.get("completed_at"),
             data.get("termination_reason"),
+            data["asset_ids"] if "asset_ids" in data else None,
+            data.get("assignee_name"),
+            data.get("assignee_user_id"),
+            data.get("access_notes"),
+            data.get("form_template_id"),
+            data.get("pre_start_form_template_id"),
+            data.get("estimated_cost_minor"),
+            jsonb_bind_update(data["line_items"]) if "line_items" in data else None,
+            jsonb_bind_update(data["form_values"]) if "form_values" in data else None,
+            jsonb_bind_update(data["pre_start_form_values"])
+            if "pre_start_form_values" in data
+            else None,
+            data["is_recurring"] if "is_recurring" in data else None,
+            data.get("recurring_frequency"),
+            data["recurring_days"] if "recurring_days" in data else None,
+            data.get("recurring_end_date"),
+            data["invoice_ids"] if "invoice_ids" in data else None,
         )
         return record_to_dict(row) if row else None
 
@@ -290,7 +332,9 @@ class WorkOrderRepository(ScopedRepository):
         except (ValueError, IndexError):
             return 0
 
-    async def update_recurring_next_date(self, work_order_id: str, next_date: str | None) -> None:
+    async def update_recurring_next_date(
+        self, work_order_id: str, next_date: date | str | None
+    ) -> None:
         """Update recurring next date."""
         await self.conn.execute(
             """
@@ -299,5 +343,5 @@ class WorkOrderRepository(ScopedRepository):
             WHERE id = $1::uuid
             """,
             work_order_id,
-            next_date,
+            coerce_date(next_date),
         )

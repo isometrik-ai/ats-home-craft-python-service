@@ -20,7 +20,7 @@ class CreateInvoiceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     work_order_id: str
-    company_id: str
+    vendor_id: str
     invoice_number: str = Field(..., min_length=1, max_length=100)
     invoice_date: date | None = None
     line_items: list[Any] = Field(default_factory=list)
@@ -35,7 +35,12 @@ class CreateInvoiceRequest(BaseModel):
 
 
 class UpdateInvoiceRequest(BaseModel):
-    """Request body for update invoice operations."""
+    """Request body for update invoice operations.
+
+    Timeline is append-only — use POST .../invoices/{id}/timeline instead.
+    ``note`` is not persisted; it is attached to the auto-appended timeline event
+    when ``status`` changes (e.g. revision_requested).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -48,9 +53,9 @@ class UpdateInvoiceRequest(BaseModel):
     currency: str | None = Field(None, max_length=10)
     status: InvoiceStatus | None = None
     file_paths: list[str] | None = None
-    timeline: list[Any] | None = None
     revisions: list[Any] | None = None
     payment_id: str | None = None
+    note: str | None = Field(None, max_length=4000)
 
 
 class VendorSubmitInvoiceRequest(BaseModel):
@@ -59,7 +64,7 @@ class VendorSubmitInvoiceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     invoice_number: str = Field(..., min_length=1, max_length=100)
-    company_id: str | None = None
+    vendor_id: str | None = None
     invoice_date: date | None = None
     line_items: list[Any] = Field(default_factory=list)
     subtotal_minor: int = Field(default=0, ge=0)

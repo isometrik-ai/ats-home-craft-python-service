@@ -17,12 +17,14 @@ from apps.user_service.app.schemas.enums import AuditLogActionType, AuditLogRisk
 from apps.user_service.app.services.audit_log_service import AuditLogService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
-    extract_user_context,
+    ensure_staff_project_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import check_user_access_async, get_user_from_auth
 from libs.shared_utils.common_query import (
     AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM,
+    PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     SETTINGS_SYSTEM_MANAGE,
 )
 from libs.shared_utils.response_factory import list_response, success_response
@@ -83,12 +85,18 @@ async def get_audit_logs(
         None,
         description="Inclusive end date for timestamp filter (YYYY-MM-DD)",
     ),
+    project_id: str = Query(..., description="Project identifier (UUID string)."),
     page: int = Query(1, ge=1, description="The page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
 ):
     """Get all audit logs for the current organization"""
-    # Extract and validate user context from JWT token.
-    user_context = await extract_user_context(current_user, db_connection)
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+        request=request,
+    )
 
     can_view_system_audit_logs = await check_user_access_async(
         permission_code=[AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM],
@@ -111,6 +119,7 @@ async def get_audit_logs(
         risk_level=risk_level,
         start_date=start_date,
         end_date=end_date,
+        project_id=project_id,
         limit=page_size,
         offset=(page - 1) * page_size,
         organization_id=user_context.organization_id,

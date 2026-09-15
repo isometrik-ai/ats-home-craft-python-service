@@ -132,6 +132,7 @@ class AuditLogService:
             "retention_date": audit_data.get("retention_date"),
             "status_code": audit_data.get("status_code"),
             "category": audit_data.get("category"),
+            "project_id": audit_data.get("project_id"),
         }
 
     @staticmethod
@@ -264,9 +265,11 @@ class AuditLogService:
         Returns:
             AuditLogItem: Formatted audit log item
         """
+        project_id = audit_log_data.get("project_id")
         return AuditLogItem(
             id=str(audit_log_data["id"]),
             organization_id=str(audit_log_data["organization_id"]),
+            project_id=str(project_id) if project_id else None,
             user_id=str(audit_log_data["user_id"]),
             user_email=AuditLogService._format_user_email(audit_log_data.get("user_email")),
             user_role=audit_log_data["user_role"],
@@ -303,9 +306,11 @@ class AuditLogService:
         Returns:
             AuditLogDetailItem: Formatted audit log detail item
         """
+        project_id = audit_log_data.get("project_id")
         return AuditLogDetailItem(
             id=str(audit_log_data["id"]),
             organization_id=str(audit_log_data["organization_id"]),
+            project_id=str(project_id) if project_id else None,
             user_id=str(audit_log_data["user_id"]),
             user_email=AuditLogService._format_user_email(audit_log_data.get("user_email")),
             user_role=audit_log_data["user_role"],

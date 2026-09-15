@@ -6,8 +6,8 @@ from typing import Any
 
 from apps.work_order_service.app.db.repositories.base import ScopedRepository
 from apps.work_order_service.app.utils.records import (
-    jsonb_bind,
     jsonb_bind_required,
+    jsonb_bind_update,
     record_to_dict,
 )
 
@@ -86,6 +86,6 @@ class FormTemplatesRepository(ScopedRepository):
             data["project_id"],
             data.get("name"),
             data.get("description"),
-            jsonb_bind(data["schema"]) if "schema" in data else None,
+            jsonb_bind_update(data["schema"]) if "schema" in data else None,
         )
         return record_to_dict(row) if row else None

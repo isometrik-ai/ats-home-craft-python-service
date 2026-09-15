@@ -9,6 +9,7 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.community_events import (
     CreateEventBookingRequest,
     ResidentEventListQuery,
+    ResidentMyBookingsQuery,
     VerifyBookingRequest,
 )
 from apps.user_service.app.services.community_event_booking_service import (
@@ -79,10 +80,11 @@ async def list_resident_community_events(
 async def list_my_community_event_bookings(
     request: Request,
     project_id: str = Path(...),
+    query: ResidentMyBookingsQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """All active bookings for the caller in a project."""
+    """Upcoming/past active bookings for the caller in a project."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -93,6 +95,7 @@ async def list_my_community_event_bookings(
     items = await service.list_my_bookings(
         project_id=project_id,
         contact_id=str(contact["id"]),
+        query=query,
     )
     return success_response(
         request=request,
