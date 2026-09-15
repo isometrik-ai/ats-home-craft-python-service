@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from starlette.requests import Request
+
 from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
+    extract_project_id_from_request,
     format_audit_log_data,
     format_audit_log_detail_data,
 )
@@ -12,6 +15,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 USER_ID = "660e8400-e29b-41d4-a716-446655440001"
 LOG_ID = "770e8400-e29b-41d4-a716-446655440002"
+PROJECT_ID = "880e8400-e29b-41d4-a716-446655440003"
 
 
 def _row(**overrides) -> dict:
@@ -42,6 +46,52 @@ def _row(**overrides) -> dict:
     }
     row.update(overrides)
     return row
+
+
+def test_extract_project_id_from_request_path():
+    """Project id is parsed from /projects/{uuid}/ URL segments."""
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": f"/v1/projects/{PROJECT_ID}/notices",
+            "headers": [],
+            "query_string": b"",
+        }
+    )
+
+    assert extract_project_id_from_request(request) == PROJECT_ID
+
+
+def test_extract_project_id_from_request_state_and_query():
+    """Explicit audit state and query params override path parsing."""
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/audit-logs",
+            "headers": [],
+            "query_string": f"project_id={PROJECT_ID}".encode(),
+        }
+    )
+    request.state.audit_project_id = "990e8400-e29b-41d4-a716-446655440004"
+
+    assert extract_project_id_from_request(request) == "990e8400-e29b-41d4-a716-446655440004"
+
+
+def test_extract_project_id_from_request_rejects_invalid_query_value():
+    """Invalid project_id query values are ignored instead of persisted raw."""
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/audit-logs",
+            "headers": [],
+            "query_string": b"project_id=not-a-uuid",
+        }
+    )
+
+    assert extract_project_id_from_request(request) is None
 
 
 def test_format_audit_log_data_parses_json_fields():

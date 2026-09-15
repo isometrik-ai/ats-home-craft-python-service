@@ -51,6 +51,29 @@ class SessionRepository:
         """
         self.db_connection = db_connection
 
+    @staticmethod
+    def _append_project_member_filter(
+        conditions: list[str],
+        params: list[object],
+        param_index: int,
+        *,
+        table_prefix: str,
+        project_id: str,
+    ) -> int:
+        """Restrict sessions to users assigned to the given project."""
+        conditions.append(
+            f"""EXISTS (
+                SELECT 1
+                FROM project_members pm
+                WHERE pm.user_id = {table_prefix}user_id
+                  AND pm.organization_id = {table_prefix}organization_id
+                  AND pm.project_id = ${param_index}::uuid
+                  AND pm.status = 'active'
+            )"""
+        )
+        params.append(project_id)
+        return param_index + 1
+
     # LISTING AND SEARCH OPERATIONS
     def _build_session_filters(
         self,
@@ -84,6 +107,14 @@ class SessionRepository:
             conditions.append(f"{table_prefix}organization_id = ${param_index}")
             params.append(organization_id)
             param_index += 1
+
+        param_index = self._append_project_member_filter(
+            conditions,
+            params,
+            param_index,
+            table_prefix=table_prefix,
+            project_id=filters.project_id,
+        )
 
         # Apply session status filter
         if filters.session_status:
@@ -236,6 +267,14 @@ class SessionRepository:
         conditions = ["us.organization_id = $1"]
         params = [organization_id]
         param_index = 2
+
+        param_index = self._append_project_member_filter(
+            conditions,
+            params,
+            param_index,
+            table_prefix="us.",
+            project_id=filters.project_id,
+        )
 
         # Apply session status filter
         if filters.session_status:

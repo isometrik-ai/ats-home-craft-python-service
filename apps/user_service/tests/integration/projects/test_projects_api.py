@@ -2070,6 +2070,128 @@ async def test_list_vehicle_requests_with_vehicle_type_and_fuel_type(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_export_vehicle_requests(monkeypatch, client):
+    """GET vehicle-requests/export returns CSV attachment."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_export_project_vehicles_csv(_self, *, project_id: str, query):
+        del _self
+        captured["project_id"] = project_id
+        captured["query"] = query
+        return (
+            "registration_number,vehicle_description,unit_code,status\n"
+            "MH07JJ8990,Bajaj Avenger - Grey,LUX-B2101,Approved\n"
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.export_project_vehicles_csv",
+        fake_export_project_vehicles_csv,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/vehicle-requests/export",
+        params={"status": "approved", "search": "MH07"},
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment" in res.headers.get("content-disposition", "")
+    assert f"vehicle-requests-{PROJECT_ID}.csv" in res.headers.get("content-disposition", "")
+    assert "MH07JJ8990" in res.text
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["query"].status.value == "approved"
+    assert captured["query"].search == "MH07"
+
+
+@pytest.mark.asyncio
+async def test_export_vehicle_requests_empty_csv(monkeypatch, client):
+    """GET vehicle-requests/export returns header-only CSV when no rows match."""
+
+    _patch_projects_access(monkeypatch)
+
+    async def fake_export_project_vehicles_csv(_self, *, project_id: str, query):
+        del _self, project_id, query
+        return "registration_number,vehicle_description,unit_code,status\n"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.export_project_vehicles_csv",
+        fake_export_project_vehicles_csv,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/vehicle-requests/export")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert res.text.strip() == "registration_number,vehicle_description,unit_code,status"
+
+
+@pytest.mark.asyncio
+async def test_export_vehicle_requests_forwards_vehicle_type_and_fuel_type(monkeypatch, client):
+    """GET vehicle-requests/export forwards vehicle_type and fuel_type filters."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_export_project_vehicles_csv(_self, *, project_id: str, query):
+        del _self
+        captured["project_id"] = project_id
+        captured["query"] = query
+        return "registration_number\n"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.export_project_vehicles_csv",
+        fake_export_project_vehicles_csv,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/vehicle-requests/export",
+        params={"vehicle_type": "two_wheeler", "fuel_type": "ev"},
+    )
+    assert res.status_code == 200
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["query"].vehicle_type.value == "two_wheeler"
+    assert captured["query"].fuel_type.value == "ev"
+
+
+@pytest.mark.asyncio
+async def test_export_vehicle_requests_rejects_invalid_status(client):
+    """GET vehicle-requests/export rejects unknown status values."""
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/vehicle-requests/export",
+        params={"status": "not-a-status"},
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_export_vehicle_requests_rejects_invalid_format_param(client):
+    """GET vehicle-requests/export rejects unsupported format query values."""
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/vehicle-requests/export",
+        params={"format": "pdf"},
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_export_vehicle_requests_rejects_unsupported_format(monkeypatch, client):
+    """GET vehicle-requests/export rejects xlsx at the service layer."""
+
+    _patch_projects_access(monkeypatch)
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/vehicle-requests/export",
+        params={"format": "xlsx"},
+    )
+    assert res.status_code == 422
+    body = res.json()
+    assert body["status"] == "error"
+    assert body["message"] == "Only CSV export is supported."
+
+
+@pytest.mark.asyncio
 async def test_review_vehicle_request(monkeypatch, client):
     """PATCH vehicle-requests approves a vehicle."""
 

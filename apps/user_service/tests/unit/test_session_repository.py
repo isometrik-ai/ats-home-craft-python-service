@@ -63,9 +63,9 @@ class _FakeConn:
         return None
 
 
-def _filters(search=None):
+def _filters(search=None, project_id="proj-1"):
     """Helper to build SessionFilter with defaults."""
-    return SessionFilter(page=1, page_size=10, search=search)
+    return SessionFilter(project_id=project_id, limit=10, offset=0, search=search)
 
 
 def test_build_session_filters_includes_search():
@@ -98,9 +98,9 @@ def test_build_session_filters_no_org():
         include_search=False,
     )
 
-    # Note: organization_id filtering is currently disabled in implementation
     assert "user_id = $1" in where
-    assert params == ["u1"]
+    assert "project_members pm" in where
+    assert params == ["u1", "proj-1"]
 
 
 @pytest.mark.asyncio
@@ -142,10 +142,23 @@ async def test_get_sessions_with_count_no_search():
 
     query, args = conn.fetch_calls[0]
     assert "FROM user_sessions" in query
-    # default limit/page_size -> 20, offset 0
-    assert args[-2:] == (20, 0)
+    assert args[-2:] == (10, 0)
     assert result["total_count"] == 2
     assert result["data"][0]["id"] == "s2"
+
+
+def test_build_org_session_filters_includes_project_member():
+    """Org-wide queries restrict sessions to active project members."""
+    repo = SessionRepository(db_connection=None)
+    where, params = repo._build_org_session_filters(  # pylint: disable=protected-access
+        organization_id="org1",
+        filters=_filters(project_id="proj-99"),
+        include_search=False,
+    )
+
+    assert "project_members pm" in where
+    assert "pm.status = 'active'" in where
+    assert params[:2] == ["org1", "proj-99"]
 
 
 def test_build_org_session_filters_search():
@@ -237,8 +250,7 @@ def test_build_session_filters_status_and_login_method():
     """Session status and login_method add predicates."""
     repo = SessionRepository(db_connection=None)
     filters = SessionFilter(
-        page=1,
-        page_size=10,
+        project_id="proj-1",
         session_status=SessionStatus.ACTIVE.value,
         login_method="password",
     )
@@ -249,9 +261,10 @@ def test_build_session_filters_status_and_login_method():
         include_search=False,
     )
 
-    assert "session_status = $3" in where
-    assert "login_method = $4" in where
-    assert params == ["u1", "org1", SessionStatus.ACTIVE.value, "password"]
+    assert "session_status = $4" in where
+    assert "login_method = $5" in where
+    assert "project_members pm" in where
+    assert params == ["u1", "org1", "proj-1", SessionStatus.ACTIVE.value, "password"]
 
 
 @pytest.mark.asyncio

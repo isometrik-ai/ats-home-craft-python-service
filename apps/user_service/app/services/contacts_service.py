@@ -2790,11 +2790,18 @@ class ContactsService:
     def _format_contact_display_name(
         *,
         first_name: str | None,
+        middle_name: str | None = None,
         last_name: str | None,
     ) -> str:
-        """Build a display name from first/last name parts."""
+        """Build a display name from first/middle/last name parts."""
         return " ".join(
-            part for part in [(first_name or "").strip(), (last_name or "").strip()] if part
+            part
+            for part in [
+                (first_name or "").strip(),
+                (middle_name or "").strip(),
+                (last_name or "").strip(),
+            ]
+            if part
         ).strip()
 
     @staticmethod
@@ -2820,6 +2827,7 @@ class ContactsService:
                 "id": row["id"],
                 "name": self._format_contact_display_name(
                     first_name=row.get("first_name"),
+                    middle_name=row.get("middle_name"),
                     last_name=row.get("last_name"),
                 ),
                 "email": row.get("email"),
@@ -2950,6 +2958,7 @@ class ContactsService:
                 "organization_id": hit_document.get("organization_id"),
                 "status": hit_document.get("status"),
                 "first_name": hit_document.get("first_name"),
+                "middle_name": hit_document.get("middle_name"),
                 "last_name": hit_document.get("last_name"),
                 "title": hit_document.get("title"),
                 "email": hit_document.get("email"),

@@ -4,7 +4,7 @@
 from typing import Annotated, Any
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -13,6 +13,7 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.contact_onboarding import (
     DeleteProjectVehicleRequest,
     ReviewVehicleRequest,
+    VehicleRequestsExportQuery,
 )
 from apps.user_service.app.schemas.enums import (
     FacilityStatus,
@@ -137,6 +138,14 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     422: {"description": "Validation error."},
     429: {"description": "Too many requests (rate limited)."},
     500: {"description": "Internal server error."},
+}
+
+EXPORT_SUCCESS_RESPONSES: dict[int | str, dict] = {
+    **COMMON_ERROR_RESPONSES,
+    http_status.HTTP_200_OK: {
+        "description": "CSV attachment with vehicle request export data.",
+        "content": {"text/csv": {}},
+    },
 }
 
 
@@ -4104,7 +4113,8 @@ async def remove_project_member(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
         "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
         "status), `parking_allotment` (slot number, status, facility) when assigned, and "
-        "`approved_by` / `rejected_by` org-member summaries when reviewed. "
+        "`approved_by` / `rejected_by` org-member summaries when reviewed, and "
+        "`removed_by` (org member or resident) when soft-removed. "
         "Optional `search` matches registration number or unit code/label. "
         "Filter by `status`, `vehicle_type`, and `fuel_type`."
     ),
@@ -4162,6 +4172,45 @@ async def list_project_vehicle_requests(
     )
 
 
+@handle_api_exceptions("export project vehicle requests")
+@router.get(
+    "/{project_id}/vehicle-requests/export",
+    status_code=http_status.HTTP_200_OK,
+    summary="Export vehicle requests as CSV",
+    description=(
+        "Export filtered vehicle requests as CSV. Supports the same filters as the list endpoint: "
+        "`status`, `vehicle_type`, `fuel_type`, and `search`."
+    ),
+    response_model=None,
+    responses=EXPORT_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def export_project_vehicle_requests(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    query: VehicleRequestsExportQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Export vehicle requests for admin review as CSV."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=VEHICLE_MANAGEMENT_VIEW,
+    )
+    service = VehiclesService(db_connection=db_connection, user_context=user_context)
+    csv_text = await service.export_project_vehicles_csv(project_id=project_id, query=query)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="vehicle-requests-{project_id}.csv"'
+        },
+    )
+
+
 @handle_api_exceptions("review project vehicle request")
 @router.patch(
     "/{project_id}/vehicle-requests/{vehicle_id}",
@@ -4173,7 +4222,8 @@ async def list_project_vehicle_requests(
         "two-wheeler/four-wheeler vehicle entitlement, auto-allots the slot when allowed, then "
         "approves the request. "
         "On rejection, stores rejection_reason. Response includes nested "
-        "`approved_by` / `rejected_by` org-member summaries when applicable."
+        "`approved_by` / `rejected_by` org-member summaries when applicable, "
+        "and `removed_by` when the vehicle was soft-removed."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )

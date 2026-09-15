@@ -518,11 +518,16 @@ async def _build_contact_document(
         "organization_id": str(details["organization_id"]),
         "status": details.get("status"),
         "first_name": (details.get("first_name") or "") or None,
+        "middle_name": (details.get("middle_name") or "") or None,
         "last_name": (details.get("last_name") or "") or None,
         "full_name": full_name
         or " ".join(
             part
-            for part in ((details.get("first_name") or ""), (details.get("last_name") or ""))
+            for part in (
+                (details.get("first_name") or ""),
+                (details.get("middle_name") or ""),
+                (details.get("last_name") or ""),
+            )
             if part
         )
         or "",
