@@ -23,3 +23,11 @@ class PetStatus(str, Enum):
 
     ACTIVE = "active"
     REMOVED = "removed"
+
+
+class AdminPetListStatusFilter(str, Enum):
+    """Admin registry status tabs for project pet list."""
+
+    ACTIVE = "active"
+    ALL = "all"
+    REMOVED = "removed"

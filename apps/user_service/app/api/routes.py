@@ -56,6 +56,7 @@ from apps.user_service.app.api.parking_allotment import (
 from apps.user_service.app.api.passes import router as passes_router
 from apps.user_service.app.api.permissions import router as permissions_router
 from apps.user_service.app.api.pets import router as pets_router
+from apps.user_service.app.api.pets_admin import router as pets_admin_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from apps.user_service.app.api.projects import router as projects_router
 from apps.user_service.app.api.roles import router as roles_router
@@ -101,6 +102,7 @@ router.include_router(tenant_requests_router)
 router.include_router(daily_help_router)
 router.include_router(daily_help_resident_router)
 router.include_router(pets_router)
+router.include_router(pets_admin_router)
 router.include_router(notices_router)
 router.include_router(notices_resident_router)
 router.include_router(notices_internal_router)
