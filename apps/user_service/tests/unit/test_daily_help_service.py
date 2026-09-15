@@ -330,6 +330,64 @@ async def test_get_detail_raises_when_missing():
 
 
 @pytest.mark.asyncio
+async def test_get_detail_includes_reviews():
+    """Profile detail returns individual reviews submitted from the app."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.members_repo = MagicMock()
+    svc.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
+    svc.contacts_repo = MagicMock()
+    svc.contacts_repo.get_contact_details = AsyncMock(return_value=None)
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(return_value=_detail_row(status=DailyHelpStatus.ACTIVE.value))
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(
+        return_value={
+            "rating_count": 2,
+            "average_stars": 4.5,
+            "trait_counts": {
+                "great_attitude": 2,
+                "quite_regular": 1,
+                "exceptional_service": 1,
+            },
+        }
+    )
+    svc.repo.list_ratings_for_profile = AsyncMock(
+        return_value=[
+            {
+                "id": "rating-1",
+                "unit_id": "unit-1",
+                "rated_by_contact_id": "contact-1",
+                "stars": 4.0,
+                "comment": "Exceptional and punctual",
+                "traits": ["quite_regular", "exceptional_service", "great_attitude"],
+                "unit_code": "A404",
+                "unit_label": "A404",
+                "rated_by_name": "Sandesh",
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+            }
+        ]
+    )
+
+    detail = await svc.get_detail(project_id="project-1", profile_id="profile-1")
+
+    assert detail.rating_summary is not None
+    assert detail.rating_summary.rating_count == 2
+    assert len(detail.reviews) == 1
+    review = detail.reviews[0]
+    assert review.stars == 4.0
+    assert review.comment == "Exceptional and punctual"
+    assert review.traits == ["quite_regular", "exceptional_service", "great_attitude"]
+    assert review.rated_by_name == "Sandesh"
+    assert review.unit_label == "A404"
+
+
+@pytest.mark.asyncio
 async def test_list_resident_household_links_returns_linked_profiles():
     """Resident can list daily help profiles linked to their unit by category."""
     svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
@@ -986,6 +1044,7 @@ async def test_approve_profile_notifies_submitter():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc.passes_repo = MagicMock()
     svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
     svc._resolve_created_by_name = AsyncMock(return_value="Admin User")
@@ -1035,6 +1094,7 @@ async def test_approve_profile_issues_pass_for_pending_submission():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc.passes_repo = MagicMock()
     svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
     svc._resolve_created_by_name = AsyncMock(return_value="Admin User")
@@ -1080,6 +1140,7 @@ async def test_reject_profile_notifies_submitter():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc._resolve_created_by_name = AsyncMock(return_value=None)
 
     await svc.reject_profile(
@@ -1125,6 +1186,7 @@ async def test_reject_profile_sets_rejected_status():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc._resolve_created_by_name = AsyncMock(return_value=None)
 
     result = await svc.reject_profile(
@@ -1166,6 +1228,7 @@ async def test_resubmit_profile_notifies_reviewers():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
 
     await svc.resubmit_profile(
@@ -1207,6 +1270,7 @@ async def test_resubmit_profile_moves_rejected_back_to_pending():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
 
     result = await svc.resubmit_profile(
@@ -1289,6 +1353,7 @@ async def test_get_my_submission_returns_owned_profile():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc._resolve_created_by_name = AsyncMock(return_value="Guard User")
 
     result = await svc.get_my_submission(project_id="project-1", profile_id="profile-pending")
@@ -1470,6 +1535,7 @@ async def test_approve_resident_submission_auto_links_household():
     svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
     svc.repo.list_slots = AsyncMock(return_value=[])
     svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0, "average_stars": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
     svc.passes_repo = MagicMock()
     svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
     svc._resolve_created_by_name = AsyncMock(return_value="Admin User")
