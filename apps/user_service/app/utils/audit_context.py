@@ -6,6 +6,9 @@ from typing import Any
 
 from fastapi import Request
 
+from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
+    extract_project_id_from_data,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 
 
@@ -26,8 +29,13 @@ def set_audit_context(
     request.state.audit_requested_id = requested_id
     request.state.audit_description = description
     request.state.audit_risk_level = risk_level
-    if project_id:
-        request.state.audit_project_id = project_id
+    resolved_project_id = (
+        project_id
+        or extract_project_id_from_data(new_data)
+        or extract_project_id_from_data(old_data)
+    )
+    if resolved_project_id:
+        request.state.audit_project_id = resolved_project_id
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
         "user_email": user_context.email,

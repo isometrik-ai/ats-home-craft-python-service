@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from pydantic import BaseModel
 from starlette.requests import Request
 
 from apps.user_service.app.dependencies.audit_logs.audit_logs_utils import (
+    extract_project_id_from_data,
     extract_project_id_from_request,
     format_audit_log_data,
     format_audit_log_detail_data,
 )
+from apps.user_service.app.utils.audit_context import set_audit_context
+from apps.user_service.app.utils.common_utils import UserContext
 
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 USER_ID = "660e8400-e29b-41d4-a716-446655440001"
@@ -46,6 +50,55 @@ def _row(**overrides) -> dict:
     }
     row.update(overrides)
     return row
+
+
+def test_extract_project_id_from_data_top_level_dict():
+    """Service payloads with project_id are resolved directly."""
+    assert extract_project_id_from_data({"project_id": PROJECT_ID}) == PROJECT_ID
+
+
+def test_extract_project_id_from_data_nested_units():
+    """List payloads expose project_id from the first unit row."""
+    assert (
+        extract_project_id_from_data({"units": [{"project_id": PROJECT_ID, "id": "unit-1"}]})
+        == PROJECT_ID
+    )
+
+
+def test_extract_project_id_from_data_pydantic_model():
+    """Pydantic response models are supported."""
+
+    class Payload(BaseModel):
+        project_id: str
+        id: str
+
+    assert extract_project_id_from_data(Payload(project_id=PROJECT_ID, id="evt-1")) == PROJECT_ID
+
+
+def test_set_audit_context_resolves_project_id_from_new_data():
+    """Explicit project_id param is optional when new_data includes it."""
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/pets",
+            "headers": [],
+            "query_string": b"",
+        }
+    )
+    user_context = UserContext(
+        user_id=USER_ID,
+        email="resident@example.com",
+        organization_id=ORG_ID,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="pets",
+        description="Created pet",
+        new_data={"id": "pet-1", "project_id": PROJECT_ID},
+    )
+    assert request.state.audit_project_id == PROJECT_ID
 
 
 def test_extract_project_id_from_request_path():

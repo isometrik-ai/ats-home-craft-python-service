@@ -214,6 +214,7 @@ async def create_community_event(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="community_events",
         requested_id=data.id,
         description=f"Created community event: {data.display_code}",
@@ -262,6 +263,7 @@ async def update_community_event(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="community_events",
         requested_id=event_id,
         description=f"Updated community event: {event_id}",
@@ -479,6 +481,7 @@ async def create_community_event_booking_on_behalf(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="community_event_bookings",
         requested_id=data.id,
         description=f"Admin created booking: {data.display_code}",
@@ -640,6 +643,7 @@ async def mark_community_event_booking_paid(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="community_event_bookings",
         requested_id=booking_id,
         description=f"Marked booking paid: {booking_id}",

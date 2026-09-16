@@ -6,13 +6,71 @@ These functions handle validation, query building, and data formatting.
 
 import json
 import re
+from typing import Any
 from uuid import UUID
 
 from fastapi import Request
+from pydantic import BaseModel
 
 _PROJECT_PATH_PATTERN = re.compile(
     r"/projects/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
 )
+
+
+def _normalize_project_id(value: Any) -> str | None:
+    """Return a canonical UUID string when value is a valid project id."""
+    if value is None:
+        return None
+    try:
+        return str(UUID(str(value).strip()))
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+_NESTED_PROJECT_ID_KEYS = (
+    "data",
+    "new_data",
+    "old_data",
+    "unit",
+    "project",
+    "items",
+    "units",
+    "properties",
+    "results",
+)
+
+
+def _nested_audit_payloads(data: dict[str, Any]) -> list[Any]:
+    """Collect nested response fragments that may carry project_id."""
+    return [data[key] for key in _NESTED_PROJECT_ID_KEYS if data.get(key) is not None]
+
+
+def extract_project_id_from_data(data: Any) -> str | None:
+    """Resolve project_id from service response payloads passed into audit context."""
+    queue: list[Any] = [data]
+    for _ in range(5):
+        if not queue:
+            break
+        next_queue: list[Any] = []
+        for item in queue:
+            if item is None:
+                continue
+            if isinstance(item, BaseModel):
+                found = _normalize_project_id(getattr(item, "project_id", None))
+                if found:
+                    return found
+                next_queue.append(item.model_dump(mode="json"))
+                continue
+            if isinstance(item, dict):
+                found = _normalize_project_id(item.get("project_id"))
+                if found:
+                    return found
+                next_queue.extend(_nested_audit_payloads(item))
+                continue
+            if isinstance(item, (list, tuple)):
+                next_queue.extend(item)
+        queue = next_queue
+    return None
 
 
 def extract_project_id_from_request(request: Request) -> str | None:

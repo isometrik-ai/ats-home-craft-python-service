@@ -153,6 +153,7 @@ def _set_audit(
     request: Request,
     user_context: UserContext,
     *,
+    project_id: str,
     table: str,
     requested_id: str,
     description: str,
@@ -167,6 +168,7 @@ def _set_audit(
         table=table,
         requested_id=requested_id,
         description=description,
+        project_id=project_id,
         risk_level=risk_level,
         old_data=old_data,
         new_data=new_data,
@@ -241,6 +243,7 @@ async def create_project(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="projects",
         requested_id=str(project_id),
         description=f"Created project: {project_id}",
@@ -492,6 +495,7 @@ async def update_project(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="projects",
         requested_id=project_id,
         description=f"Updated project: {project_id}",
@@ -542,6 +546,7 @@ async def delete_project(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="projects",
         requested_id=project_id,
         description=f"Deleted project: {project_id}",
@@ -594,6 +599,7 @@ async def complete_setup_step(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_setup_steps",
         requested_id=step_key,
         description=f"Completed setup step {step_key} for project: {project_id}",
@@ -643,6 +649,7 @@ async def complete_project_setup(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="projects",
         requested_id=project_id,
         description=f"Completed project setup: {project_id}",
@@ -693,6 +700,7 @@ async def add_project_media(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_media",
         requested_id=project_id,
         description=f"Added media to project: {project_id}",
@@ -781,6 +789,7 @@ async def delete_project_media(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_media",
         requested_id=media_id,
         description=f"Deleted project media: {media_id}",
@@ -840,6 +849,7 @@ async def create_tower(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="towers",
         requested_id=str(data.get("id")),
         description=f"Created tower in project: {project_id}",
@@ -971,6 +981,7 @@ async def update_tower(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="towers",
         requested_id=tower_id,
         description=f"Updated tower: {tower_id}",
@@ -1020,6 +1031,7 @@ async def delete_tower(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="towers",
         requested_id=tower_id,
         description=f"Deleted tower: {tower_id}",
@@ -1069,6 +1081,7 @@ async def create_tower_wing(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="tower_wings",
         requested_id=str(data.get("id")),
         description=f"Created wing in tower: {tower_id}",
@@ -1156,6 +1169,7 @@ async def delete_tower_wing(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="tower_wings",
         requested_id=wing_id,
         description=f"Deleted wing: {wing_id}",
@@ -1205,6 +1219,7 @@ async def create_tower_gate(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="tower_gates",
         requested_id=str(data.get("id")),
         description=f"Created gate in tower: {tower_id}",
@@ -1292,6 +1307,7 @@ async def delete_tower_gate(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="tower_gates",
         requested_id=gate_id,
         description=f"Deleted gate: {gate_id}",
@@ -1341,6 +1357,7 @@ async def create_tower_lift(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="tower_lifts",
         requested_id=str(data.get("id")),
         description=f"Created lift in tower: {tower_id}",
@@ -1428,6 +1445,7 @@ async def delete_tower_lift(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="tower_lifts",
         requested_id=lift_id,
         description=f"Deleted lift: {lift_id}",
@@ -1477,6 +1495,7 @@ async def create_floor(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="floors",
         requested_id=str(data.get("id")),
         description=f"Created floor in tower: {tower_id}",
@@ -1564,6 +1583,7 @@ async def delete_floor(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="floors",
         requested_id=floor_id,
         description=f"Deleted floor: {floor_id}",
@@ -1617,6 +1637,7 @@ async def create_unit_config(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="unit_configs",
         requested_id=str(data.get("id")),
         description=f"Created config in project: {project_id}",
@@ -1704,6 +1725,7 @@ async def update_unit_config(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="unit_configs",
         requested_id=config_id,
         description=f"Updated config: {config_id}",
@@ -1753,6 +1775,7 @@ async def delete_unit_config(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="unit_configs",
         requested_id=config_id,
         description=f"Deleted config: {config_id}",
@@ -1802,6 +1825,7 @@ async def create_plot_item(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="plot_config_items",
         requested_id=str(data.get("id")),
         description=f"Created plot item in config: {config_id}",
@@ -1891,6 +1915,7 @@ async def delete_plot_item(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="plot_config_items",
         requested_id=item_id,
         description=f"Deleted plot item: {item_id}",
@@ -1940,6 +1965,7 @@ async def add_config_media(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="config_media",
         requested_id=str(data.get("id")),
         description=f"Added media to config: {config_id}",
@@ -2029,6 +2055,7 @@ async def delete_config_media(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="config_media",
         requested_id=media_id,
         description=f"Deleted config media: {media_id}",
@@ -2082,6 +2109,7 @@ async def upsert_floor_inventory(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="floor_inventory",
         requested_id=project_id,
         description=f"Updated inventory for project: {project_id}",
@@ -2227,6 +2255,7 @@ async def create_facility(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="facilities",
         requested_id=str(data.get("id")),
         description=f"Created facility in project: {project_id}",
@@ -2413,6 +2442,7 @@ async def update_facility(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="facilities",
         requested_id=facility_id,
         description=f"Updated facility: {facility_id}",
@@ -2462,6 +2492,7 @@ async def delete_facility(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="facilities",
         requested_id=facility_id,
         description=f"Deleted facility: {facility_id}",
@@ -2515,6 +2546,7 @@ async def create_unit(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="units",
         requested_id=str(data.get("id")),
         description=f"Created unit in project: {project_id}",
@@ -2569,6 +2601,7 @@ async def bulk_create_units(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="units",
         requested_id=project_id,
         description=f"Bulk created {data.get('created_count', 0)} units in project: {project_id}",
@@ -2828,6 +2861,7 @@ async def unassign_unit_owner(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="contact_units",
         requested_id=unit_id,
         description=f"Unassigned owner from unit: {unit_id}",
@@ -2892,6 +2926,7 @@ async def reassign_unit_owner(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="contact_units",
         requested_id=unit_id,
         description=f"Reassigned owner on unit: {unit_id}",
@@ -2997,6 +3032,7 @@ async def add_unit_document(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="contact_unit_documents",
         requested_id=payload["id"],
         description=f"Added unit document: {payload['id']}",
@@ -3054,6 +3090,7 @@ async def delete_unit_document(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="contact_unit_documents",
         requested_id=document_id,
         description=f"Deleted unit document: {document_id}",
@@ -3101,6 +3138,7 @@ async def update_unit(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="units",
         requested_id=unit_id,
         description=f"Updated unit: {unit_id}",
@@ -3150,6 +3188,7 @@ async def delete_unit(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="units",
         requested_id=unit_id,
         description=f"Deleted unit: {unit_id}",
@@ -3198,6 +3237,7 @@ async def create_parking_zone(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="parking_zones",
         requested_id=str(data.get("id")),
         description=f"Created parking zone in project: {project_id}",
@@ -3283,6 +3323,7 @@ async def delete_parking_zone(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="parking_zones",
         requested_id=zone_id,
         description=f"Deleted parking zone: {zone_id}",
@@ -3336,6 +3377,7 @@ async def update_project_location(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="projects",
         requested_id=project_id,
         description=f"Updated project location: {project_id}",
@@ -3386,6 +3428,7 @@ async def create_site_map_overlays(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="site_map_overlays",
         requested_id=project_id,
         description=f"Created site map overlays in project: {project_id}",
@@ -3471,6 +3514,7 @@ async def delete_site_map_overlay(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="site_map_overlays",
         requested_id=overlay_id,
         description=f"Deleted site map overlay: {overlay_id}",
@@ -3636,6 +3680,7 @@ async def create_project_role(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_roles",
         requested_id=data["id"],
         description=f"Created project role {data['slug']} on project {project_id}",
@@ -3780,6 +3825,7 @@ async def update_project_role(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_roles",
         requested_id=project_role_id,
         description=f"Updated project role {project_role_id} on project {project_id}",
@@ -3838,6 +3884,7 @@ async def delete_project_role(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_roles",
         requested_id=project_role_id,
         description=f"Deleted project role {project_role_id} on project {project_id}",
@@ -3978,6 +4025,7 @@ async def assign_project_member(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_members",
         requested_id=data.get("id", project_id),
         description=f"Assigned project member {body.user_id} to project {project_id}",
@@ -4036,6 +4084,7 @@ async def update_project_member(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_members",
         requested_id=data.get("id", user_id),
         description=f"Updated project member {user_id} on project {project_id}",
@@ -4087,6 +4136,7 @@ async def remove_project_member(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_members",
         requested_id=user_id,
         description=f"Removed project member {user_id} from project {project_id}",
@@ -4260,6 +4310,7 @@ async def review_project_vehicle_request(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="vehicles",
         requested_id=vehicle_id,
         description=f"Reviewed vehicle request: {vehicle_id}",
@@ -4319,6 +4370,7 @@ async def delete_project_vehicle(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="vehicles",
         requested_id=vehicle_id,
         description=f"Removed vehicle: {vehicle_id}",

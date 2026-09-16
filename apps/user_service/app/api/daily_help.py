@@ -330,6 +330,7 @@ async def create_project_daily_help_category(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_categories",
         requested_id=data.id,
         description=f"Created daily help category: {data.id}",
@@ -386,6 +387,7 @@ async def update_project_daily_help_category(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_categories",
         requested_id=category_id,
         description=f"Updated daily help category: {category_id}",
@@ -436,6 +438,7 @@ async def create_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=data.id,
         description=f"Created daily help profile: {data.id}",
@@ -487,6 +490,7 @@ async def submit_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=data.id,
         description=f"Submitted daily help profile for review: {data.id}",
@@ -648,6 +652,7 @@ async def link_project_daily_help_to_unit(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_household_links",
         requested_id=data.id,
         description=f"Linked daily help profile {profile_id} to unit {body.unit_id}",
@@ -706,6 +711,7 @@ async def unlink_project_daily_help_from_unit(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_household_links",
         requested_id=link_id,
         description=f"Unlinked daily help profile {profile_id} from unit {data.unit_id}",
@@ -759,6 +765,7 @@ async def regenerate_daily_help_gate_passcode(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Regenerated gate passcode for daily help profile {profile_id}",
@@ -814,6 +821,7 @@ async def update_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Updated daily help profile: {profile_id}",
@@ -903,6 +911,7 @@ async def resubmit_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Resubmitted daily help profile: {profile_id}",
@@ -952,6 +961,7 @@ async def approve_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Approved daily help profile: {profile_id}",
@@ -1006,6 +1016,7 @@ async def reject_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Rejected daily help profile: {profile_id}",
@@ -1056,6 +1067,7 @@ async def deactivate_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Deactivated daily help profile: {profile_id}",
@@ -1106,6 +1118,7 @@ async def reactivate_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Reactivated daily help profile: {profile_id}",
@@ -1156,6 +1169,7 @@ async def delete_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Deleted daily help profile: {profile_id}",
@@ -1206,6 +1220,7 @@ async def restore_project_daily_help_profile(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_profiles",
         requested_id=profile_id,
         description=f"Restored daily help profile: {profile_id}",
@@ -1261,6 +1276,7 @@ async def add_daily_help_document(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_documents",
         requested_id=data.id,
         description=f"Added daily help document: {data.id}",
@@ -1317,6 +1333,7 @@ async def delete_daily_help_document(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_documents",
         requested_id=document_id,
         description=f"Deleted daily help document: {document_id}",
@@ -1372,6 +1389,7 @@ async def replace_daily_help_availability(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="daily_help_availability_slots",
         requested_id=profile_id,
         description=f"Replaced availability slots for daily help: {profile_id}",

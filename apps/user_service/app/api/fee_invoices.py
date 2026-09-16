@@ -147,6 +147,7 @@ async def generate_fee_invoices(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="maintenance_fee_invoices",
         requested_id=project_id,
         description=f"Generated maintenance fee invoices for project: {project_id}",

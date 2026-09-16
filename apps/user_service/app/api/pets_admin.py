@@ -274,6 +274,7 @@ async def create_project_pet(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="pets",
         requested_id=str(data.get("id")),
         description=f"Admin created pet for unit: {body.unit_id}",
@@ -326,6 +327,7 @@ async def update_project_pet(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="pets",
         requested_id=pet_id,
         description=f"Admin updated pet: {pet_id}",
@@ -377,6 +379,7 @@ async def remove_project_pet(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="pets",
         requested_id=pet_id,
         description=f"Admin removed pet: {pet_id}",
