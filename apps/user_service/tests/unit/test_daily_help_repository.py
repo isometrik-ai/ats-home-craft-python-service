@@ -378,6 +378,54 @@ async def test_ratings():
 
 
 @pytest.mark.asyncio
+async def test_list_ratings_for_profile():
+    conn = _FakeConn(
+        rows=[
+            {
+                "id": "rating-1",
+                "unit_id": UNIT,
+                "rated_by_contact_id": "contact-1",
+                "stars": Decimal("4.0"),
+                "comment": "Exceptional and punctual",
+                "created_at": "2026-09-14T10:00:00+00:00",
+                "updated_at": "2026-09-14T10:00:00+00:00",
+                "unit_code": "A404",
+                "unit_label": "A404",
+                "rated_by_name": "Sandesh",
+            }
+        ]
+    )
+    repo = DailyHelpRepository(db_connection=conn)
+
+    with patch.object(
+        repo,
+        "list_rating_traits_batch",
+        new=AsyncMock(
+            return_value={
+                "rating-1": ["quite_regular", "exceptional_service", "great_attitude"],
+            }
+        ),
+    ) as traits_batch:
+        reviews = await repo.list_ratings_for_profile(
+            organization_id=ORG,
+            profile_id=PROFILE,
+        )
+
+    assert len(reviews) == 1
+    assert reviews[0]["comment"] == "Exceptional and punctual"
+    assert reviews[0]["rated_by_name"] == "Sandesh"
+    assert reviews[0]["traits"] == [
+        "quite_regular",
+        "exceptional_service",
+        "great_attitude",
+    ]
+    traits_batch.assert_awaited_once_with(
+        organization_id=ORG,
+        rating_ids=["rating-1"],
+    )
+
+
+@pytest.mark.asyncio
 async def test_slots_and_attendance():
     conn = _FakeConn(rows=[{"period": "morning"}], row={"id": "absence-1"})
     repo = DailyHelpRepository(db_connection=conn)

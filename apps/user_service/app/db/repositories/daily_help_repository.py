@@ -1074,6 +1074,82 @@ class DailyHelpRepository(BaseRepository):
         )
         return [str(row["trait"]) for row in rows]
 
+    async def list_rating_traits_batch(
+        self,
+        *,
+        organization_id: str,
+        rating_ids: list[str],
+    ) -> dict[str, list[str]]:
+        """List trait enum values for many ratings."""
+        unique_ids = [rating_id for rating_id in dict.fromkeys(rating_ids) if rating_id]
+        if not unique_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              daily_help_rating_id::text AS rating_id,
+              trait::text AS trait
+            FROM daily_help_rating_traits
+            WHERE organization_id = $1::uuid
+              AND daily_help_rating_id = ANY($2::uuid[])
+            ORDER BY daily_help_rating_id, trait
+            """,
+            organization_id,
+            unique_ids,
+        )
+        traits_by_rating: dict[str, list[str]] = {rating_id: [] for rating_id in unique_ids}
+        for row in rows:
+            traits_by_rating[str(row["rating_id"])].append(str(row["trait"]))
+        return traits_by_rating
+
+    async def list_ratings_for_profile(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        """List all resident ratings for a profile with reviewer and unit context."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              r.id::text AS id,
+              r.unit_id::text AS unit_id,
+              r.rated_by_contact_id::text AS rated_by_contact_id,
+              r.stars,
+              r.comment,
+              r.created_at,
+              r.updated_at,
+              u.code AS unit_code,
+              u.unit_label,
+              TRIM(CONCAT_WS(' ',
+                NULLIF(TRIM(ct.first_name), ''),
+                NULLIF(TRIM(ct.last_name), '')
+              )) AS rated_by_name
+            FROM daily_help_ratings r
+            JOIN units u
+              ON u.id = r.unit_id
+             AND u.organization_id = r.organization_id
+            JOIN contacts ct
+              ON ct.id = r.rated_by_contact_id
+             AND ct.organization_id = r.organization_id
+            WHERE r.organization_id = $1::uuid
+              AND r.daily_help_profile_id = $2::uuid
+            ORDER BY r.created_at DESC
+            """,
+            organization_id,
+            profile_id,
+        )
+        ratings = [dict(row) for row in rows]
+        if not ratings:
+            return []
+        traits_by_rating = await self.list_rating_traits_batch(
+            organization_id=organization_id,
+            rating_ids=[str(rating["id"]) for rating in ratings],
+        )
+        for rating in ratings:
+            rating["traits"] = traits_by_rating.get(str(rating["id"]), [])
+        return ratings
+
     async def get_rating_summary(
         self,
         *,
