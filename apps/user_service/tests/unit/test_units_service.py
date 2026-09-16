@@ -476,6 +476,36 @@ def test_unit_detail_response_owner_includes_profile_photo_url():
     assert payload.owner.profile_photo_url == "https://cdn.example.com/raj.jpg"
 
 
+def test_unit_detail_response_accepts_pets():
+    """Unit detail schema accepts pets_count and compact pets payload."""
+    payload = UnitDetailResponse.model_validate(
+        {
+            "id": "unit-1",
+            "project_id": "proj-1",
+            "code": "A-1802",
+            "status": "occupied",
+            "occupancy_label": "sold",
+            "is_sold": True,
+            "created_at": "2026-07-16T09:00:00+00:00",
+            "updated_at": "2026-07-16T10:00:00+00:00",
+            "pets_count": 1,
+            "pets": [
+                {
+                    "id": "pet-1",
+                    "name": "Romeo",
+                    "pet_type": "Dog",
+                    "breed": "Golden Retriever",
+                    "vaccination_status": "completely",
+                    "status": "active",
+                }
+            ],
+        }
+    )
+
+    assert payload.pets_count == 1
+    assert payload.pets[0].name == "Romeo"
+
+
 @pytest.mark.asyncio
 async def test_get_unit_detail_not_found():
     """Missing unit raises not found."""

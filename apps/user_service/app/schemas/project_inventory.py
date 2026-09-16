@@ -729,6 +729,22 @@ class UnitDetailFinancials(BaseModel):
     currency: str = "INR"
 
 
+class UnitDetailPet(BaseModel):
+    """Compact active pet card embedded in unit detail."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    pet_type: str
+    breed: str
+    gender: str | None = None
+    vaccination_status: str
+    date_of_birth: str | None = None
+    primary_photo_path: str | None = None
+    status: str
+
+
 class UnitDetailResponse(BaseModel):
     """Full unit detail for inventory slide-out and unit registry screens."""
 
@@ -758,6 +774,8 @@ class UnitDetailResponse(BaseModel):
     documents: list[UnitDocumentResponse] = Field(default_factory=list)
     residents: list[UnitDetailPerson] = Field(default_factory=list)
     vehicles_count: int = Field(default=0, ge=0)
+    pets_count: int = Field(default=0, ge=0)
+    pets: list[UnitDetailPet] = Field(default_factory=list)
     financials: UnitDetailFinancials = Field(default_factory=UnitDetailFinancials)
     created_at: str
     updated_at: str
