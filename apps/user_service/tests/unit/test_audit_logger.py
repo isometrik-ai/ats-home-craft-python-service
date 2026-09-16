@@ -17,6 +17,7 @@ from libs.shared_utils.http_exceptions import InternalServerErrorException
 
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 USER_ID = "660e8400-e29b-41d4-a716-446655440001"
+PROJECT_ID = "880e8400-e29b-41d4-a716-446655440003"
 
 
 def _request(*, headers=None, client_host="192.168.1.1"):
@@ -77,6 +78,16 @@ def test_create_audit_event_dict(logger):
     assert event["ip_address"] == "10.0.0.1"
     assert event["changed_fields"] == ["name"]
     assert isinstance(event["timestamp"], datetime)
+
+
+def test_create_audit_event_dict_includes_project_id(logger):
+    """Project id from AuditEventData is carried into the queued event."""
+    event = logger._create_audit_event_dict(  # pylint: disable=protected-access
+        _event_data(project_id=PROJECT_ID),
+        _request(),
+    )
+
+    assert event["project_id"] == PROJECT_ID
 
 
 def test_get_client_ip_real_ip(logger):
@@ -192,6 +203,7 @@ async def test_write_audit_batch_success(logger):
             "timestamp": ts,
             "status_code": 200,
             "category": "crm",
+            "project_id": PROJECT_ID,
         }
     ]
 
@@ -220,6 +232,8 @@ async def test_write_audit_batch_success(logger):
 
     mock_repo.get_last_audit_log_hash.assert_awaited_once()
     mock_repo.bulk_create_audit_logs.assert_awaited_once()
+    prepared = mock_repo.bulk_create_audit_logs.await_args.args[0]
+    assert prepared[0]["project_id"] == PROJECT_ID
     assert logger._last_hash is not None  # pylint: disable=protected-access
 
 

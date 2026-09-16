@@ -51,6 +51,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpOpenToWorkResponse,
     DailyHelpRatingResponse,
     DailyHelpRatingSummaryResponse,
+    DailyHelpReviewResponse,
     DailyHelpSubmissionListItemResponse,
     DailyHelpSubmissionListQuery,
     DailyHelpSummaryResponse,
@@ -846,6 +847,26 @@ class DailyHelpService:
             updated_at=format_iso_datetime(row.get("updated_at")),
         )
 
+    @staticmethod
+    def _serialize_review(row: dict[str, Any]) -> DailyHelpReviewResponse:
+        """Map a profile review row to API shape."""
+        rated_by_name = row.get("rated_by_name")
+        if isinstance(rated_by_name, str):
+            rated_by_name = rated_by_name.strip() or None
+        return DailyHelpReviewResponse(
+            id=str(row["id"]),
+            stars=float(row["stars"]),
+            comment=row.get("comment"),
+            traits=[str(trait) for trait in row.get("traits") or []],
+            rated_by_contact_id=row.get("rated_by_contact_id"),
+            rated_by_name=rated_by_name,
+            unit_id=str(row["unit_id"]),
+            unit_code=row.get("unit_code"),
+            unit_label=row.get("unit_label"),
+            created_at=format_iso_datetime(row.get("created_at")),
+            updated_at=format_iso_datetime(row.get("updated_at")),
+        )
+
     async def _serialize_resident_household_link_item(
         self,
         row: dict[str, Any],
@@ -1067,6 +1088,7 @@ class DailyHelpService:
         links: list[DailyHelpHouseholdLinkResponse] = []
         slots: list[DailyHelpAvailabilitySlotResponse] = []
         rating_summary: DailyHelpRatingSummaryResponse | None = None
+        reviews: list[DailyHelpReviewResponse] = []
 
         profile_id = str(row["id"])
         if include_documents:
@@ -1103,6 +1125,11 @@ class DailyHelpService:
                 average_stars=float(summary.get("average_stars") or 0),
                 trait_counts=dict(summary.get("trait_counts") or {}),
             )
+            review_rows = await self.repo.list_ratings_for_profile(
+                organization_id=self.organization_id,
+                profile_id=profile_id,
+            )
+            reviews = [self._serialize_review(review) for review in review_rows]
 
         phone_number = str(row.get("phone_number") or "")
         phone_isd = row.get("phone_isd_code")
@@ -1143,6 +1170,7 @@ class DailyHelpService:
             household_links=links,
             availability_slots=slots,
             rating_summary=rating_summary,
+            reviews=reviews,
             created_by_user_id=row.get("created_by_user_id"),
             created_by_name=created_by_name,
             submitted_by_user_id=row.get("submitted_by_user_id"),

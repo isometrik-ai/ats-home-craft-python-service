@@ -213,6 +213,7 @@ async def create_project_notice(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="notices",
         requested_id=data.id,
         description=f"Created notice: {data.display_code}",
@@ -268,6 +269,7 @@ async def update_project_notice(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="notices",
         requested_id=notice_id,
         description=f"Updated notice: {data.display_code}",
@@ -322,6 +324,7 @@ async def delete_project_notice(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="notices",
         requested_id=notice_id,
         description=f"Deleted notice: {data.display_code}",
@@ -371,6 +374,7 @@ async def restore_project_notice(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="notices",
         requested_id=data.id,
         description=f"Restored deleted notice {notice_id} as new draft: {data.display_code}",
@@ -421,6 +425,7 @@ async def duplicate_project_notice(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="notices",
         requested_id=data.id,
         description=f"Duplicated notice to: {data.display_code}",
@@ -476,6 +481,7 @@ async def pin_project_notice(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="notice_pins",
         requested_id=notice_id,
         description=f"Pinned notice: {data.display_code}",
@@ -525,6 +531,7 @@ async def unpin_project_notice(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="notice_pins",
         requested_id=notice_id,
         description=f"Unpinned notice: {data.display_code}",

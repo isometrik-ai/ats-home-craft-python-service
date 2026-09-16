@@ -360,6 +360,24 @@ class DailyHelpRatingResponse(BaseModel):
     updated_at: str | None = None
 
 
+class DailyHelpReviewResponse(BaseModel):
+    """Resident review shown on daily help profile detail."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    stars: float
+    comment: str | None = None
+    traits: list[str] = Field(default_factory=list)
+    rated_by_contact_id: str | None = None
+    rated_by_name: str | None = None
+    unit_id: str
+    unit_code: str | None = None
+    unit_label: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 class DailyHelpAttendanceCheckInResponse(BaseModel):
     """One gate check-in event for a daily help profile."""
 
@@ -532,6 +550,7 @@ class DailyHelpDetailResponse(BaseModel):
     household_links: list[DailyHelpHouseholdLinkResponse] = Field(default_factory=list)
     availability_slots: list[DailyHelpAvailabilitySlotResponse] = Field(default_factory=list)
     rating_summary: DailyHelpRatingSummaryResponse | None = None
+    reviews: list[DailyHelpReviewResponse] = Field(default_factory=list)
     created_by_user_id: str | None = None
     created_by_name: str | None = None
     submitted_by_user_id: str | None = None
@@ -681,6 +700,7 @@ class ResidentDailyHelpDetailResponse(BaseModel):
     household_links: list[DailyHelpHouseholdLinkResponse] = Field(default_factory=list)
     availability_slots: list[DailyHelpAvailabilitySlotResponse] = Field(default_factory=list)
     rating_summary: DailyHelpRatingSummaryResponse | None = None
+    reviews: list[DailyHelpReviewResponse] = Field(default_factory=list)
     created_at: str | None = None
 
 

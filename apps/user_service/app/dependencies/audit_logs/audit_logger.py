@@ -272,6 +272,7 @@ class AuditLogger:
                     batch_data.append(
                         {
                             "organization_id": event["organization_id"],
+                            "project_id": event.get("project_id"),
                             "user_id": event["user_id"],
                             "user_email": event["user_email"],
                             "user_role": event["user_role"],

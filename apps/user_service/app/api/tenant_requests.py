@@ -202,6 +202,7 @@ async def verify_tenant_document(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="tenant_request_documents",
         requested_id=document_id,
         description=f"Verified tenant document: {document_id}",
@@ -261,6 +262,7 @@ async def reject_tenant_document(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="tenant_request_documents",
         requested_id=document_id,
         description=f"Rejected tenant document: {document_id}",
@@ -320,6 +322,7 @@ async def approve_tenant_request(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="tenant_requests",
         requested_id=tenant_request_id,
         description=f"Approved tenant request: {tenant_request_id}",

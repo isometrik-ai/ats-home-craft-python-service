@@ -72,6 +72,7 @@ async def create_walk_in(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="walk_in_entries",
         requested_id=str(data.get("id", "")),
         description=f"Created walk-in visit in project: {project_id}",
@@ -198,6 +199,7 @@ async def enter_walk_in(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="walk_in_entries",
         requested_id=walk_in_id,
         description=f"Marked walk-in entered: {walk_in_id}",
@@ -249,6 +251,7 @@ async def exit_walk_in(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="walk_in_entries",
         requested_id=walk_in_id,
         description=f"Marked walk-in exited: {walk_in_id}",

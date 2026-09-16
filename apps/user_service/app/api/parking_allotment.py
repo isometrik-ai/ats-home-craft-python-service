@@ -366,6 +366,7 @@ async def allot_parking_slot_to_unit(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="unit_parking_allotments",
         requested_id=slot_id,
         description=f"Allotted parking slot {slot_id} to unit {body.unit_id}",
@@ -417,6 +418,7 @@ async def reassign_parking_slot(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="unit_parking_allotments",
         requested_id=slot_id,
         description=f"Reassigned parking slot {slot_id} to unit {body.unit_id}",
@@ -472,6 +474,7 @@ async def release_parking_slot(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="unit_parking_allotments",
         requested_id=slot_id,
         description=f"Released parking slot {slot_id}",
@@ -527,6 +530,7 @@ async def block_parking_slot(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="facility_parking_slots",
         requested_id=slot_id,
         description=f"Blocked parking slot {slot_id}",
@@ -577,6 +581,7 @@ async def unblock_parking_slot(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="facility_parking_slots",
         requested_id=slot_id,
         description=f"Unblocked parking slot {slot_id}",
@@ -628,6 +633,7 @@ async def allot_parking_slot_from_unit(
     set_audit_context(
         request,
         user_context,
+        project_id=project_id,
         table="unit_parking_allotments",
         requested_id=body.slot_id,
         description=f"Allotted slot {body.slot_id} to unit {unit_id}",

@@ -48,6 +48,7 @@ def _set_audit(
     request: Request,
     user_context: UserContext,
     *,
+    project_id: str,
     table: str,
     requested_id: str,
     description: str,
@@ -61,6 +62,7 @@ def _set_audit(
         table=table,
         requested_id=requested_id,
         description=description,
+        project_id=project_id,
         old_data=old_data,
         new_data=new_data,
     )
@@ -133,6 +135,7 @@ async def upsert_fee_configuration(
     _set_audit(
         request,
         user_context,
+        project_id=project_id,
         table="project_fee_settings",
         requested_id=project_id,
         description="Updated project fee configuration",
