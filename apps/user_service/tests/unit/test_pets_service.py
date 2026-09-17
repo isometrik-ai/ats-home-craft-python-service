@@ -20,7 +20,11 @@ from apps.user_service.app.schemas.pets import (
     UpdatePetRequest,
 )
 from apps.user_service.app.services.pets_service import PetsService
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 
 
 def _service() -> PetsService:
@@ -417,7 +421,7 @@ async def test_get_pet_detail_admin_not_found():
 
 @pytest.mark.asyncio
 async def test_update_pet_admin_not_found():
-    """Admin update raises when pet is not active in project."""
+    """Admin update raises when pet is missing from project."""
     svc = _service()
     svc.repo.get_by_id.return_value = None
 
@@ -444,3 +448,66 @@ async def test_create_pet_admin_rejects_invalid_catalog():
 
     with pytest.raises(ValidationException):
         await svc.create_pet_admin(project_id="project-1", body=body)
+
+
+@pytest.mark.asyncio
+async def test_get_pet_detail_admin_returns_removed_pet():
+    """Admin detail allows read-only access to removed pets."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = _pet_row(
+        status="removed",
+        removal_reason="Moved out",
+        deleted_at="2026-09-15T10:00:00Z",
+    )
+
+    result = await svc.get_pet_detail_admin(project_id="project-1", pet_id="pet-1")
+
+    assert result["status"] == "removed"
+    assert result["removal_reason"] == "Moved out"
+    assert result["deleted_at"] == "2026-09-15T10:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_update_pet_admin_rejects_removed_pet():
+    """Admin update blocks removed pets with a conflict error."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = _pet_row(status="removed", deleted_at="2026-09-15T10:00:00Z")
+
+    with pytest.raises(ConflictException):
+        await svc.update_pet_admin(
+            project_id="project-1",
+            pet_id="pet-1",
+            body=UpdatePetRequest(name="Luna"),
+        )
+
+    svc.repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_remove_pet_admin_rejects_already_removed_pet():
+    """Admin remove cannot run twice on the same pet."""
+    svc = _service()
+    svc.repo.get_by_id.return_value = _pet_row(status="removed", deleted_at="2026-09-15T10:00:00Z")
+
+    with pytest.raises(ConflictException):
+        await svc.remove_pet_admin(
+            project_id="project-1",
+            pet_id="pet-1",
+            body=RemovePetRequest(reason="Duplicate remove"),
+        )
+
+    svc.repo.soft_remove.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_pets_for_project_status_removed():
+    """Admin list passes removed status filter to repository."""
+    svc = _service()
+    svc.repo.list_for_project = AsyncMock(return_value=([_pet_row(status="removed")], 1))
+    query = AdminPetListQuery(status=AdminPetListStatusFilter.REMOVED)
+
+    items, total = await svc.list_pets_for_project(project_id="project-1", query=query)
+
+    assert total == 1
+    assert items[0]["status"] == "removed"
+    assert svc.repo.list_for_project.await_args.kwargs["status"] == "removed"
