@@ -43,8 +43,8 @@ logger = get_logger("sessions-api")
     "",
     response_model=None,
     status_code=http_status.HTTP_200_OK,
-    description="Get all sessions for the current organization",
-    summary="Get all sessions for the current organization",
+    description="Get sessions for the current user",
+    summary="Get sessions for the current user",
     responses={
         http_status.HTTP_200_OK: {"description": "Sessions retrieved successfully"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
@@ -78,7 +78,11 @@ async def get_sessions_list(
         description="Optional project filter — limits results to project members when provided.",
     ),
 ):
-    """Get all sessions for the current organization."""
+    """Get sessions for the current user.
+
+    Self-service endpoint — any authenticated user may view their own sessions.
+    When ``project_id`` is provided, project-level view permission is required.
+    """
     if project_id:
         user_context = await ensure_staff_project_access(
             current_user=current_user,
@@ -89,13 +93,6 @@ async def get_sessions_list(
         )
     else:
         user_context = await extract_user_context(current_user, db_connection)
-
-    if user_context.organization_id:
-        await check_permissions(
-            current_user=current_user,
-            db_connection=db_connection,
-            permission_codes=SETTINGS_SYSTEM_MANAGE,
-        )
 
     # Create SessionFilter from query params
     filters = SessionFilter(
@@ -178,7 +175,8 @@ async def get_organization_sessions(
     ),
 ):
     """Get all sessions for all users in the current organization.
-    Intended for org-level admins with settings management permission.
+
+    Intended for org-level admins with user-management view permission.
     """
     if project_id:
         await ensure_staff_project_access(

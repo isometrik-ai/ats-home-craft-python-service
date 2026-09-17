@@ -26,15 +26,6 @@ async def test_get_sessions_list(monkeypatch, client):
             user_id="u1", email="u1@example.com", organization_id="org-1", user_type="member"
         )
 
-    async def fake_check_permissions(current_user, db_connection, permission_codes):
-        del current_user, db_connection, permission_codes
-        return UserContext(
-            user_id="admin",
-            email="admin@example.com",
-            organization_id="org-1",
-            user_type="admin",
-        )
-
     async def fake_get_user_sessions(self, filters: SessionFilter):
         del self
         captured["filters"] = filters
@@ -55,10 +46,6 @@ async def test_get_sessions_list(monkeypatch, client):
         fake_ensure_staff_project_access,
     )
     monkeypatch.setattr(
-        "apps.user_service.app.api.sessions.check_permissions",
-        fake_check_permissions,
-    )
-    monkeypatch.setattr(
         "apps.user_service.app.services.session_service.SessionService.get_user_sessions",
         fake_get_user_sessions,
     )
@@ -75,7 +62,7 @@ async def test_get_sessions_list(monkeypatch, client):
 
 @pytest.mark.asyncio
 async def test_get_sessions_list_without_project_id(monkeypatch, client):
-    """Org-wide session list works without project_id."""
+    """Current-user session list works without admin permissions."""
     captured: dict = {}
 
     async def fake_extract_user_context(current_user, db_connection):
@@ -84,18 +71,46 @@ async def test_get_sessions_list_without_project_id(monkeypatch, client):
             user_id="u1", email="u1@example.com", organization_id="org-1", user_type="member"
         )
 
-    async def fake_check_permissions(current_user, db_connection, permission_codes):
-        del current_user, db_connection, permission_codes
-        return UserContext(
-            user_id="admin",
-            email="admin@example.com",
-            organization_id="org-1",
-            user_type="admin",
-        )
-
     async def fake_get_user_sessions(self, filters: SessionFilter):
         del self
         captured["filters"] = filters
+        return {"sessions": [], "total_count": 0}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.extract_user_context",
+        fake_extract_user_context,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.session_service.SessionService.get_user_sessions",
+        fake_get_user_sessions,
+    )
+
+    res = await client.get("/v1/sessions?page=1&page_size=10")
+    body = assert_success(res, 200)
+
+    assert body["total"] == 0
+    assert captured["filters"].project_id is None
+
+
+@pytest.mark.asyncio
+async def test_get_sessions_list_allows_org_member_without_admin_permission(monkeypatch, client):
+    """Org members can list their own sessions without settings_management.edit."""
+
+    async def fake_extract_user_context(current_user, db_connection):
+        del current_user, db_connection
+        return UserContext(
+            user_id="u1", email="u1@example.com", organization_id="org-1", user_type="member"
+        )
+
+    async def fake_check_permissions(*args, **kwargs):
+        del args, kwargs
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    async def fake_get_user_sessions(self, filters: SessionFilter):
+        del self, filters
         return {"sessions": [], "total_count": 0}
 
     monkeypatch.setattr(
@@ -112,10 +127,7 @@ async def test_get_sessions_list_without_project_id(monkeypatch, client):
     )
 
     res = await client.get("/v1/sessions?page=1&page_size=10")
-    body = assert_success(res, 200)
-
-    assert body["total"] == 0
-    assert captured["filters"].project_id is None
+    assert_success(res, 200)
 
 
 @pytest.mark.asyncio
