@@ -72,7 +72,7 @@ On **approval**:
 | Verify document          | `POST /projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/verify`              |
 | Reject document          | `POST /projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/reject` `{ reason }` |
 | Approve request          | `POST /projects/{project_id}/tenant-requests/{id}/approve`                                |
-| Export (later)           | `GET /projects/{project_id}/tenant-requests/export`                                       |
+| Export                   | `GET /projects/{project_id}/tenant-requests/export`                                       |
 
 ______________________________________________________________________
 
@@ -253,7 +253,13 @@ ______________________________________________________________________
 
 ```http
 GET /v1/projects/{project_id}/tenant-requests?status=pending_review&search=A-2104
+GET /v1/projects/{project_id}/tenant-requests?status=superseded
+GET /v1/projects/{project_id}/tenant-requests?bucket=superseded
 ```
+
+**Status filter** (`status` query param) accepts any `tenant_request_status` value, including
+`superseded`. Alternatively, use **`bucket=superseded`** (same result). Omit both for **All
+statuses** — returns pending, approved, superseded, cancelled, etc.
 
 Response rows match dashboard columns:
 
@@ -276,6 +282,21 @@ Summary cards:
 | Ready to approve      | `status = ready_to_approve`                   |
 | Approved              | `status = approved AND superseded_at IS NULL` |
 | Cancelled             | `status = cancelled`                          |
+
+There is **no summary card** for superseded requests. Use the table status dropdown
+(`status=superseded` or `bucket=superseded`) or **All statuses** to view historical rows replaced
+by a newer tenant approval or closed via admin move-out.
+
+### 5.1.1 Export
+
+```http
+GET /v1/projects/{project_id}/tenant-requests/export?bucket=ready_to_approve&search=Tenant&format=csv
+```
+
+Uses the same filters as the list endpoint (`bucket`, `status`, `search`, `unit_id`) without
+pagination. Returns a CSV attachment (max 10,000 rows) with columns aligned to the dashboard table:
+tenant name/phone, unit code/description, submitter name/phone, move-in date, document counts,
+submitted on, status, and approved on.
 
 ### 5.2 Per-document review
 

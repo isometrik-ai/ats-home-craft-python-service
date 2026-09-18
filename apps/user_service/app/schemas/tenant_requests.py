@@ -106,6 +106,18 @@ class TenantRequestListQuery(BaseModel):
     page_size: int = Field(20, ge=1, le=100)
 
 
+class TenantRequestExportQuery(BaseModel):
+    """Export filters aligned with the admin tenant requests list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bucket: TenantRequestListBucket | None = None
+    status: TenantRequestStatus | None = None
+    search: str | None = Field(None, max_length=200)
+    unit_id: str | None = None
+    format: str = Field("csv", pattern="^(csv|xlsx)$")
+
+
 class OwnerTenantRequestListQuery(BaseModel):
     """Query params for owner GET /contact-onboarding/tenant-requests."""
 

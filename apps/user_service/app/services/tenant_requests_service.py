@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -29,6 +31,7 @@ from apps.user_service.app.db.repositories.units_repository import UnitsReposito
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import CreateContactRequest
 from apps.user_service.app.schemas.enums import (
+    TENANT_REQUESTS_EXPORT_MAX_ROWS,
     ContactType,
     MoveEventType,
     TenantRequestDocumentStatus,
@@ -45,6 +48,7 @@ from apps.user_service.app.schemas.tenant_requests import (
     ReuploadTenantDocumentRequest,
     TenantRequestDocumentResponse,
     TenantRequestEventResponse,
+    TenantRequestExportQuery,
     TenantRequestListItemResponse,
     TenantRequestListQuery,
     TenantRequestMilestoneResponse,
@@ -70,6 +74,9 @@ from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
     parse_json_any,
+)
+from apps.user_service.app.utils.unit_list_serialization import (
+    format_primary_contact_phone_display,
 )
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -1057,6 +1064,97 @@ class TenantRequestsService:
         )
         items = [self._serialize_list_item(row) for row in rows]
         return items, total
+
+    @staticmethod
+    def _csv_safe(value: Any) -> Any:
+        """Neutralize spreadsheet formula injection in CSV cell values."""
+        if isinstance(value, str) and value[:1] in ("=", "+", "-", "@"):
+            return "'" + value
+        return value
+
+    @staticmethod
+    def _status_label(value: str | None) -> str:
+        """Map tenant request status enum to title-case label."""
+        if not value:
+            return ""
+        return value.replace("_", " ").title()
+
+    async def export_csv(
+        self,
+        *,
+        project_id: str,
+        query: TenantRequestExportQuery,
+    ) -> str:
+        """Export filtered tenant requests as CSV text."""
+        if query.format != "csv":
+            raise ValidationException(
+                message_key="tenant_requests.errors.unsupported_export_format",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        org_id = self.user_context.organization_id
+        assert org_id
+        await self._ensure_project(project_id=project_id)
+        statuses = [query.status.value] if query.status else self._bucket_to_statuses(query.bucket)
+        rows, _ = await self.repo.list_for_admin(
+            organization_id=org_id,
+            statuses=statuses,
+            search=query.search,
+            unit_id=query.unit_id,
+            project_id=project_id,
+            limit=TENANT_REQUESTS_EXPORT_MAX_ROWS,
+            offset=0,
+        )
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(
+            [
+                "request_id",
+                "tenant_name",
+                "tenant_phone",
+                "unit_code",
+                "unit_description",
+                "submitted_by_name",
+                "submitted_by_phone",
+                "move_in_date",
+                "documents_verified",
+                "documents_total",
+                "submitted_on",
+                "status",
+                "approved_on",
+            ]
+        )
+        for row in rows:
+            item = self._serialize_list_item(row)
+            owner = item.owner
+            unit = item.unit
+            tenant_name = format_contact_display_name(
+                prefix=None,
+                first_name=item.tenant_first_name,
+                last_name=item.tenant_last_name,
+            )
+            unit_description = ""
+            if unit is not None:
+                unit_description = unit.location_label or unit.unit_label or ""
+            writer.writerow(
+                [
+                    item.id,
+                    self._csv_safe(tenant_name),
+                    self._csv_safe(format_primary_contact_phone_display(item.tenant_phones) or ""),
+                    self._csv_safe(unit.code if unit is not None else ""),
+                    self._csv_safe(unit_description),
+                    self._csv_safe(
+                        (owner.display_name if owner is not None else None) or item.owner_name or ""
+                    ),
+                    self._csv_safe(owner.phone if owner is not None else ""),
+                    item.move_in_date or "",
+                    item.documents_verified_count,
+                    item.documents_total_count,
+                    item.submitted_at or "",
+                    self._status_label(item.status),
+                    item.approved_at or "",
+                ]
+            )
+        return buffer.getvalue()
 
     async def get_admin_request(
         self,

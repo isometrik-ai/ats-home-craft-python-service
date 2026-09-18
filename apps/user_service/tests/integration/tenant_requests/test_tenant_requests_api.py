@@ -370,3 +370,62 @@ async def test_approve_tenant_request_not_ready(monkeypatch, client):
         json={"move_in_date": "2026-08-01"},
     )
     assert res.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_export_project_tenant_requests(monkeypatch, client):
+    """GET tenant-requests/export returns CSV attachment."""
+
+    _patch_admin_access(monkeypatch)
+    captured: dict[str, object] = {}
+
+    async def fake_export_csv(_self, *, project_id: str, query):
+        del _self
+        captured["project_id"] = project_id
+        captured["query"] = query
+        return (
+            "request_id,tenant_name,tenant_phone,unit_code,status\n"
+            "660e8400-e29b-41d4-a716-446655440001,Tenant User,+91 9876543210,A-101,Submitted\n"
+        )
+
+    monkeypatch.setattr(f"{_SERVICE}.export_csv", fake_export_csv)
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/tenant-requests/export",
+        params={"bucket": "ready_to_approve", "search": "Tenant"},
+    )
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert "attachment" in res.headers.get("content-disposition", "")
+    assert f"tenant-requests-{PROJECT_ID}.csv" in res.headers.get("content-disposition", "")
+    assert "Tenant User" in res.text
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["query"].bucket.value == "ready_to_approve"
+    assert captured["query"].search == "Tenant"
+
+
+@pytest.mark.asyncio
+async def test_export_project_tenant_requests_rejects_unsupported_format(monkeypatch, client):
+    """GET tenant-requests/export rejects unsupported xlsx format."""
+
+    _patch_admin_access(monkeypatch)
+
+    async def fake_export_csv(_self, *, project_id: str, query):
+        del _self, project_id, query
+        raise ValidationException(
+            message_key="tenant_requests.errors.unsupported_export_format",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    monkeypatch.setattr(f"{_SERVICE}.export_csv", fake_export_csv)
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/tenant-requests/export",
+        params={"format": "xlsx"},
+    )
+    assert res.status_code == 422
