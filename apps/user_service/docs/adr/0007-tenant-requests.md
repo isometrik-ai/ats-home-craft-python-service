@@ -263,30 +263,31 @@ CREATE TYPE public.tenant_request_event_type AS ENUM (
 
 ### `tenant_requests`
 
-| Column                      | Type                           | Notes                                    |
-| --------------------------- | ------------------------------ | ---------------------------------------- |
-| `id`                        | uuid PK                        |                                          |
-| `organization_id`           | uuid NOT NULL                  | → `organizations`                        |
-| `project_id`                | uuid NOT NULL                  | denormalized from `units`                |
-| `unit_id`                   | uuid NOT NULL                  | → `units`                                |
-| `submitted_by_contact_id`   | uuid NOT NULL                  | owner → `contacts`                       |
-| `tenant_first_name`         | text NOT NULL                  | snapshot until approval                  |
-| `tenant_last_name`          | text                           |                                          |
-| `tenant_phones`             | jsonb NOT NULL DEFAULT `[]`    | same shape as `contacts.phones`          |
-| `tenant_emails`             | jsonb NOT NULL DEFAULT `[]`    |                                          |
-| `move_in_date`              | date                           | optional intended move-in                |
-| `status`                    | tenant_request_status NOT NULL | default `draft` or `submitted`           |
-| `portal_access`             | boolean NOT NULL DEFAULT false | invite tenant after approval (phase 2)   |
-| `tenant_contact_id`         | uuid NULL                      | set on approve → `contacts`              |
-| `contact_unit_id`           | uuid NULL                      | set on approve → `contact_units`         |
-| `approved_at`               | timestamptz                    |                                          |
-| `approved_by_user_id`       | uuid                           | admin org member                         |
-| `superseded_at`             | timestamptz                    | when replaced by newer tenant            |
-| `superseded_by_request_id`  | uuid                           | → `tenant_requests`                      |
-| `cancelled_at`              | timestamptz                    |                                          |
-| `submitted_at`              | timestamptz                    |                                          |
-| `admin_notes`               | text                           | optional internal note on approve/reject |
-| `created_at` / `updated_at` | timestamptz                    |                                          |
+| Column                      | Type                           | Notes                                     |
+| --------------------------- | ------------------------------ | ----------------------------------------- |
+| `id`                        | uuid PK                        |                                           |
+| `organization_id`           | uuid NOT NULL                  | → `organizations`                         |
+| `project_id`                | uuid NOT NULL                  | denormalized from `units`                 |
+| `unit_id`                   | uuid NOT NULL                  | → `units`                                 |
+| `submitted_by_contact_id`   | uuid NOT NULL                  | owner → `contacts`                        |
+| `tenant_first_name`         | text NOT NULL                  | snapshot until approval                   |
+| `tenant_last_name`          | text                           |                                           |
+| `tenant_phones`             | jsonb NOT NULL DEFAULT `[]`    | same shape as `contacts.phones`           |
+| `tenant_emails`             | jsonb NOT NULL DEFAULT `[]`    |                                           |
+| `move_in_date`              | date                           | optional intended move-in                 |
+| `move_out_date`             | date                           | optional intended move-out (owner submit) |
+| `status`                    | tenant_request_status NOT NULL | default `draft` or `submitted`            |
+| `portal_access`             | boolean NOT NULL DEFAULT false | invite tenant after approval (phase 2)    |
+| `tenant_contact_id`         | uuid NULL                      | set on approve → `contacts`               |
+| `contact_unit_id`           | uuid NULL                      | set on approve → `contact_units`          |
+| `approved_at`               | timestamptz                    |                                           |
+| `approved_by_user_id`       | uuid                           | admin org member                          |
+| `superseded_at`             | timestamptz                    | when replaced by newer tenant             |
+| `superseded_by_request_id`  | uuid                           | → `tenant_requests`                       |
+| `cancelled_at`              | timestamptz                    |                                           |
+| `submitted_at`              | timestamptz                    |                                           |
+| `admin_notes`               | text                           | optional internal note on approve/reject  |
+| `created_at` / `updated_at` | timestamptz                    |                                           |
 
 Indexes: `(organization_id, status)`, `(organization_id, unit_id)`,
 `(submitted_by_contact_id, created_at DESC)`, partial uniques in §4.

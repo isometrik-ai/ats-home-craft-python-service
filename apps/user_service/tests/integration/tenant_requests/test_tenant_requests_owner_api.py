@@ -32,6 +32,7 @@ _CREATE_BODY = {
     "phones": [{"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}],
     "emails": [{"email": "tenant@example.com", "is_primary": True}],
     "move_in_date": "2026-08-01",
+    "move_out_date": "2027-07-31",
     "portal_access": False,
     "documents": [
         {
@@ -188,6 +189,34 @@ async def test_create_tenant_request_conflict(monkeypatch, client):
 
     res = await client.post("/v1/contact-onboarding/tenant-requests", json=_CREATE_BODY)
     assert res.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Update tenancy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_tenant_tenancy(monkeypatch, client):
+    """PATCH tenancy updates an approved request and resubmits it."""
+
+    _patch_owner_context(monkeypatch)
+
+    async def fake_update_tenancy(_self, *, owner_contact_id: str, tenant_request_id: str, body):
+        del _self
+        assert owner_contact_id == CONTACT_ID
+        assert tenant_request_id == REQUEST_ID
+        assert body.move_out_date.isoformat() == "2027-08-31"
+        return _fake_detail(status="submitted")
+
+    monkeypatch.setattr(f"{_SERVICE}.update_tenancy", fake_update_tenancy)
+
+    res = await client.patch(
+        f"/v1/contact-onboarding/tenant-requests/{REQUEST_ID}/tenancy",
+        json={"move_out_date": "2027-08-31"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["status"] == "submitted"
 
 
 # ---------------------------------------------------------------------------

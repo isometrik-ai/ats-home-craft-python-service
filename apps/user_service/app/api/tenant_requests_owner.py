@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.tenant_requests import (
     CreateTenantRequestRequest,
     OwnerTenantRequestListQuery,
     ReuploadTenantDocumentRequest,
+    UpdateTenancyRequest,
 )
 from apps.user_service.app.services.tenant_requests_service import TenantRequestsService
 from apps.user_service.app.utils.audit_context import set_audit_context
@@ -162,6 +163,62 @@ async def get_owner_tenant_request(
     return success_response(
         request=request,
         message_key="tenant_requests.success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("update tenant tenancy")
+@router.patch(
+    "/{tenant_request_id}/tenancy",
+    status_code=http_status.HTTP_200_OK,
+    summary="Update an approved tenancy nearing move-out",
+    description=(
+        "Owner updates tenancy details and documents when move-out is near or past, "
+        "then resubmits the request for admin review."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="tenant_requests",
+    category="CONTACT_ONBOARDING",
+)
+async def update_tenant_tenancy(
+    request: Request,
+    tenant_request_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: UpdateTenancyRequest = Body(...),
+):
+    """Update tenancy details for an approved request and resubmit for review."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = TenantRequestsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await service.update_tenancy(
+        owner_contact_id=str(contact["id"]),
+        tenant_request_id=tenant_request_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="tenant_requests",
+        requested_id=tenant_request_id,
+        description=f"Updated tenant tenancy: {tenant_request_id}",
+        risk_level="medium",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="tenant_requests.success.tenancy_updated",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
     )

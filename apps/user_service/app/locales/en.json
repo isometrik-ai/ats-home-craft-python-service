@@ -849,7 +849,10 @@
       "documents_incomplete": "All required documents must be uploaded before submitting.",
       "not_ready_to_approve": "All documents must be verified before approving this request.",
       "invalid_status_transition": "This action is not allowed for the current request status.",
-      "document_not_rejected": "Only rejected documents can be re-uploaded."
+      "document_not_rejected": "Only rejected documents can be re-uploaded.",
+      "tenancy_update_not_approved": "Only the active approved tenancy can be updated.",
+      "tenancy_update_requires_move_out_date": "Set a move-out date before updating the tenancy.",
+      "tenancy_update_not_due": "Tenancy updates are allowed only within {days} days of move-out or after move-out."
     },
     "success": {
       "list_retrieved": "Tenant requests retrieved successfully.",
@@ -858,6 +861,7 @@
       "created": "Tenant request submitted successfully.",
       "cancelled": "Tenant request cancelled successfully.",
       "document_reuploaded": "Document re-uploaded successfully.",
+      "tenancy_updated": "Tenancy updated and resubmitted for review.",
       "document_verified": "Document verified successfully.",
       "document_rejected": "Document rejected successfully.",
       "approved": "Tenant request approved successfully."

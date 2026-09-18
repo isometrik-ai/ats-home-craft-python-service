@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -10,6 +10,7 @@ import asyncpg
 from asyncpg import UniqueViolationError
 from supabase import AsyncClient
 
+from apps.user_service.app.config.app_settings import app_settings
 from apps.user_service.app.db.repositories.contact_roles_repository import (
     ContactRolesRepository,
 )
@@ -50,6 +51,7 @@ from apps.user_service.app.schemas.tenant_requests import (
     TenantRequestMilestoneResponse,
     TenantRequestResponse,
     TenantRequestSummaryResponse,
+    UpdateTenancyRequest,
 )
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
@@ -476,6 +478,7 @@ class TenantRequestsService:
             tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
             tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
             move_in_date=self._format_date(row.get("move_in_date")),
+            move_out_date=self._format_date(row.get("move_out_date")),
             move_in_fee=self._format_decimal(row.get("move_in_fee")) or "0",
             status=str(row.get("status")),
             portal_access=bool(row.get("portal_access", False)),
@@ -526,6 +529,7 @@ class TenantRequestsService:
             tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
             tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
             move_in_date=self._format_date(row.get("move_in_date")),
+            move_out_date=self._format_date(row.get("move_out_date")),
             move_in_fee=self._format_decimal(row.get("move_in_fee")) or "0",
             status=str(row.get("status")),
             portal_access=bool(row.get("portal_access", False)),
@@ -643,6 +647,62 @@ class TenantRequestsService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+    def _coerce_row_date(self, value: Any) -> date | None:
+        """Normalize DB date values for comparisons."""
+        if value is None:
+            return None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        return date.fromisoformat(str(value))
+
+    async def _assert_tenancy_update_allowed(self, *, row: dict[str, Any]) -> None:
+        """Ensure the approved tenancy is due for owner-initiated updates."""
+        if row.get("status") != TenantRequestStatus.APPROVED.value:
+            raise ValidationException(
+                message_key="tenant_requests.errors.tenancy_update_not_approved",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if row.get("superseded_at"):
+            raise ValidationException(
+                message_key="tenant_requests.errors.tenancy_update_not_approved",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        move_out_date = self._coerce_row_date(row.get("move_out_date"))
+        if move_out_date is None:
+            raise ValidationException(
+                message_key="tenant_requests.errors.tenancy_update_requires_move_out_date",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        window_days = app_settings.tenant_requests.tenancy_update_window_days
+        cutoff = date.today() + timedelta(days=window_days)
+        if move_out_date > cutoff:
+            raise ValidationException(
+                message_key="tenant_requests.errors.tenancy_update_not_due",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"days": window_days},
+            )
+
+    async def _assert_no_other_inflight_request(
+        self,
+        *,
+        unit_id: str,
+        tenant_request_id: str,
+    ) -> None:
+        """Reject when another open request already exists on the unit."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        open_request = await self.repo.find_latest_open_request_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if open_request and str(open_request["id"]) != tenant_request_id:
+            raise ConflictException(
+                message_key="tenant_requests.errors.inflight_request_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
     async def create_request(
         self,
         *,
@@ -671,6 +731,7 @@ class TenantRequestsService:
                 tenant_phones=phones_payload,
                 tenant_emails=emails_payload,
                 move_in_date=body.move_in_date,
+                move_out_date=body.move_out_date,
                 portal_access=body.portal_access,
                 status=TenantRequestStatus.SUBMITTED.value,
                 submitted_at=now,
@@ -1001,6 +1062,111 @@ class TenantRequestsService:
         row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
         return await self._serialize_detail(row)
 
+    async def update_tenancy(
+        self,
+        *,
+        owner_contact_id: str,
+        tenant_request_id: str,
+        body: UpdateTenancyRequest,
+    ) -> TenantRequestResponse:
+        """Owner updates an approved tenancy and resubmits it for admin review."""
+        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        await self._assert_owner_owns_request(row=row, owner_contact_id=owner_contact_id)
+        await self._assert_owner_access(
+            owner_contact_id=owner_contact_id,
+            unit_id=str(row["unit_id"]),
+        )
+        org_id = self.user_context.organization_id
+        assert org_id
+        active_approved = await self.repo.find_active_approved_for_unit(
+            organization_id=org_id,
+            unit_id=str(row["unit_id"]),
+        )
+        if not active_approved or str(active_approved["id"]) != tenant_request_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.tenancy_update_not_approved",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        await self._assert_tenancy_update_allowed(row=row)
+        await self._assert_no_other_inflight_request(
+            unit_id=str(row["unit_id"]),
+            tenant_request_id=tenant_request_id,
+        )
+
+        updates: dict[str, Any] = {}
+        if body.move_in_date is not None:
+            updates["move_in_date"] = body.move_in_date
+        if body.move_out_date is not None:
+            updates["move_out_date"] = body.move_out_date
+        if updates:
+            await self.repo.update_tenancy_fields(
+                organization_id=org_id,
+                tenant_request_id=tenant_request_id,
+                updates=updates,
+            )
+
+        if body.documents:
+            for document in body.documents:
+                updated = await self.repo.update_document_by_type(
+                    organization_id=org_id,
+                    tenant_request_id=tenant_request_id,
+                    document_type=document.document_type.value,
+                    file_path=document.file_path,
+                    file_name=document.file_name,
+                )
+                if not updated:
+                    raise NotFoundException(
+                        message_key="tenant_requests.errors.document_not_found",
+                        custom_code=CustomStatusCode.NOT_FOUND,
+                    )
+        else:
+            await self.repo.reset_all_documents_to_pending(
+                organization_id=org_id,
+                tenant_request_id=tenant_request_id,
+            )
+
+        now = datetime.now(timezone.utc)
+        await self.repo.update_request_status(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            status=TenantRequestStatus.SUBMITTED.value,
+            submitted_at=now,
+            approved_at=None,
+            approved_by_user_id=None,
+        )
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            event_type=TenantRequestEventType.SUBMITTED.value,
+            actor_contact_id=owner_contact_id,
+            payload={"reason": "tenancy_update"},
+        )
+        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=str(row["unit_id"]),
+        )
+        if unit:
+            await self._push().send_to_org_members(
+                organization_id=org_id,
+                message_key="notifications.push.tenant_request.submitted",
+                notification_type="NOTIFICATION_TYPE_TENANT",
+                feed_type="tenant",
+                params={"unit_label": unit_label_from_row(unit)},
+                data={
+                    "tenant_request_id": tenant_request_id,
+                    "project_id": str(unit["project_id"]),
+                    "unit_id": str(row["unit_id"]),
+                    "screen": "tenant_request_detail",
+                },
+                entity={"kind": "tenant_request", "id": tenant_request_id},
+                options={
+                    "click_action": "OPEN_TENANT_REQUEST",
+                    "idempotency_key": f"tenant_request:{tenant_request_id}:tenancy_update",
+                },
+            )
+        return await self._serialize_detail(row)
+
     @staticmethod
     def _bucket_to_statuses(bucket: TenantRequestListBucket | None) -> list[str] | None:
         """Map admin list bucket filters to underlying request statuses."""
@@ -1209,6 +1375,90 @@ class TenantRequestsService:
         )
         return await self._serialize_detail(row)
 
+    async def _is_tenancy_renewal(
+        self,
+        *,
+        row: dict[str, Any],
+        unit_id: str,
+        org_id: str,
+    ) -> bool:
+        """Return True when approving an updated tenancy for the existing tenant."""
+        tenant_contact_id = row.get("tenant_contact_id")
+        if not tenant_contact_id or not row.get("contact_unit_id"):
+            return False
+        active_tenant_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        return bool(active_tenant_id and str(active_tenant_id) == str(tenant_contact_id))
+
+    async def _approve_tenancy_renewal(
+        self,
+        *,
+        row: dict[str, Any],
+        tenant_request_id: str,
+        body: ApproveTenantRequestRequest,
+        documents: list[dict[str, Any]],
+    ) -> TenantRequestResponse:
+        """Re-approve an updated tenancy without reprovisioning the tenant."""
+        org_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        assert org_id and user_id
+        now = datetime.now(timezone.utc)
+        unit_id = str(row["unit_id"])
+        project_id = str(row["project_id"])
+        tenant_contact_id = str(row["tenant_contact_id"])
+        contact_unit_id = str(row["contact_unit_id"])
+
+        await self.repo.update_request_status(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            status=TenantRequestStatus.APPROVED.value,
+            tenant_contact_id=tenant_contact_id,
+            contact_unit_id=contact_unit_id,
+            approved_at=now,
+            approved_by_user_id=str(user_id),
+            admin_notes=body.admin_notes,
+            move_in_date=body.move_in_date,
+            move_in_fee=body.move_in_fee,
+        )
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            event_type=TenantRequestEventType.APPROVED.value,
+            actor_user_id=str(user_id),
+            payload={
+                "tenant_contact_id": tenant_contact_id,
+                "renewal": True,
+            },
+        )
+        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        unit_label = unit_label_from_row(unit or {"unit_id": unit_id})
+        await self._push().send_to_contact(
+            organization_id=org_id,
+            contact_id=str(row.get("submitted_by_contact_id") or ""),
+            message_key="notifications.push.tenant_request.approved",
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            params={"unit_label": unit_label},
+            data={
+                "tenant_request_id": tenant_request_id,
+                "project_id": project_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": tenant_request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": f"tenant_request:{tenant_request_id}:renewal_approved",
+            },
+        )
+        del documents
+        return await self._serialize_detail(row)
+
     async def approve_request(
         self,
         *,
@@ -1236,6 +1486,14 @@ class TenantRequestsService:
         user_id = self.user_context.user_id
         assert org_id and user_id
         unit_id = str(row["unit_id"])
+        if await self._is_tenancy_renewal(row=row, unit_id=unit_id, org_id=org_id):
+            return await self._approve_tenancy_renewal(
+                row=row,
+                tenant_request_id=tenant_request_id,
+                body=body,
+                documents=documents,
+            )
+
         now = datetime.now(timezone.utc)
         project_id = str(row["project_id"])
 

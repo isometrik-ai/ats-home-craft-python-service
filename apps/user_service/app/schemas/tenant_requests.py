@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contact_onboarding import (
@@ -41,6 +41,7 @@ class CreateTenantRequestRequest(BaseModel):
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
     emails: list[Email] | None = Field(None, max_length=20)
     move_in_date: date | None = None
+    move_out_date: date | None = None
     portal_access: bool = False
     documents: list[TenantRequestDocumentInput] = Field(..., min_length=3, max_length=3)
 
@@ -73,6 +74,47 @@ class ReuploadTenantDocumentRequest(BaseModel):
 
     file_path: str = Field(..., min_length=1, max_length=2000)
     file_name: str | None = Field(None, max_length=255)
+
+
+class UpdateTenancyRequest(BaseModel):
+    """Owner updates an approved tenancy nearing or past move-out."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    move_in_date: date | None = None
+    move_out_date: date | None = None
+    documents: list[TenantRequestDocumentInput] | None = Field(None, min_length=3, max_length=3)
+
+    @field_validator("documents")
+    @classmethod
+    def validate_required_document_types(
+        cls,
+        documents: list[TenantRequestDocumentInput] | None,
+    ) -> list[TenantRequestDocumentInput] | None:
+        """Require exactly one row per mandatory document type when documents are sent."""
+        if documents is None:
+            return documents
+        provided = {item.document_type for item in documents}
+        required = set(TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES)
+        if provided != required:
+            raise ValueError(
+                "documents must include id_proof, rental_agreement, and police_verification"
+            )
+        return documents
+
+    @model_validator(mode="after")
+    def validate_at_least_one_field(self) -> UpdateTenancyRequest:
+        """Require at least one tenancy field or document set."""
+        if any(
+            value is not None
+            for value in (
+                self.move_in_date,
+                self.move_out_date,
+                self.documents,
+            )
+        ):
+            return self
+        raise ValueError("at least one tenancy field must be provided")
 
 
 class RejectTenantDocumentRequest(BaseModel):
@@ -201,6 +243,7 @@ class TenantRequestListItemResponse(BaseModel):
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
     move_in_date: str | None = None
+    move_out_date: str | None = None
     move_in_fee: str = "0"
     status: str
     portal_access: bool = False
@@ -233,6 +276,7 @@ class TenantRequestResponse(BaseModel):
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
     move_in_date: str | None = None
+    move_out_date: str | None = None
     move_in_fee: str = "0"
     status: str
     portal_access: bool = False

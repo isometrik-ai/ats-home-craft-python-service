@@ -19,9 +19,9 @@ ______________________________________________________________________
 ## 1. What this flow does
 
 A **primary occupant** (`contact_units.relationship = self`) who has an **active unit assignment** can submit
-a **tenant request** for that unit: prospective tenant profile, three documents, and an intended
-move-in date. A **community admin** reviews each document independently, then approves or rejects
-the request.
+a **tenant request** for that unit: prospective tenant profile, three documents, an optional intended
+move-in date, and an optional intended move-out date. A **community admin** reviews each document
+independently, then approves or rejects the request.
 
 On **approval**:
 
@@ -59,6 +59,7 @@ On **approval**:
 | Confirm submit               | `POST /contact-onboarding/tenant-requests/{id}/submit`                           |
 | Status timeline              | `GET /contact-onboarding/tenant-requests/{id}` → `events[]` + derived milestones |
 | Re-upload rejected docs      | `PATCH /contact-onboarding/tenant-requests/{id}/documents/{type}`                |
+| Update approved tenancy      | `PATCH /contact-onboarding/tenant-requests/{id}/tenancy`                         |
 | Cancel pending request       | `POST /contact-onboarding/tenant-requests/{id}/cancel`                           |
 | Resend tenant invite (later) | Reuse household invite pattern post-approval                                     |
 
@@ -196,6 +197,7 @@ POST /v1/contact-onboarding/tenant-requests
   "phones": [{ "phone_isd_code": "+91", "phone_number": "9876543210", "is_primary": true }],
   "emails": [{ "email": "ankit@example.com", "is_primary": true }],
   "move_in_date": "2026-08-01",
+  "move_out_date": "2027-07-31",
   "portal_access": false,
   "documents": [
     { "document_type": "id_proof", "file_path": "org/.../aadhar.pdf", "file_name": "aadhar.pdf" },
@@ -237,7 +239,31 @@ PATCH /v1/contact-onboarding/tenant-requests/{id}/documents/id_proof
 Service resets that document to `pending`, clears `rejection_reason`, sets header back to
 `submitted`, appends `resubmitted` event.
 
-### 4.5 Cancel
+### 4.5 Update approved tenancy
+
+When the active approved request has a **move-out date** within the configured window
+(default **60 days**) or in the past, the owner may update tenancy details and documents,
+then resubmit for admin review:
+
+```http
+PATCH /v1/contact-onboarding/tenant-requests/{id}/tenancy
+{
+  "move_out_date": "2027-07-31",
+  "move_in_date": "2026-09-01",
+  "documents": [
+    { "document_type": "id_proof", "file_path": "...", "file_name": "aadhar.pdf" },
+    { "document_type": "rental_agreement", "file_path": "...", "file_name": "rental.pdf" },
+    { "document_type": "police_verification", "file_path": "...", "file_name": "police.jpg" }
+  ]
+}
+```
+
+All body fields are optional, but at least one must be provided. If `documents` is omitted,
+existing documents are reset to `pending` for re-verification. The request returns to
+`submitted` while the tenant remains on the unit until admin re-approves (renewal path —
+no turnover or new contact creation).
+
+### 4.6 Cancel
 
 Only while status is in-flight (`submitted`, `awaiting_resubmission`, `ready_to_approve`):
 
@@ -263,6 +289,7 @@ Response rows match dashboard columns:
 | Unit                 | join `units.code` + tower name           |
 | Submitted by (owner) | join owner `contacts`                    |
 | Move-in date         | `move_in_date`                           |
+| Move-out date        | `move_out_date` (optional, owner submit) |
 | Documents            | count verified / 3                       |
 | Submitted on         | `submitted_at`                           |
 | Status               | `tenant_requests.status`                 |

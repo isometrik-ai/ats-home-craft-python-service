@@ -64,6 +64,7 @@ async def test_insert_request_serializes_json_fields():
         tenant_phones=phones,
         tenant_emails=emails,
         move_in_date=date(2026, 2, 1),
+        move_out_date=date(2027, 1, 31),
         portal_access=True,
         status=TenantRequestStatus.SUBMITTED.value,
         submitted_at=submitted_at,

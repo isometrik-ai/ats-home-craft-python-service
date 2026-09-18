@@ -46,6 +46,7 @@ _TENANT_REQUEST_SELECT_COLUMNS = f"""
   tr.tenant_phones,
   tr.tenant_emails,
   tr.move_in_date,
+  tr.move_out_date,
   tr.move_in_fee,
   tr.status::text AS status,
   tr.portal_access,
@@ -131,6 +132,7 @@ class TenantRequestsRepository(BaseRepository):
         tenant_phones: list[dict[str, Any]],
         tenant_emails: list[dict[str, Any]],
         move_in_date: date | None,
+        move_out_date: date | None = None,
         portal_access: bool,
         status: str,
         submitted_at: datetime | None,
@@ -148,14 +150,15 @@ class TenantRequestsRepository(BaseRepository):
                 tenant_phones,
                 tenant_emails,
                 move_in_date,
+                move_out_date,
                 portal_access,
                 status,
                 submitted_at
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::uuid, $4::uuid,
-                $5, $6, $7::jsonb, $8::jsonb, $9::date,
-                $10, $11::tenant_request_status, $12::timestamptz
+                $5, $6, $7::jsonb, $8::jsonb, $9::date, $10::date,
+                $11, $12::tenant_request_status, $13::timestamptz
             )
             RETURNING id::text AS id
             """,
@@ -168,6 +171,7 @@ class TenantRequestsRepository(BaseRepository):
             json.dumps(tenant_phones),
             json.dumps(tenant_emails),
             move_in_date,
+            move_out_date,
             portal_access,
             status,
             submitted_at,
@@ -377,6 +381,103 @@ class TenantRequestsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def update_tenancy_fields(
+        self,
+        *,
+        organization_id: str,
+        tenant_request_id: str,
+        updates: dict[str, Any],
+    ) -> None:
+        """Patch tenant snapshot fields on an approved tenancy request."""
+        allowed = {
+            "tenant_first_name": "text",
+            "tenant_last_name": "text",
+            "tenant_phones": "jsonb",
+            "tenant_emails": "jsonb",
+            "move_in_date": "date",
+            "move_out_date": "date",
+            "portal_access": "boolean",
+        }
+        set_clauses = ["updated_at = now()"]
+        args: list[Any] = [organization_id, tenant_request_id]
+        for key, cast in allowed.items():
+            if key not in updates:
+                continue
+            value = updates[key]
+            if value is None:
+                set_clauses.append(f"{key} = NULL")
+                continue
+            args.append(value)
+            if cast == "jsonb":
+                set_clauses.append(f"{key} = ${len(args)}::jsonb")
+            else:
+                set_clauses.append(f"{key} = ${len(args)}::{cast}")
+        if len(set_clauses) == 1:
+            return
+        query = f"""
+            UPDATE tenant_requests
+            SET {", ".join(set_clauses)}
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+        """
+        await self.db_connection.execute(query, *args)
+
+    async def update_document_by_type(
+        self,
+        *,
+        organization_id: str,
+        tenant_request_id: str,
+        document_type: str,
+        file_path: str,
+        file_name: str | None,
+    ) -> dict[str, Any] | None:
+        """Replace a document file by type and reset it to pending review."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE tenant_request_documents
+            SET file_path = $4,
+                file_name = $5,
+                status = 'pending'::tenant_request_document_status,
+                rejection_reason = NULL,
+                verified_at = NULL,
+                verified_by_user_id = NULL,
+                uploaded_at = now(),
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND tenant_request_id = $2::uuid
+              AND document_type = $3::tenant_request_document_type
+            RETURNING id::text AS id, document_type::text AS document_type, status::text AS status
+            """,
+            organization_id,
+            tenant_request_id,
+            document_type,
+            file_path,
+            file_name,
+        )
+        return dict(row) if row else None
+
+    async def reset_all_documents_to_pending(
+        self,
+        *,
+        organization_id: str,
+        tenant_request_id: str,
+    ) -> None:
+        """Reset every document on a request to pending review."""
+        await self.db_connection.execute(
+            """
+            UPDATE tenant_request_documents
+            SET status = 'pending'::tenant_request_document_status,
+                rejection_reason = NULL,
+                verified_at = NULL,
+                verified_by_user_id = NULL,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND tenant_request_id = $2::uuid
+            """,
+            organization_id,
+            tenant_request_id,
+        )
+
     async def verify_document(
         self,
         *,
@@ -464,12 +565,18 @@ class TenantRequestsRepository(BaseRepository):
             "superseded_by_request_id": "uuid",
             "admin_notes": "text",
             "move_in_date": "date",
+            "move_out_date": "date",
             "move_in_fee": "numeric",
+            "submitted_at": "timestamptz",
         }
         for key, cast in allowed.items():
             if key not in fields:
                 continue
-            args.append(fields[key])
+            value = fields[key]
+            if value is None:
+                set_clauses.append(f"{key} = NULL")
+                continue
+            args.append(value)
             set_clauses.append(f"{key} = ${len(args)}::{cast}")
         query = f"""
             UPDATE tenant_requests
