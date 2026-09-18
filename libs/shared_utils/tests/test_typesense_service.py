@@ -335,6 +335,33 @@ async def test_embed_query_text_no_embedding_data(monkeypatch) -> None:
     assert await service.embed_query_text("search me") is None
 
 
+@pytest.mark.asyncio
+async def test_embed_query_text_returns_none_when_openai_fails(monkeypatch) -> None:
+    """embed_query_text falls back gracefully when OpenAI rejects the request."""
+    service = TypesenseService(collection_name="contacts")
+    mock_client = AsyncMock()
+    mock_client.embeddings.create = AsyncMock(side_effect=httpx.HTTPStatusError(
+        "unauthorized",
+        request=MagicMock(),
+        response=MagicMock(status_code=401),
+    ))
+
+    async def fake_get_client():
+        return mock_client
+
+    monkeypatch.setattr(ts_module.shared_settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(ts_module, "_get_embedding_client", fake_get_client)
+    assert await service.embed_query_text("fire") is None
+
+
+@pytest.mark.asyncio
+async def test_embed_query_text_skips_when_api_key_missing(monkeypatch) -> None:
+    """embed_query_text skips OpenAI when the API key is not configured."""
+    service = TypesenseService(collection_name="contacts")
+    monkeypatch.setattr(ts_module.shared_settings, "openai_api_key", "   ")
+    assert await service.embed_query_text("fire") is None
+
+
 def test_default_schema_for_companies_collection() -> None:
     """Schema resolver returns companies schema for companies collection."""
     settings = MagicMock()

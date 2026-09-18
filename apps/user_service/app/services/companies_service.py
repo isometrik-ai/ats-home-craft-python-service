@@ -1820,14 +1820,18 @@ class CompaniesService:
             "filter_by": filter_by,
             "exclude_fields": "embedding",
         }
-        if "@" in query_text:
+        is_email_query = "@" in query_text
+        is_phone_query = not is_email_query and sum(char.isdigit() for char in query_text) >= 5
+        if is_email_query:
             params.update(COMPANY_EMAIL_SEARCH_PARAMS)
-        elif sum(char.isdigit() for char in query_text) >= 5:
+        elif is_phone_query:
             params.update(COMPANY_PHONE_SEARCH_PARAMS)
         else:
             params.update(COMPANY_SEARCH_PARAMS)
 
-        embedding = await self.typesense.embed_query_text(query_text)
+        embedding = None
+        if not is_email_query and not is_phone_query:
+            embedding = await self.typesense.embed_query_text(query_text)
         if embedding is not None:
             vector = ",".join(map(str, embedding))
             distance_threshold = getattr(
