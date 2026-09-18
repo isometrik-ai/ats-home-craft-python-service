@@ -23,6 +23,9 @@ from apps.user_service.app.schemas.project_setup import (
 )
 from apps.user_service.app.services.project_roles_service import ProjectRolesService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
+from apps.user_service.app.services.workflow_api_key_service import (
+    provision_project_api_key,
+)
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -345,6 +348,11 @@ class ProjectsService:
             organization_id=org_id, project_id=str(inserted["id"])
         )
         details = self._normalize_details(refreshed or inserted)
+        await provision_project_api_key(
+            tenant_id=org_id,
+            project_id=str(inserted["id"]),
+            name=body.name,
+        )
         return {
             "project_id": str(inserted["id"]),
             "old_data": None,

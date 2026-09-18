@@ -46,6 +46,16 @@ class EnrichmentServiceSettings(BaseSettings):
     logo_dev_key: str | None = config("LOGO_DEV_KEY", default=None)
 
 
+class WorkflowServiceSettings(BaseSettings):
+    """Work-order / workflow service settings for internal API integrations."""
+
+    enabled: bool = config("WORKFLOW_SERVICE_ENABLED", default=False)
+    base_url: str = config("WORKFLOW_SERVICE_BASE_URL", default="http://localhost:8080")
+    internal_token: str = config("WORKFLOW_SERVICE_INTERNAL_TOKEN", default="")
+    timeout_seconds: float = config("WORKFLOW_SERVICE_TIMEOUT_SECONDS", default=10.0)
+    raise_on_failure: bool = config("WORKFLOW_SERVICE_RAISE_ON_FAILURE", default=False)
+
+
 class ExternalServiceSettings(BaseSettings):
     """External service settings."""
 
@@ -78,6 +88,7 @@ class ApplicationSettings(BaseSettings):
     shared_settings: SharedAppSettings = shared_settings
     two_fa_settings: TwoFASettings = TwoFASettings()
     enrichment_service: EnrichmentServiceSettings = EnrichmentServiceSettings()
+    workflow_service: WorkflowServiceSettings = WorkflowServiceSettings()
     invite_expiry_days: int = config("INVITE_EXPIRY_DAYS", default=7)
     # Re-enable Supabase auth by setting HOUSEHOLD_INVITATION_BYPASS_SUPABASE_AUTH=false.
     household_invitation_bypass_supabase_auth: bool = config(

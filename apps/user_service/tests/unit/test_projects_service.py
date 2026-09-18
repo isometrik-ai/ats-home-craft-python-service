@@ -436,10 +436,20 @@ async def test_create_project_success(monkeypatch):
         "apps.user_service.app.services.projects_service.ProjectRolesService",
         lambda db_connection: roles_service,
     )
+    provision_api_key = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "apps.user_service.app.services.projects_service.provision_project_api_key",
+        provision_api_key,
+    )
 
     result = await service.create_project(_create_body())
 
     assert result["project_id"]
+    provision_api_key.assert_awaited_once_with(
+        tenant_id=ORG_ID,
+        project_id=result["project_id"],
+        name="Sunrise Towers",
+    )
     assert repo.inserted_project is not None
     assert len(repo.upsert_calls) == 2
     assert all(call["project_role_id"] == "role-ca-id" for call in repo.upsert_calls)
