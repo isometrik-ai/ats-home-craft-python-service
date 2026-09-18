@@ -461,17 +461,30 @@ class TypesenseService:
 
         Uses the same model and dimensionality as document embeddings so that
         query vectors live in the same space as indexed vectors.
+
+        Returns ``None`` when OpenAI is unavailable or embedding fails so callers
+        can fall back to keyword-only Typesense search.
         """
         cleaned = (text or "").strip()
         if not cleaned:
             return None
 
-        client = await _get_embedding_client()
-        response = await client.embeddings.create(
-            model=_EMBEDDING_MODEL,
-            input=[cleaned],
-            dimensions=_EMBEDDING_DIMENSIONS,
-        )
+        api_key = (shared_settings.openai_api_key or "").strip()
+        if not api_key:
+            logger.debug("embed_query_text_skipped reason=missing_openai_api_key")
+            return None
+
+        try:
+            client = await _get_embedding_client()
+            response = await client.embeddings.create(
+                model=_EMBEDDING_MODEL,
+                input=[cleaned],
+                dimensions=_EMBEDDING_DIMENSIONS,
+            )
+        except Exception as exc:
+            logger.warning("embed_query_text_failed error=%s", exc)
+            return None
+
         if not response.data:
             return None
 

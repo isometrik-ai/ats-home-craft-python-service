@@ -1028,7 +1028,8 @@ async def test_search_companies_email_query(monkeypatch: pytest.MonkeyPatch):
 
     params = typesense.search.await_args.args[0]
     assert "@" in params["q"]
-    assert "vector_query" in params
+    typesense.embed_query_text.assert_not_awaited()
+    assert "vector_query" not in params
 
 
 @pytest.mark.asyncio
@@ -1045,6 +1046,7 @@ async def test_search_companies_phone_query():
     )
 
     params = typesense.search.await_args.args[0]
+    typesense.embed_query_text.assert_not_awaited()
     assert "filter_by" in params
     assert "status:=active" in params["filter_by"]
 
