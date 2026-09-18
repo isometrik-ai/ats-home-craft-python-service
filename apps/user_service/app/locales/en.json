@@ -849,7 +849,8 @@
       "documents_incomplete": "All required documents must be uploaded before submitting.",
       "not_ready_to_approve": "All documents must be verified before approving this request.",
       "invalid_status_transition": "This action is not allowed for the current request status.",
-      "document_not_rejected": "Only rejected documents can be re-uploaded."
+      "document_not_rejected": "Only rejected documents can be re-uploaded.",
+      "unsupported_export_format": "Only CSV export is supported."
     },
     "success": {
       "list_retrieved": "Tenant requests retrieved successfully.",

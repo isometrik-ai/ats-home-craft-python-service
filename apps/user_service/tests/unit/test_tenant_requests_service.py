@@ -12,6 +12,7 @@ from asyncpg import UniqueViolationError
 
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.enums import (
+    TENANT_REQUESTS_EXPORT_MAX_ROWS,
     MoveEventType,
     TenantRequestDocumentStatus,
     TenantRequestDocumentType,
@@ -26,6 +27,7 @@ from apps.user_service.app.schemas.tenant_requests import (
     RejectTenantDocumentRequest,
     ReuploadTenantDocumentRequest,
     TenantRequestDocumentInput,
+    TenantRequestExportQuery,
     TenantRequestListQuery,
 )
 from apps.user_service.app.services.tenant_requests_service import TenantRequestsService
@@ -551,6 +553,9 @@ def test_bucket_to_statuses() -> None:
     ]
     assert TenantRequestsService._bucket_to_statuses(TenantRequestListBucket.READY_TO_APPROVE) == [
         TenantRequestStatus.READY_TO_APPROVE.value
+    ]
+    assert TenantRequestsService._bucket_to_statuses(TenantRequestListBucket.SUPERSEDED) == [
+        TenantRequestStatus.SUPERSEDED.value
     ]
 
 
@@ -1372,3 +1377,117 @@ def test_serialize_list_item_includes_owner_and_unit() -> None:
     assert item.unit.code == "A-1802"
     assert item.unit.location_label == "Tower A · F18"
     assert item.documents_verified_count == 1
+
+
+@pytest.mark.asyncio
+async def test_export_csv_success_and_invalid_format() -> None:
+    """Export tenant requests as CSV with list filters."""
+    repo = _FakeTenantRequestsRepo()
+    repo.list_rows = [
+        _request_row(
+            documents_verified_count=2,
+            documents_total_count=3,
+            owner_phones=[
+                {"phone_number": "9123456789", "phone_isd_code": "+91", "is_primary": True}
+            ],
+        )
+    ]
+    svc = _service(repo=repo)
+
+    csv_text = await svc.export_csv(
+        project_id=PROJECT_ID,
+        query=TenantRequestExportQuery(format="csv", bucket=TenantRequestListBucket.PENDING_REVIEW),
+    )
+    assert "request_id,tenant_name,tenant_phone" in csv_text
+    assert "Tenant User" in csv_text
+    assert "+91 9876543210" in csv_text
+    assert "Owner One" in csv_text
+
+    with pytest.raises(ValidationException):
+        await svc.export_csv(
+            project_id=PROJECT_ID,
+            query=TenantRequestExportQuery(format="xlsx"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_admin_requests_superseded_bucket() -> None:
+    """Admin list supports superseded bucket filter."""
+    captured: dict[str, object] = {}
+    repo = _FakeTenantRequestsRepo()
+
+    async def fake_list_for_admin(**kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    repo.list_for_admin = fake_list_for_admin  # type: ignore[method-assign]
+    svc = _service(repo=repo)
+
+    await svc.list_admin_requests(
+        project_id=PROJECT_ID,
+        query=TenantRequestListQuery(bucket=TenantRequestListBucket.SUPERSEDED),
+    )
+    assert captured["statuses"] == [TenantRequestStatus.SUPERSEDED.value]
+
+
+@pytest.mark.asyncio
+async def test_export_csv_superseded_status_filter() -> None:
+    """Export supports status=superseded filter."""
+    captured: dict[str, object] = {}
+    repo = _FakeTenantRequestsRepo()
+
+    async def fake_list_for_admin(**kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    repo.list_for_admin = fake_list_for_admin  # type: ignore[method-assign]
+    svc = _service(repo=repo)
+
+    await svc.export_csv(
+        project_id=PROJECT_ID,
+        query=TenantRequestExportQuery(format="csv", status=TenantRequestStatus.SUPERSEDED),
+    )
+    assert captured["statuses"] == [TenantRequestStatus.SUPERSEDED.value]
+
+
+@pytest.mark.asyncio
+async def test_export_csv_forwards_filters_to_list() -> None:
+    """Export passes list filters through to the repository query."""
+    repo = _FakeTenantRequestsRepo()
+    captured: dict[str, object] = {}
+
+    async def fake_list_for_admin(**kwargs):
+        captured.update(kwargs)
+        return [], 0
+
+    repo.list_for_admin = fake_list_for_admin  # type: ignore[method-assign]
+    svc = _service(repo=repo)
+
+    await svc.export_csv(
+        project_id=PROJECT_ID,
+        query=TenantRequestExportQuery(
+            format="csv",
+            status=TenantRequestStatus.READY_TO_APPROVE,
+            search="A-101",
+            unit_id=UNIT_ID,
+        ),
+    )
+    assert captured["statuses"] == [TenantRequestStatus.READY_TO_APPROVE.value]
+    assert captured["search"] == "A-101"
+    assert captured["unit_id"] == UNIT_ID
+    assert captured["limit"] == TENANT_REQUESTS_EXPORT_MAX_ROWS
+    assert captured["offset"] == 0
+
+
+@pytest.mark.asyncio
+async def test_export_csv_sanitizes_formula_injection() -> None:
+    """CSV export neutralizes spreadsheet formula injection."""
+    repo = _FakeTenantRequestsRepo()
+    repo.list_rows = [_request_row(tenant_first_name="=HYPERLINK")]
+    svc = _service(repo=repo)
+
+    csv_text = await svc.export_csv(
+        project_id=PROJECT_ID,
+        query=TenantRequestExportQuery(format="csv"),
+    )
+    assert "'=HYPERLINK" in csv_text

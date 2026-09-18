@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
+from starlette.responses import Response
 from supabase import AsyncClient
 
 from apps.user_service.app.app_instance import limiter
@@ -14,6 +15,7 @@ from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.tenant_requests import (
     ApproveTenantRequestRequest,
     RejectTenantDocumentRequest,
+    TenantRequestExportQuery,
     TenantRequestListQuery,
 )
 from apps.user_service.app.services.tenant_requests_service import TenantRequestsService
@@ -39,6 +41,14 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     422: {"description": "Validation error."},
     429: {"description": "Too many requests (rate limited)."},
     500: {"description": "Internal server error."},
+}
+
+EXPORT_SUCCESS_RESPONSES: dict[int | str, dict] = {
+    **COMMON_ERROR_RESPONSES,
+    http_status.HTTP_200_OK: {
+        "content": {"text/csv": {}},
+        "description": "CSV export of filtered tenant requests.",
+    },
 }
 
 
@@ -117,6 +127,45 @@ async def list_project_tenant_requests(
         page_size=query.page_size,
         message_key="tenant_requests.success.list_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("export project tenant requests")
+@router.get(
+    "/{project_id}/tenant-requests/export",
+    status_code=http_status.HTTP_200_OK,
+    summary="Export tenant requests as CSV",
+    description=(
+        "Export filtered tenant requests as CSV using the same filters as the list endpoint: "
+        "`bucket`, `status`, `search`, and `unit_id`."
+    ),
+    responses=EXPORT_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+async def export_project_tenant_requests(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    query: TenantRequestExportQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Export filtered tenant requests as a CSV attachment."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = TenantRequestsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    csv_text = await service.export_csv(project_id=project_id, query=query)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="tenant-requests-{project_id}.csv"'},
     )
 
 
