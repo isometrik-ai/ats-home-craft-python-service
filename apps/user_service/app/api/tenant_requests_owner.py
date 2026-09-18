@@ -12,6 +12,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.tenant_requests import (
+    CreateMoveOutRequest,
     CreateTenantRequestRequest,
     OwnerTenantRequestListQuery,
     ReuploadTenantDocumentRequest,
@@ -128,6 +129,57 @@ async def create_tenant_request(
     return success_response(
         request=request,
         message_key="tenant_requests.success.created",
+        custom_code=CustomStatusCode.CREATED,
+        status_code=http_status.HTTP_201_CREATED,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("create move-out request")
+@router.post(
+    "/move-out",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Submit a move-out request for admin review",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="tenant_requests",
+    category="CONTACT_ONBOARDING",
+)
+async def create_move_out_request(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: CreateMoveOutRequest = Body(...),
+):
+    """Create and submit a move-out request for an active tenant."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = TenantRequestsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await service.create_move_out_request(
+        owner_contact_id=str(contact["id"]),
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="tenant_requests",
+        requested_id=data.id,
+        description=f"Submitted move-out request: {data.id}",
+        risk_level="high",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="tenant_requests.success.move_out_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
         data=data.model_dump(),

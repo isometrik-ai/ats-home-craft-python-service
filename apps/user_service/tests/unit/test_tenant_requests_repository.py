@@ -380,6 +380,7 @@ async def test_find_active_approved_for_unit():
     assert found["id"] == REQUEST_ID
     query, args = conn.fetchrow_calls[0]
     assert "superseded_at IS NULL" in query
+    assert "request_type = 'move_in'" in query
     assert args[2] == TenantRequestStatus.APPROVED.value
 
     conn.row = None

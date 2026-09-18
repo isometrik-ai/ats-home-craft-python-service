@@ -48,8 +48,11 @@ _TENANT_REQUEST_SELECT_COLUMNS = f"""
   tr.move_in_date,
   tr.move_out_date,
   tr.move_in_fee,
+  tr.request_type::text AS request_type,
   tr.status::text AS status,
   tr.portal_access,
+  tr.owner_reason,
+  tr.rejection_reason,
   tr.tenant_contact_id::text AS tenant_contact_id,
   tr.contact_unit_id::text AS contact_unit_id,
   tr.approved_at,
@@ -136,6 +139,10 @@ class TenantRequestsRepository(BaseRepository):
         portal_access: bool,
         status: str,
         submitted_at: datetime | None,
+        request_type: str = "move_in",
+        tenant_contact_id: str | None = None,
+        contact_unit_id: str | None = None,
+        owner_reason: str | None = None,
     ) -> dict[str, Any]:
         """Insert a tenant_requests header row."""
         row = await self.db_connection.fetchrow(
@@ -152,13 +159,18 @@ class TenantRequestsRepository(BaseRepository):
                 move_in_date,
                 move_out_date,
                 portal_access,
+                request_type,
+                tenant_contact_id,
+                contact_unit_id,
+                owner_reason,
                 status,
                 submitted_at
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::uuid, $4::uuid,
                 $5, $6, $7::jsonb, $8::jsonb, $9::date, $10::date,
-                $11, $12::tenant_request_status, $13::timestamptz
+                $11, $12::tenant_request_type, $13::uuid, $14::uuid, $15,
+                $16::tenant_request_status, $17::timestamptz
             )
             RETURNING id::text AS id
             """,
@@ -173,6 +185,10 @@ class TenantRequestsRepository(BaseRepository):
             move_in_date,
             move_out_date,
             portal_access,
+            request_type,
+            tenant_contact_id,
+            contact_unit_id,
+            owner_reason,
             status,
             submitted_at,
         )
@@ -568,6 +584,8 @@ class TenantRequestsRepository(BaseRepository):
             "move_out_date": "date",
             "move_in_fee": "numeric",
             "submitted_at": "timestamptz",
+            "owner_reason": "text",
+            "rejection_reason": "text",
         }
         for key, cast in allowed.items():
             if key not in fields:
@@ -622,6 +640,7 @@ class TenantRequestsRepository(BaseRepository):
         organization_id: str,
         owner_contact_id: str,
         unit_id: str | None,
+        request_type: str | None = None,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -631,6 +650,9 @@ class TenantRequestsRepository(BaseRepository):
         if unit_id:
             args.append(unit_id)
             filters.append(f"tr.unit_id = ${len(args)}::uuid")
+        if request_type:
+            args.append(request_type)
+            filters.append(f"tr.request_type = ${len(args)}::tenant_request_type")
         where_sql = " AND ".join(filters)
         count = await self.db_connection.fetchval(
             f"""
@@ -661,6 +683,7 @@ class TenantRequestsRepository(BaseRepository):
         statuses: list[str] | None,
         search: str | None,
         unit_id: str | None,
+        request_type: str | None = None,
         project_id: str,
         limit: int,
         offset: int,
@@ -671,6 +694,9 @@ class TenantRequestsRepository(BaseRepository):
         if statuses:
             args.append(statuses)
             filters.append(f"tr.status = ANY(${len(args)}::tenant_request_status[])")
+        if request_type:
+            args.append(request_type)
+            filters.append(f"tr.request_type = ${len(args)}::tenant_request_type")
         if unit_id:
             args.append(unit_id)
             filters.append(f"tr.unit_id = ${len(args)}::uuid")
@@ -791,6 +817,7 @@ class TenantRequestsRepository(BaseRepository):
             FROM tenant_requests
             WHERE organization_id = $1::uuid
               AND unit_id = $2::uuid
+              AND request_type = 'move_in'::tenant_request_type
               AND status = $3::tenant_request_status
               AND superseded_at IS NULL
             LIMIT 1
@@ -818,6 +845,7 @@ class TenantRequestsRepository(BaseRepository):
             FROM tenant_requests
             WHERE organization_id = $1::uuid
               AND tenant_contact_id = $2::uuid
+              AND request_type = 'move_in'::tenant_request_type
               AND status = $3::tenant_request_status
               AND superseded_at IS NULL
             LIMIT 1

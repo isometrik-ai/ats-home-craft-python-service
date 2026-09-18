@@ -362,3 +362,31 @@ async def test_reupload_tenant_document_not_rejected(monkeypatch, client):
         json={"file_path": "/new-id.pdf"},
     )
     assert res.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Move-out request
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request(monkeypatch, client):
+    """POST move-out creates a move-out request for admin review."""
+
+    _patch_owner_context(monkeypatch)
+
+    async def fake_create_move_out_request(_self, *, owner_contact_id: str, body):
+        del _self
+        assert owner_contact_id == CONTACT_ID
+        assert body.unit_id == UNIT_ID
+        assert body.move_out_date.isoformat() == "2026-12-01"
+        return _fake_detail(status="submitted", request_type="move_out")
+
+    monkeypatch.setattr(f"{_SERVICE}.create_move_out_request", fake_create_move_out_request)
+
+    res = await client.post(
+        "/v1/contact-onboarding/tenant-requests/move-out",
+        json={"unit_id": UNIT_ID, "move_out_date": "2026-12-01", "reason": "Lease ending"},
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["request_type"] == "move_out"

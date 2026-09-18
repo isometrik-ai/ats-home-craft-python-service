@@ -17,6 +17,13 @@ class MoveEventListBucket(str, Enum):
     MOVE_OUT = "move_out"
 
 
+class TenantRequestType(str, Enum):
+    """Tenant request workflow type (Postgres tenant_request_type enum)."""
+
+    MOVE_IN = "move_in"
+    MOVE_OUT = "move_out"
+
+
 class TenantRequestStatus(str, Enum):
     """Tenant request header status (Postgres tenant_request_status enum)."""
 
@@ -26,6 +33,7 @@ class TenantRequestStatus(str, Enum):
     AWAITING_RESUBMISSION = "awaiting_resubmission"
     READY_TO_APPROVE = "ready_to_approve"
     APPROVED = "approved"
+    REJECTED = "rejected"
     CANCELLED = "cancelled"
     SUPERSEDED = "superseded"
 
@@ -70,6 +78,7 @@ class TenantRequestEventType(str, Enum):
     RESUBMITTED = "resubmitted"
     READY_TO_APPROVE = "ready_to_approve"
     APPROVED = "approved"
+    REJECTED = "rejected"
     CANCELLED = "cancelled"
     SUPERSEDED = "superseded"
     TENANT_INVITE_SENT = "tenant_invite_sent"

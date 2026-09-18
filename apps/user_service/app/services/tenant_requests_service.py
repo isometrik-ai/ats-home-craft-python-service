@@ -1,5 +1,6 @@
 """Tenant request business logic."""
 
+# pylint: disable=too-many-lines
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
@@ -37,11 +38,15 @@ from apps.user_service.app.schemas.enums import (
     TenantRequestEventType,
     TenantRequestListBucket,
     TenantRequestStatus,
+    TenantRequestType,
 )
 from apps.user_service.app.schemas.tenant_requests import (
+    ApproveMoveOutRequest,
     ApproveTenantRequestRequest,
+    CreateMoveOutRequest,
     CreateTenantRequestRequest,
     OwnerTenantRequestListQuery,
+    RejectMoveOutRequest,
     RejectTenantDocumentRequest,
     ReuploadTenantDocumentRequest,
     TenantRequestDocumentResponse,
@@ -279,6 +284,11 @@ class TenantRequestsService:
             return TenantRequestStatus.READY_TO_APPROVE.value
         return TenantRequestStatus.PENDING_REVIEW.value
 
+    @staticmethod
+    def _row_request_type(row: dict[str, Any]) -> str:
+        """Return the request workflow type, defaulting to move-in."""
+        return str(row.get("request_type") or TenantRequestType.MOVE_IN.value)
+
     async def _sync_header_status_from_documents(
         self,
         *,
@@ -286,6 +296,8 @@ class TenantRequestsService:
         documents: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """Align tenant_requests.status with document rows when still in-flight."""
+        if self._row_request_type(row) == TenantRequestType.MOVE_OUT.value:
+            return row
         current = str(row.get("status") or "")
         if current not in _INFLIGHT_STATUSES:
             return row
@@ -320,8 +332,38 @@ class TenantRequestsService:
         events: list[dict[str, Any]],
     ) -> list[TenantRequestMilestoneResponse]:
         """Build mobile timeline milestones from events and header."""
+        request_type = str(row.get("request_type") or TenantRequestType.MOVE_IN.value)
         submitted_at = format_iso_datetime(row.get("submitted_at"))
         approved_at = format_iso_datetime(row.get("approved_at"))
+        if request_type == TenantRequestType.MOVE_OUT.value:
+            rejected_at = next(
+                (
+                    format_iso_datetime(event.get("occurred_at"))
+                    for event in events
+                    if event.get("event_type") == TenantRequestEventType.REJECTED.value
+                ),
+                None,
+            )
+            return [
+                TenantRequestMilestoneResponse(
+                    key="submitted",
+                    label="Move-out request submitted",
+                    completed=bool(submitted_at),
+                    occurred_at=submitted_at,
+                ),
+                TenantRequestMilestoneResponse(
+                    key="move_out_completed",
+                    label="Move-out approved",
+                    completed=row.get("status") == TenantRequestStatus.APPROVED.value,
+                    occurred_at=approved_at,
+                ),
+                TenantRequestMilestoneResponse(
+                    key="move_out_rejected",
+                    label="Move-out rejected",
+                    completed=row.get("status") == TenantRequestStatus.REJECTED.value,
+                    occurred_at=rejected_at,
+                ),
+            ]
         ready_at = next(
             (
                 format_iso_datetime(event.get("occurred_at"))
@@ -481,10 +523,13 @@ class TenantRequestsService:
             move_out_date=self._format_date(row.get("move_out_date")),
             move_in_fee=self._format_decimal(row.get("move_in_fee")) or "0",
             status=str(row.get("status")),
+            request_type=self._row_request_type(row),
             portal_access=bool(row.get("portal_access", False)),
             submitted_at=format_iso_datetime(row.get("submitted_at")),
             approved_at=format_iso_datetime(row.get("approved_at")),
             cancelled_at=format_iso_datetime(row.get("cancelled_at")),
+            owner_reason=row.get("owner_reason"),
+            rejection_reason=row.get("rejection_reason"),
             documents_verified_count=int(row.get("documents_verified_count") or 0),
             documents_total_count=int(row.get("documents_total_count") or 0),
             owner=self._build_owner_summary(row),
@@ -506,11 +551,13 @@ class TenantRequestsService:
             organization_id=org_id,
             tenant_request_id=str(row["id"]),
         )
+        request_type = self._row_request_type(row)
         verified_count = sum(
             1
             for doc in documents
             if doc.get("status") == TenantRequestDocumentStatus.VERIFIED.value
         )
+        documents_total = len(documents) if request_type == TenantRequestType.MOVE_IN.value else 0
         return TenantRequestResponse(
             id=str(row["id"]),
             organization_id=str(row["organization_id"]),
@@ -532,6 +579,7 @@ class TenantRequestsService:
             move_out_date=self._format_date(row.get("move_out_date")),
             move_in_fee=self._format_decimal(row.get("move_in_fee")) or "0",
             status=str(row.get("status")),
+            request_type=request_type,
             portal_access=bool(row.get("portal_access", False)),
             tenant_contact_id=row.get("tenant_contact_id"),
             contact_unit_id=row.get("contact_unit_id"),
@@ -540,6 +588,8 @@ class TenantRequestsService:
             superseded_at=format_iso_datetime(row.get("superseded_at")),
             cancelled_at=format_iso_datetime(row.get("cancelled_at")),
             admin_notes=row.get("admin_notes"),
+            owner_reason=row.get("owner_reason"),
+            rejection_reason=row.get("rejection_reason"),
             documents=[
                 TenantRequestDocumentResponse(
                     id=str(doc["id"]),
@@ -564,7 +614,7 @@ class TenantRequestsService:
             ],
             milestones=self._derive_milestones(row=row, events=events),
             documents_verified_count=verified_count,
-            documents_total_count=len(documents),
+            documents_total_count=documents_total,
             owner=self._build_owner_summary(row),
             unit=self._build_unit_summary(row),
             created_at=format_iso_datetime(row.get("created_at")),
@@ -631,6 +681,31 @@ class TenantRequestsService:
         if tenant_id:
             raise ValidationException(
                 message_key="tenant_requests.errors.active_tenant_exists",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _assert_active_tenant_on_unit(self, *, unit_id: str) -> str:
+        """Require an active tenant on the unit and return the contact id."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        tenant_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if not tenant_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenant",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return str(tenant_id)
+
+    @staticmethod
+    def _assert_move_out_request_row(row: dict[str, Any]) -> None:
+        """Ensure the row is a move-out request."""
+        request_type = str(row.get("request_type") or TenantRequestType.MOVE_IN.value)
+        if request_type != TenantRequestType.MOVE_OUT.value:
+            raise ValidationException(
+                message_key="tenant_requests.errors.not_move_out_request",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
@@ -735,6 +810,7 @@ class TenantRequestsService:
                 portal_access=body.portal_access,
                 status=TenantRequestStatus.SUBMITTED.value,
                 submitted_at=now,
+                request_type=TenantRequestType.MOVE_IN.value,
             )
         except UniqueViolationError as exc:
             raise ConflictException(
@@ -779,6 +855,108 @@ class TenantRequestsService:
             options={
                 "click_action": "OPEN_TENANT_REQUEST",
                 "idempotency_key": f"tenant_request:{request_id}:submitted",
+            },
+        )
+        return await self._serialize_detail(row)
+
+    async def create_move_out_request(
+        self,
+        *,
+        owner_contact_id: str,
+        body: CreateMoveOutRequest,
+    ) -> TenantRequestResponse:
+        """Owner submits a move-out request for admin review."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await self._assert_owner_access(
+            owner_contact_id=owner_contact_id,
+            unit_id=body.unit_id,
+        )
+        active_tenant_id = await self._assert_active_tenant_on_unit(unit_id=body.unit_id)
+        active_approved = await self.repo.find_active_approved_for_unit(
+            organization_id=org_id,
+            unit_id=body.unit_id,
+        )
+        if not active_approved:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenancy",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if str(active_approved.get("tenant_contact_id") or "") != active_tenant_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenancy",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if body.move_out_date < date.today():
+            raise ValidationException(
+                message_key="tenant_requests.errors.move_out_date_in_past",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        approved_row = await self.repo.get_request_by_id(
+            organization_id=org_id,
+            tenant_request_id=str(active_approved["id"]),
+        )
+        if not approved_row:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenancy",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        now = datetime.now(timezone.utc)
+        try:
+            inserted = await self.repo.insert_request(
+                organization_id=org_id,
+                project_id=str(unit["project_id"]),
+                unit_id=body.unit_id,
+                submitted_by_contact_id=owner_contact_id,
+                tenant_first_name=str(approved_row.get("tenant_first_name") or ""),
+                tenant_last_name=approved_row.get("tenant_last_name"),
+                tenant_phones=parse_json_any(approved_row.get("tenant_phones"), default=[]) or [],
+                tenant_emails=parse_json_any(approved_row.get("tenant_emails"), default=[]) or [],
+                move_in_date=self._coerce_row_date(approved_row.get("move_in_date")),
+                move_out_date=body.move_out_date,
+                portal_access=bool(approved_row.get("portal_access", False)),
+                status=TenantRequestStatus.SUBMITTED.value,
+                submitted_at=now,
+                request_type=TenantRequestType.MOVE_OUT.value,
+                tenant_contact_id=active_tenant_id,
+                contact_unit_id=str(active_approved.get("contact_unit_id") or ""),
+                owner_reason=body.reason,
+            )
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="tenant_requests.errors.inflight_request_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        request_id = str(inserted["id"])
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=request_id,
+            event_type=TenantRequestEventType.CREATED.value,
+            actor_contact_id=owner_contact_id,
+        )
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=request_id,
+            event_type=TenantRequestEventType.SUBMITTED.value,
+            actor_contact_id=owner_contact_id,
+        )
+        row = await self._get_request_or_raise(tenant_request_id=request_id)
+        await self._push().send_to_org_members(
+            organization_id=org_id,
+            message_key="notifications.push.tenant_request.move_out_submitted",
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            params={"unit_label": unit_label_from_row(unit)},
+            data={
+                "tenant_request_id": request_id,
+                "project_id": str(unit["project_id"]),
+                "unit_id": body.unit_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": f"tenant_request:{request_id}:move_out_submitted",
             },
         )
         return await self._serialize_detail(row)
@@ -944,6 +1122,7 @@ class TenantRequestsService:
             organization_id=org_id,
             owner_contact_id=owner_contact_id,
             unit_id=query.unit_id,
+            request_type=query.request_type.value if query.request_type else None,
             limit=query.page_size,
             offset=offset,
         )
@@ -1217,6 +1396,7 @@ class TenantRequestsService:
             statuses=statuses,
             search=query.search,
             unit_id=query.unit_id,
+            request_type=query.request_type.value if query.request_type else None,
             project_id=project_id,
             limit=query.page_size,
             offset=offset,
@@ -1274,6 +1454,11 @@ class TenantRequestsService:
             project_id=project_id,
             tenant_request_id=tenant_request_id,
         )
+        if self._row_request_type(row) == TenantRequestType.MOVE_OUT.value:
+            raise ValidationException(
+                message_key="tenant_requests.errors.not_move_in_request",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         if row.get("status") not in _INFLIGHT_STATUSES:
             raise ValidationException(
                 message_key="tenant_requests.errors.invalid_status_transition",
@@ -1329,6 +1514,11 @@ class TenantRequestsService:
             project_id=project_id,
             tenant_request_id=tenant_request_id,
         )
+        if self._row_request_type(row) == TenantRequestType.MOVE_OUT.value:
+            raise ValidationException(
+                message_key="tenant_requests.errors.not_move_in_request",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         if row.get("status") not in _INFLIGHT_STATUSES:
             raise ValidationException(
                 message_key="tenant_requests.errors.invalid_status_transition",
@@ -1471,6 +1661,11 @@ class TenantRequestsService:
             project_id=project_id,
             tenant_request_id=tenant_request_id,
         )
+        if self._row_request_type(row) == TenantRequestType.MOVE_OUT.value:
+            raise ValidationException(
+                message_key="tenant_requests.errors.not_move_in_request",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         org_id = self.user_context.organization_id
         assert org_id
         documents = await self.repo.list_documents(
@@ -1650,6 +1845,197 @@ class TenantRequestsService:
             options={
                 "click_action": "OPEN_TENANT_REQUEST",
                 "idempotency_key": f"tenant_request:{tenant_request_id}:approved",
+            },
+        )
+        return await self._serialize_detail(row)
+
+    async def approve_move_out_request(
+        self,
+        *,
+        project_id: str,
+        tenant_request_id: str,
+        body: ApproveMoveOutRequest,
+    ) -> TenantRequestResponse:
+        """Admin approves a move-out request and releases the tenant household."""
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
+        self._assert_move_out_request_row(row)
+        if row.get("status") != TenantRequestStatus.SUBMITTED.value:
+            raise ValidationException(
+                message_key="tenant_requests.errors.invalid_status_transition",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        org_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        assert org_id and user_id
+        unit_id = str(row["unit_id"])
+        tenant_contact_id = str(row.get("tenant_contact_id") or "")
+        contact_unit_id = str(row.get("contact_unit_id") or "")
+        if not tenant_contact_id or not contact_unit_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenancy",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        active_tenant_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if not active_tenant_id or str(active_tenant_id) != tenant_contact_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenant",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        move_out_date = self._coerce_row_date(row.get("move_out_date"))
+        if move_out_date is None:
+            raise ValidationException(
+                message_key="tenant_requests.errors.move_out_date_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        existing = await self.repo.find_active_approved_for_unit(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        turnover_service = UnitOccupancyTurnoverService(
+            db_connection=self.db_connection,
+            user_context=self.user_context,
+        )
+        await turnover_service.release_outgoing_tenant_household(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            reason="Move-out request approved; clearing outgoing household.",
+        )
+        await self._record_move_event_ledger(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            contact_id=tenant_contact_id,
+            contact_unit_id=contact_unit_id,
+            move_type=MoveEventType.MOVE_OUT.value,
+            event_date=move_out_date,
+            notes=body.admin_notes or "Move-out request approved",
+        )
+        now = datetime.now(timezone.utc)
+        if existing:
+            await self.repo.update_request_status(
+                organization_id=org_id,
+                tenant_request_id=str(existing["id"]),
+                status=TenantRequestStatus.SUPERSEDED.value,
+                superseded_at=now,
+                superseded_by_request_id=tenant_request_id,
+            )
+            await self.repo.insert_event(
+                organization_id=org_id,
+                tenant_request_id=str(existing["id"]),
+                event_type=TenantRequestEventType.SUPERSEDED.value,
+                actor_user_id=str(user_id),
+                payload={"superseded_by_request_id": tenant_request_id},
+            )
+        await self.repo.update_request_status(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            status=TenantRequestStatus.APPROVED.value,
+            approved_at=now,
+            approved_by_user_id=str(user_id),
+            admin_notes=body.admin_notes,
+        )
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            event_type=TenantRequestEventType.APPROVED.value,
+            actor_user_id=str(user_id),
+            payload={"tenant_contact_id": tenant_contact_id},
+        )
+        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=unit_id,
+        )
+        if unit:
+            await self.units_repo.reconcile_unit_inventory_status(
+                organization_id=org_id,
+                project_id=str(unit["project_id"]),
+                unit_id=unit_id,
+            )
+        unit_label = unit_label_from_row(unit or {"unit_id": unit_id})
+        await self._push().send_to_contact(
+            organization_id=org_id,
+            contact_id=str(row.get("submitted_by_contact_id") or ""),
+            message_key="notifications.push.tenant_request.move_out_approved",
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            params={"unit_label": unit_label},
+            data={
+                "tenant_request_id": tenant_request_id,
+                "project_id": project_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": tenant_request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": f"tenant_request:{tenant_request_id}:move_out_approved",
+            },
+        )
+        return await self._serialize_detail(row)
+
+    async def reject_move_out_request(
+        self,
+        *,
+        project_id: str,
+        tenant_request_id: str,
+        body: RejectMoveOutRequest,
+    ) -> TenantRequestResponse:
+        """Admin rejects a submitted move-out request."""
+        row = await self._get_admin_request_or_raise(
+            project_id=project_id,
+            tenant_request_id=tenant_request_id,
+        )
+        self._assert_move_out_request_row(row)
+        if row.get("status") != TenantRequestStatus.SUBMITTED.value:
+            raise ValidationException(
+                message_key="tenant_requests.errors.invalid_status_transition",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        org_id = self.user_context.organization_id
+        user_id = self.user_context.user_id
+        assert org_id and user_id
+        await self.repo.update_request_status(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            status=TenantRequestStatus.REJECTED.value,
+            rejection_reason=body.rejection_reason,
+        )
+        await self.repo.insert_event(
+            organization_id=org_id,
+            tenant_request_id=tenant_request_id,
+            event_type=TenantRequestEventType.REJECTED.value,
+            actor_user_id=str(user_id),
+            payload={"rejection_reason": body.rejection_reason},
+        )
+        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        unit = await self.contact_units_repo.get_unit_project(
+            organization_id=org_id,
+            unit_id=str(row["unit_id"]),
+        )
+        unit_label = unit_label_from_row(unit or {"unit_id": str(row["unit_id"])})
+        await self._push().send_to_contact(
+            organization_id=org_id,
+            contact_id=str(row.get("submitted_by_contact_id") or ""),
+            message_key="notifications.push.tenant_request.move_out_rejected",
+            notification_type="NOTIFICATION_TYPE_TENANT",
+            feed_type="tenant",
+            params={"unit_label": unit_label},
+            data={
+                "tenant_request_id": tenant_request_id,
+                "project_id": project_id,
+                "screen": "tenant_request_detail",
+            },
+            entity={"kind": "tenant_request", "id": tenant_request_id},
+            options={
+                "click_action": "OPEN_TENANT_REQUEST",
+                "idempotency_key": f"tenant_request:{tenant_request_id}:move_out_rejected",
             },
         )
         return await self._serialize_detail(row)

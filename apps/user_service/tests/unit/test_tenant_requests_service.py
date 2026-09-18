@@ -18,11 +18,15 @@ from apps.user_service.app.schemas.enums import (
     TenantRequestEventType,
     TenantRequestListBucket,
     TenantRequestStatus,
+    TenantRequestType,
 )
 from apps.user_service.app.schemas.tenant_requests import (
+    ApproveMoveOutRequest,
     ApproveTenantRequestRequest,
+    CreateMoveOutRequest,
     CreateTenantRequestRequest,
     OwnerTenantRequestListQuery,
+    RejectMoveOutRequest,
     RejectTenantDocumentRequest,
     ReuploadTenantDocumentRequest,
     TenantRequestDocumentInput,
@@ -88,6 +92,7 @@ def _request_row(**overrides: Any) -> dict[str, Any]:
         "tenant_emails": [],
         "move_in_date": date(2026, 8, 1),
         "move_in_fee": Decimal("0"),
+        "request_type": TenantRequestType.MOVE_IN.value,
         "status": TenantRequestStatus.SUBMITTED.value,
         "portal_access": False,
         "tenant_contact_id": None,
@@ -204,6 +209,26 @@ class _FakeTenantRequestsRepo:
         self.last_insert_kwargs = dict(kwargs)
         if self.insert_raises_unique:
             raise UniqueViolationError("duplicate")
+        self.row = _request_row(
+            id=REQUEST_ID,
+            organization_id=kwargs.get("organization_id", ORG_ID),
+            project_id=kwargs.get("project_id", PROJECT_ID),
+            unit_id=kwargs.get("unit_id", UNIT_ID),
+            submitted_by_contact_id=kwargs.get("submitted_by_contact_id", OWNER_ID),
+            tenant_first_name=kwargs.get("tenant_first_name", "Tenant"),
+            tenant_last_name=kwargs.get("tenant_last_name"),
+            tenant_phones=kwargs.get("tenant_phones", []),
+            tenant_emails=kwargs.get("tenant_emails", []),
+            move_in_date=kwargs.get("move_in_date"),
+            move_out_date=kwargs.get("move_out_date"),
+            portal_access=kwargs.get("portal_access", False),
+            request_type=kwargs.get("request_type", TenantRequestType.MOVE_IN.value),
+            status=kwargs.get("status", TenantRequestStatus.SUBMITTED.value),
+            tenant_contact_id=kwargs.get("tenant_contact_id"),
+            contact_unit_id=kwargs.get("contact_unit_id"),
+            owner_reason=kwargs.get("owner_reason"),
+            submitted_at=kwargs.get("submitted_at"),
+        )
         return {"id": REQUEST_ID}
 
     async def insert_document(self, **kwargs):
@@ -1496,3 +1521,130 @@ def test_serialize_list_item_includes_owner_and_unit() -> None:
     assert item.unit.code == "A-1802"
     assert item.unit.location_label == "Tower A · F18"
     assert item.documents_verified_count == 1
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request_success() -> None:
+    """Owner can submit a move-out request for an active tenant."""
+    repo = _FakeTenantRequestsRepo()
+    repo.active_approved = {
+        "id": "approved-1",
+        "tenant_contact_id": "tenant-1",
+        "contact_unit_id": "link-1",
+    }
+    repo.row = _request_row(
+        id="approved-1",
+        status=TenantRequestStatus.APPROVED.value,
+        tenant_contact_id="tenant-1",
+        contact_unit_id="link-1",
+    )
+    service = _service(repo=repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+
+    result = await service.create_move_out_request(
+        owner_contact_id=OWNER_ID,
+        body=CreateMoveOutRequest(
+            unit_id=UNIT_ID,
+            move_out_date=date.today() + timedelta(days=30),
+            reason="Lease ending",
+        ),
+    )
+
+    assert result.request_type == TenantRequestType.MOVE_OUT.value
+    assert repo.last_insert_kwargs["request_type"] == TenantRequestType.MOVE_OUT.value
+    assert repo.last_insert_kwargs["tenant_contact_id"] == "tenant-1"
+    assert repo.last_insert_kwargs["owner_reason"] == "Lease ending"
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request_requires_active_tenant() -> None:
+    """Move-out request fails when the unit has no active tenant."""
+    service = _service()
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(return_value=None)
+
+    with pytest.raises(ValidationException) as exc:
+        await service.create_move_out_request(
+            owner_contact_id=OWNER_ID,
+            body=CreateMoveOutRequest(
+                unit_id=UNIT_ID,
+                move_out_date=date.today() + timedelta(days=10),
+            ),
+        )
+    assert exc.value.message_key == "tenant_requests.errors.no_active_tenant"
+
+
+@pytest.mark.asyncio
+async def test_approve_move_out_request_success() -> None:
+    """Admin approve move-out releases tenant and supersedes move-in request."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(
+        request_type=TenantRequestType.MOVE_OUT.value,
+        status=TenantRequestStatus.SUBMITTED.value,
+        tenant_contact_id="tenant-1",
+        contact_unit_id="link-1",
+        move_out_date=date(2026, 12, 1),
+    )
+    repo.active_approved = {
+        "id": "approved-1",
+        "tenant_contact_id": "tenant-1",
+        "contact_unit_id": "link-1",
+    }
+    move_events_repo = _FakeMoveEventsRepo()
+    service = _service(repo=repo, move_events_repo=move_events_repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+
+    result = await service.approve_move_out_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        body=ApproveMoveOutRequest(admin_notes="Confirmed"),
+    )
+
+    assert result.status == TenantRequestStatus.APPROVED.value
+    assert move_events_repo.insert_calls
+    assert move_events_repo.insert_calls[0]["move_type"] == MoveEventType.MOVE_OUT.value
+    assert repo.row["status"] == TenantRequestStatus.APPROVED.value
+
+
+@pytest.mark.asyncio
+async def test_reject_move_out_request_success() -> None:
+    """Admin reject move-out keeps tenant unchanged."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(
+        request_type=TenantRequestType.MOVE_OUT.value,
+        status=TenantRequestStatus.SUBMITTED.value,
+        tenant_contact_id="tenant-1",
+        contact_unit_id="link-1",
+        move_out_date=date(2026, 12, 1),
+    )
+    service = _service(repo=repo)
+
+    result = await service.reject_move_out_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        body=RejectMoveOutRequest(rejection_reason="Incomplete notice"),
+    )
+
+    assert result.status == TenantRequestStatus.REJECTED.value
+    assert repo.row["status"] == TenantRequestStatus.REJECTED.value
+    assert any(
+        event.get("event_type") == TenantRequestEventType.REJECTED.value for event in repo.events
+    )
+
+
+def test_derive_milestones_move_out_approved() -> None:
+    """Move-out requests expose a simplified milestone timeline."""
+    milestones = TenantRequestsService._derive_milestones(
+        row=_request_row(
+            request_type=TenantRequestType.MOVE_OUT.value,
+            status=TenantRequestStatus.APPROVED.value,
+            approved_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        ),
+        events=[],
+    )
+    assert milestones[0].key == "submitted"
+    assert milestones[1].completed is True
+    assert milestones[2].completed is False

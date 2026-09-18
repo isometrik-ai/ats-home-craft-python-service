@@ -12,7 +12,9 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.tenant_requests import (
+    ApproveMoveOutRequest,
     ApproveTenantRequestRequest,
+    RejectMoveOutRequest,
     RejectTenantDocumentRequest,
     TenantRequestListQuery,
 )
@@ -332,6 +334,122 @@ async def approve_tenant_request(
     return success_response(
         request=request,
         message_key="tenant_requests.success.approved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("approve move-out request")
+@router.post(
+    "/{project_id}/tenant-requests/{tenant_request_id}/approve-move-out",
+    status_code=http_status.HTTP_200_OK,
+    summary="Approve a move-out request",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="tenant_requests",
+    category="TENANT_REQUESTS",
+)
+async def approve_move_out_request(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    tenant_request_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: ApproveMoveOutRequest = Body(...),
+):
+    """Approve a submitted move-out request and release the tenant household."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = TenantRequestsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await service.approve_move_out_request(
+        project_id=project_id,
+        tenant_request_id=tenant_request_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        project_id=project_id,
+        table="tenant_requests",
+        requested_id=tenant_request_id,
+        description=f"Approved move-out request: {tenant_request_id}",
+        risk_level="high",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="tenant_requests.success.move_out_approved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("reject move-out request")
+@router.post(
+    "/{project_id}/tenant-requests/{tenant_request_id}/reject-move-out",
+    status_code=http_status.HTTP_200_OK,
+    summary="Reject a move-out request",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="tenant_requests",
+    category="TENANT_REQUESTS",
+)
+async def reject_move_out_request(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    tenant_request_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: RejectMoveOutRequest = Body(...),
+):
+    """Reject a submitted move-out request without changing tenancy."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=TENANT_REQUESTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = TenantRequestsService(
+        db_connection=db_connection,
+        user_context=user_context,
+    )
+    data = await service.reject_move_out_request(
+        project_id=project_id,
+        tenant_request_id=tenant_request_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        project_id=project_id,
+        table="tenant_requests",
+        requested_id=tenant_request_id,
+        description=f"Rejected move-out request: {tenant_request_id}",
+        risk_level="medium",
+        new_data=data.model_dump(),
+    )
+    return success_response(
+        request=request,
+        message_key="tenant_requests.success.move_out_rejected",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
     )

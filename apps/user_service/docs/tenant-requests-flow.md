@@ -47,21 +47,34 @@ On **approval**:
 | **Submitter must be primary occupant on unit** | `contact_units` active link with `relationship = self`                      |
 | **Three documents required to submit**         | `id_proof`, `rental_agreement`, `police_verification`                       |
 | **Turnover on approve**                        | Full household cleanup via `UnitOccupancyTurnoverService` before new tenant |
+| **Move-out requires active tenant**            | `create_move_out_request` → `tenant_requests.errors.no_active_tenant` (422) |
+| **Move-out supersedes move-in on approve**     | Active approved `move_in` request → `superseded`; turnover + `move_events`  |
+
+### Move-out request flow (Phase 1)
+
+Owners with an **active tenant** can submit `request_type = move_out` (no documents). The request stays
+in **`submitted`** until an admin approves or rejects it.
+
+On **approve move-out**: household turnover, `move_events` move-out row, supersede the active approved
+move-in request, mark the move-out request **`approved`**.
+
+On **reject move-out**: status **`rejected`**, tenant unchanged, no turnover.
 
 ### Screen → capability map
 
 **Owner mobile**
 
-| Screen / action              | Capability                                                                       |
-| ---------------------------- | -------------------------------------------------------------------------------- |
-| Tenant list (all statuses)   | `GET /contact-onboarding/tenant-requests?unit_id=`                               |
-| Add tenant (form)            | `POST /contact-onboarding/tenant-requests` (or draft + PATCH)                    |
-| Confirm submit               | `POST /contact-onboarding/tenant-requests/{id}/submit`                           |
-| Status timeline              | `GET /contact-onboarding/tenant-requests/{id}` → `events[]` + derived milestones |
-| Re-upload rejected docs      | `PATCH /contact-onboarding/tenant-requests/{id}/documents/{type}`                |
-| Update approved tenancy      | `PATCH /contact-onboarding/tenant-requests/{id}/tenancy`                         |
-| Cancel pending request       | `POST /contact-onboarding/tenant-requests/{id}/cancel`                           |
-| Resend tenant invite (later) | Reuse household invite pattern post-approval                                     |
+| Screen / action              | Capability                                                                                |
+| ---------------------------- | ----------------------------------------------------------------------------------------- |
+| Tenant list (all statuses)   | `GET /contact-onboarding/tenant-requests?unit_id=`                                        |
+| Add tenant (form)            | `POST /contact-onboarding/tenant-requests` (or draft + PATCH)                             |
+| Confirm submit               | `POST /contact-onboarding/tenant-requests/{id}/submit`                                    |
+| Status timeline              | `GET /contact-onboarding/tenant-requests/{id}` → `events[]` + derived milestones          |
+| Re-upload rejected docs      | `PATCH /contact-onboarding/tenant-requests/{id}/documents/{type}`                         |
+| Update approved tenancy      | `PATCH /contact-onboarding/tenant-requests/{id}/tenancy`                                  |
+| Cancel pending request       | `POST /contact-onboarding/tenant-requests/{id}/cancel`                                    |
+| Request move-out             | `POST /contact-onboarding/tenant-requests/move-out` `{ unit_id, move_out_date, reason? }` |
+| Resend tenant invite (later) | Reuse household invite pattern post-approval                                              |
 
 **Admin dashboard**
 
@@ -73,6 +86,8 @@ On **approval**:
 | Verify document          | `POST /projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/verify`              |
 | Reject document          | `POST /projects/{project_id}/tenant-requests/{id}/documents/{doc_id}/reject` `{ reason }` |
 | Approve request          | `POST /projects/{project_id}/tenant-requests/{id}/approve`                                |
+| Approve move-out         | `POST /projects/{project_id}/tenant-requests/{id}/approve-move-out`                       |
+| Reject move-out          | `POST /projects/{project_id}/tenant-requests/{id}/reject-move-out` `{ rejection_reason }` |
 | Export (later)           | `GET /projects/{project_id}/tenant-requests/export`                                       |
 
 ______________________________________________________________________

@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.enums import (
     TenantRequestDocumentType,
     TenantRequestListBucket,
     TenantRequestStatus,
+    TenantRequestType,
 )
 
 
@@ -74,6 +75,32 @@ class ReuploadTenantDocumentRequest(BaseModel):
 
     file_path: str = Field(..., min_length=1, max_length=2000)
     file_name: str | None = Field(None, max_length=255)
+
+
+class CreateMoveOutRequest(BaseModel):
+    """Owner submits a move-out request for admin review."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str
+    move_out_date: date
+    reason: str | None = Field(None, max_length=2000)
+
+
+class ApproveMoveOutRequest(BaseModel):
+    """Admin approves a submitted move-out request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    admin_notes: str | None = Field(None, max_length=2000)
+
+
+class RejectMoveOutRequest(BaseModel):
+    """Admin rejects a submitted move-out request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rejection_reason: str = Field(..., min_length=1, max_length=2000)
 
 
 class UpdateTenancyRequest(BaseModel):
@@ -142,6 +169,7 @@ class TenantRequestListQuery(BaseModel):
 
     bucket: TenantRequestListBucket | None = None
     status: TenantRequestStatus | None = None
+    request_type: TenantRequestType | None = None
     search: str | None = Field(None, max_length=200)
     unit_id: str | None = None
     page: int = Field(1, ge=1)
@@ -153,6 +181,7 @@ class OwnerTenantRequestListQuery(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    request_type: TenantRequestType | None = None
     unit_id: str | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
@@ -246,10 +275,13 @@ class TenantRequestListItemResponse(BaseModel):
     move_out_date: str | None = None
     move_in_fee: str = "0"
     status: str
+    request_type: str = TenantRequestType.MOVE_IN.value
     portal_access: bool = False
     submitted_at: str | None = None
     approved_at: str | None = None
     cancelled_at: str | None = None
+    owner_reason: str | None = None
+    rejection_reason: str | None = None
     documents_verified_count: int = 0
     documents_total_count: int = 3
     owner: TenantRequestOwnerSummary | None = None
@@ -279,6 +311,7 @@ class TenantRequestResponse(BaseModel):
     move_out_date: str | None = None
     move_in_fee: str = "0"
     status: str
+    request_type: str = TenantRequestType.MOVE_IN.value
     portal_access: bool = False
     tenant_contact_id: str | None = None
     contact_unit_id: str | None = None
@@ -287,6 +320,8 @@ class TenantRequestResponse(BaseModel):
     superseded_at: str | None = None
     cancelled_at: str | None = None
     admin_notes: str | None = None
+    owner_reason: str | None = None
+    rejection_reason: str | None = None
     documents: list[TenantRequestDocumentResponse] = Field(default_factory=list)
     events: list[TenantRequestEventResponse] = Field(default_factory=list)
     milestones: list[TenantRequestMilestoneResponse] = Field(default_factory=list)

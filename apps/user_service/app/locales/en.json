@@ -852,7 +852,13 @@
       "document_not_rejected": "Only rejected documents can be re-uploaded.",
       "tenancy_update_not_approved": "Only the active approved tenancy can be updated.",
       "tenancy_update_requires_move_out_date": "Set a move-out date before updating the tenancy.",
-      "tenancy_update_not_due": "Tenancy updates are allowed only within {days} days of move-out or after move-out."
+      "tenancy_update_not_due": "Tenancy updates are allowed only within {days} days of move-out or after move-out.",
+      "no_active_tenant": "This unit does not have an active tenant.",
+      "no_active_tenancy": "No active approved tenancy was found for this unit.",
+      "not_move_out_request": "This action applies only to move-out requests.",
+      "not_move_in_request": "This action applies only to move-in requests.",
+      "move_out_date_in_past": "Move-out date cannot be in the past.",
+      "move_out_date_required": "Move-out date is required."
     },
     "success": {
       "list_retrieved": "Tenant requests retrieved successfully.",
@@ -864,7 +870,10 @@
       "tenancy_updated": "Tenancy updated and resubmitted for review.",
       "document_verified": "Document verified successfully.",
       "document_rejected": "Document rejected successfully.",
-      "approved": "Tenant request approved successfully."
+      "approved": "Tenant request approved successfully.",
+      "move_out_created": "Move-out request submitted successfully.",
+      "move_out_approved": "Move-out request approved successfully.",
+      "move_out_rejected": "Move-out request rejected successfully."
     }
   },
   "walk_in": {
@@ -961,6 +970,18 @@
         "approved": {
           "title": "Tenant request approved",
           "body": "Your tenant request for {unit_label} was approved"
+        },
+        "move_out_submitted": {
+          "title": "New move-out request",
+          "body": "A move-out request was submitted for {unit_label}"
+        },
+        "move_out_approved": {
+          "title": "Move-out approved",
+          "body": "Your move-out request for {unit_label} was approved"
+        },
+        "move_out_rejected": {
+          "title": "Move-out rejected",
+          "body": "Your move-out request for {unit_label} was rejected"
         }
       },
       "fee": {
