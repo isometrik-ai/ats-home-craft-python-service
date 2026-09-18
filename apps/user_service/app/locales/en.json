@@ -1104,7 +1104,8 @@
       "invalid_photo_path": "One or more photo paths are invalid.",
       "invalid_date_of_birth": "Date of birth cannot be in the future.",
       "invalid_name": "Pet name is required.",
-      "unit_has_no_contact_for_pet": "Assign an owner to this unit before adding a pet."
+      "unit_has_no_contact_for_pet": "Assign an owner to this unit before adding a pet.",
+      "removed_profile_read_only": "This pet profile was removed and cannot be edited or restored."
     },
     "success": {
       "catalog_retrieved": "Pet options retrieved successfully.",
