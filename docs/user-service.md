@@ -37,4 +37,3 @@ ______________________________________________________________________
 ## Related
 
 - [Top-level docs index](./README.md)
-- [Work order service](./work-order-service.md) — separate service; shares `common_utils` and custom fields

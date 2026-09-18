@@ -81,9 +81,6 @@ jobs:
           - service: user-service
             dockerfile: docker/user_service.Dockerfile
             image_repo: ats-home-craft-python-service
-          - service: work-order-service
-            dockerfile: docker/work_order_service.Dockerfile
-            image_repo: ats-home-craft-work-order-service
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
