@@ -109,22 +109,9 @@ class AuditLogRepository:
         params = [filter_params.organization_id]
         param_index = 2
 
-        # Apply project_id filter (required for project-scoped audit views)
+        # Apply project_id filter — strict match on the dedicated column only.
         if filter_params.project_id:
-            project_param = f"${param_index}"
-            conditions.append(
-                f"""(
-                    al.project_id = {project_param}::uuid
-                    OR (
-                        al.project_id IS NULL
-                        AND (
-                            al.new_values->'meta'->>'path' LIKE '%/projects/' || {project_param} || '/%'
-                            OR al.new_values->'meta'->'query_params'->>'project_id' = {project_param}
-                            OR al.new_values->'data'->>'project_id' = {project_param}
-                        )
-                    )
-                )"""
-            )
+            conditions.append(f"al.project_id = ${param_index}::uuid")
             params.append(filter_params.project_id)
             param_index += 1
 

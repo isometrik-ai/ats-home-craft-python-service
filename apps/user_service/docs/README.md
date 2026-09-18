@@ -45,11 +45,10 @@ ______________________________________________________________________
 
 ## External references
 
-| Doc                 | Location                                                                                                                     |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| DB schemas          | [ats-home-craft-supabase/docs/](../../../../ats-home-craft-supabase/docs/)                                                   |
-| Work order service  | [work_order_service/docs/](../../work_order_service/docs/README.md) · [top-level index](../../../docs/work-order-service.md) |
-| Frontend membership | [frontend-membership-flow.md](./frontend-membership-flow.md)                                                                 |
+| Doc                 | Location                                                                   |
+| ------------------- | -------------------------------------------------------------------------- |
+| DB schemas          | [ats-home-craft-supabase/docs/](../../../../ats-home-craft-supabase/docs/) |
+| Frontend membership | [frontend-membership-flow.md](./frontend-membership-flow.md)               |
 
 ______________________________________________________________________
 

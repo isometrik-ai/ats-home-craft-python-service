@@ -148,7 +148,6 @@ ignore-imports=no
 # Additional directories to ignore (duplicate-code detection only)
 ignore-paths=
     ^apps/user_service/docs/.*$
-    ^apps/work_order_service/docs/.*$
     ^migrations/.*$
     ^alembic/.*$
 

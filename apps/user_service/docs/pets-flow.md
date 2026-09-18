@@ -407,6 +407,15 @@ Staff JWT + project membership. Permissions: `resident_management.view` (read),
 | `status`             | `active` (default) · `all` · `removed`   |
 | `page` / `page_size` | Pagination                               |
 
+**Deleted tab (`status=removed`)** — permanent soft-delete, view-only:
+
+- List removed pets with `GET .../pets?status=removed`.
+- Open read-only detail with `GET .../pets/{pet_id}` (`status`, `removal_reason`, `deleted_at`).
+- **No restore route** — once removed, a profile cannot return to `active`.
+- `PATCH` and `POST .../remove` on a removed pet return **409** (`pets.errors.removed_profile_read_only`).
+- Admin UI should hide **Save**, **Remove**, and **Add Pet** actions when viewing the Deleted tab
+  or when `status === "removed"` on detail.
+
 **Admin create** uses the same body as resident create (`unit_id`, name, type, breed,
 vaccination, optional gender/DOB/photos). `created_by_contact_id` is set to the **unit owner**
 contact (unit must have an owner assigned).

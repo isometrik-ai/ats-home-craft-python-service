@@ -91,14 +91,14 @@ def test_build_filters_org_only():
     assert params == ["org-1"]
 
 
-def test_build_filters_project_id_legacy_fallback():
-    """Project filter includes legacy JSON path fallback for older rows."""
+def test_build_filters_project_id_strict_column_match():
+    """Project filter matches only audit_logs.project_id (no JSON fallbacks)."""
     repo = AuditLogRepository(db_connection=None)
     where, params = repo._build_audit_log_filters(_filter(project_id="proj-99"))  # pylint: disable=protected-access
 
-    assert "al.project_id IS NULL" in where
-    assert "new_values->'meta'->>'path'" in where
-    assert params[1] == "proj-99"
+    assert where == "al.organization_id = $1 AND al.project_id = $2::uuid"
+    assert params == ["org-1", "proj-99"]
+    assert "new_values" not in where
 
 
 def test_build_filters_with_search_and_dates():

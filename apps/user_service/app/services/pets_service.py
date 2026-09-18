@@ -12,6 +12,7 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 )
 from apps.user_service.app.db.repositories.pets_repository import PetsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
+from apps.user_service.app.schemas.enums.pets import PetStatus
 from apps.user_service.app.schemas.pets import (
     AdminCreatePetRequest,
     AdminPetListQuery,
@@ -22,7 +23,11 @@ from apps.user_service.app.schemas.pets import (
 from apps.user_service.app.services.pet_catalog_service import PetCatalogService
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.user_utils import build_full_name
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -151,12 +156,11 @@ class PetsService:
         org_id = self.user_context.organization_id
         assert org_id
         await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
-        existing = await self.repo.get_by_id(organization_id=org_id, pet_id=pet_id)
-        if not existing or str(existing.get("unit_id")) != unit_id:
-            raise NotFoundException(
-                message_key="pets.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
+        existing = await self._load_mutable_pet_for_unit(
+            organization_id=org_id,
+            pet_id=pet_id,
+            unit_id=unit_id,
+        )
 
         update_data = self._build_pet_update_data(body=body, existing=existing)
 
@@ -285,17 +289,10 @@ class PetsService:
         """Patch an active pet profile in a project (admin)."""
         org_id = self.user_context.organization_id
         assert org_id
-        existing = await self.repo.get_by_id(
-            organization_id=org_id,
-            pet_id=pet_id,
+        existing = await self._load_mutable_pet_for_project(
             project_id=project_id,
-            active_only=True,
+            pet_id=pet_id,
         )
-        if not existing:
-            raise NotFoundException(
-                message_key="pets.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
 
         update_data = self._build_pet_update_data(body=body, existing=existing)
         if not update_data:
@@ -329,17 +326,7 @@ class PetsService:
         """Soft-remove a pet profile in a project (admin)."""
         org_id = self.user_context.organization_id
         assert org_id
-        existing = await self.repo.get_by_id(
-            organization_id=org_id,
-            pet_id=pet_id,
-            project_id=project_id,
-            active_only=True,
-        )
-        if not existing:
-            raise NotFoundException(
-                message_key="pets.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
+        await self._load_mutable_pet_for_project(project_id=project_id, pet_id=pet_id)
         row = await self.repo.soft_remove(
             organization_id=org_id,
             pet_id=pet_id,
@@ -381,12 +368,11 @@ class PetsService:
         org_id = self.user_context.organization_id
         assert org_id
         await self._validate_unit_for_contact(contact_id=contact_id, unit_id=unit_id)
-        existing = await self.repo.get_by_id(organization_id=org_id, pet_id=pet_id)
-        if not existing or str(existing.get("unit_id")) != unit_id:
-            raise NotFoundException(
-                message_key="pets.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
+        await self._load_mutable_pet_for_unit(
+            organization_id=org_id,
+            pet_id=pet_id,
+            unit_id=unit_id,
+        )
         row = await self.repo.soft_remove(
             organization_id=org_id,
             pet_id=pet_id,
@@ -399,6 +385,64 @@ class PetsService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         return self._serialize_pet(row)
+
+    @staticmethod
+    def _is_pet_removed(row: dict[str, Any]) -> bool:
+        """Return True when a pet profile has been soft-removed."""
+        status = str(row.get("status") or "")
+        return status == PetStatus.REMOVED.value or row.get("deleted_at") is not None
+
+    async def _load_mutable_pet_for_project(
+        self,
+        *,
+        project_id: str,
+        pet_id: str,
+    ) -> dict[str, Any]:
+        """Load an active pet in a project or reject removed profiles."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        row = await self.repo.get_by_id(
+            organization_id=org_id,
+            pet_id=pet_id,
+            project_id=project_id,
+            active_only=False,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="pets.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if self._is_pet_removed(row):
+            raise ConflictException(
+                message_key="pets.errors.removed_profile_read_only",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        return row
+
+    async def _load_mutable_pet_for_unit(
+        self,
+        *,
+        organization_id: str,
+        pet_id: str,
+        unit_id: str,
+    ) -> dict[str, Any]:
+        """Load an active pet on a unit or reject removed profiles."""
+        row = await self.repo.get_by_id(
+            organization_id=organization_id,
+            pet_id=pet_id,
+            active_only=False,
+        )
+        if not row or str(row.get("unit_id")) != unit_id:
+            raise NotFoundException(
+                message_key="pets.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if self._is_pet_removed(row):
+            raise ConflictException(
+                message_key="pets.errors.removed_profile_read_only",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        return row
 
     def _build_pet_update_data(
         self,

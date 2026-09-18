@@ -314,7 +314,7 @@ async def update_project_pet(
     current_user: dict = Depends(get_user_from_auth),
     body: UpdatePetRequest = Body(...),
 ):
-    """Patch an active pet profile in the project."""
+    """Patch an active pet profile in the project. Removed pets are view-only (409)."""
     user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
@@ -366,7 +366,7 @@ async def remove_project_pet(
     current_user: dict = Depends(get_user_from_auth),
     body: RemovePetRequest = Body(...),
 ):
-    """Soft-remove a pet profile with reason."""
+    """Soft-remove an active pet profile with reason. Removal is permanent (no restore)."""
     user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
