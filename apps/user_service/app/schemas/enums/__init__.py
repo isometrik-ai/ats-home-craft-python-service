@@ -199,6 +199,7 @@ __all__ = [
     "VisitorType",
     "MoveEventType",
     "MoveEventListBucket",
+    "TenantRequestType",
     "TenantRequestStatus",
     "TenantRequestDocumentType",
     "ContactUnitDocumentType",

@@ -340,11 +340,13 @@ async def test_embed_query_text_returns_none_when_openai_fails(monkeypatch) -> N
     """embed_query_text falls back gracefully when OpenAI rejects the request."""
     service = TypesenseService(collection_name="contacts")
     mock_client = AsyncMock()
-    mock_client.embeddings.create = AsyncMock(side_effect=httpx.HTTPStatusError(
-        "unauthorized",
-        request=MagicMock(),
-        response=MagicMock(status_code=401),
-    ))
+    mock_client.embeddings.create = AsyncMock(
+        side_effect=httpx.HTTPStatusError(
+            "unauthorized",
+            request=MagicMock(),
+            response=MagicMock(status_code=401),
+        )
+    )
 
     async def fake_get_client():
         return mock_client

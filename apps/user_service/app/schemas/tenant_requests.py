@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contact_onboarding import (
@@ -17,6 +17,7 @@ from apps.user_service.app.schemas.enums import (
     TenantRequestDocumentType,
     TenantRequestListBucket,
     TenantRequestStatus,
+    TenantRequestType,
 )
 
 
@@ -41,6 +42,7 @@ class CreateTenantRequestRequest(BaseModel):
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
     emails: list[Email] | None = Field(None, max_length=20)
     move_in_date: date | None = None
+    move_out_date: date | None = None
     portal_access: bool = False
     documents: list[TenantRequestDocumentInput] = Field(..., min_length=3, max_length=3)
 
@@ -75,6 +77,73 @@ class ReuploadTenantDocumentRequest(BaseModel):
     file_name: str | None = Field(None, max_length=255)
 
 
+class CreateMoveOutRequest(BaseModel):
+    """Owner submits a move-out request for admin review."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str
+    move_out_date: date
+    reason: str | None = Field(None, max_length=2000)
+
+
+class ApproveMoveOutRequest(BaseModel):
+    """Admin approves a submitted move-out request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    admin_notes: str | None = Field(None, max_length=2000)
+
+
+class RejectMoveOutRequest(BaseModel):
+    """Admin rejects a submitted move-out request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rejection_reason: str = Field(..., min_length=1, max_length=2000)
+
+
+class UpdateTenancyRequest(BaseModel):
+    """Owner updates an approved tenancy nearing or past move-out."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    move_in_date: date | None = None
+    move_out_date: date | None = None
+    documents: list[TenantRequestDocumentInput] | None = Field(None, min_length=3, max_length=3)
+
+    @field_validator("documents")
+    @classmethod
+    def validate_required_document_types(
+        cls,
+        documents: list[TenantRequestDocumentInput] | None,
+    ) -> list[TenantRequestDocumentInput] | None:
+        """Require exactly one row per mandatory document type when documents are sent."""
+        if documents is None:
+            return documents
+        provided = {item.document_type for item in documents}
+        required = set(TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES)
+        if provided != required:
+            raise ValueError(
+                "documents must include id_proof, rental_agreement, and police_verification"
+            )
+        return documents
+
+    @model_validator(mode="after")
+    def validate_at_least_one_field(self) -> UpdateTenancyRequest:
+        """Require at least one tenancy field or document set."""
+        if any(
+            value is not None
+            for value in (
+                self.move_in_date,
+                self.move_out_date,
+                self.documents,
+            )
+        ):
+            return self
+        raise ValueError("at least one tenancy field must be provided")
+
+
 class RejectTenantDocumentRequest(BaseModel):
     """Admin rejects a document."""
 
@@ -100,6 +169,7 @@ class TenantRequestListQuery(BaseModel):
 
     bucket: TenantRequestListBucket | None = None
     status: TenantRequestStatus | None = None
+    request_type: TenantRequestType | None = None
     search: str | None = Field(None, max_length=200)
     unit_id: str | None = None
     page: int = Field(1, ge=1)
@@ -111,6 +181,7 @@ class OwnerTenantRequestListQuery(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    request_type: TenantRequestType | None = None
     unit_id: str | None = None
     page: int = Field(1, ge=1)
     page_size: int = Field(20, ge=1, le=100)
@@ -201,12 +272,16 @@ class TenantRequestListItemResponse(BaseModel):
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
     move_in_date: str | None = None
+    move_out_date: str | None = None
     move_in_fee: str = "0"
     status: str
+    request_type: str = TenantRequestType.MOVE_IN.value
     portal_access: bool = False
     submitted_at: str | None = None
     approved_at: str | None = None
     cancelled_at: str | None = None
+    owner_reason: str | None = None
+    rejection_reason: str | None = None
     documents_verified_count: int = 0
     documents_total_count: int = 3
     owner: TenantRequestOwnerSummary | None = None
@@ -233,8 +308,10 @@ class TenantRequestResponse(BaseModel):
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
     move_in_date: str | None = None
+    move_out_date: str | None = None
     move_in_fee: str = "0"
     status: str
+    request_type: str = TenantRequestType.MOVE_IN.value
     portal_access: bool = False
     tenant_contact_id: str | None = None
     contact_unit_id: str | None = None
@@ -243,6 +320,8 @@ class TenantRequestResponse(BaseModel):
     superseded_at: str | None = None
     cancelled_at: str | None = None
     admin_notes: str | None = None
+    owner_reason: str | None = None
+    rejection_reason: str | None = None
     documents: list[TenantRequestDocumentResponse] = Field(default_factory=list)
     events: list[TenantRequestEventResponse] = Field(default_factory=list)
     milestones: list[TenantRequestMilestoneResponse] = Field(default_factory=list)

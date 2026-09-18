@@ -64,6 +64,7 @@ async def test_insert_request_serializes_json_fields():
         tenant_phones=phones,
         tenant_emails=emails,
         move_in_date=date(2026, 2, 1),
+        move_out_date=date(2027, 1, 31),
         portal_access=True,
         status=TenantRequestStatus.SUBMITTED.value,
         submitted_at=submitted_at,
@@ -379,6 +380,7 @@ async def test_find_active_approved_for_unit():
     assert found["id"] == REQUEST_ID
     query, args = conn.fetchrow_calls[0]
     assert "superseded_at IS NULL" in query
+    assert "request_type = 'move_in'" in query
     assert args[2] == TenantRequestStatus.APPROVED.value
 
     conn.row = None

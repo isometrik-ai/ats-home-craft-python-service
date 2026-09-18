@@ -82,6 +82,12 @@ class KafkaSettings(BaseSettings):
     )
 
 
+class TenantRequestSettings(BaseSettings):
+    """Tenant request workflow settings."""
+
+    tenancy_update_window_days: int = config("TENANCY_UPDATE_WINDOW_DAYS", default=60)
+
+
 class ApplicationSettings(BaseSettings):
     """Application settings."""
 
@@ -89,6 +95,7 @@ class ApplicationSettings(BaseSettings):
     two_fa_settings: TwoFASettings = TwoFASettings()
     enrichment_service: EnrichmentServiceSettings = EnrichmentServiceSettings()
     workflow_service: WorkflowServiceSettings = WorkflowServiceSettings()
+    tenant_requests: TenantRequestSettings = TenantRequestSettings()
     invite_expiry_days: int = config("INVITE_EXPIRY_DAYS", default=7)
     # Re-enable Supabase auth by setting HOUSEHOLD_INVITATION_BYPASS_SUPABASE_AUTH=false.
     household_invitation_bypass_supabase_auth: bool = config(

@@ -370,3 +370,67 @@ async def test_approve_tenant_request_not_ready(monkeypatch, client):
         json={"move_in_date": "2026-08-01"},
     )
     assert res.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Move-out approve / reject
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_approve_move_out_request(monkeypatch, client):
+    """POST approve-move-out releases tenant household."""
+
+    _patch_admin_access(monkeypatch)
+
+    async def fake_approve_move_out_request(
+        _self,
+        *,
+        project_id: str,
+        tenant_request_id: str,
+        body,
+    ):
+        del _self
+        assert project_id == PROJECT_ID
+        assert tenant_request_id == REQUEST_ID
+        assert body.admin_notes == "Confirmed"
+        return _fake_detail(status="approved", request_type="move_out")
+
+    monkeypatch.setattr(f"{_SERVICE}.approve_move_out_request", fake_approve_move_out_request)
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/tenant-requests/{REQUEST_ID}/approve-move-out",
+        json={"admin_notes": "Confirmed"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["request_type"] == "move_out"
+    assert body["data"]["status"] == "approved"
+
+
+@pytest.mark.asyncio
+async def test_reject_move_out_request(monkeypatch, client):
+    """POST reject-move-out marks request rejected without turnover."""
+
+    _patch_admin_access(monkeypatch)
+
+    async def fake_reject_move_out_request(
+        _self,
+        *,
+        project_id: str,
+        tenant_request_id: str,
+        body,
+    ):
+        del _self
+        assert project_id == PROJECT_ID
+        assert tenant_request_id == REQUEST_ID
+        assert body.rejection_reason == "Incomplete notice"
+        return _fake_detail(status="rejected", request_type="move_out")
+
+    monkeypatch.setattr(f"{_SERVICE}.reject_move_out_request", fake_reject_move_out_request)
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/tenant-requests/{REQUEST_ID}/reject-move-out",
+        json={"rejection_reason": "Incomplete notice"},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["status"] == "rejected"
