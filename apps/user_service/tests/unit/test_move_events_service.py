@@ -10,12 +10,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from apps.user_service.app.schemas.enums import MoveEventType, TenantRequestDocumentType
+from apps.user_service.app.schemas.enums import MoveEventType
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
+    MoveEventDocumentInput,
     UpdateMoveEventRequest,
 )
-from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
 from apps.user_service.app.services.move_events_service import MoveEventsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
@@ -41,23 +41,13 @@ def _mock_tenant_request_sync(monkeypatch):
     )
 
 
-def _required_move_in_documents() -> list[TenantRequestDocumentInput]:
-    """Build the three required move-in document slots."""
+def _required_move_in_documents() -> list[MoveEventDocumentInput]:
+    """Build sample move-in documents with free-form document_type values."""
     return [
-        TenantRequestDocumentInput(
-            document_type=TenantRequestDocumentType.ID_PROOF,
-            file_path="moves/id-proof.pdf",
-            file_name="id-proof.pdf",
-        ),
-        TenantRequestDocumentInput(
-            document_type=TenantRequestDocumentType.RENTAL_AGREEMENT,
-            file_path="moves/rental.pdf",
-            file_name="rental.pdf",
-        ),
-        TenantRequestDocumentInput(
-            document_type=TenantRequestDocumentType.POLICE_VERIFICATION,
-            file_path="moves/police.pdf",
-            file_name="police.pdf",
+        MoveEventDocumentInput(
+            document_type="inspection_report",
+            file_path="moves/inspection.pdf",
+            file_name="inspection.pdf",
         ),
     ]
 
@@ -345,7 +335,8 @@ async def test_create_move_in_syncs_active_link():
 
     assert result.move_type == MoveEventType.MOVE_IN.value
     assert len(move_repo.insert_calls) == 1
-    assert len(move_repo.insert_calls[0]["documents"]) == 3
+    assert len(move_repo.insert_calls[0]["documents"]) == 1
+    assert move_repo.insert_calls[0]["documents"][0]["document_type"] == "inspection_report"
     assert len(contact_units_repo.sync_move_in_calls) == 1
     service.contact_roles_repo.insert_tenant_role.assert_awaited_once()
     sync_mock.assert_awaited_once()

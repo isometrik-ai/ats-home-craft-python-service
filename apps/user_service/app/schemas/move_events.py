@@ -7,17 +7,17 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from apps.user_service.app.schemas.enums import (
-    TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES,
-    MoveEventListBucket,
-    MoveEventType,
-)
-from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
+from apps.user_service.app.schemas.enums import MoveEventListBucket, MoveEventType
 
 
-def _document_types(documents: list[TenantRequestDocumentInput]) -> set[str]:
-    """Collect document_type values from uploaded document rows."""
-    return {item.document_type for item in documents}
+class MoveEventDocumentInput(BaseModel):
+    """Document upload on a move event (free-form document_type)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_type: str = Field(..., min_length=1, max_length=100)
+    file_path: str = Field(..., min_length=1, max_length=2000)
+    file_name: str | None = Field(None, max_length=255)
 
 
 class MoveEventDocumentResponse(BaseModel):
@@ -43,24 +43,15 @@ class CreateMoveEventRequest(BaseModel):
     fee_amount: Decimal | None = Field(None, ge=0)
     fee_currency: str = Field(default="INR", min_length=3, max_length=3)
     notes: str | None = Field(None, max_length=2000)
-    documents: list[TenantRequestDocumentInput] | None = None
+    documents: list[MoveEventDocumentInput] | None = None
 
     @model_validator(mode="after")
     def validate_documents_for_move_type(self) -> CreateMoveEventRequest:
-        """Require typed documents on move-in only."""
+        """Require at least one document on move-in; move-out must not include documents."""
         documents = self.documents
         if self.move_type == MoveEventType.MOVE_IN:
             if not documents:
-                raise ValueError(
-                    "documents are required for move_in and must include "
-                    "id_proof, rental_agreement, and police_verification"
-                )
-            provided = _document_types(documents)
-            required = set(TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES)
-            if provided != required:
-                raise ValueError(
-                    "documents must include id_proof, rental_agreement, and police_verification"
-                )
+                raise ValueError("documents are required for move_in")
             return self
         if documents:
             raise ValueError("documents may only be supplied for move_in")
@@ -76,20 +67,15 @@ class UpdateMoveEventRequest(BaseModel):
     fee_amount: Decimal | None = Field(None, ge=0)
     fee_currency: str | None = Field(None, min_length=3, max_length=3)
     notes: str | None = Field(None, max_length=2000)
-    documents: list[TenantRequestDocumentInput] | None = None
+    documents: list[MoveEventDocumentInput] | None = Field(None, min_length=1)
 
     @model_validator(mode="after")
     def validate_documents_when_present(self) -> UpdateMoveEventRequest:
-        """When documents are patched, require the full move-in document set."""
-        documents = self.documents
-        if documents is None:
+        """When documents are patched, require at least one row."""
+        if self.documents is None:
             return self
-        provided = _document_types(documents)
-        required = set(TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES)
-        if provided != required:
-            raise ValueError(
-                "documents must include id_proof, rental_agreement, and police_verification"
-            )
+        if not self.documents:
+            raise ValueError("documents must include at least one item when provided")
         return self
 
 

@@ -25,11 +25,11 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
+    MoveEventDocumentInput,
     MoveEventDocumentResponse,
     MoveEventResponse,
     UpdateMoveEventRequest,
 )
-from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
 from apps.user_service.app.services.inventory_service import resolve_is_sold
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
@@ -164,14 +164,14 @@ class MoveEventsService:
 
     @staticmethod
     def _documents_to_json(
-        documents: list[TenantRequestDocumentInput] | None,
+        documents: list[MoveEventDocumentInput] | None,
     ) -> list[dict[str, str | None]]:
         """Serialize typed document inputs for jsonb storage."""
         if not documents:
             return []
         return [
             {
-                "document_type": item.document_type.value,
+                "document_type": item.document_type,
                 "file_path": item.file_path,
                 "file_name": item.file_name,
             }
