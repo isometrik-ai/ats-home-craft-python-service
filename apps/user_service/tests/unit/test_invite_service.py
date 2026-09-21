@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from supabase import AuthApiError
 
 from apps.user_service.app.db.repositories.invite_repository import (
@@ -16,6 +17,7 @@ from apps.user_service.app.schemas.enums import (
     InviteStatus,
 )
 from apps.user_service.app.schemas.invites import (
+    INVITE_MAX_PROJECT_IDS,
     InviteAcceptBySettingPasswordRequest,
     InviteCreateRequest,
     PatchInviteRequest,
@@ -210,6 +212,54 @@ async def test_add_invitee_to_team_skips_duplicate_project_assignment():
     service._add_invitee_to_project.assert_not_awaited()  # pylint: disable=protected-access
 
 
+def test_create_body_rejects_too_many_project_ids():
+    """Invite create rejects more than the configured maximum project assignments."""
+    too_many = [UUID(f"{index:032x}") for index in range(INVITE_MAX_PROJECT_IDS + 1)]
+
+    with pytest.raises(ValidationError):
+        InviteCreateRequest(
+            email="invitee@example.com",
+            first_name="Jane",
+            last_name="Doe",
+            role_id=UUID(ROLE_ID),
+            project_ids=too_many,
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_projects_in_org_batches_lookup():
+    """Project validation uses a single repository lookup for all IDs."""
+    service = InviteService(user_context=None, db_connection=MagicMock())
+    service.projects_repository = MagicMock()
+    service.projects_repository.get_existing_project_ids = AsyncMock(
+        return_value={PROJECT_ID, PROJECT_ID_2}
+    )
+
+    await service._validate_projects_in_org(  # pylint: disable=protected-access
+        [PROJECT_ID, PROJECT_ID_2],
+        ORG_ID,
+    )
+
+    service.projects_repository.get_existing_project_ids.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        project_ids=[PROJECT_ID, PROJECT_ID_2],
+    )
+
+
+@pytest.mark.asyncio
+async def test_validate_projects_in_org_raises_when_missing():
+    """Project validation fails when any ID is not in the organization."""
+    service = InviteService(user_context=None, db_connection=MagicMock())
+    service.projects_repository = MagicMock()
+    service.projects_repository.get_existing_project_ids = AsyncMock(return_value={PROJECT_ID})
+
+    with pytest.raises(NotFoundException):
+        await service._validate_projects_in_org(  # pylint: disable=protected-access
+            [PROJECT_ID, PROJECT_ID_2],
+            ORG_ID,
+        )
+
+
 @pytest.mark.asyncio
 async def test_create_invite_stores_project_ids(monkeypatch):
     """Create invitation validates and persists all selected project IDs."""
@@ -232,7 +282,9 @@ async def test_create_invite_stores_project_ids(monkeypatch):
         return_value={"id": ROLE_ID, "name": "Member"}
     )
     service.projects_repository = MagicMock()
-    service.projects_repository.get_project = AsyncMock(return_value={"id": PROJECT_ID})
+    service.projects_repository.get_existing_project_ids = AsyncMock(
+        return_value={PROJECT_ID, PROJECT_ID_2}
+    )
 
     monkeypatch.setattr(
         "apps.user_service.app.services.invite_service.get_user_by_id",
@@ -250,7 +302,7 @@ async def test_create_invite_stores_project_ids(monkeypatch):
 
     create_call = service.invite_repository.create_invite.await_args.args[0]
     assert create_call["metadata"]["project_ids"] == [PROJECT_ID, PROJECT_ID_2]
-    assert service.projects_repository.get_project.await_count == 2
+    service.projects_repository.get_existing_project_ids.assert_awaited_once()
 
 
 def test_list_item_includes_project_ids():

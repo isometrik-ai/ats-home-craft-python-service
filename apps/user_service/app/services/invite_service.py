@@ -284,18 +284,25 @@ class InviteService:
                 user_id=user_id,
             )
 
-    async def _validate_project_in_org(self, project_id: str, organization_id: str) -> None:
-        """Ensure project_id belongs to the organization before storing on invite."""
-        validate_uuid_format(project_id, "project ID")
-        project = await self.projects_repository.get_project(
+    async def _validate_projects_in_org(self, project_ids: list[str], organization_id: str) -> None:
+        """Ensure all project_ids belong to the organization before storing on invite."""
+        if not project_ids:
+            return
+
+        for project_id in project_ids:
+            validate_uuid_format(project_id, "project ID")
+
+        existing_ids = await self.projects_repository.get_existing_project_ids(
             organization_id=organization_id,
-            project_id=project_id,
+            project_ids=project_ids,
         )
-        if not project:
-            raise NotFoundException(
-                message_key="project_setup.errors.project_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
+        if len(existing_ids) == len(set(project_ids)):
+            return
+
+        raise NotFoundException(
+            message_key="project_setup.errors.project_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
 
     @staticmethod
     def _resolve_invite_project_ids(metadata: dict[str, Any]) -> list[str]:
@@ -829,8 +836,10 @@ class InviteService:
         if body.team_id:
             await self._validate_team_in_org(str(body.team_id), organization_id)
         if body.project_ids:
-            for project_id in body.project_ids:
-                await self._validate_project_in_org(str(project_id), organization_id)
+            await self._validate_projects_in_org(
+                [str(project_id) for project_id in body.project_ids],
+                organization_id,
+            )
 
         return organization_data, pending_invite, role_data
 

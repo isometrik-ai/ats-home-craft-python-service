@@ -17,6 +17,8 @@ from apps.user_service.app.schemas.enums import (
     ProjectMemberRole,
 )
 
+INVITE_MAX_PROJECT_IDS = 25
+
 
 class InviteDetailsResponse(BaseModel):
     """Response model for invitation details operations."""
@@ -107,9 +109,11 @@ class InviteCreateRequest(BaseModel):
     )
     project_ids: list[uuid.UUID] | None = Field(
         None,
+        max_length=INVITE_MAX_PROJECT_IDS,
         description=(
             "Optional projects to assign the invitee to when the invitation is accepted. "
-            "When both project_id and project_ids are provided, they are merged."
+            "When both project_id and project_ids are provided, they are merged. "
+            f"At most {INVITE_MAX_PROJECT_IDS} projects may be assigned per invitation."
         ),
     )
     project_role: ProjectMemberRole | None = Field(
@@ -152,6 +156,11 @@ class InviteCreateRequest(BaseModel):
             if project_id not in seen:
                 seen.add(project_id)
                 unique_ids.append(project_id)
+
+        if len(unique_ids) > INVITE_MAX_PROJECT_IDS:
+            raise ValueError(
+                f"At most {INVITE_MAX_PROJECT_IDS} projects may be assigned per invitation"
+            )
 
         self.project_ids = unique_ids or None
         self.project_id = unique_ids[0] if unique_ids else None

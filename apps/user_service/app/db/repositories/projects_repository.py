@@ -101,6 +101,24 @@ class ProjectsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def get_existing_project_ids(
+        self, *, organization_id: str, project_ids: list[str]
+    ) -> set[str]:
+        """Return project IDs from the list that exist in the organization."""
+        if not project_ids:
+            return set()
+        rows = await self.db_connection.fetch(
+            """
+            SELECT id::text
+            FROM projects
+            WHERE organization_id = $1::uuid
+              AND id = ANY($2::uuid[])
+            """,
+            organization_id,
+            project_ids,
+        )
+        return {str(row["id"]) for row in rows}
+
     async def update_project(
         self,
         *,
