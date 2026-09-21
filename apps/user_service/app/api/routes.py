@@ -2,6 +2,9 @@
 
 from fastapi import APIRouter
 
+from apps.user_service.app.api.audit_logs import (
+    project_router as project_audit_logs_router,
+)
 from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
 from apps.user_service.app.api.community_events import router as community_events_router
@@ -60,6 +63,7 @@ from apps.user_service.app.api.pets_admin import router as pets_admin_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from apps.user_service.app.api.projects import router as projects_router
 from apps.user_service.app.api.roles import router as roles_router
+from apps.user_service.app.api.sessions import project_router as project_sessions_router
 from apps.user_service.app.api.sessions import router as sessions_router
 from apps.user_service.app.api.superadmin_organizations import (
     router as superadmin_organizations_router,
@@ -89,8 +93,10 @@ router.include_router(users_router)
 router.include_router(user_push_tokens_router)
 router.include_router(roles_router)
 router.include_router(sessions_router)
+router.include_router(project_sessions_router)
 router.include_router(permissions_router)
 router.include_router(audit_logs_router)
+router.include_router(project_audit_logs_router)
 router.include_router(invites_router)
 router.include_router(presigned_url_router)
 router.include_router(verification_codes_router)
@@ -149,6 +155,9 @@ async def api_status():
             "/permissions",
             "/role-permissions",
             "/audit-logs",
+            "/projects/{project_id}/audit-logs",
+            "/projects/{project_id}/audit-logs/{audit_log_id}",
+            "/projects/{project_id}/sessions",
             "/invite",
             "/teams",
             "/contacts",

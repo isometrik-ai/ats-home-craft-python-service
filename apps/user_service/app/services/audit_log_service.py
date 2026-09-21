@@ -397,6 +397,41 @@ class AuditLogService:
         # Format audit log data
         return self._format_audit_log_detail(audit_log_data)
 
+    async def get_project_audit_log_by_id(
+        self,
+        audit_log_id: str,
+        project_id: str,
+        *,
+        scoped_user_id: str | None,
+    ) -> AuditLogDetailItem:
+        """Get audit log detail scoped to a single project.
+
+        Args:
+            audit_log_id: Audit log ID
+            project_id: Project ID from the request path
+            scoped_user_id: User ID filter when caller lacks system audit visibility
+
+        Returns:
+            AuditLogDetailItem: Detailed audit log
+
+        Raises:
+            NotFoundException: If audit log not found for this project scope
+        """
+        audit_log_data = await self.audit_log_repository.get_audit_log_by_id(
+            audit_log_id,
+            self.user_context.organization_id,
+            scoped_user_id,
+            project_id=project_id,
+        )
+
+        if not audit_log_data:
+            raise NotFoundException(
+                message_key="audit_logs.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        return self._format_audit_log_detail(audit_log_data)
+
     async def delete_all_audit_logs(self) -> int:
         """Delete all audit logs from the system.
 

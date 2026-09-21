@@ -3,7 +3,7 @@ This module provides endpoints for managing user sessions.
 """
 
 import asyncpg
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -34,8 +34,74 @@ from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/sessions", tags=["Sessions Management"])
+project_router = APIRouter(prefix="/projects", tags=["Project Sessions"])
 
 logger = get_logger("sessions-api")
+
+
+async def _list_organization_sessions(
+    *,
+    request: Request,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str | None,
+    search: str | None,
+    session_status: str | None,
+    login_method: str | None,
+    page: int,
+    page_size: int,
+):
+    """Shared list logic for org-wide and project-scoped session endpoints."""
+    if project_id:
+        await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+            request=request,
+        )
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=SETTINGS_USERS_VIEW,
+    )
+
+    filters = SessionFilter(
+        project_id=project_id,
+        search=search,
+        session_status=session_status,
+        login_method=login_method,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+    )
+
+    session_service = SessionService(user_context=user_context, db_connection=db_connection)
+    result = await session_service.get_organization_sessions_json(filters=filters)
+    sessions = result["sessions"]
+    total_count = result["total_count"]
+
+    if not sessions:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            page=page,
+            page_size=page_size,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+        )
+
+    return list_response(
+        request=request,
+        items=sessions,
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+    )
 
 
 @handle_api_exceptions("get sessions list")
@@ -180,57 +246,67 @@ async def get_organization_sessions(
     """Get all sessions for all users in the current organization.
     Intended for org-level admins with settings management permission.
     """
-    if project_id:
-        await ensure_staff_project_access(
-            current_user=current_user,
-            db_connection=db_connection,
-            project_id=project_id,
-            permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
-            request=request,
-        )
-    user_context = await check_permissions(
+    return await _list_organization_sessions(
+        request=request,
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=SETTINGS_USERS_VIEW,
-    )
-
-    # Create SessionFilter from query params
-    filters = SessionFilter(
         project_id=project_id,
         search=search,
         session_status=session_status,
         login_method=login_method,
-        limit=page_size,
-        offset=(page - 1) * page_size,
-    )
-
-    # Create service and delegate to service
-    session_service = SessionService(user_context=user_context, db_connection=db_connection)
-    result = await session_service.get_organization_sessions_json(filters=filters)
-    sessions = result["sessions"]
-    total_count = result["total_count"]
-
-    if not sessions:
-        return list_response(
-            request=request,
-            items=[],
-            total=0,
-            page=page,
-            page_size=page_size,
-            message_key="success.no_data",
-            custom_code=CustomStatusCode.NO_CONTENT,
-            status_code=http_status.HTTP_200_OK,
-        )
-
-    return list_response(
-        request=request,
-        items=sessions,
-        total=total_count,
         page=page,
         page_size=page_size,
-        message_key="success.retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        status_code=http_status.HTTP_200_OK,
+    )
+
+
+@handle_api_exceptions("get project sessions")
+@project_router.get(
+    "/{project_id}/sessions",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get user sessions for members of a specific project",
+    summary="Get user sessions for a specific project",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Sessions retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_project_sessions(
+    *,
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    project_id: str = Path(..., description="The UUID of the project"),
+    search: str | None = Query(
+        None,
+        description="Search term to filter sessions by user email or IP address (case-insensitive)",
+    ),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
+    session_status: str | None = Query(
+        None, description="Filter by session status (active, inactive, terminated)"
+    ),
+    login_method: str | None = Query(
+        None, description="Filter by login method (password, sso, mfa)"
+    ),
+):
+    """Get sessions for users assigned to a single project."""
+    return await _list_organization_sessions(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        search=search,
+        session_status=session_status,
+        login_method=login_method,
+        page=page,
+        page_size=page_size,
     )
 
 

@@ -243,6 +243,20 @@ async def test_get_audit_log_by_id():
 
 
 @pytest.mark.asyncio
+async def test_get_audit_log_by_id_with_project_filter():
+    """Detail lookup can scope by project_id."""
+    conn = _FakeConn(row={"id": "a1", "project_id": "proj-1"})
+    repo = AuditLogRepository(db_connection=conn)
+
+    row = await repo.get_audit_log_by_id("a1", "org-1", project_id="proj-1")
+
+    assert row["id"] == "a1"
+    query, args = conn.fetchrow_calls[0]
+    assert "project_id = $3::uuid" in query
+    assert args == ("a1", "org-1", "proj-1")
+
+
+@pytest.mark.asyncio
 async def test_create_audit_log_jsonb_cast():
     """Insert casts JSONB columns."""
     conn = _FakeConn(row={"id": "a1"})

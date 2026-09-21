@@ -278,6 +278,138 @@ async def test_get_audit_log_by_id(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_get_project_audit_logs(monkeypatch, client):
+    """Project-scoped route always filters by path project_id."""
+    captured: dict = {}
+    _patch_audit_list_auth(monkeypatch)
+
+    async def fake_get_audit_logs(self, filter_params):
+        del self
+        captured["filter_params"] = filter_params
+        return {"audit_logs": [{"id": "log-1", "project_id": PROJECT_ID}], "total_count": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.audit_log_service.AuditLogService.get_audit_logs",
+        fake_get_audit_logs,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/audit-logs?page=1&page_size=10")
+    body = assert_success(res, 200)
+    assert body["data"][0]["id"] == "log-1"
+    assert body["total"] == 1
+    assert captured["filter_params"].project_id == PROJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_get_project_audit_log_by_id(monkeypatch, client):
+    """Project-scoped detail route returns audit log for the given project."""
+    captured: dict = {}
+    _patch_audit_list_auth(monkeypatch)
+
+    async def fake_get_project_by_id(self, audit_log_id, project_id, *, scoped_user_id):
+        del self
+        captured["audit_log_id"] = audit_log_id
+        captured["project_id"] = project_id
+        captured["scoped_user_id"] = scoped_user_id
+        return {"id": audit_log_id, "project_id": project_id, "description": "project detail"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.audit_log_service.AuditLogService.get_project_audit_log_by_id",
+        fake_get_project_by_id,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/audit-logs/log-1")
+    body = assert_success(res, 200)
+    assert body["data"]["id"] == "log-1"
+    assert body["data"]["project_id"] == PROJECT_ID
+    assert captured["audit_log_id"] == "log-1"
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["scoped_user_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_project_audit_log_by_id_rejects_forbidden_project_access(monkeypatch, client):
+    """Project-scoped detail route returns 403 when user lacks project access."""
+
+    async def fake_get_user_from_auth(*args, **kwargs):
+        del args, kwargs
+        return {"sub": "u1", "email": "u1@example.com", "session_id": "sess-1"}
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args, kwargs
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.audit_logs.get_user_from_auth",
+        fake_get_user_from_auth,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.audit_logs.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/audit-logs/log-1")
+
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_project_audit_log_by_id_not_found(monkeypatch, client):
+    """Project-scoped detail route returns 404 when log is missing or wrong project."""
+    _patch_audit_list_auth(monkeypatch)
+
+    async def fake_get_project_by_id(self, audit_log_id, project_id, *, scoped_user_id):
+        del self, audit_log_id, project_id, scoped_user_id
+        from libs.shared_utils.http_exceptions import NotFoundException
+
+        raise NotFoundException(
+            message_key="audit_logs.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.audit_log_service.AuditLogService.get_project_audit_log_by_id",
+        fake_get_project_by_id,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/audit-logs/missing-log")
+
+    assert res.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_project_audit_logs_rejects_forbidden_project_access(monkeypatch, client):
+    """Project-scoped route returns 403 when user lacks project access."""
+
+    async def fake_get_user_from_auth(*args, **kwargs):
+        del args, kwargs
+        return {"sub": "u1", "email": "u1@example.com", "session_id": "sess-1"}
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args, kwargs
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.audit_logs.get_user_from_auth",
+        fake_get_user_from_auth,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.audit_logs.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/audit-logs?page=1&page_size=10")
+
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_delete_all_audit_logs(monkeypatch, client):
     """Should delete all audit logs."""
 

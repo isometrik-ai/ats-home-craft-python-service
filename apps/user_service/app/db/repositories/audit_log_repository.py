@@ -248,28 +248,46 @@ class AuditLogRepository:
         return int(count)
 
     async def get_audit_log_by_id(
-        self, audit_log_id: str, organization_id: str, user_id: str
+        self,
+        audit_log_id: str,
+        organization_id: str,
+        user_id: str | None = None,
+        *,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Get audit log by ID.
 
         Args:
             audit_log_id: Audit log ID
             organization_id: Organization ID
-            user_id: User ID
+            user_id: Optional user ID filter (omit for org-wide visibility)
+            project_id: Optional project ID filter for project-scoped detail views
 
         Returns:
             Audit record or None if not found
         """
+        conditions = ["id = $1", "organization_id = $2"]
+        params: list[Any] = [audit_log_id, organization_id]
+        param_index = 3
+
+        if project_id:
+            conditions.append(f"project_id = ${param_index}::uuid")
+            params.append(project_id)
+            param_index += 1
+
+        if user_id:
+            conditions.append(f"user_id = ${param_index}")
+            params.append(user_id)
+            param_index += 1
+
         query = f"""
             SELECT {AUDIT_LOG_DETAIL_FIELDS}
             FROM audit_logs
-            WHERE id = $1
-            AND organization_id = $2
-            AND user_id = $3
+            WHERE {" AND ".join(conditions)}
             LIMIT 1
         """
 
-        row = await self.db_connection.fetchrow(query, audit_log_id, organization_id, user_id)
+        row = await self.db_connection.fetchrow(query, *params)
         return dict(row) if row else None
 
     async def delete_all_audit_logs(self) -> int:

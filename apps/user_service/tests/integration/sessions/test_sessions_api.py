@@ -250,6 +250,81 @@ async def test_get_organization_sessions_rejects_forbidden_project_access(monkey
 
 
 @pytest.mark.asyncio
+async def test_get_project_sessions(monkeypatch, client):
+    """Project-scoped route always filters by path project_id."""
+    captured: dict = {}
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args
+        captured["project_id"] = kwargs.get("project_id")
+        return UserContext(
+            user_id="admin", email="admin@example.com", organization_id="org-1", user_type="admin"
+        )
+
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        del current_user, db_connection, permission_codes
+        return UserContext(
+            user_id="admin", email="admin@example.com", organization_id="org-1", user_type="admin"
+        )
+
+    async def fake_get_org_sessions(self, filters: SessionFilter):
+        del self
+        captured["filters"] = filters
+        return {
+            "sessions": [
+                {
+                    "id": "s3",
+                    "user_id": "u3",
+                    "user_email": "u3@example.com",
+                    "user_name": "User Three",
+                }
+            ],
+            "total_count": 1,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.session_service.SessionService.get_organization_sessions",
+        fake_get_org_sessions,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/sessions?page=1&page_size=10")
+    body = assert_success(res, 200)
+    assert body["data"][0]["id"] == "s3"
+    assert body["total"] == 1
+    assert captured["project_id"] == PROJECT_ID
+    assert captured["filters"].project_id == PROJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_get_project_sessions_rejects_forbidden_project_access(monkeypatch, client):
+    """Project-scoped route returns 403 when user lacks project access."""
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args, kwargs
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/sessions?page=1&page_size=10")
+
+    assert res.status_code == 403
+
+
+@pytest.mark.asyncio
 async def test_revoke_session(monkeypatch, client):
     """Revoke a specific session."""
 

@@ -33,6 +33,88 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 # Create router for audit logs endpoints
 router = APIRouter(prefix="/audit-logs", tags=["Audit Logs Management"])
+project_router = APIRouter(prefix="/projects", tags=["Project Audit Logs"])
+
+
+async def _list_audit_logs(
+    *,
+    request: Request,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str | None,
+    search: str | None,
+    user_id: str | None,
+    action_type: AuditLogActionType | None,
+    category: str | None,
+    risk_level: AuditLogRiskLevel | None,
+    start_date: date | None,
+    end_date: date | None,
+    page: int,
+    page_size: int,
+):
+    """Shared list logic for org-wide and project-scoped audit log endpoints."""
+    if project_id:
+        user_context = await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+            request=request,
+        )
+    else:
+        user_context = await extract_user_context(current_user, db_connection)
+
+    can_view_system_audit_logs = await check_user_access_async(
+        permission_code=[AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM],
+        user_id=user_context.user_id,
+        organization_id=user_context.organization_id,
+        db_connection=db_connection,
+    )
+
+    effective_user_id = user_id if can_view_system_audit_logs else user_context.user_id
+
+    audit_log_service = AuditLogService(user_context=user_context, db_connection=db_connection)
+
+    filters = AuditLogFilter(
+        search=search,
+        user_id=effective_user_id,
+        action_type=action_type,
+        category=category,
+        risk_level=risk_level,
+        start_date=start_date,
+        end_date=end_date,
+        project_id=project_id,
+        limit=page_size,
+        offset=(page - 1) * page_size,
+        organization_id=user_context.organization_id,
+    )
+
+    result = await audit_log_service.get_audit_logs(filter_params=filters)
+    audit_logs = result["audit_logs"]
+    total_count = result["total_count"]
+
+    if not audit_logs:
+        return list_response(
+            request=request,
+            items=[],
+            total=0,
+            message_key="success.no_data",
+            custom_code=CustomStatusCode.NO_CONTENT,
+            status_code=http_status.HTTP_200_OK,
+            page=page,
+            page_size=page_size,
+        )
+
+    return list_response(
+        request=request,
+        items=audit_logs,
+        total=total_count,
+        message_key="success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        page=page,
+        page_size=page_size,
+        status_code=http_status.HTTP_200_OK,
+    )
 
 
 @handle_api_exceptions("get audit logs")
@@ -94,16 +176,130 @@ async def get_audit_logs(
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
 ):
     """Get all audit logs for the current organization"""
-    if project_id:
-        user_context = await ensure_staff_project_access(
-            current_user=current_user,
-            db_connection=db_connection,
-            project_id=project_id,
-            permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
-            request=request,
-        )
-    else:
-        user_context = await extract_user_context(current_user, db_connection)
+    return await _list_audit_logs(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        search=search,
+        user_id=user_id,
+        action_type=action_type,
+        category=category,
+        risk_level=risk_level,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@handle_api_exceptions("get project audit logs")
+@project_router.get(
+    "/{project_id}/audit-logs",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get audit logs for a specific project",
+    summary="Get audit logs for a specific project",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Audit logs retrieved successfully"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_project_audit_logs(
+    *,
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    project_id: str = Path(..., description="The UUID of the project"),
+    search: str | None = Query(
+        None,
+        description="Search term to filter audit logs by description",
+    ),
+    user_id: str | None = Query(
+        None,
+        description="Filter audit logs by user ID",
+    ),
+    action_type: AuditLogActionType | None = Query(
+        None,
+        description="Filter by action type (CREATE, UPDATE, DELETE)",
+    ),
+    category: str | None = Query(
+        None,
+        description="Filter by audit category (e.g. CONTACT, PROJECT_SETUP, DAILY_HELP)",
+    ),
+    risk_level: AuditLogRiskLevel | None = Query(
+        None,
+        description="Filter by risk level (low, medium, high)",
+    ),
+    start_date: date | None = Query(
+        None,
+        description="Inclusive start date for timestamp filter (YYYY-MM-DD)",
+    ),
+    end_date: date | None = Query(
+        None,
+        description="Inclusive end date for timestamp filter (YYYY-MM-DD)",
+    ),
+    page: int = Query(1, ge=1, description="The page number for pagination"),
+    page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
+):
+    """Get audit logs scoped to a single project."""
+    return await _list_audit_logs(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        search=search,
+        user_id=user_id,
+        action_type=action_type,
+        category=category,
+        risk_level=risk_level,
+        start_date=start_date,
+        end_date=end_date,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@handle_api_exceptions("get project audit log by ID")
+@project_router.get(
+    "/{project_id}/audit-logs/{audit_log_id}",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description="Get a single audit log for a specific project",
+    summary="Get project audit log by ID",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Audit log retrieved successfully"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Audit log not found"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
+        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
+        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+async def get_project_audit_log_by_id(
+    request: Request,
+    current_user: dict = Depends(get_user_from_auth),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    project_id: str = Path(..., description="The UUID of the project"),
+    audit_log_id: str = Path(..., description="The UUID of the audit log to get"),
+):
+    """Get audit log detail scoped to a single project."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+        request=request,
+    )
 
     can_view_system_audit_logs = await check_user_access_async(
         permission_code=[AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM],
@@ -112,52 +308,21 @@ async def get_audit_logs(
         db_connection=db_connection,
     )
 
-    # If role does not have system-level visibility, force personal scope and ignore query param.
-    effective_user_id = user_id if can_view_system_audit_logs else user_context.user_id
+    scoped_user_id = None if can_view_system_audit_logs else user_context.user_id
 
-    # Create service and delegate to service
     audit_log_service = AuditLogService(user_context=user_context, db_connection=db_connection)
-
-    filters = AuditLogFilter(
-        search=search,
-        user_id=effective_user_id,
-        action_type=action_type,
-        category=category,
-        risk_level=risk_level,
-        start_date=start_date,
-        end_date=end_date,
-        project_id=project_id,
-        limit=page_size,
-        offset=(page - 1) * page_size,
-        organization_id=user_context.organization_id,
+    audit_log_detail = await audit_log_service.get_project_audit_log_by_id(
+        audit_log_id,
+        project_id,
+        scoped_user_id=scoped_user_id,
     )
 
-    result = await audit_log_service.get_audit_logs(filter_params=filters)
-
-    audit_logs = result["audit_logs"]
-    total_count = result["total_count"]
-
-    if not audit_logs:
-        return list_response(
-            request=request,
-            items=[],
-            total=0,
-            message_key="success.no_data",
-            custom_code=CustomStatusCode.NO_CONTENT,
-            status_code=http_status.HTTP_200_OK,
-            page=page,
-            page_size=page_size,
-        )
-
-    return list_response(
+    return success_response(
         request=request,
-        items=audit_logs,
-        total=total_count,
         message_key="success.retrieved",
         custom_code=CustomStatusCode.SUCCESS,
-        page=page,
-        page_size=page_size,
         status_code=http_status.HTTP_200_OK,
+        data=audit_log_detail,
     )
 
 

@@ -113,12 +113,20 @@ class _FakeAuditLogRepo:
         """Return configured total count."""
         return self.total
 
-    async def get_audit_log_by_id(self, *, audit_log_id: str, organization_id: str, user_id: str):
+    async def get_audit_log_by_id(
+        self,
+        audit_log_id: str,
+        organization_id: str,
+        user_id: str | None = None,
+        *,
+        project_id: str | None = None,
+    ):
         """Return configured detail row."""
         self.last_detail_kwargs = {
             "audit_log_id": audit_log_id,
             "organization_id": organization_id,
             "user_id": user_id,
+            "project_id": project_id,
         }
         return self.detail_row
 
@@ -275,6 +283,38 @@ async def test_get_audit_log_by_id_not_found():
 
     with pytest.raises(NotFoundException):
         await svc.get_audit_log_by_id(LOG_ID)
+
+
+@pytest.mark.asyncio
+async def test_get_project_audit_log_by_id_found():
+    """Project-scoped detail lookup passes project_id to repository."""
+    project_id = "880e8400-e29b-41d4-a716-446655440003"
+    repo = _FakeAuditLogRepo(detail_row=_db_row(project_id=project_id))
+    svc = _service(repo=repo)
+
+    detail = await svc.get_project_audit_log_by_id(
+        LOG_ID,
+        project_id,
+        scoped_user_id=None,
+    )
+
+    assert detail.id == LOG_ID
+    assert repo.last_detail_kwargs["project_id"] == project_id
+    assert repo.last_detail_kwargs["user_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_project_audit_log_by_id_not_found():
+    """Missing project-scoped audit log raises NotFoundException."""
+    project_id = "880e8400-e29b-41d4-a716-446655440003"
+    svc = _service(repo=_FakeAuditLogRepo(detail_row=None))
+
+    with pytest.raises(NotFoundException):
+        await svc.get_project_audit_log_by_id(
+            LOG_ID,
+            project_id,
+            scoped_user_id=USER_ID,
+        )
 
 
 @pytest.mark.asyncio
