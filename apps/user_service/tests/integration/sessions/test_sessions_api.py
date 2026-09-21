@@ -7,6 +7,11 @@ import pytest
 from apps.user_service.app.schemas.auth import SessionFilter
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.tests.utils.assertions import assert_success
+from libs.shared_utils.common_query import (
+    PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    SETTINGS_SYSTEM_MANAGE,
+)
 from libs.shared_utils.http_exceptions import ForbiddenException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -202,7 +207,8 @@ async def test_get_organization_sessions_without_project_id(monkeypatch, client)
     captured: dict = {}
 
     async def fake_check_permissions(current_user, db_connection, permission_codes):
-        del current_user, db_connection, permission_codes
+        del current_user, db_connection
+        captured["permission_codes"] = permission_codes
         return UserContext(
             user_id="admin", email="admin@example.com", organization_id="org-1", user_type="admin"
         )
@@ -226,6 +232,53 @@ async def test_get_organization_sessions_without_project_id(monkeypatch, client)
 
     assert body["total"] == 0
     assert captured["filters"].project_id is None
+    assert captured["permission_codes"] == SETTINGS_SYSTEM_MANAGE
+
+
+@pytest.mark.asyncio
+async def test_get_project_sessions_uses_project_access_not_system_manage(monkeypatch, client):
+    """Project-scoped route must not require org-wide system-manage permission."""
+    captured: dict = {}
+
+    async def fake_ensure_staff_project_access(*args, **kwargs):
+        del args
+        captured["permission_codes"] = kwargs.get("permission_codes")
+        return UserContext(
+            user_id="staff",
+            email="staff@example.com",
+            organization_id="org-1",
+            user_type="member",
+        )
+
+    async def fake_check_permissions(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("check_permissions should not be called for project-scoped sessions")
+
+    async def fake_get_org_sessions(self, filters: SessionFilter):
+        del self, filters
+        return {"sessions": [], "total_count": 0}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.ensure_staff_project_access",
+        fake_ensure_staff_project_access,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.sessions.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.session_service.SessionService.get_organization_sessions",
+        fake_get_org_sessions,
+    )
+
+    res = await client.get(f"/v1/projects/{PROJECT_ID}/sessions?page=1&page_size=10")
+    body = assert_success(res, 200)
+
+    assert body["total"] == 0
+    assert captured["permission_codes"] == [
+        PROJECTS_MANAGEMENT_VIEW,
+        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    ]
 
 
 @pytest.mark.asyncio

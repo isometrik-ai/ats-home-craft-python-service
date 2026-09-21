@@ -22,7 +22,6 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     SETTINGS_SYSTEM_MANAGE,
-    SETTINGS_USERS_VIEW,
 )
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
@@ -53,18 +52,19 @@ async def _list_organization_sessions(
 ):
     """Shared list logic for org-wide and project-scoped session endpoints."""
     if project_id:
-        await ensure_staff_project_access(
+        user_context = await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
             project_id=project_id,
             permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
             request=request,
         )
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=SETTINGS_USERS_VIEW,
-    )
+    else:
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=SETTINGS_SYSTEM_MANAGE,
+        )
 
     filters = SessionFilter(
         project_id=project_id,
