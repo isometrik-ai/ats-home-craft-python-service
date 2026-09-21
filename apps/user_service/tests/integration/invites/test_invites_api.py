@@ -109,6 +109,62 @@ async def test_create_invitation(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_create_invitation_with_multiple_project_ids(monkeypatch, client):
+    """Create invitation accepts project_ids array in request body."""
+    captured: dict = {}
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        del current_user, db_connection, permission_codes, organization_id
+        return UserContext(
+            user_id="u1", email="u1@example.com", organization_id="org-1", user_type="admin"
+        )
+
+    async def fake_create(self, organization_id, body):
+        del self
+        captured["organization_id"] = organization_id
+        captured["body"] = body
+        return {
+            "invite_id": "inv-1",
+            "invite_url": "http://example.com/invite",
+            "email": "invitee@example.com",
+            "expires_at": "2024-01-01T00:00:00Z",
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.invites.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.invite_service.InviteService.create_invitation",
+        fake_create,
+    )
+
+    project_ids = [
+        "770e8400-e29b-41d4-a716-446655440002",
+        "880e8400-e29b-41d4-a716-446655440003",
+    ]
+    res = await client.post(
+        "/v1/invite/org-123",
+        json={
+            "email": "invitee@example.com",
+            "role_id": "550e8400-e29b-41d4-a716-446655440000",
+            "first_name": "Test",
+            "last_name": "User",
+            "project_ids": project_ids,
+            "project_role": "security",
+        },
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["invite_id"] == "inv-1"
+    assert captured["organization_id"] == "org-123"
+    assert [str(project_id) for project_id in captured["body"].project_ids] == project_ids
+    assert str(captured["body"].project_id) == project_ids[0]
+    assert captured["body"].project_role.value == "security"
+
+
+@pytest.mark.asyncio
 async def test_get_organization_invitations(monkeypatch, client):
     """List invitations for an organization."""
 

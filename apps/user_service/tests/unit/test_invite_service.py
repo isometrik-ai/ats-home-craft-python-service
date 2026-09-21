@@ -33,6 +33,8 @@ from libs.shared_utils.http_exceptions import (
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 ROLE_ID = "660e8400-e29b-41d4-a716-446655440001"
 TEAM_ID = "770e8400-e29b-41d4-a716-446655440002"
+PROJECT_ID = "aa0e8400-e29b-41d4-a716-446655440005"
+PROJECT_ID_2 = "bb0e8400-e29b-41d4-a716-446655440006"
 USER_ID = "880e8400-e29b-41d4-a716-446655440003"
 INVITER_ID = "990e8400-e29b-41d4-a716-446655440004"
 
@@ -48,9 +50,13 @@ def _ctx() -> UserContext:
 
 
 def _create_body(
-    *, team_id: UUID | None = None, tags: list[str] | None = None
+    *,
+    team_id: UUID | None = None,
+    tags: list[str] | None = None,
+    project_id: UUID | None = None,
+    project_ids: list[UUID] | None = None,
 ) -> InviteCreateRequest:
-    """Build InviteCreateRequest with optional team_id and tags."""
+    """Build InviteCreateRequest with optional team_id, tags, and project assignments."""
     return InviteCreateRequest(
         email="invitee@example.com",
         first_name="Jane",
@@ -58,6 +64,8 @@ def _create_body(
         role_id=UUID(ROLE_ID),
         team_id=team_id,
         tags=tags,
+        project_id=project_id,
+        project_ids=project_ids,
     )
 
 
@@ -111,6 +119,162 @@ async def test_metadata_omits_team_id():
 
     assert "team_id" not in metadata
     assert "tags" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_project_ids():
+    """Metadata stores all project_ids when multiple projects are provided."""
+    service = InviteService(user_context=None, db_connection=None)
+    metadata = service._build_invite_metadata(  # pylint: disable=protected-access
+        _create_body(
+            project_ids=[UUID(PROJECT_ID), UUID(PROJECT_ID_2)],
+        )
+    )
+
+    assert metadata["project_ids"] == [PROJECT_ID, PROJECT_ID_2]
+    assert metadata["project_id"] == PROJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_metadata_normalizes_legacy_project_id():
+    """Legacy single project_id is stored as a one-item project_ids list."""
+    service = InviteService(user_context=None, db_connection=None)
+    metadata = service._build_invite_metadata(  # pylint: disable=protected-access
+        _create_body(project_id=UUID(PROJECT_ID))
+    )
+
+    assert metadata["project_ids"] == [PROJECT_ID]
+    assert metadata["project_id"] == PROJECT_ID
+
+
+def test_resolve_invite_project_ids_from_list():
+    """Accept path resolves multiple project IDs from invite metadata."""
+    service = InviteService(user_context=None, db_connection=None)
+    project_ids = service._resolve_invite_project_ids(  # pylint: disable=protected-access
+        {"project_ids": [PROJECT_ID, PROJECT_ID_2]}
+    )
+
+    assert project_ids == [PROJECT_ID, PROJECT_ID_2]
+
+
+def test_resolve_invite_project_ids_from_legacy_field():
+    """Accept path still supports legacy single project_id metadata."""
+    service = InviteService(user_context=None, db_connection=None)
+    project_ids = service._resolve_invite_project_ids(  # pylint: disable=protected-access
+        {"project_id": PROJECT_ID}
+    )
+
+    assert project_ids == [PROJECT_ID]
+
+
+@pytest.mark.asyncio
+async def test_add_invitee_to_projects_assigns_each_project():
+    """Accept path upserts the invitee into every listed project."""
+    service = InviteService(user_context=None, db_connection=MagicMock())
+    service._add_invitee_to_project = AsyncMock()  # pylint: disable=protected-access
+
+    await service._add_invitee_to_projects(  # pylint: disable=protected-access
+        project_ids=[PROJECT_ID, PROJECT_ID_2],
+        project_role="security",
+        organization_id=ORG_ID,
+        user_id=USER_ID,
+    )
+
+    assert service._add_invitee_to_project.await_count == 2  # pylint: disable=protected-access
+    first_call = service._add_invitee_to_project.await_args_list[0].kwargs  # pylint: disable=protected-access
+    second_call = service._add_invitee_to_project.await_args_list[1].kwargs  # pylint: disable=protected-access
+    assert first_call["project_id"] == PROJECT_ID
+    assert second_call["project_id"] == PROJECT_ID_2
+    assert first_call["project_role"] == "security"
+
+
+@pytest.mark.asyncio
+async def test_add_invitee_to_team_skips_duplicate_project_assignment():
+    """Team fallback does not re-add a project already listed on the invite."""
+    service = InviteService(user_context=None, db_connection=None)
+    service.team_repository = MagicMock()
+    service.team_repository.get_team_detail = AsyncMock(
+        return_value=({"id": TEAM_ID, "project_id": PROJECT_ID}, [])
+    )
+    service.team_repository._insert_team_members = AsyncMock()  # pylint: disable=protected-access
+    service._add_invitee_to_project = AsyncMock()  # pylint: disable=protected-access
+
+    await service._add_invitee_to_team(  # pylint: disable=protected-access
+        team_id=TEAM_ID,
+        organization_id=ORG_ID,
+        user_id=USER_ID,
+        added_by=INVITER_ID,
+        invite_project_ids=[PROJECT_ID],
+    )
+
+    service._add_invitee_to_project.assert_not_awaited()  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_create_invite_stores_project_ids(monkeypatch):
+    """Create invitation validates and persists all selected project IDs."""
+    service = InviteService(user_context=_ctx(), db_connection=MagicMock())
+    service.organization_repository = MagicMock()
+    service.organization_repository.get_organization_by_id = AsyncMock(
+        return_value={"id": ORG_ID, "name": "Acme"}
+    )
+    service.invite_repository = MagicMock()
+    service.invite_repository.check_user_membership = AsyncMock(return_value=False)
+    service.invite_repository.check_existing_invite = AsyncMock(return_value=None)
+    service.invite_repository.create_invite = AsyncMock(
+        return_value={
+            "id": "inv-1",
+            "expires_at": "2024-12-26T10:00:00Z",
+        }
+    )
+    service.role_repository = MagicMock()
+    service.role_repository.get_role_by_id = AsyncMock(
+        return_value={"id": ROLE_ID, "name": "Member"}
+    )
+    service.projects_repository = MagicMock()
+    service.projects_repository.get_project = AsyncMock(return_value={"id": PROJECT_ID})
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.invite_service.get_user_by_id",
+        AsyncMock(return_value={"user_metadata": {"first_name": "Admin"}}),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.invite_service.send_organization_invitation_email",
+        lambda **kwargs: None,
+    )
+
+    await service.create_invitation(
+        ORG_ID,
+        _create_body(project_ids=[UUID(PROJECT_ID), UUID(PROJECT_ID_2)]),
+    )
+
+    create_call = service.invite_repository.create_invite.await_args.args[0]
+    assert create_call["metadata"]["project_ids"] == [PROJECT_ID, PROJECT_ID_2]
+    assert service.projects_repository.get_project.await_count == 2
+
+
+def test_list_item_includes_project_ids():
+    """List response exposes all project_ids from invitation metadata."""
+    service = InviteService(user_context=None, db_connection=None)
+    item = service.build_invite_list_item(
+        {
+            "id": "inv-1",
+            "email": "invitee@example.com",
+            "role_id": ROLE_ID,
+            "status": "pending",
+            "invited_by": INVITER_ID,
+            "expires_at": "2024-12-26T10:00:00Z",
+            "created_at": "2024-12-19T10:00:00Z",
+            "updated_at": "2024-12-19T10:00:00Z",
+            "metadata": {
+                "first_name": "Jane",
+                "project_ids": [PROJECT_ID, PROJECT_ID_2],
+            },
+        }
+    )
+
+    assert item["project_ids"] == [PROJECT_ID, PROJECT_ID_2]
+    assert item["project_id"] == PROJECT_ID
 
 
 @pytest.mark.asyncio

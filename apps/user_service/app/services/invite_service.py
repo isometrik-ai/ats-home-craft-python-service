@@ -242,8 +242,9 @@ class InviteService:
             metadata["designation"] = body.designation.strip()
         if body.team_id:
             metadata["team_id"] = str(body.team_id)
-        if body.project_id:
-            metadata["project_id"] = str(body.project_id)
+        if body.project_ids:
+            metadata["project_ids"] = [str(project_id) for project_id in body.project_ids]
+            metadata["project_id"] = metadata["project_ids"][0]
         if body.project_role:
             metadata["project_role"] = body.project_role.value
         if body.tags is not None:
@@ -257,7 +258,7 @@ class InviteService:
         organization_id: str,
         user_id: str,
         added_by: str,
-        invite_project_id: str | None = None,
+        invite_project_ids: list[str] | None = None,
     ) -> None:
         """Add an accepted invitee to a team when team_id was set on the invitation."""
         if not team_id:
@@ -274,7 +275,8 @@ class InviteService:
         )
 
         team_project_id = team_data.get("project_id")
-        if team_project_id and not invite_project_id:
+        assigned_project_ids = set(invite_project_ids or [])
+        if team_project_id and str(team_project_id) not in assigned_project_ids:
             await self._add_invitee_to_project(
                 project_id=str(team_project_id),
                 project_role=None,
@@ -294,6 +296,20 @@ class InviteService:
                 message_key="project_setup.errors.project_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+
+    @staticmethod
+    def _resolve_invite_project_ids(metadata: dict[str, Any]) -> list[str]:
+        """Extract project IDs from invite metadata (supports legacy single project_id)."""
+        raw_ids = metadata.get("project_ids")
+        if isinstance(raw_ids, list):
+            project_ids = [str(project_id) for project_id in raw_ids if project_id]
+            if project_ids:
+                return project_ids
+
+        project_id = metadata.get("project_id")
+        if project_id:
+            return [str(project_id)]
+        return []
 
     async def _add_invitee_to_project(
         self,
@@ -323,6 +339,23 @@ class InviteService:
             user_id=user_id,
             project_role_id=project_role_id,
         )
+
+    async def _add_invitee_to_projects(
+        self,
+        *,
+        project_ids: list[str],
+        project_role: str | None,
+        organization_id: str,
+        user_id: str,
+    ) -> None:
+        """Assign accepted invitee to each project listed on the invitation."""
+        for project_id in project_ids:
+            await self._add_invitee_to_project(
+                project_id=project_id,
+                project_role=project_role,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
 
     def _validate_invitation_for_acceptance(
         self, invitation_data: dict[str, Any] | None
@@ -669,15 +702,16 @@ class InviteService:
             isometrik_credentials=isometrik_credentials,
         )
 
+        invite_project_ids = self._resolve_invite_project_ids(inv_meta)
         await self._add_invitee_to_team(
             team_id=inv_meta.get("team_id"),
             organization_id=str(invitation_data["organization_id"]),
             user_id=str(user.id),
             added_by=str(invitation_data["invited_by"]),
-            invite_project_id=inv_meta.get("project_id"),
+            invite_project_ids=invite_project_ids,
         )
-        await self._add_invitee_to_project(
-            project_id=inv_meta.get("project_id"),
+        await self._add_invitee_to_projects(
+            project_ids=invite_project_ids,
             project_role=inv_meta.get("project_role"),
             organization_id=str(invitation_data["organization_id"]),
             user_id=str(user.id),
@@ -749,11 +783,10 @@ class InviteService:
         has_password = bool(existing_auth_user and existing_auth_user.get("encrypted_password"))
         return {"is_existing_user": existing_auth_user is not None, "has_password": has_password}
 
-    async def create_invitation(
+    async def _validate_create_invitation_request(
         self, organization_id: str, body: InviteCreateRequest
-    ) -> dict[str, Any]:
-        """Create a new organization invitation."""
-        # Validate organization ID format
+    ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any]]:
+        """Validate organization access, membership, pending invite, role, team, and projects."""
         validate_uuid_format(organization_id, "organization ID")
 
         if not self.user_context.organization_id == organization_id:
@@ -762,7 +795,6 @@ class InviteService:
                 custom_code=CustomStatusCode.FORBIDDEN,
             )
 
-        # Get organization details when needed for validation and email
         organization_data = await self.organization_repository.get_organization_by_id(
             organization_id
         )
@@ -771,10 +803,7 @@ class InviteService:
                 message_key="invitations.errors.organization_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        # Check organization capacity
-        # await self.validate_organization_subscription(organization_data)
 
-        # Check if user is already a member
         existing_member = await self.invite_repository.check_user_membership(
             organization_id, body.email
         )
@@ -795,30 +824,27 @@ class InviteService:
                     custom_code=CustomStatusCode.CONFLICT,
                 )
 
-        # Validate the role exists for this organization before inserting the invite
         role_data = await self._get_role_data(str(body.role_id), organization_id)
 
         if body.team_id:
             await self._validate_team_in_org(str(body.team_id), organization_id)
-        if body.project_id:
-            await self._validate_project_in_org(str(body.project_id), organization_id)
+        if body.project_ids:
+            for project_id in body.project_ids:
+                await self._validate_project_in_org(str(project_id), organization_id)
 
-        # Generate invite token
-        invite_token, token_hash = self._generate_invite_token()
-        expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
+        return organization_data, pending_invite, role_data
 
-        user_service = UserService(
-            user_context=self.user_context,
-            db_connection=self.db_connection,
-        )
-        validated_custom_fields = await user_service.validate_member_custom_fields_for_create(
-            body.custom_fields,
-            enforce_required=False,
-        )
-
-        metadata = self._build_invite_metadata(body)
-        metadata["custom_fields"] = validated_custom_fields
-
+    async def _persist_invitation_record(
+        self,
+        *,
+        organization_id: str,
+        body: InviteCreateRequest,
+        pending_invite: dict[str, Any] | None,
+        token_hash: str,
+        expires_at: datetime,
+        metadata: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create a new invite or renew an expired pending invite."""
         if pending_invite:
             created_invite = await self.invite_repository.renew_expired_invite(
                 str(pending_invite["id"]),
@@ -835,18 +861,53 @@ class InviteService:
                     message_key="errors.internal_server_error",
                     custom_code=CustomStatusCode.INTERNAL_SERVER_ERROR,
                 )
-        else:
-            invite_data = {
-                "organization_id": organization_id,
-                "email": body.email,
-                "role_id": str(body.role_id),
-                "token_hash": token_hash,
-                "invited_by": self.user_context.user_id,
-                "status": InviteStatus.PENDING.value,
-                "expires_at": expires_at,
-                "metadata": metadata,
-            }
-            created_invite = await self.invite_repository.create_invite(invite_data)
+            return created_invite
+
+        invite_data = {
+            "organization_id": organization_id,
+            "email": body.email,
+            "role_id": str(body.role_id),
+            "token_hash": token_hash,
+            "invited_by": self.user_context.user_id,
+            "status": InviteStatus.PENDING.value,
+            "expires_at": expires_at,
+            "metadata": metadata,
+        }
+        return await self.invite_repository.create_invite(invite_data)
+
+    async def create_invitation(
+        self, organization_id: str, body: InviteCreateRequest
+    ) -> dict[str, Any]:
+        """Create a new organization invitation."""
+        (
+            organization_data,
+            pending_invite,
+            role_data,
+        ) = await self._validate_create_invitation_request(organization_id, body)
+
+        invite_token, token_hash = self._generate_invite_token()
+        expires_at = datetime.now(timezone.utc) + timedelta(days=app_settings.invite_expiry_days)
+
+        user_service = UserService(
+            user_context=self.user_context,
+            db_connection=self.db_connection,
+        )
+        validated_custom_fields = await user_service.validate_member_custom_fields_for_create(
+            body.custom_fields,
+            enforce_required=False,
+        )
+
+        metadata = self._build_invite_metadata(body)
+        metadata["custom_fields"] = validated_custom_fields
+
+        created_invite = await self._persist_invitation_record(
+            organization_id=organization_id,
+            body=body,
+            pending_invite=pending_invite,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            metadata=metadata,
+        )
 
         # Generate invitation URL
         invite_url = self._generate_invite_url(invite_token)
@@ -1198,7 +1259,8 @@ class InviteService:
             phone_full = f"{phone_isd_code}{phone_number_db}"
 
         team_id = metadata.get("team_id")
-        project_id = metadata.get("project_id")
+        project_ids = self._resolve_invite_project_ids(metadata)
+        project_id = project_ids[0] if project_ids else None
         project_role = metadata.get("project_role")
         tags = metadata.get("tags")
 
@@ -1217,6 +1279,7 @@ class InviteService:
             "phone": phone_full,
             "team_id": team_id,
             "project_id": project_id,
+            "project_ids": project_ids or None,
             "project_role": project_role,
             "tags": tags if tags else None,
             "avatar_url": metadata.get("avatar_url"),

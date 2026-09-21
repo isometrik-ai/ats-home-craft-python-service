@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from apps.user_service.app.schemas.enums import (
     BloodGroup,
@@ -100,11 +100,23 @@ class InviteCreateRequest(BaseModel):
     )
     project_id: uuid.UUID | None = Field(
         None,
-        description="Optional project to assign the invitee to when the invitation is accepted",
+        description=(
+            "Optional single project to assign the invitee to when the invitation is accepted. "
+            "Prefer project_ids when assigning multiple projects."
+        ),
+    )
+    project_ids: list[uuid.UUID] | None = Field(
+        None,
+        description=(
+            "Optional projects to assign the invitee to when the invitation is accepted. "
+            "When both project_id and project_ids are provided, they are merged."
+        ),
     )
     project_role: ProjectMemberRole | None = Field(
         default=None,
-        description="Project member role when project_id is set (defaults to community_admin)",
+        description=(
+            "Project member role applied to each assigned project (defaults to community_admin)"
+        ),
     )
     tags: list[str] | None = Field(
         None,
@@ -127,12 +139,34 @@ class InviteCreateRequest(BaseModel):
         description="User custom fields (FieldCell create payload; no type or instance_id).",
     )
 
+    @model_validator(mode="after")
+    def normalize_project_ids(self) -> "InviteCreateRequest":
+        """Merge legacy project_id with project_ids and deduplicate while preserving order."""
+        merged: list[uuid.UUID] = list(self.project_ids or [])
+        if self.project_id and self.project_id not in merged:
+            merged.insert(0, self.project_id)
+
+        seen: set[uuid.UUID] = set()
+        unique_ids: list[uuid.UUID] = []
+        for project_id in merged:
+            if project_id not in seen:
+                seen.add(project_id)
+                unique_ids.append(project_id)
+
+        self.project_ids = unique_ids or None
+        self.project_id = unique_ids[0] if unique_ids else None
+        return self
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "team_id": "660e8400-e29b-41d4-a716-446655440001",
+                "project_ids": [
+                    "770e8400-e29b-41d4-a716-446655440002",
+                    "880e8400-e29b-41d4-a716-446655440003",
+                ],
                 "tags": ["sales", "onboarding"],
                 "expires_in_days": 7,
             }
@@ -214,6 +248,20 @@ class InviteListItem(BaseModel):
     team_id: uuid.UUID | None = Field(
         None,
         description="Team the invitee will be added to on acceptance, if set at invite time",
+    )
+    project_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "First project the invitee will be added to on acceptance, if set at invite time"
+        ),
+    )
+    project_ids: list[uuid.UUID] | None = Field(
+        None,
+        description="Projects the invitee will be added to on acceptance, if set at invite time",
+    )
+    project_role: ProjectMemberRole | None = Field(
+        None,
+        description="Project member role applied to each assigned project on acceptance",
     )
     tags: list[str] | None = Field(
         None,
