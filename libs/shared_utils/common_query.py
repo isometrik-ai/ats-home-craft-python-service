@@ -50,6 +50,7 @@ DAILY_HELP_MANAGEMENT_VIEW = "daily_help_management.view"
 DAILY_HELP_MANAGEMENT_CREATE = "daily_help_management.create"
 DAILY_HELP_MANAGEMENT_UPDATE = "daily_help_management.update"
 DAILY_HELP_MANAGEMENT_REVIEW = "daily_help_management.review"
+DAILY_HELP_MANAGEMENT_DELETE = "daily_help_management.delete"
 
 TENANT_REQUESTS_MANAGEMENT_VIEW = "tenant_requests_management.view"
 TENANT_REQUESTS_MANAGEMENT_EDIT = "tenant_requests_management.edit"
@@ -472,6 +473,12 @@ DEFAULT_PROJECT_PERMISSIONS = [
         DAILY_HELP_MANAGEMENT_UPDATE,
         "Update Daily Help",
         "Edit daily help profiles and categories within assigned projects",
+        "daily_help",
+    ),
+    (
+        DAILY_HELP_MANAGEMENT_DELETE,
+        "Delete Daily Help",
+        "Soft-delete daily help profiles within assigned projects",
         "daily_help",
     ),
     (

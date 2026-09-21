@@ -10,6 +10,7 @@ from libs.shared_utils.common_query import (
     CONTACTS_MANAGEMENT_DELETE,
     CONTACTS_MANAGEMENT_VIEW,
     DAILY_HELP_MANAGEMENT_CREATE,
+    DAILY_HELP_MANAGEMENT_DELETE,
     DAILY_HELP_MANAGEMENT_REVIEW,
     DAILY_HELP_MANAGEMENT_UPDATE,
     DAILY_HELP_MANAGEMENT_VIEW,
@@ -64,6 +65,7 @@ PROJECT_PERMISSION_SATISFIERS: dict[str, frozenset[str]] = {
     DAILY_HELP_MANAGEMENT_VIEW: frozenset({DAILY_HELP_MANAGEMENT_VIEW}),
     DAILY_HELP_MANAGEMENT_CREATE: frozenset({DAILY_HELP_MANAGEMENT_CREATE}),
     DAILY_HELP_MANAGEMENT_UPDATE: frozenset({DAILY_HELP_MANAGEMENT_UPDATE}),
+    DAILY_HELP_MANAGEMENT_DELETE: frozenset({DAILY_HELP_MANAGEMENT_DELETE}),
     DAILY_HELP_MANAGEMENT_REVIEW: frozenset({DAILY_HELP_MANAGEMENT_REVIEW}),
     TENANT_REQUESTS_MANAGEMENT_VIEW: frozenset({TENANT_REQUESTS_MANAGEMENT_VIEW}),
     TENANT_REQUESTS_MANAGEMENT_EDIT: frozenset({TENANT_REQUESTS_MANAGEMENT_EDIT}),
@@ -148,6 +150,7 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
         COMMUNITY_EVENTS_MANAGEMENT_EDIT,
         DAILY_HELP_MANAGEMENT_CREATE,
         DAILY_HELP_MANAGEMENT_UPDATE,
+        DAILY_HELP_MANAGEMENT_DELETE,
         DAILY_HELP_MANAGEMENT_REVIEW,
         TENANT_REQUESTS_MANAGEMENT_EDIT,
         MOVE_EVENTS_MANAGEMENT_EDIT,
@@ -174,24 +177,14 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
     return frozenset(codes)
 
 
-def _expand_assigned_view_ceiling(codes: frozenset[str]) -> frozenset[str]:
-    """Treat view_assigned as satisfying ceilings that include org-wide project view.
-
-    Matches ``_expand_project_view_permission_codes`` in ensure_staff_project_access so
-    my-permissions effective_permissions align with API enforcement for assigned staff.
-    """
-    if PROJECTS_MANAGEMENT_VIEW in codes:
-        return codes | {PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
-    return codes
-
-
 def project_code_allowed_by_org_ceiling(
     org_permission_codes: set[str],
     project_permission_code: str,
 ) -> bool:
     """Return True when the user's org role satisfies the ceiling for a project permission."""
-    ceiling = _expand_assigned_view_ceiling(org_ceiling_permission_codes(project_permission_code))
-    return bool(org_permission_codes.intersection(ceiling))
+    return bool(
+        org_permission_codes.intersection(org_ceiling_permission_codes(project_permission_code))
+    )
 
 
 def expand_org_ceiling_permission_codes(permission_codes: list[str]) -> list[str]:
