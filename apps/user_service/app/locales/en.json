@@ -800,6 +800,8 @@
       "not_currently_occupying": "The contact is not currently occupying this unit.",
       "unit_not_sold": "Move-in is not allowed because this unit has not been sold or allotted to an owner.",
       "unit_occupied_by_other_tenant": "This unit is already occupied by another tenant.",
+      "contact_not_unit_owner": "The contact is not the assigned owner of this unit.",
+      "documents_required": "At least one document is required for tenant move-in.",
       "invalid_fee": "The move fee must be zero or greater."
     },
     "success": {

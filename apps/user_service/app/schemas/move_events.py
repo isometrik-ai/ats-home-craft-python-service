@@ -47,13 +47,10 @@ class CreateMoveEventRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_documents_for_move_type(self) -> CreateMoveEventRequest:
-        """Require at least one document on move-in; move-out must not include documents."""
-        documents = self.documents
+        """Move-out must not include documents; tenant move-in docs checked in service."""
         if self.move_type == MoveEventType.MOVE_IN:
-            if not documents:
-                raise ValueError("documents are required for move_in")
             return self
-        if documents:
+        if self.documents:
             raise ValueError("documents may only be supplied for move_in")
         return self
 

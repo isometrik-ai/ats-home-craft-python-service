@@ -263,6 +263,15 @@ class TestMoveEventsSchemaValidators:
         )
         assert request.documents[0].document_type == "custom_lease"
 
+    def test_create_move_in_allows_missing_documents_at_schema_level(self) -> None:
+        request = CreateMoveEventRequest(
+            unit_id="unit-1",
+            contact_id="contact-1",
+            move_type=MoveEventType.MOVE_IN,
+            event_date=date(2026, 1, 1),
+        )
+        assert request.documents is None
+
 
 class TestVisitorLogsSchemaValidators:
     """Visitor log query schema validation."""

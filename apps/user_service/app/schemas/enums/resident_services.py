@@ -17,6 +17,13 @@ class MoveEventListBucket(str, Enum):
     MOVE_OUT = "move_out"
 
 
+class MoveEventOccupantType(str, Enum):
+    """Who the admin move event applies to."""
+
+    TENANT = "tenant"
+    OWNER = "owner"
+
+
 class TenantRequestType(str, Enum):
     """Tenant request workflow type (Postgres tenant_request_type enum)."""
 
