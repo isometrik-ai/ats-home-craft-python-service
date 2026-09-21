@@ -860,7 +860,8 @@
       "not_move_out_request": "This action applies only to move-out requests.",
       "not_move_in_request": "This action applies only to move-in requests.",
       "move_out_date_in_past": "Move-out date cannot be in the past.",
-      "move_out_date_required": "Move-out date is required."
+      "move_out_date_required": "Move-out date is required.",
+      "unsupported_export_format": "Only CSV export is supported."
     },
     "success": {
       "list_retrieved": "Tenant requests retrieved successfully.",

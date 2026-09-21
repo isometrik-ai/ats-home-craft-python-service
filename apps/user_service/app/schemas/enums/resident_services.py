@@ -108,6 +108,8 @@ TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES: tuple[TenantRequestDocumentType, ...] = 
     TenantRequestDocumentType.POLICE_VERIFICATION,
 )
 
+TENANT_REQUESTS_EXPORT_MAX_ROWS = 10_000
+
 
 # ============================================================================
 # DAILY HELP ENUMS — mirror Postgres daily_help_* enums (ADR 0013)
