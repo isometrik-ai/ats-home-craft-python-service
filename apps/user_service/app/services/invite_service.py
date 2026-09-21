@@ -244,8 +244,8 @@ class InviteService:
             metadata["team_id"] = str(body.team_id)
         if body.project_id:
             metadata["project_id"] = str(body.project_id)
-        if body.project_role:
-            metadata["project_role"] = body.project_role.value
+        if body.project_role_id:
+            metadata["project_role_id"] = str(body.project_role_id)
         if body.tags is not None:
             metadata["tags"] = [tag.strip() for tag in body.tags if tag and tag.strip()]
         return metadata
@@ -277,7 +277,7 @@ class InviteService:
         if team_project_id and not invite_project_id:
             await self._add_invitee_to_project(
                 project_id=str(team_project_id),
-                project_role=None,
+                project_role_id=None,
                 organization_id=organization_id,
                 user_id=user_id,
             )
@@ -295,13 +295,33 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+    async def _validate_project_role_in_project(
+        self,
+        *,
+        project_id: str,
+        project_role_id: str,
+        organization_id: str,
+    ) -> None:
+        """Ensure project_role_id belongs to the given project."""
+        from apps.user_service.app.services.project_roles_service import (
+            ProjectRolesService,
+        )
+
+        roles_service = ProjectRolesService(db_connection=self.db_connection)
+        await roles_service.ensure_project_role_belongs_to_project(
+            organization_id=organization_id,
+            project_id=project_id,
+            project_role_id=project_role_id,
+        )
+
     async def _add_invitee_to_project(
         self,
         *,
         project_id: str | None,
-        project_role: str | None,
+        project_role_id: str | None,
         organization_id: str,
         user_id: str,
+        legacy_project_role_slug: str | None = None,
     ) -> None:
         """Assign accepted invitee to a project when project_id was set on the invitation."""
         if not project_id:
@@ -311,17 +331,25 @@ class InviteService:
         )
 
         roles_service = ProjectRolesService(db_connection=self.db_connection)
-        slug = project_role or ProjectMemberRole.COMMUNITY_ADMIN.value
-        project_role_id = await roles_service.resolve_role_id_for_slug(
-            organization_id=organization_id,
-            project_id=project_id,
-            slug=slug,
-        )
+        resolved_role_id = project_role_id
+        if resolved_role_id:
+            await roles_service.ensure_project_role_belongs_to_project(
+                organization_id=organization_id,
+                project_id=project_id,
+                project_role_id=resolved_role_id,
+            )
+        else:
+            slug = legacy_project_role_slug or ProjectMemberRole.COMMUNITY_ADMIN.value
+            resolved_role_id = await roles_service.resolve_role_id_for_slug(
+                organization_id=organization_id,
+                project_id=project_id,
+                slug=slug,
+            )
         await self.projects_repository.upsert_member(
             organization_id=organization_id,
             project_id=project_id,
             user_id=user_id,
-            project_role_id=project_role_id,
+            project_role_id=resolved_role_id,
         )
 
     def _validate_invitation_for_acceptance(
@@ -678,7 +706,8 @@ class InviteService:
         )
         await self._add_invitee_to_project(
             project_id=inv_meta.get("project_id"),
-            project_role=inv_meta.get("project_role"),
+            project_role_id=inv_meta.get("project_role_id"),
+            legacy_project_role_slug=inv_meta.get("project_role"),
             organization_id=str(invitation_data["organization_id"]),
             user_id=str(user.id),
         )
@@ -753,6 +782,7 @@ class InviteService:
         self, organization_id: str, body: InviteCreateRequest
     ) -> dict[str, Any]:
         """Create a new organization invitation."""
+        # pylint: disable=too-complex
         # Validate organization ID format
         validate_uuid_format(organization_id, "organization ID")
 
@@ -802,6 +832,12 @@ class InviteService:
             await self._validate_team_in_org(str(body.team_id), organization_id)
         if body.project_id:
             await self._validate_project_in_org(str(body.project_id), organization_id)
+            if body.project_role_id:
+                await self._validate_project_role_in_project(
+                    project_id=str(body.project_id),
+                    project_role_id=str(body.project_role_id),
+                    organization_id=organization_id,
+                )
 
         # Generate invite token
         invite_token, token_hash = self._generate_invite_token()
@@ -1199,7 +1235,7 @@ class InviteService:
 
         team_id = metadata.get("team_id")
         project_id = metadata.get("project_id")
-        project_role = metadata.get("project_role")
+        project_role_id = metadata.get("project_role_id")
         tags = metadata.get("tags")
 
         return {
@@ -1217,7 +1253,7 @@ class InviteService:
             "phone": phone_full,
             "team_id": team_id,
             "project_id": project_id,
-            "project_role": project_role,
+            "project_role_id": project_role_id,
             "tags": tags if tags else None,
             "avatar_url": metadata.get("avatar_url"),
             "gender": metadata.get("gender"),

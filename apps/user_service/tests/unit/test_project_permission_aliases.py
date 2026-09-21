@@ -1,6 +1,7 @@
 """Unit tests for project permission alias helpers."""
 
 from libs.shared_utils.common_query import (
+    COMMUNITY_EVENTS_MANAGEMENT_EDIT,
     MOVE_EVENTS_MANAGEMENT_VIEW,
     NOTICES_MANAGEMENT_EDIT,
     PROJECT_SETUP_EDIT,
@@ -13,6 +14,7 @@ from libs.shared_utils.common_query import (
 from libs.shared_utils.project_permission_aliases import (
     expand_org_ceiling_permission_codes,
     org_ceiling_permission_codes,
+    project_code_allowed_by_org_ceiling,
     project_permission_satisfiers,
     project_role_grants_any,
 )
@@ -62,3 +64,18 @@ def test_expand_org_ceiling_permission_codes_deduplicates():
     assert PROJECT_SETUP_EDIT in expanded
     assert PROJECTS_MANAGEMENT_EDIT in expanded
     assert expanded.count(PROJECTS_MANAGEMENT_VIEW) == 1
+
+
+def test_project_code_allowed_by_org_ceiling_edit_with_view_assigned_only():
+    """Assigned staff with view_assigned can effective-edit when project role grants edit."""
+    assert project_code_allowed_by_org_ceiling(
+        {PROJECTS_MANAGEMENT_VIEW_ASSIGNED},
+        COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+    )
+
+
+def test_project_code_allowed_by_org_ceiling_edit_requires_org_ceiling():
+    assert not project_code_allowed_by_org_ceiling(
+        {"users_management.view"},
+        COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+    )

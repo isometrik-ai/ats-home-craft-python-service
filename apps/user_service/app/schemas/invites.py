@@ -8,13 +8,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from apps.user_service.app.schemas.enums import (
     BloodGroup,
     Gender,
     InviteStatus,
-    ProjectMemberRole,
 )
 
 
@@ -102,9 +101,12 @@ class InviteCreateRequest(BaseModel):
         None,
         description="Optional project to assign the invitee to when the invitation is accepted",
     )
-    project_role: ProjectMemberRole | None = Field(
+    project_role_id: uuid.UUID | None = Field(
         default=None,
-        description="Project member role when project_id is set (defaults to community_admin)",
+        description=(
+            "Project role template id when project_id is set "
+            "(defaults to community_admin on acceptance if omitted)"
+        ),
     )
     tags: list[str] | None = Field(
         None,
@@ -127,12 +129,21 @@ class InviteCreateRequest(BaseModel):
         description="User custom fields (FieldCell create payload; no type or instance_id).",
     )
 
+    @model_validator(mode="after")
+    def project_role_id_requires_project(self) -> "InviteCreateRequest":
+        """project_role_id is only valid when project_id is set."""
+        if self.project_role_id is not None and self.project_id is None:
+            raise ValueError("project_role_id requires project_id")
+        return self
+
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "team_id": "660e8400-e29b-41d4-a716-446655440001",
+                "project_id": "770e8400-e29b-41d4-a716-446655440002",
+                "project_role_id": "880e8400-e29b-41d4-a716-446655440003",
                 "tags": ["sales", "onboarding"],
                 "expires_in_days": 7,
             }
@@ -214,6 +225,14 @@ class InviteListItem(BaseModel):
     team_id: uuid.UUID | None = Field(
         None,
         description="Team the invitee will be added to on acceptance, if set at invite time",
+    )
+    project_id: uuid.UUID | None = Field(
+        None,
+        description="Project the invitee will be assigned to on acceptance, if set at invite time",
+    )
+    project_role_id: uuid.UUID | None = Field(
+        None,
+        description="Project role template id for project assignment on acceptance",
     )
     tags: list[str] | None = Field(
         None,
