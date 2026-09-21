@@ -25,11 +25,11 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
+    MoveEventDocumentInput,
     MoveEventDocumentResponse,
     MoveEventResponse,
     UpdateMoveEventRequest,
 )
-from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
 from apps.user_service.app.services.inventory_service import resolve_is_sold
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
@@ -164,14 +164,14 @@ class MoveEventsService:
 
     @staticmethod
     def _documents_to_json(
-        documents: list[TenantRequestDocumentInput] | None,
+        documents: list[MoveEventDocumentInput] | None,
     ) -> list[dict[str, str | None]]:
         """Serialize typed document inputs for jsonb storage."""
         if not documents:
             return []
         return [
             {
-                "document_type": item.document_type.value,
+                "document_type": item.document_type,
                 "file_path": item.file_path,
                 "file_name": item.file_name,
             }
@@ -317,14 +317,51 @@ class MoveEventsService:
         )
         return created["id"]
 
-    async def _assert_move_in_allowed(
+    async def _get_unit_owner_row_or_raise(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+    ) -> dict[str, Any]:
+        """Return the active owner allotment for a unit or raise."""
+        owner = await self.units_repo.get_unit_owner_contact(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if not owner or not owner.get("contact_id"):
+            raise ValidationException(
+                message_key="move_events.errors.unit_not_sold",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return owner
+
+    async def _assert_contact_is_unit_owner(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        contact_id: str,
+    ) -> dict[str, Any]:
+        """Ensure contact_id is the assigned owner for the unit."""
+        owner = await self._get_unit_owner_row_or_raise(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if str(owner.get("contact_id") or "") != str(contact_id):
+            raise ValidationException(
+                message_key="move_events.errors.contact_not_unit_owner",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return owner
+
+    async def _assert_unit_sold_without_active_tenant(
         self,
         *,
         organization_id: str,
         project_id: str,
         unit_id: str,
     ) -> None:
-        """Reject move-in when the unit is unsold or already has an active tenant."""
+        """Reject when the unit is unsold or already has an active tenant."""
         unit_row = await self.units_repo.get_unit_detail_base(
             organization_id=organization_id,
             project_id=project_id,
@@ -357,6 +394,45 @@ class MoveEventsService:
         if tenant_id:
             raise ValidationException(
                 message_key="move_events.errors.unit_occupied_by_other_tenant",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _assert_move_in_allowed(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> None:
+        """Reject tenant move-in when the unit is unsold or already has an active tenant."""
+        await self._assert_unit_sold_without_active_tenant(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+
+    async def _contact_is_unit_owner(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        contact_id: str,
+    ) -> bool:
+        """Return True when contact_id is the assigned owner of the unit."""
+        owner = await self.units_repo.get_unit_owner_contact(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        return bool(owner and str(owner.get("contact_id") or "") == str(contact_id))
+
+    @staticmethod
+    def _assert_tenant_move_in_documents(body: CreateMoveEventRequest) -> None:
+        """Tenant move-in requires at least one document."""
+        if body.move_type != MoveEventType.MOVE_IN:
+            return
+        if not body.documents:
+            raise ValidationException(
+                message_key="move_events.errors.documents_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
@@ -510,6 +586,116 @@ class MoveEventsService:
         )
         return str(inserted["id"])
 
+    async def _create_owner_move_event(
+        self,
+        *,
+        body: CreateMoveEventRequest,
+        project_id: str,
+    ) -> MoveEventResponse:
+        """Record owner move-in/out on the unit they own."""
+        organization_id = self.user_context.organization_id
+        assert organization_id
+
+        owner_row = await self._assert_contact_is_unit_owner(
+            organization_id=organization_id,
+            unit_id=body.unit_id,
+            contact_id=body.contact_id,
+        )
+        contact_unit_id = str(owner_row.get("contact_unit_id") or owner_row.get("id") or "")
+        if not contact_unit_id:
+            raise ValidationException(
+                message_key="move_events.errors.contact_not_unit_owner",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        move_type = body.move_type.value
+        owner_status = str(owner_row.get("status") or "")
+
+        if move_type == MoveEventType.MOVE_IN.value:
+            await self._assert_unit_sold_without_active_tenant(
+                organization_id=organization_id,
+                project_id=project_id,
+                unit_id=body.unit_id,
+            )
+            if owner_status not in {
+                ContactUnitStatus.PENDING.value,
+                ContactUnitStatus.ACTIVE.value,
+            }:
+                raise ValidationException(
+                    message_key="move_events.errors.contact_not_unit_owner",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            inserted = await self.move_events_repo.insert(
+                {
+                    "organization_id": organization_id,
+                    "project_id": project_id,
+                    "unit_id": body.unit_id,
+                    "contact_id": body.contact_id,
+                    "contact_unit_id": contact_unit_id,
+                    "move_type": move_type,
+                    "event_date": body.event_date,
+                    "fee_amount": body.fee_amount,
+                    "fee_currency": body.fee_currency,
+                    "notes": body.notes,
+                    "documents": self._documents_to_json(body.documents),
+                    "recorded_by_user_id": self.user_context.user_id,
+                }
+            )
+            if owner_status == ContactUnitStatus.PENDING.value:
+                await self.contact_units_repo.sync_move_in(
+                    organization_id=organization_id,
+                    contact_unit_id=contact_unit_id,
+                    event_date=body.event_date,
+                )
+        else:
+            inserted = await self.move_events_repo.insert(
+                {
+                    "organization_id": organization_id,
+                    "project_id": project_id,
+                    "unit_id": body.unit_id,
+                    "contact_id": body.contact_id,
+                    "contact_unit_id": contact_unit_id,
+                    "move_type": move_type,
+                    "event_date": body.event_date,
+                    "fee_amount": body.fee_amount,
+                    "fee_currency": body.fee_currency,
+                    "notes": body.notes,
+                    "documents": [],
+                    "recorded_by_user_id": self.user_context.user_id,
+                }
+            )
+
+        await self.units_repo.reconcile_unit_inventory_status(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=body.unit_id,
+        )
+        row = await self.move_events_repo.get_by_id(
+            organization_id=organization_id,
+            move_event_id=inserted["id"],
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="move_events.errors.move_event_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._notify_move_recorded(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=body.unit_id,
+            move_event_id=str(row.get("id") or inserted["id"]),
+            move_type=move_type,
+            moving_contact_id=str(body.contact_id),
+            unit_label=unit_label_from_row(
+                {
+                    "unit_id": body.unit_id,
+                    "unit_label": row.get("unit_label"),
+                    "unit_code": row.get("unit_code"),
+                }
+            ),
+        )
+        return self._serialize_row(row)
+
     async def create_move_event(self, body: CreateMoveEventRequest) -> MoveEventResponse:
         """Record a move-in or move-out and sync occupancy."""
         organization_id = self.user_context.organization_id
@@ -533,9 +719,20 @@ class MoveEventsService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        move_type = body.move_type.value
         project_id = str(unit["project_id"])
+        if await self._contact_is_unit_owner(
+            organization_id=organization_id,
+            unit_id=body.unit_id,
+            contact_id=body.contact_id,
+        ):
+            return await self._create_owner_move_event(
+                body=body,
+                project_id=project_id,
+            )
+
+        move_type = body.move_type.value
         if move_type == MoveEventType.MOVE_IN.value:
+            self._assert_tenant_move_in_documents(body)
             await self._assert_move_in_allowed(
                 organization_id=organization_id,
                 project_id=project_id,

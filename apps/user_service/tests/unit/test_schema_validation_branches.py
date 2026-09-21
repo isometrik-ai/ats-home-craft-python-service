@@ -244,16 +244,33 @@ class TestMoveEventsSchemaValidators:
                 ],
             )
 
-    def test_update_move_event_documents_requires_full_set(self) -> None:
+    def test_update_move_event_documents_rejects_empty_list(self) -> None:
         with pytest.raises(ValidationError):
-            UpdateMoveEventRequest(
-                documents=[
-                    {
-                        "document_type": "id_proof",
-                        "file_path": "moves/id.pdf",
-                    }
-                ],
-            )
+            UpdateMoveEventRequest(documents=[])
+
+    def test_create_move_in_accepts_free_form_document_types(self) -> None:
+        request = CreateMoveEventRequest(
+            unit_id="unit-1",
+            contact_id="contact-1",
+            move_type=MoveEventType.MOVE_IN,
+            event_date=date(2026, 1, 1),
+            documents=[
+                {
+                    "document_type": "custom_lease",
+                    "file_path": "moves/lease.pdf",
+                }
+            ],
+        )
+        assert request.documents[0].document_type == "custom_lease"
+
+    def test_create_move_in_allows_missing_documents_at_schema_level(self) -> None:
+        request = CreateMoveEventRequest(
+            unit_id="unit-1",
+            contact_id="contact-1",
+            move_type=MoveEventType.MOVE_IN,
+            event_date=date(2026, 1, 1),
+        )
+        assert request.documents is None
 
 
 class TestVisitorLogsSchemaValidators:

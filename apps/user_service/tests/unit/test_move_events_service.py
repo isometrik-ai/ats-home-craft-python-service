@@ -8,14 +8,13 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from pydantic import ValidationError
 
-from apps.user_service.app.schemas.enums import MoveEventType, TenantRequestDocumentType
+from apps.user_service.app.schemas.enums import MoveEventType
 from apps.user_service.app.schemas.move_events import (
     CreateMoveEventRequest,
+    MoveEventDocumentInput,
     UpdateMoveEventRequest,
 )
-from apps.user_service.app.schemas.tenant_requests import TenantRequestDocumentInput
 from apps.user_service.app.services.move_events_service import MoveEventsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
@@ -41,23 +40,13 @@ def _mock_tenant_request_sync(monkeypatch):
     )
 
 
-def _required_move_in_documents() -> list[TenantRequestDocumentInput]:
-    """Build the three required move-in document slots."""
+def _required_move_in_documents() -> list[MoveEventDocumentInput]:
+    """Build sample move-in documents with free-form document_type values."""
     return [
-        TenantRequestDocumentInput(
-            document_type=TenantRequestDocumentType.ID_PROOF,
-            file_path="moves/id-proof.pdf",
-            file_name="id-proof.pdf",
-        ),
-        TenantRequestDocumentInput(
-            document_type=TenantRequestDocumentType.RENTAL_AGREEMENT,
-            file_path="moves/rental.pdf",
-            file_name="rental.pdf",
-        ),
-        TenantRequestDocumentInput(
-            document_type=TenantRequestDocumentType.POLICE_VERIFICATION,
-            file_path="moves/police.pdf",
-            file_name="police.pdf",
+        MoveEventDocumentInput(
+            document_type="inspection_report",
+            file_path="moves/inspection.pdf",
+            file_name="inspection.pdf",
         ),
     ]
 
@@ -70,6 +59,18 @@ def _move_in_request(**overrides: Any) -> CreateMoveEventRequest:
         "move_type": MoveEventType.MOVE_IN,
         "event_date": date(2026, 5, 25),
         "documents": _required_move_in_documents(),
+    }
+    payload.update(overrides)
+    return CreateMoveEventRequest(**payload)
+
+
+def _owner_move_in_request(**overrides: Any) -> CreateMoveEventRequest:
+    """Build a valid owner move-in create request."""
+    payload = {
+        "unit_id": "unit-1",
+        "contact_id": "owner-1",
+        "move_type": MoveEventType.MOVE_IN,
+        "event_date": date(2026, 5, 25),
     }
     payload.update(overrides)
     return CreateMoveEventRequest(**payload)
@@ -127,6 +128,7 @@ class _FakeMoveEventsRepo:
     async def insert(self, data: dict[str, Any]) -> dict[str, Any]:
         """Record insert call and return new move event id."""
         self.insert_calls.append(data)
+        self.row = _move_row(**{k: v for k, v in data.items() if k in _move_row()})
         return {"id": "move-1"}
 
     async def get_by_id(self, *, organization_id: str, move_event_id: str):
@@ -210,6 +212,11 @@ class _FakeContactUnitsRepo:
         """Record move-out sync and return moved-out link."""
         self.sync_move_out_calls.append(kwargs)
         return {"id": kwargs["contact_unit_id"], "status": "moved_out"}
+
+    async def sync_owner_occupancy_move_out(self, **kwargs):
+        """Record owner occupancy move-out and return pending link."""
+        self.sync_move_out_calls.append(kwargs)
+        return {"id": kwargs["contact_unit_id"], "status": "pending"}
 
 
 class _FakeContactsRepo:
@@ -345,7 +352,8 @@ async def test_create_move_in_syncs_active_link():
 
     assert result.move_type == MoveEventType.MOVE_IN.value
     assert len(move_repo.insert_calls) == 1
-    assert len(move_repo.insert_calls[0]["documents"]) == 3
+    assert len(move_repo.insert_calls[0]["documents"]) == 1
+    assert move_repo.insert_calls[0]["documents"][0]["document_type"] == "inspection_report"
     assert len(contact_units_repo.sync_move_in_calls) == 1
     service.contact_roles_repo.insert_tenant_role.assert_awaited_once()
     sync_mock.assert_awaited_once()
@@ -657,17 +665,6 @@ async def test_create_raises_when_inserted_row_missing():
     assert exc_info.value.message_key == "move_events.errors.move_event_not_found"
 
 
-def test_create_move_in_requires_documents():
-    """Move-in without typed documents fails schema validation."""
-    with pytest.raises(ValidationError):
-        CreateMoveEventRequest(
-            unit_id="unit-1",
-            contact_id="contact-1",
-            move_type=MoveEventType.MOVE_IN,
-            event_date=date(2026, 5, 25),
-        )
-
-
 def test_documents_from_row_parses_jsonb_list():
     """Stored documents jsonb is parsed into response models."""
     row = _move_row(
@@ -834,3 +831,131 @@ async def test_update_with_null_fee_amount_skips_fee_validation():
     )
 
     assert result.notes == "cleared"
+
+
+@pytest.mark.asyncio
+async def test_create_owner_move_in_activates_pending_allotment():
+    """Owner move-in records ledger row and activates the owner allotment."""
+    move_repo = _FakeMoveEventsRepo()
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+    service.units_repo.get_unit_owner_contact = AsyncMock(
+        return_value={
+            "contact_id": "owner-1",
+            "contact_unit_id": "cu-owner",
+            "status": "pending",
+        }
+    )
+
+    result = await service.create_move_event(_owner_move_in_request())
+
+    assert result.move_type == MoveEventType.MOVE_IN.value
+    assert len(move_repo.insert_calls) == 1
+    assert move_repo.insert_calls[0]["contact_id"] == "owner-1"
+    assert len(contact_units_repo.sync_move_in_calls) == 1
+    service.contact_roles_repo.insert_tenant_role.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_owner_move_in_rejects_invalid_allotment_status():
+    """Owner move-in fails when the owner allotment is not pending or active."""
+    service = _service()
+    service.units_repo.get_unit_owner_contact = AsyncMock(
+        return_value={
+            "contact_id": "owner-1",
+            "contact_unit_id": "cu-owner",
+            "status": "moved_out",
+        }
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.create_move_event(_owner_move_in_request())
+    assert exc_info.value.message_key == "move_events.errors.contact_not_unit_owner"
+
+
+@pytest.mark.asyncio
+async def test_create_move_in_auto_routes_unit_owner_to_owner_flow():
+    """Move-in for the assigned owner uses the owner flow without tenant provisioning."""
+    move_repo = _FakeMoveEventsRepo()
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+    service.units_repo.get_unit_owner_contact = AsyncMock(
+        return_value={
+            "contact_id": "owner-1",
+            "contact_unit_id": "cu-owner",
+            "status": "active",
+        }
+    )
+
+    result = await service.create_move_event(_owner_move_in_request())
+
+    assert result.move_type == MoveEventType.MOVE_IN.value
+    assert move_repo.insert_calls[0]["contact_id"] == "owner-1"
+    service.contact_roles_repo.insert_tenant_role.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_tenant_move_in_requires_documents():
+    """Non-owner tenant move-in requires at least one document."""
+    service = _service()
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.create_move_event(
+            CreateMoveEventRequest(
+                unit_id="unit-1",
+                contact_id="contact-1",
+                move_type=MoveEventType.MOVE_IN,
+                event_date=date(2026, 5, 25),
+            )
+        )
+    assert exc_info.value.message_key == "move_events.errors.documents_required"
+
+
+@pytest.mark.asyncio
+async def test_create_owner_move_in_with_active_allotment_skips_sync():
+    """Owner move-in with an active allotment records ledger only."""
+    move_repo = _FakeMoveEventsRepo()
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+    service.units_repo.get_unit_owner_contact = AsyncMock(
+        return_value={
+            "contact_id": "owner-1",
+            "contact_unit_id": "cu-owner",
+            "status": "active",
+        }
+    )
+
+    result = await service.create_move_event(_owner_move_in_request())
+
+    assert result.move_type == MoveEventType.MOVE_IN.value
+    assert len(move_repo.insert_calls) == 1
+    assert contact_units_repo.sync_move_in_calls == []
+
+
+@pytest.mark.asyncio
+async def test_create_owner_move_out_does_not_change_allotment():
+    """Owner move-out records ledger row without mutating contact_units."""
+    move_repo = _FakeMoveEventsRepo()
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(move_repo, contact_units_repo)
+    service.units_repo.get_unit_owner_contact = AsyncMock(
+        return_value={
+            "contact_id": "owner-1",
+            "contact_unit_id": "cu-owner",
+            "status": "active",
+        }
+    )
+
+    result = await service.create_move_event(
+        CreateMoveEventRequest(
+            unit_id="unit-1",
+            contact_id="owner-1",
+            move_type=MoveEventType.MOVE_OUT,
+            event_date=date(2026, 6, 1),
+        )
+    )
+
+    assert result.move_type == MoveEventType.MOVE_OUT.value
+    assert contact_units_repo.sync_move_in_calls == []
+    assert contact_units_repo.sync_move_out_calls == []
+    service.contact_roles_repo.get_active_tenant_contact_for_unit.assert_not_awaited()

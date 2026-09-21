@@ -27,7 +27,7 @@ from apps.user_service.app.utils.common_utils import (
     set_audit_old_data_from_user,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE
+from libs.shared_utils.common_query import SETTINGS_USERS_MANAGE, SETTINGS_USERS_VIEW
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -70,7 +70,7 @@ async def get_users_list(
 ):
     """List all users in the current organization (paginated, sequential)"""
     # Check permissions
-    user_context = await check_permissions(current_user, db_connection, SETTINGS_USERS_MANAGE)
+    user_context = await check_permissions(current_user, db_connection, SETTINGS_USERS_VIEW)
 
     # Create service and delegate all business logic to service
     user_service = UserService(user_context=user_context, db_connection=db_connection)
