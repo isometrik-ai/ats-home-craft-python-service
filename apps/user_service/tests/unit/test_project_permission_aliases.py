@@ -16,6 +16,7 @@ from libs.shared_utils.common_query import (
 from libs.shared_utils.project_permission_aliases import (
     expand_org_ceiling_permission_codes,
     org_ceiling_permission_codes,
+    project_code_allowed_by_org_ceiling,
     project_permission_satisfiers,
     project_role_grants_any,
 )
@@ -89,6 +90,13 @@ def test_vehicle_and_daily_help_delete_share_edit_ceiling_pattern():
     daily_help_ceiling = org_ceiling_permission_codes(DAILY_HELP_MANAGEMENT_DELETE)
     assert PROJECTS_MANAGEMENT_EDIT in vehicle_ceiling
     assert PROJECTS_MANAGEMENT_EDIT in daily_help_ceiling
+
+
+def test_project_code_allowed_by_org_ceiling_expands_view_assigned():
+    """Staff with only view_assigned must retain project permissions in my-permissions."""
+    org_codes = {PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    assert project_code_allowed_by_org_ceiling(org_codes, VISITOR_MANAGEMENT_VIEW)
+    assert project_code_allowed_by_org_ceiling(org_codes, MOVE_EVENTS_MANAGEMENT_VIEW)
 
 
 def test_default_project_permissions_daily_help_includes_delete():
