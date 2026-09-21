@@ -1,6 +1,7 @@
 """Unit tests for project permission alias helpers."""
 
 from libs.shared_utils.common_query import (
+    DAILY_HELP_MANAGEMENT_DELETE,
     MOVE_EVENTS_MANAGEMENT_VIEW,
     NOTICES_MANAGEMENT_EDIT,
     PROJECT_SETUP_EDIT,
@@ -8,6 +9,7 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_VIEW,
+    VEHICLE_MANAGEMENT_DELETE,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.project_permission_aliases import (
@@ -62,3 +64,27 @@ def test_expand_org_ceiling_permission_codes_deduplicates():
     assert PROJECT_SETUP_EDIT in expanded
     assert PROJECTS_MANAGEMENT_EDIT in expanded
     assert expanded.count(PROJECTS_MANAGEMENT_VIEW) == 1
+
+
+def test_daily_help_delete_ceiling_requires_projects_management_edit():
+    ceiling = org_ceiling_permission_codes(DAILY_HELP_MANAGEMENT_DELETE)
+    assert DAILY_HELP_MANAGEMENT_DELETE in ceiling
+    assert PROJECTS_MANAGEMENT_EDIT in ceiling
+
+
+def test_daily_help_delete_satisfied_only_by_delete_permission():
+    assert project_role_grants_any(
+        role_permission_codes={DAILY_HELP_MANAGEMENT_DELETE},
+        required_permission_codes=[DAILY_HELP_MANAGEMENT_DELETE],
+    )
+    assert not project_role_grants_any(
+        role_permission_codes={"daily_help_management.update"},
+        required_permission_codes=[DAILY_HELP_MANAGEMENT_DELETE],
+    )
+
+
+def test_vehicle_and_daily_help_delete_share_edit_ceiling_pattern():
+    vehicle_ceiling = org_ceiling_permission_codes(VEHICLE_MANAGEMENT_DELETE)
+    daily_help_ceiling = org_ceiling_permission_codes(DAILY_HELP_MANAGEMENT_DELETE)
+    assert PROJECTS_MANAGEMENT_EDIT in vehicle_ceiling
+    assert PROJECTS_MANAGEMENT_EDIT in daily_help_ceiling
