@@ -1,6 +1,7 @@
 """Unit tests for project permission alias helpers."""
 
 from libs.shared_utils.common_query import (
+    COMMUNITY_EVENTS_MANAGEMENT_EDIT,
     DAILY_HELP_MANAGEMENT_DELETE,
     MOVE_EVENTS_MANAGEMENT_VIEW,
     NOTICES_MANAGEMENT_EDIT,
@@ -15,6 +16,7 @@ from libs.shared_utils.common_query import (
 from libs.shared_utils.project_permission_aliases import (
     expand_org_ceiling_permission_codes,
     org_ceiling_permission_codes,
+    project_code_allowed_by_org_ceiling,
     project_permission_satisfiers,
     project_role_grants_any,
 )
@@ -88,3 +90,18 @@ def test_vehicle_and_daily_help_delete_share_edit_ceiling_pattern():
     daily_help_ceiling = org_ceiling_permission_codes(DAILY_HELP_MANAGEMENT_DELETE)
     assert PROJECTS_MANAGEMENT_EDIT in vehicle_ceiling
     assert PROJECTS_MANAGEMENT_EDIT in daily_help_ceiling
+
+
+def test_project_code_allowed_by_org_ceiling_edit_with_view_assigned_only():
+    """Assigned staff with view_assigned can effective-edit when project role grants edit."""
+    assert project_code_allowed_by_org_ceiling(
+        {PROJECTS_MANAGEMENT_VIEW_ASSIGNED},
+        COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+    )
+
+
+def test_project_code_allowed_by_org_ceiling_edit_requires_org_ceiling():
+    assert not project_code_allowed_by_org_ceiling(
+        {"users_management.view"},
+        COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+    )

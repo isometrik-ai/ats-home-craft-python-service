@@ -177,14 +177,24 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
     return frozenset(codes)
 
 
+def _expand_assigned_view_ceiling(codes: frozenset[str]) -> frozenset[str]:
+    """Treat view_assigned as satisfying ceilings that include org-wide project view.
+
+    Matches ``_expand_project_view_permission_codes`` in ensure_staff_project_access so
+    my-permissions effective_permissions align with API enforcement for assigned staff.
+    """
+    if PROJECTS_MANAGEMENT_VIEW in codes:
+        return codes | {PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    return codes
+
+
 def project_code_allowed_by_org_ceiling(
     org_permission_codes: set[str],
     project_permission_code: str,
 ) -> bool:
     """Return True when the user's org role satisfies the ceiling for a project permission."""
-    return bool(
-        org_permission_codes.intersection(org_ceiling_permission_codes(project_permission_code))
-    )
+    ceiling = _expand_assigned_view_ceiling(org_ceiling_permission_codes(project_permission_code))
+    return bool(org_permission_codes.intersection(ceiling))
 
 
 def expand_org_ceiling_permission_codes(permission_codes: list[str]) -> list[str]:
