@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
+from pydantic import ValidationError
 from supabase import AuthApiError
 
 from apps.user_service.app.db.repositories.invite_repository import (
@@ -35,6 +36,8 @@ ROLE_ID = "660e8400-e29b-41d4-a716-446655440001"
 TEAM_ID = "770e8400-e29b-41d4-a716-446655440002"
 USER_ID = "880e8400-e29b-41d4-a716-446655440003"
 INVITER_ID = "990e8400-e29b-41d4-a716-446655440004"
+PROJECT_ID = "aa0e8400-e29b-41d4-a716-446655440005"
+PROJECT_ROLE_ID = "bb0e8400-e29b-41d4-a716-446655440006"
 
 
 def _ctx() -> UserContext:
@@ -111,6 +114,34 @@ async def test_metadata_omits_team_id():
 
     assert "team_id" not in metadata
     assert "tags" not in metadata
+
+
+@pytest.mark.asyncio
+async def test_metadata_includes_project_role_id():
+    """Metadata stores project_role_id when project assignment is requested."""
+    service = InviteService(user_context=None, db_connection=None)
+    body = InviteCreateRequest(
+        email="invitee@example.com",
+        first_name="Jane",
+        role_id=UUID(ROLE_ID),
+        project_id=UUID(PROJECT_ID),
+        project_role_id=UUID(PROJECT_ROLE_ID),
+    )
+    metadata = service._build_invite_metadata(body)  # pylint: disable=protected-access
+
+    assert metadata["project_id"] == PROJECT_ID
+    assert metadata["project_role_id"] == PROJECT_ROLE_ID
+
+
+def test_create_body_rejects_project_role_id_without_project_id():
+    """project_role_id without project_id fails request validation."""
+    with pytest.raises(ValidationError, match="project_role_id requires project_id"):
+        InviteCreateRequest(
+            email="invitee@example.com",
+            first_name="Jane",
+            role_id=UUID(ROLE_ID),
+            project_role_id=UUID(PROJECT_ROLE_ID),
+        )
 
 
 @pytest.mark.asyncio
