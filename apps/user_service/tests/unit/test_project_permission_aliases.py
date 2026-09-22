@@ -1,6 +1,7 @@
 """Unit tests for project permission alias helpers."""
 
 from libs.shared_utils.common_query import (
+    CONTACTS_MANAGEMENT_EDIT,
     DAILY_HELP_MANAGEMENT_DELETE,
     DEFAULT_PROJECT_PERMISSIONS,
     MOVE_EVENTS_MANAGEMENT_VIEW,
@@ -112,3 +113,20 @@ def test_default_project_permissions_daily_help_includes_delete():
     )
     assert delete_entry[1] == "Delete Daily Help"
     assert delete_entry[2] == "Soft-delete daily help profiles within assigned projects"
+
+
+def test_default_project_permissions_contacts_includes_edit():
+    """Role editor contacts group must expose view, create, edit, and delete."""
+    contacts_entries = [entry for entry in DEFAULT_PROJECT_PERMISSIONS if entry[3] == "contacts"]
+    codes = {entry[0] for entry in contacts_entries}
+    assert len(contacts_entries) == 4
+    assert CONTACTS_MANAGEMENT_EDIT in codes
+    edit_entry = next(entry for entry in contacts_entries if entry[0] == CONTACTS_MANAGEMENT_EDIT)
+    assert edit_entry[1] == "Edit Project Contacts"
+    assert edit_entry[2] == "Modify contacts within assigned projects"
+
+
+def test_contacts_edit_ceiling_requires_projects_management_edit():
+    ceiling = org_ceiling_permission_codes(CONTACTS_MANAGEMENT_EDIT)
+    assert CONTACTS_MANAGEMENT_EDIT in ceiling
+    assert PROJECTS_MANAGEMENT_EDIT in ceiling
