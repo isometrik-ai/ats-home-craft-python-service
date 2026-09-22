@@ -374,7 +374,7 @@ class VisitorLogVisitStatus(str, Enum):
     INSIDE = "inside"
     EXITED = "exited"
     EXPIRED = "expired"
-    DENIED = "denied"
+    CANCELLED = "cancelled"
 
 
 class VisitorLogBucket(str, Enum):

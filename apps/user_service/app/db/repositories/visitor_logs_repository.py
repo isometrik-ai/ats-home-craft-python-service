@@ -299,7 +299,7 @@ class VisitorLogsRepository(BaseRepository):
                 clauses.append(f"combined.visit_status IN (${idx}, ${idx + 1})")
                 args.extend(
                     [
-                        VisitorLogVisitStatus.DENIED.value,
+                        VisitorLogVisitStatus.CANCELLED.value,
                         VisitorLogVisitStatus.EXPIRED.value,
                     ]
                 )
@@ -419,7 +419,7 @@ TRIM(
         inside = VisitorLogVisitStatus.INSIDE.value
         exited = VisitorLogVisitStatus.EXITED.value
         expired = VisitorLogVisitStatus.EXPIRED.value
-        denied = VisitorLogVisitStatus.DENIED.value
+        cancelled = VisitorLogVisitStatus.CANCELLED.value
         pass_cancelled = PassStatus.CANCELLED.value
         pass_expired = PassStatus.EXPIRED.value
         access_denied = PassAccessStatus.DENIED.value
@@ -451,8 +451,8 @@ TRIM(
                 WHEN ci.occurred_at IS NOT NULL
                      AND (co.occurred_at IS NULL OR ci.occurred_at > co.occurred_at) THEN '{inside}'
                 WHEN ci.occurred_at IS NOT NULL AND co.occurred_at IS NOT NULL THEN '{exited}'
-                WHEN ci.occurred_at IS NOT NULL AND ci.access_status = '{access_denied}' THEN '{denied}'
-                WHEN p.status = '{pass_cancelled}'::pass_status THEN '{denied}'
+                WHEN ci.occurred_at IS NOT NULL AND ci.access_status = '{access_denied}' THEN '{cancelled}'
+                WHEN p.status = '{pass_cancelled}'::pass_status THEN '{cancelled}'
                 WHEN p.status = '{pass_expired}'::pass_status THEN '{expired}'
                 WHEN p.valid_until IS NOT NULL
                      AND p.valid_until < NOW()
@@ -521,7 +521,7 @@ TRIM(
         approved = VisitorLogVisitStatus.APPROVED.value
         inside = VisitorLogVisitStatus.INSIDE.value
         exited = VisitorLogVisitStatus.EXITED.value
-        denied = VisitorLogVisitStatus.DENIED.value
+        cancelled = VisitorLogVisitStatus.CANCELLED.value
         wi_awaiting = WalkInStatus.AWAITING.value
         wi_approved = WalkInStatus.APPROVED.value
         wi_entered = WalkInStatus.ENTERED.value
@@ -579,7 +579,7 @@ TRIM(
                 WHEN '{wi_approved}' THEN '{approved}'
                 WHEN '{wi_entered}' THEN '{inside}'
                 WHEN '{wi_exited}' THEN '{exited}'
-                WHEN '{wi_cancelled}' THEN '{denied}'
+                WHEN '{wi_cancelled}' THEN '{cancelled}'
                 ELSE '{approved}'
               END AS visit_status,
               NULL::text AS pass_code,
@@ -792,8 +792,8 @@ TRIM(
         awaiting = VisitorLogVisitStatus.AWAITING_APPROVAL.value
         inside = VisitorLogVisitStatus.INSIDE.value
         exited = VisitorLogVisitStatus.EXITED.value
-        denied = VisitorLogVisitStatus.DENIED.value
         expired = VisitorLogVisitStatus.EXPIRED.value
+        cancelled = VisitorLogVisitStatus.CANCELLED.value
 
         row = await self.db_connection.fetchrow(
             f"""
@@ -812,7 +812,7 @@ TRIM(
                 WHERE visit_status = '{exited}'
               )::int AS exited,
               COUNT(*) FILTER (
-                WHERE visit_status IN ('{denied}', '{expired}')
+                WHERE visit_status IN ('{cancelled}', '{expired}')
               )::int AS denied_expired
             FROM ({union_sql}) combined
             """,
