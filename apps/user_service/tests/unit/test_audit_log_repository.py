@@ -208,6 +208,9 @@ async def test_get_audit_logs_list_query():
     query, args = conn.fetch_calls[0]
     assert "FROM audit_logs al" in query
     assert "LEFT JOIN auth.users au" in query
+    assert "LEFT JOIN organization_members om" in query
+    assert "LEFT JOIN roles r" in query
+    assert "COALESCE(NULLIF(TRIM(r.name), ''), NULLIF(TRIM(al.user_role), ''), 'unknown')" in query
     assert "ORDER BY al.timestamp DESC" in query
     assert args[-2:] == (10, 5)
 
@@ -239,7 +242,31 @@ async def test_get_audit_log_by_id():
     assert row["id"] == "a1"
     query, args = conn.fetchrow_calls[0]
     assert "hash_signature" in query
+    assert "LEFT JOIN organization_members om" in query
+    assert "LEFT JOIN roles r" in query
     assert args == ("a1", "org-1", "u1")
+
+
+@pytest.mark.asyncio
+async def test_get_role_names_for_members():
+    """Batch role lookup maps user/org pairs to role names."""
+    conn = _FakeConn(
+        rows=[
+            {
+                "user_id": "u1",
+                "organization_id": "org-1",
+                "role_name": "Administrator",
+            }
+        ]
+    )
+    repo = AuditLogRepository(db_connection=conn)
+
+    role_names = await repo.get_role_names_for_members([("u1", "org-1")])
+
+    assert role_names == {("u1", "org-1"): "Administrator"}
+    query, args = conn.fetch_calls[0]
+    assert "JOIN roles r" in query
+    assert args == (["u1"], ["org-1"])
 
 
 @pytest.mark.asyncio

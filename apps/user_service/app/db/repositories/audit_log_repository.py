@@ -27,6 +27,21 @@ AUDIT_LOG_LIST_FIELDS = (
     "status_code, category"
 )
 
+# Resolved role name from organization membership; falls back to stored audit value.
+AUDIT_LOG_USER_ROLE_EXPR = (
+    "COALESCE(NULLIF(TRIM(r.name), ''), NULLIF(TRIM(al.user_role), ''), 'unknown') AS user_role"
+)
+
+# Join organization member + role for actor role enrichment on read.
+AUDIT_LOG_ACTOR_ROLE_JOINS = """
+            LEFT JOIN organization_members om
+                ON om.user_id = al.user_id
+               AND om.organization_id = al.organization_id
+            LEFT JOIN roles r
+                ON r.id = om.role_id
+               AND r.organization_id = al.organization_id
+"""
+
 # Same fields, but qualified for joined queries (keeps output keys stable).
 AUDIT_LOG_LIST_FIELDS_ALIASED = (
     "al.id AS id, al.organization_id AS organization_id, al.project_id AS project_id, "
@@ -199,6 +214,9 @@ class AuditLogRepository:
         list_fields_aliased = AUDIT_LOG_LIST_FIELDS_ALIASED.replace(
             "al.user_email AS user_email",
             "COALESCE(au.email, al.user_email, '') AS user_email",
+        ).replace(
+            "al.user_role AS user_role",
+            AUDIT_LOG_USER_ROLE_EXPR,
         )
 
         query = f"""
@@ -217,6 +235,7 @@ class AuditLogRepository:
             FROM audit_logs al
             LEFT JOIN auth.users au
                 ON au.id = al.user_id
+            {AUDIT_LOG_ACTOR_ROLE_JOINS}
             WHERE {where_clause}
             ORDER BY al.timestamp DESC
             LIMIT ${limit_param} OFFSET ${offset_param}
@@ -260,17 +279,59 @@ class AuditLogRepository:
         Returns:
             Audit record or None if not found
         """
+        detail_fields_aliased = AUDIT_LOG_LIST_FIELDS_ALIASED.replace(
+            "al.user_role AS user_role",
+            AUDIT_LOG_USER_ROLE_EXPR,
+        )
+        detail_extra_fields = (
+            "al.old_values AS old_values, al.new_values AS new_values, "
+            "al.changed_fields AS changed_fields, al.compliance_tags AS compliance_tags, "
+            "al.risk_level AS risk_level, al.ip_address AS ip_address, "
+            "al.description AS description, al.timestamp AS timestamp, "
+            "al.hash_signature AS hash_signature, al.previous_hash AS previous_hash, "
+            "al.retention_date AS retention_date, al.status_code AS status_code, "
+            "al.category AS category"
+        )
         query = f"""
-            SELECT {AUDIT_LOG_DETAIL_FIELDS}
-            FROM audit_logs
-            WHERE id = $1
-            AND organization_id = $2
-            AND user_id = $3
+            SELECT
+                {detail_fields_aliased},
+                {detail_extra_fields}
+            FROM audit_logs al
+            {AUDIT_LOG_ACTOR_ROLE_JOINS}
+            WHERE al.id = $1
+            AND al.organization_id = $2
+            AND al.user_id = $3
             LIMIT 1
         """
 
         row = await self.db_connection.fetchrow(query, audit_log_id, organization_id, user_id)
         return dict(row) if row else None
+
+    async def get_role_names_for_members(
+        self, members: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], str]:
+        """Resolve organization role names for (user_id, organization_id) pairs."""
+        if not members:
+            return {}
+
+        user_ids = [member[0] for member in members]
+        org_ids = [member[1] for member in members]
+        query = """
+            SELECT om.user_id, om.organization_id, r.name AS role_name
+            FROM organization_members om
+            JOIN roles r
+                ON r.id = om.role_id
+               AND r.organization_id = om.organization_id
+            JOIN unnest($1::uuid[], $2::uuid[]) AS pair(user_id, organization_id)
+                ON om.user_id = pair.user_id
+               AND om.organization_id = pair.organization_id
+        """
+        rows = await self.db_connection.fetch(query, user_ids, org_ids)
+        return {
+            (str(row["user_id"]), str(row["organization_id"])): row["role_name"]
+            for row in rows
+            if row.get("role_name")
+        }
 
     async def delete_all_audit_logs(self) -> int:
         """Delete all audit logs from database.

@@ -241,6 +241,30 @@ class AuditLogger:
 
                 await asyncio.sleep(2**attempt)
 
+    async def _resolve_missing_user_roles(
+        self,
+        repository: AuditLogRepository,
+        events: list[dict],
+    ) -> None:
+        """Fill missing user_role values from organization membership before persist."""
+        members_to_resolve = {
+            (str(event["user_id"]), str(event["organization_id"]))
+            for event in events
+            if event.get("user_id")
+            and event.get("organization_id")
+            and event.get("user_role") in (None, "", "unknown")
+        }
+        if not members_to_resolve:
+            return
+
+        role_names = await repository.get_role_names_for_members(list(members_to_resolve))
+        for event in events:
+            if event.get("user_role") not in (None, "", "unknown"):
+                continue
+            role_name = role_names.get((str(event["user_id"]), str(event["organization_id"])))
+            if role_name:
+                event["user_role"] = role_name
+
     async def _write_audit_batch(self, events: list[dict]) -> None:
         """Write a batch of audit events to the database.
 
@@ -253,6 +277,7 @@ class AuditLogger:
         try:
             async with UnitOfWork(self._pool) as conn:
                 repository = AuditLogRepository(db_connection=conn)
+                await self._resolve_missing_user_roles(repository, events)
 
                 # Fetch last hash ONCE, using SAME connection
                 if self._last_hash is None:

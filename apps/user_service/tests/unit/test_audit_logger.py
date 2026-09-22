@@ -174,6 +174,27 @@ async def test_collect_batch_events_drains_queue(logger):
 
 
 @pytest.mark.asyncio
+async def test_resolve_missing_user_roles(logger):
+    """Unknown roles are resolved from organization membership before insert."""
+    mock_repo = MagicMock()
+    mock_repo.get_role_names_for_members = AsyncMock(
+        return_value={(USER_ID, ORG_ID): "Administrator"}
+    )
+    events = [
+        {
+            "user_id": USER_ID,
+            "organization_id": ORG_ID,
+            "user_role": "unknown",
+        }
+    ]
+
+    await logger._resolve_missing_user_roles(mock_repo, events)  # pylint: disable=protected-access
+
+    assert events[0]["user_role"] == "Administrator"
+    mock_repo.get_role_names_for_members.assert_awaited_once_with([(USER_ID, ORG_ID)])
+
+
+@pytest.mark.asyncio
 async def test_write_audit_batch_empty_noop(logger):
     """Empty batch skips DB write."""
     await logger._write_audit_batch([])  # pylint: disable=protected-access
@@ -210,6 +231,7 @@ async def test_write_audit_batch_success(logger):
     mock_conn = MagicMock()
     mock_repo = MagicMock()
     mock_repo.get_last_audit_log_hash = AsyncMock(return_value="prev")
+    mock_repo.get_role_names_for_members = AsyncMock(return_value={})
     mock_repo.bulk_create_audit_logs = AsyncMock(return_value=[])
 
     mock_uow = MagicMock()
