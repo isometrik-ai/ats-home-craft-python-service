@@ -262,18 +262,20 @@ When assigning staff to a project, admins manage **two separate things**:
 
 - Email, name, org role (RBAC)
 - Optional: org CRM `team_id`
-- Optional: **`project_id`** + **`project_role`**
+- Optional: **`project_assignments[]`** — each entry has `project_id` + optional `project_role_id`
+  - Legacy single-project fields `project_id` + `project_role_id` still work
+  - Load roles per project from `GET /v1/projects/{project_id}/roles`
   - Roles: `community_admin`, `security`, `accountant`, `facility_manager`, `viewer`
 
 On accept, backend:
 
 1. Creates `organization_members`
-1. If invite metadata had `project_id` → upserts `project_members`
+1. If invite metadata had `project_assignments` (or legacy `project_id`) → upserts one `project_members` row per assignment
 1. If invited to a **project-scoped team** without explicit project → syncs `project_members` from team’s `project_id`
 
-**Confirmation copy after invite with project:**
+**Confirmation copy after invite with projects:**
 
-> “User will be added to **Green Valley** as **Security** when they accept.”
+> “User will be added to **Green Valley (Security)** and **Sunrise Towers (Viewer)** when they accept.”
 
 ### Org members vs project members
 

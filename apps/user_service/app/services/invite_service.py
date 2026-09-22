@@ -35,6 +35,7 @@ from apps.user_service.app.schemas.invites import (
     InviteCreateRequest,
     InvitedUserInfo,
     PatchInviteRequest,
+    ProjectAssignmentInput,
 )
 from apps.user_service.app.schemas.teams import MemberData
 from apps.user_service.app.services.session_management_service import (
@@ -221,6 +222,56 @@ class InviteService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+    def _serialize_project_assignments(
+        self, assignments: list[ProjectAssignmentInput]
+    ) -> list[dict[str, str | None]]:
+        """Serialize project assignments for invite metadata storage."""
+        return [
+            {
+                "project_id": str(assignment.project_id),
+                "project_role_id": (
+                    str(assignment.project_role_id) if assignment.project_role_id else None
+                ),
+            }
+            for assignment in assignments
+        ]
+
+    def _extract_project_assignments_from_metadata(
+        self, metadata: dict[str, Any]
+    ) -> list[dict[str, str | None]]:
+        """Read project assignments from invite metadata (array or legacy single fields)."""
+        raw_assignments = metadata.get("project_assignments")
+        if isinstance(raw_assignments, list) and raw_assignments:
+            assignments: list[dict[str, str | None]] = []
+            for item in raw_assignments:
+                if not isinstance(item, dict):
+                    continue
+                project_id = item.get("project_id")
+                if not project_id:
+                    continue
+                assignments.append(
+                    {
+                        "project_id": str(project_id),
+                        "project_role_id": (
+                            str(item["project_role_id"]) if item.get("project_role_id") else None
+                        ),
+                    }
+                )
+            return assignments
+
+        project_id = metadata.get("project_id")
+        if not project_id:
+            return []
+
+        return [
+            {
+                "project_id": str(project_id),
+                "project_role_id": (
+                    str(metadata["project_role_id"]) if metadata.get("project_role_id") else None
+                ),
+            }
+        ]
+
     def _build_invite_metadata(self, body: InviteCreateRequest) -> dict[str, Any]:
         """Build invitation metadata from the create request."""
         metadata: dict[str, Any] = {
@@ -242,10 +293,11 @@ class InviteService:
             metadata["designation"] = body.designation.strip()
         if body.team_id:
             metadata["team_id"] = str(body.team_id)
-        if body.project_id:
-            metadata["project_id"] = str(body.project_id)
-        if body.project_role_id:
-            metadata["project_role_id"] = str(body.project_role_id)
+        project_assignments = body.resolved_project_assignments()
+        if project_assignments:
+            metadata["project_assignments"] = self._serialize_project_assignments(
+                project_assignments
+            )
         if body.tags is not None:
             metadata["tags"] = [tag.strip() for tag in body.tags if tag and tag.strip()]
         return metadata
@@ -278,6 +330,24 @@ class InviteService:
             await self._add_invitee_to_project(
                 project_id=str(team_project_id),
                 project_role_id=None,
+                organization_id=organization_id,
+                user_id=user_id,
+            )
+
+    async def _add_invitee_to_projects(
+        self,
+        *,
+        project_assignments: list[dict[str, str | None]],
+        organization_id: str,
+        user_id: str,
+        legacy_project_role_slug: str | None = None,
+    ) -> None:
+        """Assign accepted invitee to all projects stored on the invitation."""
+        for assignment in project_assignments:
+            await self._add_invitee_to_project(
+                project_id=assignment.get("project_id"),
+                project_role_id=assignment.get("project_role_id"),
+                legacy_project_role_slug=legacy_project_role_slug,
                 organization_id=organization_id,
                 user_id=user_id,
             )
@@ -697,16 +767,21 @@ class InviteService:
             isometrik_credentials=isometrik_credentials,
         )
 
+        project_assignments = self._extract_project_assignments_from_metadata(inv_meta)
+        invite_project_ids = {
+            assignment["project_id"]
+            for assignment in project_assignments
+            if assignment.get("project_id")
+        }
         await self._add_invitee_to_team(
             team_id=inv_meta.get("team_id"),
             organization_id=str(invitation_data["organization_id"]),
             user_id=str(user.id),
             added_by=str(invitation_data["invited_by"]),
-            invite_project_id=inv_meta.get("project_id"),
+            invite_project_id=next(iter(invite_project_ids), None),
         )
-        await self._add_invitee_to_project(
-            project_id=inv_meta.get("project_id"),
-            project_role_id=inv_meta.get("project_role_id"),
+        await self._add_invitee_to_projects(
+            project_assignments=project_assignments,
             legacy_project_role_slug=inv_meta.get("project_role"),
             organization_id=str(invitation_data["organization_id"]),
             user_id=str(user.id),
@@ -830,12 +905,12 @@ class InviteService:
 
         if body.team_id:
             await self._validate_team_in_org(str(body.team_id), organization_id)
-        if body.project_id:
-            await self._validate_project_in_org(str(body.project_id), organization_id)
-            if body.project_role_id:
+        for assignment in body.resolved_project_assignments():
+            await self._validate_project_in_org(str(assignment.project_id), organization_id)
+            if assignment.project_role_id:
                 await self._validate_project_role_in_project(
-                    project_id=str(body.project_id),
-                    project_role_id=str(body.project_role_id),
+                    project_id=str(assignment.project_id),
+                    project_role_id=str(assignment.project_role_id),
                     organization_id=organization_id,
                 )
 
@@ -1234,8 +1309,20 @@ class InviteService:
             phone_full = f"{phone_isd_code}{phone_number_db}"
 
         team_id = metadata.get("team_id")
-        project_id = metadata.get("project_id")
-        project_role_id = metadata.get("project_role_id")
+        raw_assignments = self._extract_project_assignments_from_metadata(metadata)
+        project_assignments = [
+            ProjectAssignmentInput(
+                project_id=assignment["project_id"],
+                project_role_id=(
+                    assignment["project_role_id"] if assignment.get("project_role_id") else None
+                ),
+            )
+            for assignment in raw_assignments
+            if assignment.get("project_id")
+        ] or None
+        first_assignment = raw_assignments[0] if raw_assignments else {}
+        project_id = first_assignment.get("project_id")
+        project_role_id = first_assignment.get("project_role_id")
         tags = metadata.get("tags")
 
         return {
@@ -1254,6 +1341,7 @@ class InviteService:
             "team_id": team_id,
             "project_id": project_id,
             "project_role_id": project_role_id,
+            "project_assignments": project_assignments,
             "tags": tags if tags else None,
             "avatar_url": metadata.get("avatar_url"),
             "gender": metadata.get("gender"),

@@ -63,6 +63,29 @@ class InviteAcceptResponse(BaseModel):
     user: InvitedUserInfo
 
 
+class ProjectAssignmentInput(BaseModel):
+    """Project assignment with optional role for invite/create flows."""
+
+    project_id: uuid.UUID = Field(..., description="Project to assign the invitee to on acceptance")
+    project_role_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Project role template id for this project "
+            "(defaults to community_admin on acceptance if omitted)"
+        ),
+    )
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "project_id": "770e8400-e29b-41d4-a716-446655440002",
+                "project_role_id": "880e8400-e29b-41d4-a716-446655440003",
+            }
+        },
+    )
+
+
 class PatchInviteRequest(BaseModel):
     """Body for PATCH /invite/{invite_id}: change the RBAC role on a pending invitation."""
 
@@ -99,13 +122,23 @@ class InviteCreateRequest(BaseModel):
     )
     project_id: uuid.UUID | None = Field(
         None,
-        description="Optional project to assign the invitee to when the invitation is accepted",
+        description=(
+            "Optional single project to assign on acceptance. "
+            "Prefer project_assignments for multiple projects."
+        ),
     )
     project_role_id: uuid.UUID | None = Field(
         default=None,
         description=(
             "Project role template id when project_id is set "
             "(defaults to community_admin on acceptance if omitted)"
+        ),
+    )
+    project_assignments: list[ProjectAssignmentInput] | None = Field(
+        None,
+        description=(
+            "Optional list of project assignments applied on acceptance. "
+            "Each entry may include a project-specific role."
         ),
     )
     tags: list[str] | None = Field(
@@ -130,11 +163,33 @@ class InviteCreateRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def project_role_id_requires_project(self) -> "InviteCreateRequest":
-        """project_role_id is only valid when project_id is set."""
+    def validate_project_assignments(self) -> "InviteCreateRequest":
+        """Validate project role and assignment consistency."""
         if self.project_role_id is not None and self.project_id is None:
             raise ValueError("project_role_id requires project_id")
+
+        seen_project_ids: set[uuid.UUID] = set()
+        for assignment in self.project_assignments or []:
+            if assignment.project_id in seen_project_ids:
+                raise ValueError("project_assignments must not contain duplicate project_id values")
+            seen_project_ids.add(assignment.project_id)
+
+        if self.project_id is not None and self.project_id in seen_project_ids:
+            raise ValueError("project_id must not duplicate an entry in project_assignments")
+
         return self
+
+    def resolved_project_assignments(self) -> list[ProjectAssignmentInput]:
+        """Return normalized project assignments from legacy and new fields."""
+        assignments = list(self.project_assignments or [])
+        if self.project_id is not None:
+            assignments.append(
+                ProjectAssignmentInput(
+                    project_id=self.project_id,
+                    project_role_id=self.project_role_id,
+                )
+            )
+        return assignments
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -142,8 +197,12 @@ class InviteCreateRequest(BaseModel):
                 "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "team_id": "660e8400-e29b-41d4-a716-446655440001",
-                "project_id": "770e8400-e29b-41d4-a716-446655440002",
-                "project_role_id": "880e8400-e29b-41d4-a716-446655440003",
+                "project_assignments": [
+                    {
+                        "project_id": "770e8400-e29b-41d4-a716-446655440002",
+                        "project_role_id": "880e8400-e29b-41d4-a716-446655440003",
+                    }
+                ],
                 "tags": ["sales", "onboarding"],
                 "expires_in_days": 7,
             }
@@ -228,11 +287,21 @@ class InviteListItem(BaseModel):
     )
     project_id: uuid.UUID | None = Field(
         None,
-        description="Project the invitee will be assigned to on acceptance, if set at invite time",
+        description=(
+            "First project the invitee will be assigned to on acceptance "
+            "(legacy single-project field; see project_assignments)"
+        ),
     )
     project_role_id: uuid.UUID | None = Field(
         None,
-        description="Project role template id for project assignment on acceptance",
+        description=(
+            "Project role template id for the first project assignment "
+            "(legacy single-project field; see project_assignments)"
+        ),
+    )
+    project_assignments: list[ProjectAssignmentInput] | None = Field(
+        None,
+        description="Projects and roles the invitee will be assigned to on acceptance",
     )
     tags: list[str] | None = Field(
         None,
