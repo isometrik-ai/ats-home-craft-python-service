@@ -744,11 +744,12 @@ ______________________________________________________________________
 | Resident     | Submit, list/view/resubmit own submissions — `/v1/daily-help/submissions` + JWT contact context             |
 | Admin (view) | List, detail, export, summary — `projects_management.view`                                                  |
 
-| Code                           | Use                                                  |
-| ------------------------------ | ---------------------------------------------------- |
-| `daily_help_management.view`   | List, detail, export, summary                        |
-| `daily_help_management.create` | Create, upload documents                             |
-| `daily_help_management.update` | Edit, deactivate, delete, restore, manage categories |
+| Code                           | Use                                          |
+| ------------------------------ | -------------------------------------------- |
+| `daily_help_management.view`   | List, detail, export, summary                |
+| `daily_help_management.create` | Create, upload documents                     |
+| `daily_help_management.update` | Edit, deactivate, restore, manage categories |
+| `daily_help_management.delete` | Soft-delete daily help profiles              |
 
 Alternatively map to existing `contacts_management.*` if product prefers fewer permission codes.
 
