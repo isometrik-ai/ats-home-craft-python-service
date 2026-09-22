@@ -575,6 +575,12 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "contacts",
     ),
     (
+        CONTACTS_MANAGEMENT_EDIT,
+        "Edit Project Contacts",
+        "Modify contacts within assigned projects",
+        "contacts",
+    ),
+    (
         CONTACTS_MANAGEMENT_DELETE,
         "Delete Project Contacts",
         "Remove contacts within assigned projects",
