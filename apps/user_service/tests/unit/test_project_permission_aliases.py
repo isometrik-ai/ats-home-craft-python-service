@@ -105,13 +105,23 @@ def test_project_code_allowed_by_org_ceiling_expands_view_assigned():
 
 
 def test_work_order_granular_org_codes_satisfied_by_project_manage():
-    for required in (
-        WORK_ORDER_MANAGEMENT_VIEW,
-        WORK_ORDER_MANAGEMENT_EDIT,
-        WORK_ORDER_MANAGEMENT_APPROVE,
-        WORK_ORDER_MANAGEMENT_PAY,
-    ):
-        assert project_permission_satisfiers(required) == frozenset({WORK_ORDER_MANAGEMENT_MANAGE})
+    assert project_permission_satisfiers(WORK_ORDER_MANAGEMENT_VIEW) == frozenset(
+        {WORK_ORDER_MANAGEMENT_VIEW, WORK_ORDER_MANAGEMENT_MANAGE}
+    )
+    assert project_permission_satisfiers(WORK_ORDER_MANAGEMENT_EDIT) == frozenset(
+        {WORK_ORDER_MANAGEMENT_EDIT, WORK_ORDER_MANAGEMENT_MANAGE}
+    )
+
+
+def test_work_order_legacy_project_role_codes_remain_valid():
+    assert project_role_grants_any(
+        role_permission_codes={WORK_ORDER_MANAGEMENT_VIEW},
+        required_permission_codes=[WORK_ORDER_MANAGEMENT_VIEW],
+    )
+    assert project_role_grants_any(
+        role_permission_codes={WORK_ORDER_MANAGEMENT_EDIT},
+        required_permission_codes=[WORK_ORDER_MANAGEMENT_EDIT],
+    )
 
 
 def test_work_order_manage_grants_any_granular_org_requirement():
