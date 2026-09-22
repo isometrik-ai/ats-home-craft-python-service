@@ -19,6 +19,7 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteCreateRequest,
+    InviteProjectAssignment,
     PatchInviteRequest,
 )
 from apps.user_service.app.services.invite_service import InviteService
@@ -37,7 +38,9 @@ TEAM_ID = "770e8400-e29b-41d4-a716-446655440002"
 USER_ID = "880e8400-e29b-41d4-a716-446655440003"
 INVITER_ID = "990e8400-e29b-41d4-a716-446655440004"
 PROJECT_ID = "aa0e8400-e29b-41d4-a716-446655440005"
+PROJECT_ID_2 = "cc0e8400-e29b-41d4-a716-446655440007"
 PROJECT_ROLE_ID = "bb0e8400-e29b-41d4-a716-446655440006"
+PROJECT_ROLE_ID_2 = "dd0e8400-e29b-41d4-a716-446655440008"
 
 
 def _ctx() -> UserContext:
@@ -117,31 +120,84 @@ async def test_metadata_omits_team_id():
 
 
 @pytest.mark.asyncio
-async def test_metadata_includes_project_role_id():
-    """Metadata stores project_role_id when project assignment is requested."""
+async def test_metadata_includes_project_assignments():
+    """Metadata stores multiple project assignments when requested."""
     service = InviteService(user_context=None, db_connection=None)
     body = InviteCreateRequest(
         email="invitee@example.com",
         first_name="Jane",
         role_id=UUID(ROLE_ID),
-        project_id=UUID(PROJECT_ID),
-        project_role_id=UUID(PROJECT_ROLE_ID),
+        projects=[
+            InviteProjectAssignment(
+                project_id=UUID(PROJECT_ID),
+                project_role_id=UUID(PROJECT_ROLE_ID),
+            ),
+            InviteProjectAssignment(project_id=UUID(PROJECT_ID_2)),
+        ],
     )
     metadata = service._build_invite_metadata(body)  # pylint: disable=protected-access
 
-    assert metadata["project_id"] == PROJECT_ID
-    assert metadata["project_role_id"] == PROJECT_ROLE_ID
+    assert metadata["projects"] == [
+        {"project_id": PROJECT_ID, "project_role_id": PROJECT_ROLE_ID},
+        {"project_id": PROJECT_ID_2, "project_role_id": None},
+    ]
 
 
-def test_create_body_rejects_project_role_id_without_project_id():
-    """project_role_id without project_id fails request validation."""
-    with pytest.raises(ValidationError, match="project_role_id requires project_id"):
+def test_create_body_rejects_duplicate_project_ids():
+    """Duplicate project_id values in projects fail request validation."""
+    with pytest.raises(ValidationError, match="duplicate project_id"):
         InviteCreateRequest(
             email="invitee@example.com",
             first_name="Jane",
             role_id=UUID(ROLE_ID),
-            project_role_id=UUID(PROJECT_ROLE_ID),
+            projects=[
+                InviteProjectAssignment(project_id=UUID(PROJECT_ID)),
+                InviteProjectAssignment(project_id=UUID(PROJECT_ID)),
+            ],
         )
+
+
+def test_projects_from_metadata_supports_legacy_single_project_keys():
+    """Acceptance reads legacy project_id/project_role_id metadata."""
+    assignments = InviteService._projects_from_metadata(  # pylint: disable=protected-access
+        {
+            "project_id": PROJECT_ID,
+            "project_role_id": PROJECT_ROLE_ID,
+        }
+    )
+    assert assignments == [
+        {"project_id": PROJECT_ID, "project_role_id": PROJECT_ROLE_ID},
+    ]
+
+
+def test_list_item_includes_projects():
+    """List response exposes projects from invitation metadata."""
+    service = InviteService(user_context=None, db_connection=None)
+    item = service.build_invite_list_item(
+        {
+            "id": "inv-1",
+            "email": "invitee@example.com",
+            "role_id": ROLE_ID,
+            "status": "pending",
+            "invited_by": INVITER_ID,
+            "expires_at": "2024-12-26T10:00:00Z",
+            "created_at": "2024-12-19T10:00:00Z",
+            "updated_at": "2024-12-19T10:00:00Z",
+            "metadata": {
+                "first_name": "Jane",
+                "projects": [
+                    {
+                        "project_id": PROJECT_ID,
+                        "project_role_id": PROJECT_ROLE_ID,
+                    }
+                ],
+            },
+        }
+    )
+
+    assert item["projects"] == [
+        {"project_id": PROJECT_ID, "project_role_id": PROJECT_ROLE_ID},
+    ]
 
 
 @pytest.mark.asyncio

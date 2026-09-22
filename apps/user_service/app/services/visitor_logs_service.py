@@ -411,7 +411,7 @@ class VisitorLogsService:
 
         status = str(detail.get("status") or "")
         if status == PassStatus.CANCELLED.value:
-            return VisitorLogVisitStatus.DENIED.value
+            return VisitorLogVisitStatus.CANCELLED.value
         if status == PassStatus.EXPIRED.value:
             return VisitorLogVisitStatus.EXPIRED.value
 
@@ -430,7 +430,7 @@ class VisitorLogsService:
             WalkInStatus.APPROVED.value: VisitorLogVisitStatus.APPROVED.value,
             WalkInStatus.ENTERED.value: VisitorLogVisitStatus.INSIDE.value,
             WalkInStatus.EXITED.value: VisitorLogVisitStatus.EXITED.value,
-            WalkInStatus.CANCELLED.value: VisitorLogVisitStatus.DENIED.value,
+            WalkInStatus.CANCELLED.value: VisitorLogVisitStatus.CANCELLED.value,
         }
         return mapping.get(str(status or ""), VisitorLogVisitStatus.APPROVED.value)
 

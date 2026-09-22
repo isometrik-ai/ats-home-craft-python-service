@@ -63,6 +63,24 @@ class InviteAcceptResponse(BaseModel):
     user: InvitedUserInfo
 
 
+class InviteProjectAssignment(BaseModel):
+    """One project (and optional role) to assign when an invitation is accepted."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: uuid.UUID = Field(
+        ...,
+        description="Project to assign the invitee to when the invitation is accepted",
+    )
+    project_role_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Project role template id for this project "
+            "(defaults to community_admin on acceptance if omitted)"
+        ),
+    )
+
+
 class PatchInviteRequest(BaseModel):
     """Body for PATCH /invite/{invite_id}: change the RBAC role on a pending invitation."""
 
@@ -97,16 +115,9 @@ class InviteCreateRequest(BaseModel):
         None,
         description="Optional team to add the invitee to when the invitation is accepted",
     )
-    project_id: uuid.UUID | None = Field(
-        None,
-        description="Optional project to assign the invitee to when the invitation is accepted",
-    )
-    project_role_id: uuid.UUID | None = Field(
-        default=None,
-        description=(
-            "Project role template id when project_id is set "
-            "(defaults to community_admin on acceptance if omitted)"
-        ),
+    projects: list[InviteProjectAssignment] = Field(
+        default_factory=list,
+        description=("Optional projects to assign the invitee to when the invitation is accepted"),
     )
     tags: list[str] | None = Field(
         None,
@@ -130,10 +141,13 @@ class InviteCreateRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def project_role_id_requires_project(self) -> "InviteCreateRequest":
-        """project_role_id is only valid when project_id is set."""
-        if self.project_role_id is not None and self.project_id is None:
-            raise ValueError("project_role_id requires project_id")
+    def validate_unique_project_ids(self) -> "InviteCreateRequest":
+        """Each project may appear at most once in projects."""
+        seen: set[uuid.UUID] = set()
+        for assignment in self.projects:
+            if assignment.project_id in seen:
+                raise ValueError("projects must not contain duplicate project_id values")
+            seen.add(assignment.project_id)
         return self
 
     model_config = ConfigDict(
@@ -142,8 +156,12 @@ class InviteCreateRequest(BaseModel):
                 "email": "newuser@example.com",
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
                 "team_id": "660e8400-e29b-41d4-a716-446655440001",
-                "project_id": "770e8400-e29b-41d4-a716-446655440002",
-                "project_role_id": "880e8400-e29b-41d4-a716-446655440003",
+                "projects": [
+                    {
+                        "project_id": "770e8400-e29b-41d4-a716-446655440002",
+                        "project_role_id": "880e8400-e29b-41d4-a716-446655440003",
+                    }
+                ],
                 "tags": ["sales", "onboarding"],
                 "expires_in_days": 7,
             }
@@ -226,13 +244,9 @@ class InviteListItem(BaseModel):
         None,
         description="Team the invitee will be added to on acceptance, if set at invite time",
     )
-    project_id: uuid.UUID | None = Field(
-        None,
-        description="Project the invitee will be assigned to on acceptance, if set at invite time",
-    )
-    project_role_id: uuid.UUID | None = Field(
-        None,
-        description="Project role template id for project assignment on acceptance",
+    projects: list[InviteProjectAssignment] = Field(
+        default_factory=list,
+        description="Projects the invitee will be assigned to on acceptance, if set at invite time",
     )
     tags: list[str] | None = Field(
         None,

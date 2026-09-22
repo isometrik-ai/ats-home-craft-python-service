@@ -47,6 +47,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     DAILY_HELP_MANAGEMENT_CREATE,
+    DAILY_HELP_MANAGEMENT_DELETE,
     DAILY_HELP_MANAGEMENT_UPDATE,
     DAILY_HELP_MANAGEMENT_VIEW,
     VISITOR_MANAGEMENT_VERIFY,
@@ -1161,7 +1162,7 @@ async def delete_project_daily_help_profile(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=DAILY_HELP_MANAGEMENT_UPDATE,
+        permission_codes=DAILY_HELP_MANAGEMENT_DELETE,
         request=request,
     )
     service = DailyHelpService(db_connection=db_connection, user_context=user_context)
