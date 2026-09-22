@@ -253,7 +253,8 @@ class VisitorLogItemResponse(BaseModel):
     visit_status: str = Field(
         ...,
         description=(
-            "Unified row status: awaiting_approval, approved, inside, exited, expired, or denied."
+            "Unified row status: awaiting_approval, approved, inside, exited, "
+            "expired, or cancelled."
         ),
     )
     visitor_type: str = Field(
@@ -346,7 +347,7 @@ class VisitorLogOverviewResponse(BaseModel):
     )
     denied_expired: int = Field(
         ...,
-        description="Expired passes and denied/cancelled visits with no entry.",
+        description="Expired passes and cancelled visits with no entry.",
     )
 
 
@@ -457,7 +458,7 @@ class VisitorLogPassDetailData(PassResponse):
         ...,
         description=(
             "Unified visit status aligned with the list API: awaiting_approval, approved, "
-            "inside, exited, expired, or denied."
+            "inside, exited, expired, or cancelled."
         ),
     )
     visitor_type: str = Field(
@@ -579,7 +580,7 @@ class VisitorLogWalkInDetailData(WalkInDetailResponse):
         ...,
         description=(
             "Unified visit status aligned with the list API: awaiting_approval, approved, "
-            "inside, exited, expired, or denied."
+            "inside, exited, expired, or cancelled."
         ),
     )
     visitor_type: str = Field(

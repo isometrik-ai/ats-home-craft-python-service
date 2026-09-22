@@ -11,6 +11,7 @@ import pytest
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
 from apps.user_service.app.schemas.enums import (
     PassEventType,
+    PassStatus,
     PassType,
     VisitorLogVisitStatus,
     VisitorType,
@@ -625,6 +626,22 @@ def test_walk_in_visit_status_maps_awaiting():
         VisitorLogsService._walk_in_visit_status(status=WalkInStatus.AWAITING.value)
         == VisitorLogVisitStatus.AWAITING_APPROVAL.value
     )
+
+
+def test_walk_in_visit_status_maps_cancelled():
+    """Walk-in cancelled maps to cancelled visit_status."""
+    assert (
+        VisitorLogsService._walk_in_visit_status(status=WalkInStatus.CANCELLED.value)
+        == VisitorLogVisitStatus.CANCELLED.value
+    )
+
+
+def test_pass_visit_status_maps_cancelled():
+    """Cancelled passes map to cancelled visit_status."""
+    status = VisitorLogsService._pass_visit_status(
+        detail={"events": [], "status": PassStatus.CANCELLED.value}
+    )
+    assert status == VisitorLogVisitStatus.CANCELLED.value
 
 
 @pytest.mark.asyncio
