@@ -13,6 +13,11 @@ from libs.shared_utils.common_query import (
     RESIDENT_MANAGEMENT_VIEW,
     VEHICLE_MANAGEMENT_DELETE,
     VISITOR_MANAGEMENT_VIEW,
+    WORK_ORDER_MANAGEMENT_APPROVE,
+    WORK_ORDER_MANAGEMENT_EDIT,
+    WORK_ORDER_MANAGEMENT_MANAGE,
+    WORK_ORDER_MANAGEMENT_PAY,
+    WORK_ORDER_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.project_permission_aliases import (
     expand_org_ceiling_permission_codes,
@@ -98,6 +103,57 @@ def test_project_code_allowed_by_org_ceiling_expands_view_assigned():
     org_codes = {PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
     assert project_code_allowed_by_org_ceiling(org_codes, VISITOR_MANAGEMENT_VIEW)
     assert project_code_allowed_by_org_ceiling(org_codes, MOVE_EVENTS_MANAGEMENT_VIEW)
+
+
+def test_work_order_granular_org_codes_satisfied_by_project_manage():
+    assert project_permission_satisfiers(WORK_ORDER_MANAGEMENT_VIEW) == frozenset(
+        {WORK_ORDER_MANAGEMENT_VIEW, WORK_ORDER_MANAGEMENT_MANAGE}
+    )
+    assert project_permission_satisfiers(WORK_ORDER_MANAGEMENT_EDIT) == frozenset(
+        {WORK_ORDER_MANAGEMENT_EDIT, WORK_ORDER_MANAGEMENT_MANAGE}
+    )
+
+
+def test_work_order_legacy_project_role_codes_remain_valid():
+    assert project_role_grants_any(
+        role_permission_codes={WORK_ORDER_MANAGEMENT_VIEW},
+        required_permission_codes=[WORK_ORDER_MANAGEMENT_VIEW],
+    )
+    assert project_role_grants_any(
+        role_permission_codes={WORK_ORDER_MANAGEMENT_EDIT},
+        required_permission_codes=[WORK_ORDER_MANAGEMENT_EDIT],
+    )
+
+
+def test_work_order_manage_grants_any_granular_org_requirement():
+    role_codes = {WORK_ORDER_MANAGEMENT_MANAGE}
+    for required in (
+        WORK_ORDER_MANAGEMENT_VIEW,
+        WORK_ORDER_MANAGEMENT_EDIT,
+        WORK_ORDER_MANAGEMENT_APPROVE,
+        WORK_ORDER_MANAGEMENT_PAY,
+    ):
+        assert project_role_grants_any(
+            role_permission_codes=role_codes,
+            required_permission_codes=[required],
+        )
+
+
+def test_work_order_manage_project_ceiling_uses_org_granular_codes():
+    ceiling = org_ceiling_permission_codes(WORK_ORDER_MANAGEMENT_MANAGE)
+    assert WORK_ORDER_MANAGEMENT_VIEW in ceiling
+    assert WORK_ORDER_MANAGEMENT_EDIT in ceiling
+    assert WORK_ORDER_MANAGEMENT_APPROVE in ceiling
+    assert WORK_ORDER_MANAGEMENT_PAY in ceiling
+    assert PROJECTS_MANAGEMENT_VIEW in ceiling
+
+
+def test_default_project_permissions_work_order_is_single_manage():
+    work_order_entries = [
+        entry for entry in DEFAULT_PROJECT_PERMISSIONS if entry[3] == "work_order_management"
+    ]
+    assert len(work_order_entries) == 1
+    assert work_order_entries[0][0] == WORK_ORDER_MANAGEMENT_MANAGE
 
 
 def test_default_project_permissions_daily_help_includes_delete():
