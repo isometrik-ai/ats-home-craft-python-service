@@ -54,7 +54,6 @@ PROJECT_SCOPABLE_PERMISSION_CODES: frozenset[str] = PROJECT_PERMISSION_CODES
 
 # Maps an API/org permission requirement to project-role codes that satisfy it.
 PROJECT_PERMISSION_SATISFIERS: dict[str, frozenset[str]] = {
-    PROJECTS_MANAGEMENT_VIEW_ASSIGNED: frozenset({PROJECTS_MANAGEMENT_VIEW_ASSIGNED}),
     PROJECT_SETUP_EDIT: frozenset({PROJECT_SETUP_EDIT}),
     PROJECT_SETUP_DELETE: frozenset({PROJECT_SETUP_DELETE}),
     PROJECT_MEMBERS_MANAGE_ASSIGNED: frozenset({PROJECT_MEMBERS_MANAGE_ASSIGNED}),
@@ -106,8 +105,6 @@ def project_permission_satisfiers(permission_code: str) -> frozenset[str]:
     explicit = PROJECT_PERMISSION_SATISFIERS.get(permission_code)
     if explicit is not None:
         return explicit
-    if permission_code == "projects_management.view":
-        return frozenset({PROJECTS_MANAGEMENT_VIEW_ASSIGNED})
     return frozenset({permission_code})
 
 
@@ -133,7 +130,6 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
     codes.add(PROJECTS_MANAGEMENT_VIEW)
 
     if permission_code in {
-        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
         VISITOR_MANAGEMENT_VIEW,
         NOTICES_MANAGEMENT_VIEW,
         COMMUNITY_EVENTS_MANAGEMENT_VIEW,

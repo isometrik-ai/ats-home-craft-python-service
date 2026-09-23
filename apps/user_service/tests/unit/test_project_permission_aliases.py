@@ -29,13 +29,13 @@ from libs.shared_utils.project_permission_aliases import (
 
 
 def test_project_permission_satisfiers_for_legacy_view():
-    assert PROJECTS_MANAGEMENT_VIEW_ASSIGNED in project_permission_satisfiers(
-        "projects_management.view"
+    assert project_permission_satisfiers("projects_management.view") == frozenset(
+        {"projects_management.view"}
     )
 
 
 def test_project_role_grants_any_matches_granular_edit():
-    role_codes = {"notices_management.edit", PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    role_codes = {"notices_management.edit", "notices_management.view"}
     assert project_role_grants_any(
         role_permission_codes=role_codes,
         required_permission_codes=[NOTICES_MANAGEMENT_EDIT],
@@ -43,7 +43,7 @@ def test_project_role_grants_any_matches_granular_edit():
 
 
 def test_project_role_grants_any_rejects_missing_permission():
-    role_codes = {PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    role_codes = {"projects_management.view_assigned"}
     assert not project_role_grants_any(
         role_permission_codes=role_codes,
         required_permission_codes=[VISITOR_MANAGEMENT_VIEW],
@@ -58,7 +58,7 @@ def test_org_ceiling_includes_legacy_projects_management_edit():
 
 
 def test_move_events_not_satisfied_by_resident_management_only():
-    role_codes = {RESIDENT_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    role_codes = {RESIDENT_MANAGEMENT_VIEW}
     assert not project_role_grants_any(
         role_permission_codes=role_codes,
         required_permission_codes=[MOVE_EVENTS_MANAGEMENT_VIEW],
@@ -169,6 +169,12 @@ def test_default_project_permissions_daily_help_includes_delete():
     )
     assert delete_entry[1] == "Delete Daily Help"
     assert delete_entry[2] == "Soft-delete daily help profiles within assigned projects"
+
+
+def test_default_project_permissions_excludes_view_assigned():
+    """Project access is org-scoped; view_assigned must not appear in role editor catalog."""
+    codes = {entry[0] for entry in DEFAULT_PROJECT_PERMISSIONS}
+    assert PROJECTS_MANAGEMENT_VIEW_ASSIGNED not in codes
 
 
 def test_default_project_permissions_contacts_includes_edit():

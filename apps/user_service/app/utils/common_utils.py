@@ -416,6 +416,11 @@ def _expand_project_view_permission_codes(permission_codes: list[str]) -> list[s
     return expanded
 
 
+_PROJECT_ACCESS_GATE_CODES = frozenset(
+    {PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+)
+
+
 async def user_has_any_permission(
     *,
     permission_codes: list[str],
@@ -525,6 +530,10 @@ async def ensure_staff_project_access_for_context(
         )
         if member:
             requested_codes = _normalize_permission_codes(permission_codes)
+            if set(requested_codes).issubset(_PROJECT_ACCESS_GATE_CODES):
+                user_context.project_member_role = str(member.get("role_slug") or "") or None
+                return user_context
+
             role_codes = await ProjectRolesRepository(db_connection).get_permission_codes_for_role(
                 project_role_id=str(member["project_role_id"]),
             )

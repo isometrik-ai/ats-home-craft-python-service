@@ -151,6 +151,66 @@ async def test_ensure_staff_project_access_assigned_requires_membership():
 
 
 @pytest.mark.asyncio
+async def test_ensure_staff_project_access_assigned_membership_satisfies_access_gate():
+    """Org view_assigned + project membership is enough for project access gate checks."""
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    setup_mock = MagicMock()
+    setup_mock.ensure_project = AsyncMock(return_value={"id": PROJECT_ID})
+    repo_mock = MagicMock()
+    repo_mock.get_active_member_with_role = AsyncMock(
+        return_value={
+            "project_role_id": ROLE_ID,
+            "role_slug": "viewer",
+            "user_id": USER_ID,
+        }
+    )
+    roles_repo_mock = MagicMock()
+    roles_repo_mock.get_permission_codes_for_role = AsyncMock(return_value=set())
+
+    with (
+        patch(
+            "apps.user_service.app.utils.common_utils.extract_user_context",
+            new=AsyncMock(return_value=_user_context()),
+        ),
+        patch(
+            "apps.user_service.app.utils.common_utils.require_any_permission",
+            new=AsyncMock(),
+        ),
+        patch(
+            "apps.user_service.app.services.project_setup_service.ProjectSetupService",
+            return_value=setup_mock,
+        ),
+        patch(
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
+            new=AsyncMock(
+                side_effect=lambda **kwargs: kwargs["permission_code"]
+                == [PROJECTS_MANAGEMENT_VIEW_ASSIGNED]
+            ),
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository",
+            return_value=repo_mock,
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.project_roles_repository.ProjectRolesRepository",
+            return_value=roles_repo_mock,
+        ),
+    ):
+        ctx = await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db,
+            project_id=PROJECT_ID,
+            permission_codes=[
+                PROJECTS_MANAGEMENT_VIEW,
+                PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+            ],
+        )
+        assert ctx.project_member_role == "viewer"
+        roles_repo_mock.get_permission_codes_for_role.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_ensure_staff_project_access_assigned_requires_project_role_permission():
     db = MagicMock()
     current_user = {"sub": USER_ID}
@@ -224,7 +284,7 @@ async def test_ensure_staff_project_access_assigned_allows_matching_project_role
     )
     roles_repo_mock = MagicMock()
     roles_repo_mock.get_permission_codes_for_role = AsyncMock(
-        return_value={VISITOR_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+        return_value={VISITOR_MANAGEMENT_VIEW}
     )
 
     with (
@@ -281,9 +341,7 @@ async def test_ensure_staff_project_access_legacy_org_edit_satisfies_setup_ceili
         }
     )
     roles_repo_mock = MagicMock()
-    roles_repo_mock.get_permission_codes_for_role = AsyncMock(
-        return_value={PROJECT_SETUP_EDIT, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
-    )
+    roles_repo_mock.get_permission_codes_for_role = AsyncMock(return_value={PROJECT_SETUP_EDIT})
 
     async def _access_side_effect(**kwargs):
         code = kwargs["permission_code"][0]
