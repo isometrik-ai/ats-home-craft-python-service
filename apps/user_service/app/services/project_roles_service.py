@@ -374,12 +374,37 @@ class ProjectRolesService:
                 custom_code=CustomStatusCode.FORBIDDEN,
             )
 
-        catalog_codes = self._catalog_scopable_codes(
-            await self.project_permissions_repo.get_all_permissions(org_id)
-        )
         org_codes = await self._fetch_org_permission_codes(org_id=org_id)
+        member = await self.projects_repo.get_active_member_with_role(
+            organization_id=org_id,
+            project_id=project_id,
+            user_id=user_id,
+        )
+
+        if member:
+            role_id = str(member["project_role_id"])
+            project_codes = sorted(
+                await self.repo.get_permission_codes_for_role(project_role_id=role_id)
+            )
+            effective = sorted(
+                code
+                for code in project_codes
+                if project_code_allowed_by_org_ceiling(org_codes, code)
+            )
+            return ProjectMyPermissionsResponse(
+                project_id=project_id,
+                project_role_id=role_id,
+                role_slug=str(member.get("role_slug") or "") or None,
+                role_name=member.get("role_name"),
+                is_org_wide=has_org_wide,
+                project_permissions=project_codes,
+                effective_permissions=effective,
+            )
 
         if has_org_wide:
+            catalog_codes = self._catalog_scopable_codes(
+                await self.project_permissions_repo.get_all_permissions(org_id)
+            )
             effective = sorted(
                 code for code in org_codes if code in PROJECT_SCOPABLE_PERMISSION_CODES
             )
@@ -390,33 +415,9 @@ class ProjectRolesService:
                 effective_permissions=effective,
             )
 
-        member = await self.projects_repo.get_active_member_with_role(
-            organization_id=org_id,
-            project_id=project_id,
-            user_id=user_id,
-        )
-        if not member:
-            raise ForbiddenException(
-                message_key="auth.errors.project_access_denied",
-                custom_code=CustomStatusCode.FORBIDDEN,
-            )
-
-        role_id = str(member["project_role_id"])
-        project_codes = sorted(
-            await self.repo.get_permission_codes_for_role(project_role_id=role_id)
-        )
-        effective = sorted(
-            code for code in project_codes if project_code_allowed_by_org_ceiling(org_codes, code)
-        )
-
-        return ProjectMyPermissionsResponse(
-            project_id=project_id,
-            project_role_id=role_id,
-            role_slug=str(member.get("role_slug") or "") or None,
-            role_name=member.get("role_name"),
-            is_org_wide=False,
-            project_permissions=project_codes,
-            effective_permissions=effective,
+        raise ForbiddenException(
+            message_key="auth.errors.project_access_denied",
+            custom_code=CustomStatusCode.FORBIDDEN,
         )
 
     async def _resolve_project_permission_ids(self, permission_ids: list[str]) -> list[str]:
