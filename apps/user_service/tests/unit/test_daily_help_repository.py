@@ -359,36 +359,38 @@ async def test_ratings():
     )
     assert batch[PROFILE]["rating_count"] == 2
 
-    fetch_results = [
-        [{"star_level": 5, "count": 2}],
-        [{"category": "punctuality", "average_stars": Decimal("4.50")}],
-        [{"trait": "punctual", "count": 1}],
-    ]
-
-    async def _fetch(query, *args):
-        conn.fetch_calls.append((query.strip(), args))
-        return fetch_results.pop(0)
-
-    conn.fetch = _fetch
-    conn.fetchval = AsyncMock(return_value=1)
-    with patch.object(
-        repo,
-        "get_rating_summaries_batch",
-        new=AsyncMock(
-            return_value={
-                PROFILE: {"rating_count": 2, "average_stars": 4.5},
-            }
-        ),
-    ):
-        summary = await repo.get_rating_summary(
-            organization_id=ORG,
-            profile_id=PROFILE,
-        )
+    conn.row = {
+        "rating_count": 2,
+        "average_stars": Decimal("4.50"),
+        "review_count": 1,
+        "star_distribution": {"5": 2},
+        "category_averages": {"punctuality": Decimal("4.50")},
+        "trait_counts": {"punctual": 1},
+    }
+    summary = await repo.get_rating_summary(
+        organization_id=ORG,
+        profile_id=PROFILE,
+    )
     assert summary["rating_count"] == 2
     assert summary["review_count"] == 1
     assert summary["star_distribution"]["5"] == 2
     assert summary["category_averages"]["punctuality"] == 4.5
     assert summary["trait_counts"]["punctual"] == 1
+
+    conn.row = {
+        "rating_count": 0,
+        "average_stars": Decimal("0"),
+        "review_count": 0,
+        "star_distribution": {},
+        "category_averages": {},
+        "trait_counts": {},
+    }
+    empty_summary = await repo.get_rating_summary(
+        organization_id=ORG,
+        profile_id=PROFILE,
+    )
+    assert empty_summary["rating_count"] == 0
+    assert empty_summary["review_count"] == 0
 
 
 @pytest.mark.asyncio

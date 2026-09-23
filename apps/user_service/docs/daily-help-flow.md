@@ -630,8 +630,8 @@ GET /v1/projects/{project_id}/daily-help/{profile_id}/ratings/reviews?stars=3&so
 | `page_size` | Page size (default `20`, max `100`)                                      |
 
 Each review includes reviewer name, unit label, stars, comment, traits, and timestamps.
-Profile detail still embeds the full `reviews[]` list for backward compatibility; prefer the
-paginated endpoint for the admin Ratings & reviews tab and mobile infinite scroll.
+Both the paginated endpoint and embedded profile `reviews[]` include **written reviews only**
+(ratings with a non-empty comment), matching `review_count` in the summary.
 
 **Trait values:** `very_punctual`, `quite_regular`, `exceptional_service`, `great_attitude`,
 `good_communication`

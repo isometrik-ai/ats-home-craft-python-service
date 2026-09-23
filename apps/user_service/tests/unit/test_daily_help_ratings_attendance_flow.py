@@ -407,9 +407,7 @@ async def test_mark_attendance_absence_fails_on_future_date():
 @pytest.mark.asyncio
 async def test_mark_attendance_absence_fails_when_already_checked_in():
     svc = _rating_service(linked=True)
-    svc.events_repo.list_check_in_dates_for_month = AsyncMock(
-        return_value=[date(2024, 5, 22)]
-    )
+    svc.events_repo.list_check_in_dates_for_month = AsyncMock(return_value=[date(2024, 5, 22)])
 
     with pytest.raises(ConflictException) as exc:
         await svc.mark_attendance_absence(
