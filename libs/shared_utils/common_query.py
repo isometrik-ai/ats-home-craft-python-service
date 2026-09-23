@@ -72,6 +72,7 @@ WORK_ORDER_MANAGEMENT_VIEW = "work_order_management.view"
 WORK_ORDER_MANAGEMENT_EDIT = "work_order_management.edit"
 WORK_ORDER_MANAGEMENT_APPROVE = "work_order_management.approve"
 WORK_ORDER_MANAGEMENT_PAY = "work_order_management.pay"
+WORK_ORDER_MANAGEMENT_MANAGE = "work_order_management.manage"
 
 CUSTOM_FIELDS_MANAGEMENT_CREATE = "custom_fields_management.create"
 CUSTOM_FIELDS_MANAGEMENT_VIEW = "custom_fields_management.view"
@@ -569,6 +570,12 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "contacts",
     ),
     (
+        CONTACTS_MANAGEMENT_EDIT,
+        "Edit Project Contacts",
+        "Modify contacts within assigned projects",
+        "contacts",
+    ),
+    (
         CONTACTS_MANAGEMENT_DELETE,
         "Delete Project Contacts",
         "Remove contacts within assigned projects",
@@ -605,27 +612,12 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "finance",
     ),
     (
-        WORK_ORDER_MANAGEMENT_VIEW,
-        "View Work Order Management",
-        "View assets, contracts, work orders, and invoices",
-        "work_order_management",
-    ),
-    (
-        WORK_ORDER_MANAGEMENT_EDIT,
-        "Edit Work Order Management",
-        "Create and update assets, contracts, and work orders",
-        "work_order_management",
-    ),
-    (
-        WORK_ORDER_MANAGEMENT_APPROVE,
-        "Approve Vendor Invoices",
-        "Approve or reject vendor invoices",
-        "work_order_management",
-    ),
-    (
-        WORK_ORDER_MANAGEMENT_PAY,
-        "Record Vendor Payments",
-        "Record payments against approved invoices",
+        WORK_ORDER_MANAGEMENT_MANAGE,
+        "Manage Work Orders",
+        (
+            "View and manage assets, contracts, work orders, vendor invoices, "
+            "and payments within assigned projects"
+        ),
         "work_order_management",
     ),
 ]
