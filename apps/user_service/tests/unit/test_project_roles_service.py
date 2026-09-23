@@ -242,8 +242,9 @@ async def test_get_my_permissions_denies_view_assigned_without_membership(monkey
 
 @pytest.mark.asyncio
 async def test_get_my_permissions_hq_uses_org_scopable_not_full_catalog(monkeypatch) -> None:
-    """HQ users get org scopable codes, not every row in project_permissions."""
+    """HQ users without project assignment get org scopable codes, not full catalog."""
     svc = _service()
+    svc.projects_repo.get_active_member_with_role = AsyncMock(return_value=None)
     svc.project_permissions_repo = MagicMock()
     svc.project_permissions_repo.get_all_permissions = AsyncMock(
         return_value=[
@@ -271,3 +272,41 @@ async def test_get_my_permissions_hq_uses_org_scopable_not_full_catalog(monkeypa
     assert result.project_permissions == [NOTICES_MANAGEMENT_VIEW]
     assert "projects_management.view_assigned" not in result.project_permissions
     assert "legacy_stale.permission" not in result.project_permissions
+
+
+@pytest.mark.asyncio
+async def test_get_my_permissions_hq_assigned_uses_project_role(monkeypatch) -> None:
+    """HQ users assigned to a project use project role permissions for effective UI gating."""
+    svc = _service()
+    svc.projects_repo.get_active_member_with_role = AsyncMock(
+        return_value={
+            "project_role_id": ROLE_ID,
+            "role_slug": "community_admin",
+            "role_name": "Community Admin",
+        }
+    )
+    svc.repo.get_permission_codes_for_role = AsyncMock(
+        return_value={NOTICES_MANAGEMENT_VIEW, "notices_management.edit"}
+    )
+    svc._fetch_org_permission_codes = AsyncMock(  # pylint: disable=protected-access
+        return_value={
+            PROJECTS_MANAGEMENT_VIEW,
+            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        }
+    )
+
+    async def _access(**kwargs):
+        return kwargs["permission_code"] == [PROJECTS_MANAGEMENT_VIEW]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_roles_service.check_user_access_async",
+        AsyncMock(side_effect=_access),
+    )
+
+    result = await svc.get_my_permissions(project_id=PROJECT_ID)
+
+    assert result.is_org_wide is True
+    assert result.project_role_id == ROLE_ID
+    assert result.role_slug == "community_admin"
+    assert result.effective_permissions == ["notices_management.edit", NOTICES_MANAGEMENT_VIEW]
+    assert result.project_permissions == ["notices_management.edit", NOTICES_MANAGEMENT_VIEW]
