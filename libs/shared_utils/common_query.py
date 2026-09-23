@@ -410,12 +410,6 @@ DEFAULT_PERMISSIONS = [
 # Project-role catalog (stored in project_permissions, not organization permissions).
 DEFAULT_PROJECT_PERMISSIONS = [
     (
-        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
-        "View Assigned Projects",
-        "View and access only projects assigned via project_members",
-        "projects",
-    ),
-    (
         PROJECT_MEMBERS_MANAGE_ASSIGNED,
         "Manage Assigned Project Members",
         "Assign and remove staff on projects where caller is community admin",

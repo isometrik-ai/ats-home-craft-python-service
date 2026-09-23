@@ -29,6 +29,7 @@ from apps.user_service.app.utils.common_utils import (
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
 )
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
@@ -337,32 +338,62 @@ class ProjectRolesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+    @staticmethod
+    def _catalog_scopable_codes(rows: list[dict[str, Any]]) -> list[str]:
+        """Return sorted project catalog codes that are valid project-role grants."""
+        return sorted(
+            {
+                str(row["code"])
+                for row in rows
+                if str(row.get("code") or "") in PROJECT_SCOPABLE_PERMISSION_CODES
+            }
+        )
+
     async def get_my_permissions(self, *, project_id: str) -> ProjectMyPermissionsResponse:
-        """Return effective project permissions for the current user."""
+        """Return effective project permissions for the current user on one project."""
         org_id = self._require_org_id()
         assert self.user_context and self.user_context.user_id
         await self._ensure_project(project_id=project_id)
 
+        user_id = self.user_context.user_id
         has_org_wide = await check_user_access_async(
             permission_code=[PROJECTS_MANAGEMENT_VIEW],
-            user_id=self.user_context.user_id,
+            user_id=user_id,
             organization_id=org_id,
             db_connection=self.db_connection,
         )
+        has_assigned_view = await check_user_access_async(
+            permission_code=[PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+            user_id=user_id,
+            organization_id=org_id,
+            db_connection=self.db_connection,
+        )
+        if not has_org_wide and not has_assigned_view:
+            raise ForbiddenException(
+                message_key="auth.errors.project_access_denied",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+
+        catalog_codes = self._catalog_scopable_codes(
+            await self.project_permissions_repo.get_all_permissions(org_id)
+        )
+        org_codes = await self._fetch_org_permission_codes(org_id=org_id)
+
         if has_org_wide:
-            project_catalog = await self.project_permissions_repo.get_all_permissions(org_id)
-            codes = sorted(str(row["code"]) for row in project_catalog)
+            effective = sorted(
+                code for code in org_codes if code in PROJECT_SCOPABLE_PERMISSION_CODES
+            )
             return ProjectMyPermissionsResponse(
                 project_id=project_id,
                 is_org_wide=True,
-                project_permissions=codes,
-                effective_permissions=codes,
+                project_permissions=catalog_codes,
+                effective_permissions=effective,
             )
 
         member = await self.projects_repo.get_active_member_with_role(
             organization_id=org_id,
             project_id=project_id,
-            user_id=self.user_context.user_id,
+            user_id=user_id,
         )
         if not member:
             raise ForbiddenException(
@@ -374,7 +405,6 @@ class ProjectRolesService:
         project_codes = sorted(
             await self.repo.get_permission_codes_for_role(project_role_id=role_id)
         )
-        org_codes = await self._fetch_org_permission_codes(org_id=org_id)
         effective = sorted(
             code for code in project_codes if project_code_allowed_by_org_ceiling(org_codes, code)
         )
@@ -386,7 +416,7 @@ class ProjectRolesService:
             role_name=member.get("role_name"),
             is_org_wide=False,
             project_permissions=project_codes,
-            effective_permissions=sorted(effective),
+            effective_permissions=effective,
         )
 
     async def _resolve_project_permission_ids(self, permission_ids: list[str]) -> list[str]:
