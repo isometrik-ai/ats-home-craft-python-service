@@ -249,7 +249,7 @@ async def test_get_my_permissions_hq_uses_org_scopable_not_full_catalog(monkeypa
         return_value=[
             {"code": NOTICES_MANAGEMENT_VIEW},
             {"code": "projects_management.view_assigned"},
-            {"code": "work_order_management.manage"},
+            {"code": "legacy_stale.permission"},
         ]
     )
     svc._fetch_org_permission_codes = AsyncMock(  # pylint: disable=protected-access
@@ -270,4 +270,4 @@ async def test_get_my_permissions_hq_uses_org_scopable_not_full_catalog(monkeypa
     assert result.effective_permissions == []
     assert result.project_permissions == [NOTICES_MANAGEMENT_VIEW]
     assert "projects_management.view_assigned" not in result.project_permissions
-    assert "work_order_management.manage" not in result.project_permissions
+    assert "legacy_stale.permission" not in result.project_permissions
