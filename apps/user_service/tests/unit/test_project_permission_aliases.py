@@ -28,14 +28,20 @@ from libs.shared_utils.project_permission_aliases import (
 )
 
 
-def test_project_permission_satisfiers_for_legacy_view():
-    assert PROJECTS_MANAGEMENT_VIEW_ASSIGNED in project_permission_satisfiers(
-        "projects_management.view"
+def test_project_permission_satisfiers_view_is_org_only():
+    assert project_permission_satisfiers(PROJECTS_MANAGEMENT_VIEW) == frozenset()
+    assert project_permission_satisfiers(PROJECTS_MANAGEMENT_VIEW_ASSIGNED) == frozenset()
+
+
+def test_project_role_grants_any_access_only_needs_membership_not_project_code():
+    assert project_role_grants_any(
+        role_permission_codes=set(),
+        required_permission_codes=[PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
     )
 
 
 def test_project_role_grants_any_matches_granular_edit():
-    role_codes = {"notices_management.edit", PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    role_codes = {"notices_management.edit"}
     assert project_role_grants_any(
         role_permission_codes=role_codes,
         required_permission_codes=[NOTICES_MANAGEMENT_EDIT],
@@ -43,7 +49,7 @@ def test_project_role_grants_any_matches_granular_edit():
 
 
 def test_project_role_grants_any_rejects_missing_permission():
-    role_codes = {PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    role_codes = {"notices_management.view"}
     assert not project_role_grants_any(
         role_permission_codes=role_codes,
         required_permission_codes=[VISITOR_MANAGEMENT_VIEW],
@@ -58,7 +64,7 @@ def test_org_ceiling_includes_legacy_projects_management_edit():
 
 
 def test_move_events_not_satisfied_by_resident_management_only():
-    role_codes = {RESIDENT_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    role_codes = {RESIDENT_MANAGEMENT_VIEW}
     assert not project_role_grants_any(
         role_permission_codes=role_codes,
         required_permission_codes=[MOVE_EVENTS_MANAGEMENT_VIEW],

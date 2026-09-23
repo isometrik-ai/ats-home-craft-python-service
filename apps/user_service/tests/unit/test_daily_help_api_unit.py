@@ -17,10 +17,12 @@ from apps.user_service.app.api.daily_help import (
     delete_project_daily_help_profile,
     export_project_daily_help_profiles,
     get_daily_help_attendance,
+    get_daily_help_rating_summary,
     get_project_daily_help_profile,
     get_project_daily_help_summary,
     get_security_daily_help_submission,
     link_project_daily_help_to_unit,
+    list_daily_help_reviews,
     list_project_daily_help_categories,
     list_project_daily_help_household_links,
     list_project_daily_help_profiles,
@@ -46,6 +48,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpDocumentResponse,
     DailyHelpHouseholdLinkResponse,
     DailyHelpListQuery,
+    DailyHelpReviewListQuery,
     DailyHelpSubmissionListQuery,
     DailyHelpSummaryResponse,
     RejectDailyHelpRequest,
@@ -601,6 +604,53 @@ async def test_attendance_endpoint(mock_service_cls, mock_access):
         profile_id=PROFILE_ID,
         month=8,
         year=2026,
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.api.daily_help.ensure_staff_project_access", new_callable=AsyncMock)
+@patch("apps.user_service.app.api.daily_help.DailyHelpService")
+async def test_admin_rating_summary_endpoint(mock_service_cls, mock_access):
+    mock_access.return_value = _user_context()
+    mock_service_cls.return_value.get_rating_summary = AsyncMock(
+        return_value=MagicMock(
+            model_dump=lambda **_: {
+                "rating_count": 128,
+                "review_count": 18,
+                "average_stars": 4.4,
+                "star_distribution": {"5": 78},
+                "category_averages": {"punctuality": 4.7},
+                "trait_counts": {},
+            }
+        )
+    )
+
+    response = await get_daily_help_rating_summary(
+        request=_request(),
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.api.daily_help.ensure_staff_project_access", new_callable=AsyncMock)
+@patch("apps.user_service.app.api.daily_help.DailyHelpService")
+async def test_admin_list_reviews_endpoint(mock_service_cls, mock_access):
+    mock_access.return_value = _user_context()
+    review = MagicMock(model_dump=lambda **_: {"id": "rating-1", "stars": 3.0})
+    mock_service_cls.return_value.list_profile_reviews = AsyncMock(return_value=([review], 1))
+
+    response = await list_daily_help_reviews(
+        request=_request(),
+        project_id=PROJECT_ID,
+        profile_id=PROFILE_ID,
+        query=DailyHelpReviewListQuery(stars=3, page=1, page_size=20),
         db_connection=MagicMock(),
         current_user={"sub": "staff-1"},
     )

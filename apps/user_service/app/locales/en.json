@@ -1070,6 +1070,7 @@
       "duplicate_household_link": "This helper is already linked to your household.",
       "link_not_found": "The household link could not be found.",
       "household_link_required": "Link this helper to your household before updating open to work.",
+      "rating_household_link_required": "Only households this helper is assigned to can rate them.",
       "duplicate_rating": "You have already rated this helper. Use update rating to change it.",
       "rating_not_found": "You have not rated this helper yet.",
       "attendance_household_link_required": "Link this helper to your household before marking attendance.",
@@ -1121,6 +1122,7 @@
       "rating_not_submitted": "You have not rated this helper yet.",
       "rating_updated": "Daily help rating updated successfully.",
       "rating_summary_retrieved": "Daily help rating summary retrieved successfully.",
+      "reviews_retrieved": "Daily help reviews retrieved successfully.",
       "open_to_work_updated": "Open to work status updated successfully."
     }
   },

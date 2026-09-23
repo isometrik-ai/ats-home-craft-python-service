@@ -52,9 +52,16 @@ from libs.shared_utils.common_query import (
 # All permission codes that may appear on a project role template.
 PROJECT_SCOPABLE_PERMISSION_CODES: frozenset[str] = PROJECT_PERMISSION_CODES
 
+# Org-only gates: assigned-project access is enforced via org role + project_members.
+PROJECT_ACCESS_ONLY_CODES: frozenset[str] = frozenset(
+    {
+        PROJECTS_MANAGEMENT_VIEW,
+        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    }
+)
+
 # Maps an API/org permission requirement to project-role codes that satisfy it.
 PROJECT_PERMISSION_SATISFIERS: dict[str, frozenset[str]] = {
-    PROJECTS_MANAGEMENT_VIEW_ASSIGNED: frozenset({PROJECTS_MANAGEMENT_VIEW_ASSIGNED}),
     PROJECT_SETUP_EDIT: frozenset({PROJECT_SETUP_EDIT}),
     PROJECT_SETUP_DELETE: frozenset({PROJECT_SETUP_DELETE}),
     PROJECT_MEMBERS_MANAGE_ASSIGNED: frozenset({PROJECT_MEMBERS_MANAGE_ASSIGNED}),
@@ -106,8 +113,8 @@ def project_permission_satisfiers(permission_code: str) -> frozenset[str]:
     explicit = PROJECT_PERMISSION_SATISFIERS.get(permission_code)
     if explicit is not None:
         return explicit
-    if permission_code == "projects_management.view":
-        return frozenset({PROJECTS_MANAGEMENT_VIEW_ASSIGNED})
+    if permission_code in PROJECT_ACCESS_ONLY_CODES:
+        return frozenset()
     return frozenset({permission_code})
 
 
@@ -117,6 +124,8 @@ def project_role_grants_any(
     required_permission_codes: list[str],
 ) -> bool:
     """Return True when the project role satisfies at least one required permission."""
+    if set(required_permission_codes).issubset(PROJECT_ACCESS_ONLY_CODES):
+        return True
     for required in required_permission_codes:
         satisfiers = project_permission_satisfiers(required)
         if role_permission_codes.intersection(satisfiers):
@@ -133,7 +142,6 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
     codes.add(PROJECTS_MANAGEMENT_VIEW)
 
     if permission_code in {
-        PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
         VISITOR_MANAGEMENT_VIEW,
         NOTICES_MANAGEMENT_VIEW,
         COMMUNITY_EVENTS_MANAGEMENT_VIEW,

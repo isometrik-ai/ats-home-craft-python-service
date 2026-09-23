@@ -9,6 +9,11 @@ import pytest
 from apps.user_service.app.schemas.project_roles import CreateProjectRoleRequest
 from apps.user_service.app.services.project_roles_service import ProjectRolesService
 from apps.user_service.app.utils.common_utils import UserContext
+from libs.shared_utils.common_query import (
+    NOTICES_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+)
 from libs.shared_utils.http_exceptions import (
     ForbiddenException,
     NotFoundException,
@@ -196,3 +201,73 @@ async def test_list_assignable_permissions_reads_project_catalog() -> None:
     assert len(items) == 1
     assert items[0].code == "notices_management.view"
     assert items[0].id == "perm-1"
+
+
+@pytest.mark.asyncio
+async def test_get_my_permissions_denies_without_org_project_gate(monkeypatch) -> None:
+    """Users without org project view or view_assigned cannot read my-permissions."""
+    svc = _service()
+    svc.project_permissions_repo = MagicMock()
+    svc.project_permissions_repo.get_all_permissions = AsyncMock(return_value=[])
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_roles_service.check_user_access_async",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(ForbiddenException):
+        await svc.get_my_permissions(project_id=PROJECT_ID)
+
+
+@pytest.mark.asyncio
+async def test_get_my_permissions_denies_view_assigned_without_membership(monkeypatch) -> None:
+    """Assigned-project gate still requires membership on the requested project."""
+    svc = _service()
+    svc.project_permissions_repo = MagicMock()
+    svc.project_permissions_repo.get_all_permissions = AsyncMock(return_value=[])
+    svc.projects_repo.get_active_member_with_role = AsyncMock(return_value=None)
+    svc._fetch_org_permission_codes = AsyncMock(return_value=set())  # pylint: disable=protected-access
+
+    async def _access(**kwargs):
+        return kwargs["permission_code"] == [PROJECTS_MANAGEMENT_VIEW_ASSIGNED]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_roles_service.check_user_access_async",
+        AsyncMock(side_effect=_access),
+    )
+
+    with pytest.raises(ForbiddenException):
+        await svc.get_my_permissions(project_id=PROJECT_ID)
+
+
+@pytest.mark.asyncio
+async def test_get_my_permissions_hq_uses_org_scopable_not_full_catalog(monkeypatch) -> None:
+    """HQ users get org scopable codes, not every row in project_permissions."""
+    svc = _service()
+    svc.project_permissions_repo = MagicMock()
+    svc.project_permissions_repo.get_all_permissions = AsyncMock(
+        return_value=[
+            {"code": NOTICES_MANAGEMENT_VIEW},
+            {"code": "projects_management.view_assigned"},
+            {"code": "work_order_management.manage"},
+        ]
+    )
+    svc._fetch_org_permission_codes = AsyncMock(  # pylint: disable=protected-access
+        return_value={PROJECTS_MANAGEMENT_VIEW}
+    )
+
+    async def _access(**kwargs):
+        return kwargs["permission_code"] == [PROJECTS_MANAGEMENT_VIEW]
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.project_roles_service.check_user_access_async",
+        AsyncMock(side_effect=_access),
+    )
+
+    result = await svc.get_my_permissions(project_id=PROJECT_ID)
+
+    assert result.is_org_wide is True
+    assert result.effective_permissions == []
+    assert result.project_permissions == [NOTICES_MANAGEMENT_VIEW]
+    assert "projects_management.view_assigned" not in result.project_permissions
+    assert "work_order_management.manage" not in result.project_permissions

@@ -30,7 +30,6 @@ from libs.shared_utils.common_query import (
     PROJECT_MEMBERS_MANAGE_ASSIGNED,
     PROJECT_SETUP_DELETE,
     PROJECT_SETUP_EDIT,
-    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_EDIT,
     RESIDENT_MANAGEMENT_VIEW,
     TENANT_REQUESTS_MANAGEMENT_EDIT,
@@ -116,7 +115,6 @@ def is_reserved_system_project_role_slug(slug: str) -> bool:
 DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "community_admin": frozenset(
         {
-            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
             PROJECT_SETUP_EDIT,
             PROJECT_SETUP_DELETE,
             PROJECT_MEMBERS_MANAGE_ASSIGNED,
@@ -155,7 +153,6 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     ),
     "security": frozenset(
         {
-            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
             BUSINESS_DASHBOARD_VIEW,
             CONTACTS_MANAGEMENT_VIEW,
             VISITOR_MANAGEMENT_VIEW,
@@ -170,7 +167,6 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     ),
     "accountant": frozenset(
         {
-            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
             BUSINESS_DASHBOARD_VIEW,
             CONTACTS_MANAGEMENT_VIEW,
             TENANT_REQUESTS_MANAGEMENT_VIEW,
@@ -184,7 +180,6 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     ),
     "facility_manager": frozenset(
         {
-            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
             BUSINESS_DASHBOARD_VIEW,
             CONTACTS_MANAGEMENT_VIEW,
             PROJECT_SETUP_EDIT,
@@ -206,7 +201,6 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     ),
     "viewer": frozenset(
         {
-            PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
             BUSINESS_DASHBOARD_VIEW,
             CONTACTS_MANAGEMENT_VIEW,
             VISITOR_MANAGEMENT_VIEW,

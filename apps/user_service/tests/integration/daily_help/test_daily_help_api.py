@@ -13,6 +13,8 @@ def test_daily_help_admin_router_registered():
     assert "/projects/{project_id}/daily-help" in paths
     assert "/projects/{project_id}/daily-help/submissions" in paths
     assert "/projects/{project_id}/daily-help/{profile_id}/submission" in paths
+    assert "/projects/{project_id}/daily-help/{profile_id}/ratings/summary" in paths
+    assert "/projects/{project_id}/daily-help/{profile_id}/ratings/reviews" in paths
     assert any("/approve" in path for path in paths)
     assert any("/reject" in path for path in paths)
 
@@ -28,3 +30,4 @@ def test_daily_help_resident_router_registered():
     assert "/daily-help/{profile_id}/open-to-work" in paths
     assert "/daily-help/submissions" in paths
     assert "/daily-help/{profile_id}/submission" in paths
+    assert "/daily-help/{profile_id}/ratings/reviews" in paths

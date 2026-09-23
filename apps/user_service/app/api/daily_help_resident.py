@@ -16,6 +16,8 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpOpenToWorkApiResponse,
     DailyHelpRatingApiResponse,
     DailyHelpRatingSummaryApiResponse,
+    DailyHelpReviewListApiResponse,
+    DailyHelpReviewListQuery,
     MarkDailyHelpAttendanceAbsenceApiResponse,
     MarkDailyHelpAttendanceAbsenceRequest,
     RemoveDailyHelpHouseholdLinkRequest,
@@ -110,7 +112,11 @@ RATING_CREATED_RESPONSES = _created_response(
 )
 RATING_SUMMARY_SUCCESS_RESPONSES = _ok_response(
     DailyHelpRatingSummaryApiResponse,
-    "Aggregated star average and trait counts for the profile.",
+    "Aggregated star average, distribution, category scores, and trait counts.",
+)
+REVIEW_LIST_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpReviewListApiResponse,
+    "Paginated resident reviews for the daily help profile.",
 )
 RATING_MINE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpRatingApiResponse,
@@ -680,7 +686,7 @@ async def get_daily_help_rating_summary(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return star average and trait counts for a profile."""
+    """Return star average, distribution, category scores, and trait counts."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -695,6 +701,48 @@ async def get_daily_help_rating_summary(
         message_key="daily_help.success.rating_summary_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("list daily help reviews")
+@router.get(
+    "/{profile_id}/ratings/reviews",
+    status_code=http_status.HTTP_200_OK,
+    summary="Paginated reviews for a daily help profile",
+    response_model=None,
+    responses=REVIEW_LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def list_daily_help_reviews(
+    request: Request,
+    profile_id: str = Path(...),
+    unit_id: str = Query(..., description="Resident unit identifier (UUID string)."),
+    query: DailyHelpReviewListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return paginated reviews with optional star filter and sort order."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items, total = await service.list_profile_reviews(
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        profile_id=profile_id,
+        stars=query.stars,
+        sort=query.sort.value,
+        page=query.page,
+        page_size=query.page_size,
+    )
+    return list_response(
+        request=request,
+        items=[item.model_dump() for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="daily_help.success.reviews_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
     )
 
 
