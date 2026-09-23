@@ -28,6 +28,9 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpListApiResponse,
     DailyHelpListQuery,
     DailyHelpMessageApiResponse,
+    DailyHelpRatingSummaryApiResponse,
+    DailyHelpReviewListApiResponse,
+    DailyHelpReviewListQuery,
     DailyHelpSubmissionListQuery,
     DailyHelpSummaryApiResponse,
     RejectDailyHelpRequest,
@@ -140,6 +143,14 @@ AVAILABILITY_SUCCESS_RESPONSES = _ok_response(
 ATTENDANCE_SUCCESS_RESPONSES = _ok_response(
     DailyHelpAttendanceApiResponse,
     "Monthly attendance calendar with gate check-in days and events.",
+)
+RATING_SUMMARY_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpRatingSummaryApiResponse,
+    "Aggregated star average, distribution, category scores, and trait counts.",
+)
+REVIEW_LIST_SUCCESS_RESPONSES = _ok_response(
+    DailyHelpReviewListApiResponse,
+    "Paginated resident reviews for the daily help profile.",
 )
 HOUSEHOLD_LINK_LIST_SUCCESS_RESPONSES = _ok_response(
     DailyHelpHouseholdLinkListApiResponse,
@@ -1402,6 +1413,88 @@ async def replace_daily_help_availability(
         message_key="daily_help.success.availability_updated",
         custom_code=CustomStatusCode.SUCCESS,
         data=[item.model_dump() for item in items],
+    )
+
+
+@handle_api_exceptions("get daily help rating summary")
+@router.get(
+    "/{project_id}/daily-help/{profile_id}/ratings/summary",
+    status_code=http_status.HTTP_200_OK,
+    summary="Aggregated rating summary for a daily help profile",
+    response_model=None,
+    responses=RATING_SUMMARY_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def get_daily_help_rating_summary(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return star average, distribution, category scores, and trait counts."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_rating_summary(
+        project_id=project_id,
+        profile_id=profile_id,
+    )
+    return success_response(
+        request=request,
+        message_key="daily_help.success.rating_summary_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("list daily help reviews")
+@router.get(
+    "/{project_id}/daily-help/{profile_id}/ratings/reviews",
+    status_code=http_status.HTTP_200_OK,
+    summary="Paginated reviews for a daily help profile",
+    response_model=None,
+    responses=REVIEW_LIST_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_daily_help_reviews(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    profile_id: str = Path(...),
+    query: DailyHelpReviewListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return paginated reviews with optional star filter and sort order."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=DAILY_HELP_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = DailyHelpService(db_connection=db_connection, user_context=user_context)
+    items, total = await service.list_profile_reviews(
+        project_id=project_id,
+        profile_id=profile_id,
+        stars=query.stars,
+        sort=query.sort.value,
+        page=query.page,
+        page_size=query.page_size,
+    )
+    return list_response(
+        request=request,
+        items=[item.model_dump() for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="daily_help.success.reviews_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
     )
 
 

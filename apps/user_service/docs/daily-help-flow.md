@@ -43,29 +43,31 @@ users for helpers.
 
 **Admin dashboard — Requests → Daily Help**
 
-| Screen / element                                                         | Capability                                                           |
-| ------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| Summary cards (Total / Pending / Rejected / Active / Inactive / Deleted) | `GET /projects/{project_id}/daily-help/summary`                      |
-| Status tabs + category filter + search                                   | `GET /projects/{project_id}/daily-help?status=&category_id=&search=` |
-| Manage categories                                                        | `GET/POST/PATCH /projects/{project_id}/daily-help/categories`        |
-| Table list (all statuses on one page)                                    | Same list endpoint (paginated)                                       |
-| Add Daily Help drawer (admin direct)                                     | `POST /projects/{project_id}/daily-help`                             |
-| Security submit for review                                               | `POST /projects/{project_id}/daily-help/submissions`                 |
-| Security list my submissions                                             | `GET /projects/{project_id}/daily-help/submissions?status=`          |
-| Security view one submission                                             | `GET /projects/{project_id}/daily-help/{id}/submission`              |
-| Security edit + resubmit (rejected rows)                                 | `PATCH /projects/{project_id}/daily-help/{id}/submission`            |
-| Approve pending submission                                               | `POST /projects/{project_id}/daily-help/{id}/approve`                |
-| Reject pending submission                                                | `POST /projects/{project_id}/daily-help/{id}/reject`                 |
-| View detail drawer                                                       | `GET /projects/{project_id}/daily-help/{id}`                         |
-| Edit details (active/inactive only)                                      | `PATCH /projects/{project_id}/daily-help/{id}`                       |
-| Mark inactive                                                            | `POST /projects/{project_id}/daily-help/{id}/deactivate`             |
-| Reactivate inactive                                                      | `POST /projects/{project_id}/daily-help/{id}/reactivate`             |
-| Delete record                                                            | `POST /projects/{project_id}/daily-help/{id}/delete`                 |
-| Restore (optional)                                                       | `POST /projects/{project_id}/daily-help/{id}/restore`                |
-| Add / remove document                                                    | `POST/PATCH/DELETE .../documents`                                    |
-| Export                                                                   | `GET /projects/{project_id}/daily-help/export`                       |
-| Availability slots                                                       | `PUT /projects/{project_id}/daily-help/{id}/availability`            |
-| Attendance calendar (gate check-ins)                                     | `GET /projects/{project_id}/daily-help/{id}/attendance?year=&month=` |
+| Screen / element                                                         | Capability                                                                                 |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Summary cards (Total / Pending / Rejected / Active / Inactive / Deleted) | `GET /projects/{project_id}/daily-help/summary`                                            |
+| Status tabs + category filter + search                                   | `GET /projects/{project_id}/daily-help?status=&category_id=&search=`                       |
+| Manage categories                                                        | `GET/POST/PATCH /projects/{project_id}/daily-help/categories`                              |
+| Table list (all statuses on one page)                                    | Same list endpoint (paginated)                                                             |
+| Add Daily Help drawer (admin direct)                                     | `POST /projects/{project_id}/daily-help`                                                   |
+| Security submit for review                                               | `POST /projects/{project_id}/daily-help/submissions`                                       |
+| Security list my submissions                                             | `GET /projects/{project_id}/daily-help/submissions?status=`                                |
+| Security view one submission                                             | `GET /projects/{project_id}/daily-help/{id}/submission`                                    |
+| Security edit + resubmit (rejected rows)                                 | `PATCH /projects/{project_id}/daily-help/{id}/submission`                                  |
+| Approve pending submission                                               | `POST /projects/{project_id}/daily-help/{id}/approve`                                      |
+| Reject pending submission                                                | `POST /projects/{project_id}/daily-help/{id}/reject`                                       |
+| View detail drawer                                                       | `GET /projects/{project_id}/daily-help/{id}`                                               |
+| Edit details (active/inactive only)                                      | `PATCH /projects/{project_id}/daily-help/{id}`                                             |
+| Mark inactive                                                            | `POST /projects/{project_id}/daily-help/{id}/deactivate`                                   |
+| Reactivate inactive                                                      | `POST /projects/{project_id}/daily-help/{id}/reactivate`                                   |
+| Delete record                                                            | `POST /projects/{project_id}/daily-help/{id}/delete`                                       |
+| Restore (optional)                                                       | `POST /projects/{project_id}/daily-help/{id}/restore`                                      |
+| Add / remove document                                                    | `POST/PATCH/DELETE .../documents`                                                          |
+| Export                                                                   | `GET /projects/{project_id}/daily-help/export`                                             |
+| Availability slots                                                       | `PUT /projects/{project_id}/daily-help/{id}/availability`                                  |
+| Attendance calendar (gate check-ins)                                     | `GET /projects/{project_id}/daily-help/{id}/attendance?year=&month=`                       |
+| Ratings & reviews tab — summary (distribution + category scores)         | `GET /projects/{project_id}/daily-help/{id}/ratings/summary`                               |
+| Ratings & reviews tab — filtered/sorted review list                      | `GET /projects/{project_id}/daily-help/{id}/ratings/reviews?stars=&sort=&page=&page_size=` |
 
 **Resident mobile — Daily Help**
 
@@ -84,6 +86,7 @@ users for helpers.
 | View my rating                               | `GET /daily-help/{id}/ratings/mine?unit_id=`                                         |
 | Update my rating                             | `PUT /daily-help/{id}/ratings?unit_id=`                                              |
 | Profile rating aggregate                     | `GET /daily-help/{id}/ratings/summary?unit_id=`                                      |
+| All reviews (paginated, filter/sort)         | `GET /daily-help/{id}/ratings/reviews?unit_id=&stars=&sort=&page=&page_size=`        |
 | Attendance calendar (present / absent days)  | `GET /daily-help/{id}/attendance?unit_id=&year=&month=`                              |
 | Mark absent (helper did not visit)           | `POST /daily-help/{id}/attendance/absence?unit_id=`                                  |
 | Submit helper for admin review               | `POST /daily-help/submissions` (`SubmitResidentDailyHelpRequest`)                    |
@@ -549,7 +552,8 @@ project-wide `open_to_work` flag shown on category cards and directory badges.
 ### 6.5 Ratings
 
 One rating per **(profile, unit, resident contact)** — enforced by DB unique index
-`uq_daily_help_ratings_profile_unit_rater`.
+`uq_daily_help_ratings_profile_unit_rater`. The resident must have an **active household link**
+to the profile before creating or updating a rating (same rule as marking attendance absent).
 
 **Submit (first time):**
 
@@ -562,8 +566,9 @@ POST /v1/daily-help/{profile_id}/ratings?unit_id={unit_id}
 }
 ```
 
-Returns updated **aggregate summary** (`rating_count`, `average_stars`, `trait_counts`).
-Duplicate POST → `409` with `daily_help.errors.duplicate_rating` — use PUT to update.
+Returns updated **aggregate summary** (`rating_count`, `review_count`, `average_stars`,
+`star_distribution`, `category_averages`, `trait_counts`). Duplicate POST → `409` with
+`daily_help.errors.duplicate_rating` — use PUT to update.
 
 **View my rating:**
 
@@ -593,7 +598,53 @@ Returns the updated rating object. `404` if no prior rating exists.
 GET /v1/daily-help/{profile_id}/ratings/summary?unit_id={unit_id}
 ```
 
-**Trait values:** `very_punctual`, `quite_regular`, `exceptional_service`, `great_attitude`
+Admin equivalent (no `unit_id`):
+
+```http
+GET /v1/projects/{project_id}/daily-help/{profile_id}/ratings/summary
+```
+
+**Summary fields:**
+
+| Field               | UI mapping                                                                 |
+| ------------------- | -------------------------------------------------------------------------- |
+| `rating_count`      | Total star ratings (e.g. **128 ratings**)                                  |
+| `review_count`      | Ratings with a non-empty comment (e.g. **18 written reviews**)             |
+| `average_stars`     | Overall average (e.g. **4.4**)                                             |
+| `star_distribution` | Counts keyed `"1"`–`"5"` for the admin histogram                           |
+| `category_averages` | `punctuality`, `work_quality`, `behavior`, `communication` from trait tags |
+| `trait_counts`      | Raw trait tag frequency counts                                             |
+
+**Paginated reviews (resident + admin):**
+
+```http
+GET /v1/daily-help/{profile_id}/ratings/reviews?unit_id={unit_id}&stars=3&sort=most_recent&page=1&page_size=20
+GET /v1/projects/{project_id}/daily-help/{profile_id}/ratings/reviews?stars=3&sort=highest_rated&page=1&page_size=20
+```
+
+| Query param | Values                                                                   |
+| ----------- | ------------------------------------------------------------------------ |
+| `stars`     | Optional `1`–`5` — filter by rounded star level                          |
+| `sort`      | `most_recent` (default), `oldest_first`, `highest_rated`, `lowest_rated` |
+| `page`      | Page number (default `1`)                                                |
+| `page_size` | Page size (default `20`, max `100`)                                      |
+
+Each review includes reviewer name, unit label, stars, comment, traits, and timestamps.
+Profile detail still embeds the full `reviews[]` list for backward compatibility; prefer the
+paginated endpoint for the admin Ratings & reviews tab and mobile infinite scroll.
+
+**Trait values:** `very_punctual`, `quite_regular`, `exceptional_service`, `great_attitude`,
+`good_communication`
+
+**Category mapping (for `category_averages`):**
+
+| Trait(s)                         | Category        |
+| -------------------------------- | --------------- |
+| `very_punctual`, `quite_regular` | `punctuality`   |
+| `exceptional_service`            | `work_quality`  |
+| `great_attitude`                 | `behavior`      |
+| `good_communication`             | `communication` |
+
 **Stars:** `0.5` – `5.0` in `0.5` steps.
 
 **Recommended mobile flow:**
@@ -601,6 +652,7 @@ GET /v1/daily-help/{profile_id}/ratings/summary?unit_id={unit_id}
 1. `GET .../ratings/mine` — pre-fill form if `data` is non-null
 1. If null → `POST .../ratings`; if exists → `PUT .../ratings`
 1. Optionally refresh aggregate via `GET .../ratings/summary`
+1. Load review list via `GET .../ratings/reviews` with pagination
 
 ### 6.6 Attendance calendar
 
@@ -782,6 +834,7 @@ ______________________________________________________________________
 | Show submission source on admin  | `submission_source`, `submitted_unit_label` on `DailyHelpDetailResponse`               |
 | Add overview card                | `visitor_logs_repository.get_overview` + schema                                        |
 | Add rating / traits              | `POST/GET/PUT .../ratings` — see §6.5                                                  |
+| Paginated reviews + admin tab    | `GET .../ratings/reviews` and `GET .../ratings/summary` (admin + resident)             |
 | Add attendance / mark absent     | `GET/POST .../attendance` — see §6.6                                                   |
 | Mask phone in profile detail     | `DailyHelpService.get_resident_detail` (`mask_phone` when not household-linked)        |
 | View / update resident rating    | `GET/PUT .../ratings/mine` and `PUT .../ratings` in `daily_help_resident.py`           |
@@ -808,6 +861,7 @@ ______________________________________________________________________
 | `daily_help.errors.attendance_date_in_future`          | Absence date is after today                |
 | `daily_help.errors.attendance_already_checked_in`      | Gate check-in exists on absence date       |
 | `daily_help.errors.duplicate_rating`                   | POST rating when one already exists        |
+| `daily_help.errors.rating_household_link_required`     | Rate without household link                |
 | `daily_help.errors.rating_not_found`                   | PUT rating before first POST               |
 | `daily_help.errors.invalid_attendance_month`           | Month query param outside 1–12             |
 | `daily_help.errors.security_role_required`             | Non-security user calls submit/resubmit    |

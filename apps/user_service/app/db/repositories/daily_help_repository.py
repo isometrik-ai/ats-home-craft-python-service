@@ -1102,15 +1102,7 @@ class DailyHelpRepository(BaseRepository):
             traits_by_rating[str(row["rating_id"])].append(str(row["trait"]))
         return traits_by_rating
 
-    async def list_ratings_for_profile(
-        self,
-        *,
-        organization_id: str,
-        profile_id: str,
-    ) -> list[dict[str, Any]]:
-        """List all resident ratings for a profile with reviewer and unit context."""
-        rows = await self.db_connection.fetch(
-            """
+    _RATING_REVIEW_SELECT = """
             SELECT
               r.id::text AS id,
               r.unit_id::text AS unit_id,
@@ -1134,12 +1126,26 @@ class DailyHelpRepository(BaseRepository):
              AND ct.organization_id = r.organization_id
             WHERE r.organization_id = $1::uuid
               AND r.daily_help_profile_id = $2::uuid
-            ORDER BY r.created_at DESC
-            """,
-            organization_id,
-            profile_id,
-        )
-        ratings = [dict(row) for row in rows]
+    """
+
+    @staticmethod
+    def _rating_review_order_clause(sort: str) -> str:
+        """Map review sort key to SQL ORDER BY clause."""
+        if sort == "oldest_first":
+            return "ORDER BY r.created_at ASC, r.id ASC"
+        if sort == "highest_rated":
+            return "ORDER BY r.stars DESC, r.created_at DESC, r.id DESC"
+        if sort == "lowest_rated":
+            return "ORDER BY r.stars ASC, r.created_at DESC, r.id DESC"
+        return "ORDER BY r.created_at DESC, r.id DESC"
+
+    async def _attach_rating_traits(
+        self,
+        *,
+        organization_id: str,
+        ratings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Attach trait tags to rating/review rows."""
         if not ratings:
             return []
         traits_by_rating = await self.list_rating_traits_batch(
@@ -1150,13 +1156,111 @@ class DailyHelpRepository(BaseRepository):
             rating["traits"] = traits_by_rating.get(str(rating["id"]), [])
         return ratings
 
+    async def list_ratings_for_profile(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        """List all resident ratings for a profile with reviewer and unit context."""
+        rows = await self.db_connection.fetch(
+            f"""
+            {self._RATING_REVIEW_SELECT}
+            ORDER BY r.created_at DESC, r.id DESC
+            """,
+            organization_id,
+            profile_id,
+        )
+        return await self._attach_rating_traits(
+            organization_id=organization_id,
+            ratings=[dict(row) for row in rows],
+        )
+
+    async def count_ratings_for_profile(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        stars: int | None = None,
+    ) -> int:
+        """Count ratings for a profile, optionally filtered by rounded star level."""
+        if stars is None:
+            value = await self.db_connection.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM daily_help_ratings
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                """,
+                organization_id,
+                profile_id,
+            )
+        else:
+            value = await self.db_connection.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM daily_help_ratings
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                  AND GREATEST(1, LEAST(5, ROUND(stars::numeric))) = $3::int
+                """,
+                organization_id,
+                profile_id,
+                stars,
+            )
+        return int(value or 0)
+
+    async def list_ratings_for_profile_paginated(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        stars: int | None = None,
+        sort: str = "most_recent",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> list[dict[str, Any]]:
+        """List paginated ratings for a profile with optional star filter and sort."""
+        order_clause = self._rating_review_order_clause(sort)
+        offset = (page - 1) * page_size
+        if stars is None:
+            rows = await self.db_connection.fetch(
+                f"""
+                {self._RATING_REVIEW_SELECT}
+                {order_clause}
+                LIMIT $3 OFFSET $4
+                """,
+                organization_id,
+                profile_id,
+                page_size,
+                offset,
+            )
+        else:
+            rows = await self.db_connection.fetch(
+                f"""
+                {self._RATING_REVIEW_SELECT}
+                  AND GREATEST(1, LEAST(5, ROUND(r.stars::numeric))) = $3::int
+                {order_clause}
+                LIMIT $4 OFFSET $5
+                """,
+                organization_id,
+                profile_id,
+                stars,
+                page_size,
+                offset,
+            )
+        return await self._attach_rating_traits(
+            organization_id=organization_id,
+            ratings=[dict(row) for row in rows],
+        )
+
     async def get_rating_summary(
         self,
         *,
         organization_id: str,
         profile_id: str,
     ) -> dict[str, Any]:
-        """Aggregate star rating and trait counts for a profile."""
+        """Aggregate star rating, distribution, category averages, and trait counts."""
         summaries = await self.get_rating_summaries_batch(
             organization_id=organization_id,
             profile_ids=[profile_id],
@@ -1165,9 +1269,63 @@ class DailyHelpRepository(BaseRepository):
         if summary is None:
             return {
                 "rating_count": 0,
+                "review_count": 0,
                 "average_stars": 0.0,
+                "star_distribution": {},
+                "category_averages": {},
                 "trait_counts": {},
             }
+
+        review_count = await self.db_connection.fetchval(
+            """
+            SELECT COUNT(*)::int
+            FROM daily_help_ratings
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = $2::uuid
+              AND comment IS NOT NULL
+              AND BTRIM(comment) <> ''
+            """,
+            organization_id,
+            profile_id,
+        )
+        distribution_rows = await self.db_connection.fetch(
+            """
+            SELECT
+              GREATEST(1, LEAST(5, ROUND(stars::numeric)))::int AS star_level,
+              COUNT(*)::int AS count
+            FROM daily_help_ratings
+            WHERE organization_id = $1::uuid
+              AND daily_help_profile_id = $2::uuid
+            GROUP BY star_level
+            ORDER BY star_level DESC
+            """,
+            organization_id,
+            profile_id,
+        )
+        category_rows = await self.db_connection.fetch(
+            """
+            SELECT
+              CASE rt.trait::text
+                WHEN 'very_punctual' THEN 'punctuality'
+                WHEN 'quite_regular' THEN 'punctuality'
+                WHEN 'exceptional_service' THEN 'work_quality'
+                WHEN 'great_attitude' THEN 'behavior'
+                WHEN 'good_communication' THEN 'communication'
+              END AS category,
+              AVG(r.stars)::numeric(3, 2) AS average_stars
+            FROM daily_help_rating_traits rt
+            JOIN daily_help_ratings r
+              ON r.id = rt.daily_help_rating_id
+             AND r.organization_id = rt.organization_id
+            WHERE rt.organization_id = $1::uuid
+              AND r.daily_help_profile_id = $2::uuid
+            GROUP BY category
+            HAVING category IS NOT NULL
+            ORDER BY category
+            """,
+            organization_id,
+            profile_id,
+        )
         trait_rows = await self.db_connection.fetch(
             """
             SELECT
@@ -1187,6 +1345,13 @@ class DailyHelpRepository(BaseRepository):
         )
         return {
             **summary,
+            "review_count": int(review_count or 0),
+            "star_distribution": {
+                str(row["star_level"]): int(row["count"]) for row in distribution_rows
+            },
+            "category_averages": {
+                str(row["category"]): float(row["average_stars"]) for row in category_rows
+            },
             "trait_counts": {str(row["trait"]): int(row["count"]) for row in trait_rows},
         }
 

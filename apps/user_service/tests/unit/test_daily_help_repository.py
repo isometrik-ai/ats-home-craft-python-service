@@ -359,7 +359,18 @@ async def test_ratings():
     )
     assert batch[PROFILE]["rating_count"] == 2
 
-    conn.rows = [{"trait": "punctual", "count": 1}]
+    fetch_results = [
+        [{"star_level": 5, "count": 2}],
+        [{"category": "punctuality", "average_stars": Decimal("4.50")}],
+        [{"trait": "punctual", "count": 1}],
+    ]
+
+    async def _fetch(query, *args):
+        conn.fetch_calls.append((query.strip(), args))
+        return fetch_results.pop(0)
+
+    conn.fetch = _fetch
+    conn.fetchval = AsyncMock(return_value=1)
     with patch.object(
         repo,
         "get_rating_summaries_batch",
@@ -374,7 +385,55 @@ async def test_ratings():
             profile_id=PROFILE,
         )
     assert summary["rating_count"] == 2
+    assert summary["review_count"] == 1
+    assert summary["star_distribution"]["5"] == 2
+    assert summary["category_averages"]["punctuality"] == 4.5
     assert summary["trait_counts"]["punctual"] == 1
+
+
+@pytest.mark.asyncio
+async def test_count_and_list_ratings_for_profile_paginated():
+    conn = _FakeConn(
+        rows=[
+            {
+                "id": "rating-1",
+                "unit_id": UNIT,
+                "rated_by_contact_id": "contact-1",
+                "stars": Decimal("3.0"),
+                "comment": "Average",
+                "created_at": "2026-09-14T10:00:00+00:00",
+                "updated_at": "2026-09-14T10:00:00+00:00",
+                "unit_code": "C-0502",
+                "unit_label": "C-0502",
+                "rated_by_name": "Rahul Mehta",
+            }
+        ],
+        val=2,
+    )
+    repo = DailyHelpRepository(db_connection=conn)
+
+    with patch.object(
+        repo,
+        "list_rating_traits_batch",
+        new=AsyncMock(return_value={"rating-1": ["quite_regular"]}),
+    ):
+        total = await repo.count_ratings_for_profile(
+            organization_id=ORG,
+            profile_id=PROFILE,
+            stars=3,
+        )
+        reviews = await repo.list_ratings_for_profile_paginated(
+            organization_id=ORG,
+            profile_id=PROFILE,
+            stars=3,
+            sort="most_recent",
+            page=1,
+            page_size=20,
+        )
+
+    assert total == 2
+    assert len(reviews) == 1
+    assert reviews[0]["rated_by_name"] == "Rahul Mehta"
 
 
 @pytest.mark.asyncio
