@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.enums import (
     DailyHelpCategoryStatus,
     DailyHelpDocumentType,
     DailyHelpRatingTrait,
+    DailyHelpReviewSort,
     DailyHelpStatus,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -343,8 +344,27 @@ class DailyHelpRatingSummaryResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     rating_count: int = 0
+    review_count: int = 0
     average_stars: float = 0.0
+    star_distribution: dict[str, int] = Field(default_factory=dict)
+    category_averages: dict[str, float] = Field(default_factory=dict)
     trait_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class DailyHelpReviewListQuery(BaseModel):
+    """Filters for paginated daily help review lists."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stars: int | None = Field(
+        None,
+        ge=1,
+        le=5,
+        description="Filter reviews by rounded star level (1–5).",
+    )
+    sort: DailyHelpReviewSort = DailyHelpReviewSort.MOST_RECENT
+    page: int = Field(1, ge=1)
+    page_size: int = Field(20, ge=1, le=100)
 
 
 class DailyHelpRatingResponse(BaseModel):
@@ -962,6 +982,20 @@ class DailyHelpRatingSummaryApiResponse(BaseModel):
     statusCode: int
     code: str
     data: DailyHelpRatingSummaryResponse
+
+
+class DailyHelpReviewListApiResponse(BaseModel):
+    """API envelope for paginated daily help reviews."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[DailyHelpReviewResponse]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class DailyHelpRatingApiResponse(BaseModel):

@@ -1,13 +1,13 @@
 # ADR 0013: Daily Help — project registry, household links, gate integration
 
-|                  |                                                                                                                                                                                                                                                                                                                                                                   |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted — implemented in `user_service` (Phases 1–5 core)                                                                                                                                                                                                                                                                                                        |
-| **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                                                                        |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                                                                          |
-| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access)                                                                                            |
-| **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                                                                                                                          |
-| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`, `20260820120000_daily_help_resident_submission.sql` (`ats-home-craft-supabase`) |
+|                  |                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted — implemented in `user_service` (Phases 1–5 core)                                                                                                                                                                                                                                                                                                                                                                    |
+| **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access)                                                                                                                                                        |
+| **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                                                                                                                                                                                      |
+| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`, `20260820120000_daily_help_resident_submission.sql`, `20260923120000_daily_help_rating_trait_communication.sql` (`ats-home-craft-supabase`) |
 
 ______________________________________________________________________
 
@@ -564,14 +564,20 @@ Partial unique: at most one `photo` typed row may duplicate `profiles.photo_path
 **Unique:** `(daily_help_profile_id, unit_id, rated_by_contact_id)` — one rating per resident per unit.
 
 Child table **`daily_help_rating_traits`** stores trait enum values (`very_punctual`, `quite_regular`,
-`exceptional_service`, `great_attitude`).
+`exceptional_service`, `great_attitude`, `good_communication`).
 
 **Resident API:**
 
-- `POST /v1/daily-help/{id}/ratings?unit_id=` — create (409 if duplicate)
+- `POST /v1/daily-help/{id}/ratings?unit_id=` — create (409 if duplicate; requires household link)
 - `GET /v1/daily-help/{id}/ratings/mine?unit_id=` — fetch caller's rating
-- `PUT /v1/daily-help/{id}/ratings?unit_id=` — update existing
-- `GET /v1/daily-help/{id}/ratings/summary?unit_id=` — aggregate average + trait counts
+- `PUT /v1/daily-help/{id}/ratings?unit_id=` — update existing (requires household link)
+- `GET /v1/daily-help/{id}/ratings/summary?unit_id=` — aggregate average, star distribution, category scores, trait counts
+- `GET /v1/daily-help/{id}/ratings/reviews?unit_id=` — paginated reviews (`stars`, `sort`, `page`, `page_size`)
+
+**Admin API:**
+
+- `GET /v1/projects/{project_id}/daily-help/{id}/ratings/summary` — same summary shape as resident
+- `GET /v1/projects/{project_id}/daily-help/{id}/ratings/reviews` — paginated reviews for Ratings & reviews tab
 
 ### `daily_help_attendance_absences` (Phase 3)
 

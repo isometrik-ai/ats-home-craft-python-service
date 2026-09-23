@@ -17,6 +17,7 @@ from apps.user_service.app.api.daily_help_resident import (
     get_resident_daily_help_profile,
     get_resident_daily_help_rating,
     get_resident_daily_help_submission,
+    list_daily_help_reviews,
     list_resident_daily_help_categories,
     list_resident_daily_help_household_links,
     list_resident_daily_help_profiles,
@@ -31,6 +32,7 @@ from apps.user_service.app.api.daily_help_resident import (
 )
 from apps.user_service.app.schemas.daily_help import (
     CreateDailyHelpRatingRequest,
+    DailyHelpReviewListQuery,
     MarkDailyHelpAttendanceAbsenceRequest,
     RemoveDailyHelpHouseholdLinkRequest,
     ResidentDailyHelpListQuery,
@@ -91,6 +93,7 @@ async def test_resident_daily_help_read_endpoints(mock_service_cls, mock_contact
     service.get_rating_summary = AsyncMock(
         return_value=MagicMock(model_dump=lambda **_: {"average_stars": "4.0"})
     )
+    service.list_profile_reviews = AsyncMock(return_value=([], 0))
     service.get_attendance = AsyncMock(return_value={"days": []})
 
     db = MagicMock()
@@ -150,6 +153,16 @@ async def test_resident_daily_help_read_endpoints(mock_service_cls, mock_contact
             request=_request(),
             profile_id=PROFILE_ID,
             unit_id=UNIT_ID,
+            db_connection=db,
+            current_user=user,
+        )
+    ).status_code == 200
+    assert (
+        await list_daily_help_reviews(
+            request=_request(),
+            profile_id=PROFILE_ID,
+            unit_id=UNIT_ID,
+            query=DailyHelpReviewListQuery(),
             db_connection=db,
             current_user=user,
         )

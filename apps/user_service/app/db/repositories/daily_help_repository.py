@@ -1102,15 +1102,12 @@ class DailyHelpRepository(BaseRepository):
             traits_by_rating[str(row["rating_id"])].append(str(row["trait"]))
         return traits_by_rating
 
-    async def list_ratings_for_profile(
-        self,
-        *,
-        organization_id: str,
-        profile_id: str,
-    ) -> list[dict[str, Any]]:
-        """List all resident ratings for a profile with reviewer and unit context."""
-        rows = await self.db_connection.fetch(
-            """
+    _WRITTEN_REVIEW_FILTER = """
+              AND r.comment IS NOT NULL
+              AND BTRIM(r.comment) <> ''
+    """
+
+    _RATING_REVIEW_SELECT = """
             SELECT
               r.id::text AS id,
               r.unit_id::text AS unit_id,
@@ -1134,12 +1131,36 @@ class DailyHelpRepository(BaseRepository):
              AND ct.organization_id = r.organization_id
             WHERE r.organization_id = $1::uuid
               AND r.daily_help_profile_id = $2::uuid
-            ORDER BY r.created_at DESC
-            """,
-            organization_id,
-            profile_id,
-        )
-        ratings = [dict(row) for row in rows]
+    """
+
+    _RATING_CATEGORY_CASE = """
+              CASE rt.trait::text
+                WHEN 'very_punctual' THEN 'punctuality'
+                WHEN 'quite_regular' THEN 'punctuality'
+                WHEN 'exceptional_service' THEN 'work_quality'
+                WHEN 'great_attitude' THEN 'behavior'
+                WHEN 'good_communication' THEN 'communication'
+              END
+    """
+
+    @staticmethod
+    def _rating_review_order_clause(sort: str) -> str:
+        """Map review sort key to SQL ORDER BY clause."""
+        if sort == "oldest_first":
+            return "ORDER BY r.created_at ASC, r.id ASC"
+        if sort == "highest_rated":
+            return "ORDER BY r.stars DESC, r.created_at DESC, r.id DESC"
+        if sort == "lowest_rated":
+            return "ORDER BY r.stars ASC, r.created_at DESC, r.id DESC"
+        return "ORDER BY r.created_at DESC, r.id DESC"
+
+    async def _attach_rating_traits(
+        self,
+        *,
+        organization_id: str,
+        ratings: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Attach trait tags to rating/review rows."""
         if not ratings:
             return []
         traits_by_rating = await self.list_rating_traits_batch(
@@ -1150,44 +1171,226 @@ class DailyHelpRepository(BaseRepository):
             rating["traits"] = traits_by_rating.get(str(rating["id"]), [])
         return ratings
 
+    async def list_ratings_for_profile(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+    ) -> list[dict[str, Any]]:
+        """List all resident ratings for a profile with reviewer and unit context."""
+        rows = await self.db_connection.fetch(
+            f"""
+            {self._RATING_REVIEW_SELECT}
+            {self._WRITTEN_REVIEW_FILTER}
+            ORDER BY r.created_at DESC, r.id DESC
+            """,
+            organization_id,
+            profile_id,
+        )
+        return await self._attach_rating_traits(
+            organization_id=organization_id,
+            ratings=[dict(row) for row in rows],
+        )
+
+    async def count_ratings_for_profile(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        stars: int | None = None,
+    ) -> int:
+        """Count written reviews for a profile, optionally filtered by rounded star level."""
+        if stars is None:
+            value = await self.db_connection.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM daily_help_ratings
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                  AND comment IS NOT NULL
+                  AND BTRIM(comment) <> ''
+                """,
+                organization_id,
+                profile_id,
+            )
+        else:
+            value = await self.db_connection.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM daily_help_ratings
+                WHERE organization_id = $1::uuid
+                  AND daily_help_profile_id = $2::uuid
+                  AND comment IS NOT NULL
+                  AND BTRIM(comment) <> ''
+                  AND GREATEST(1, LEAST(5, ROUND(stars::numeric))) = $3::int
+                """,
+                organization_id,
+                profile_id,
+                stars,
+            )
+        return int(value or 0)
+
+    async def list_ratings_for_profile_paginated(
+        self,
+        *,
+        organization_id: str,
+        profile_id: str,
+        stars: int | None = None,
+        sort: str = "most_recent",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> list[dict[str, Any]]:
+        """List paginated ratings for a profile with optional star filter and sort."""
+        order_clause = self._rating_review_order_clause(sort)
+        offset = (page - 1) * page_size
+        if stars is None:
+            rows = await self.db_connection.fetch(
+                f"""
+                {self._RATING_REVIEW_SELECT}
+                {self._WRITTEN_REVIEW_FILTER}
+                {order_clause}
+                LIMIT $3 OFFSET $4
+                """,
+                organization_id,
+                profile_id,
+                page_size,
+                offset,
+            )
+        else:
+            rows = await self.db_connection.fetch(
+                f"""
+                {self._RATING_REVIEW_SELECT}
+                {self._WRITTEN_REVIEW_FILTER}
+                  AND GREATEST(1, LEAST(5, ROUND(r.stars::numeric))) = $3::int
+                {order_clause}
+                LIMIT $4 OFFSET $5
+                """,
+                organization_id,
+                profile_id,
+                stars,
+                page_size,
+                offset,
+            )
+        return await self._attach_rating_traits(
+            organization_id=organization_id,
+            ratings=[dict(row) for row in rows],
+        )
+
     async def get_rating_summary(
         self,
         *,
         organization_id: str,
         profile_id: str,
     ) -> dict[str, Any]:
-        """Aggregate star rating and trait counts for a profile."""
-        summaries = await self.get_rating_summaries_batch(
-            organization_id=organization_id,
-            profile_ids=[profile_id],
-        )
-        summary = summaries.get(profile_id)
-        if summary is None:
-            return {
-                "rating_count": 0,
-                "average_stars": 0.0,
-                "trait_counts": {},
-            }
-        trait_rows = await self.db_connection.fetch(
-            """
+        """Aggregate star rating, distribution, category averages, and trait counts."""
+        empty_summary = {
+            "rating_count": 0,
+            "review_count": 0,
+            "average_stars": 0.0,
+            "star_distribution": {},
+            "category_averages": {},
+            "trait_counts": {},
+        }
+        row = await self.db_connection.fetchrow(
+            f"""
+            WITH base_ratings AS (
+              SELECT stars, comment
+              FROM daily_help_ratings
+              WHERE organization_id = $1::uuid
+                AND daily_help_profile_id = $2::uuid
+            ),
+            star_distribution_rows AS (
+              SELECT
+                GREATEST(1, LEAST(5, ROUND(stars::numeric)))::int AS star_level,
+                COUNT(*)::int AS count
+              FROM base_ratings
+              GROUP BY 1
+            ),
+            category_average_rows AS (
+              SELECT
+                category,
+                AVG(stars)::numeric(3, 2) AS average_stars
+              FROM (
+                SELECT
+                  {self._RATING_CATEGORY_CASE} AS category,
+                  r.stars
+                FROM daily_help_rating_traits rt
+                JOIN daily_help_ratings r
+                  ON r.id = rt.daily_help_rating_id
+                 AND r.organization_id = rt.organization_id
+                WHERE rt.organization_id = $1::uuid
+                  AND r.daily_help_profile_id = $2::uuid
+              ) mapped_traits
+              WHERE category IS NOT NULL
+              GROUP BY category
+            ),
+            trait_count_rows AS (
+              SELECT
+                rt.trait::text AS trait,
+                COUNT(*)::int AS count
+              FROM daily_help_rating_traits rt
+              JOIN daily_help_ratings r
+                ON r.id = rt.daily_help_rating_id
+               AND r.organization_id = rt.organization_id
+              WHERE rt.organization_id = $1::uuid
+                AND r.daily_help_profile_id = $2::uuid
+              GROUP BY rt.trait
+            )
             SELECT
-              rt.trait::text AS trait,
-              COUNT(*)::int AS count
-            FROM daily_help_rating_traits rt
-            JOIN daily_help_ratings r
-              ON r.id = rt.daily_help_rating_id
-             AND r.organization_id = rt.organization_id
-            WHERE rt.organization_id = $1::uuid
-              AND r.daily_help_profile_id = $2::uuid
-            GROUP BY rt.trait
-            ORDER BY count DESC, rt.trait
+              (SELECT COUNT(*)::int FROM base_ratings) AS rating_count,
+              (
+                SELECT COALESCE(AVG(stars), 0)::numeric(3, 2)
+                FROM base_ratings
+              ) AS average_stars,
+              (
+                SELECT COUNT(*)::int
+                FROM base_ratings
+                WHERE comment IS NOT NULL
+                  AND BTRIM(comment) <> ''
+              ) AS review_count,
+              COALESCE(
+                (
+                  SELECT jsonb_object_agg(star_level::text, count)
+                  FROM star_distribution_rows
+                ),
+                '{{}}'::jsonb
+              ) AS star_distribution,
+              COALESCE(
+                (
+                  SELECT jsonb_object_agg(category, average_stars)
+                  FROM category_average_rows
+                ),
+                '{{}}'::jsonb
+              ) AS category_averages,
+              COALESCE(
+                (
+                  SELECT jsonb_object_agg(trait, count)
+                  FROM trait_count_rows
+                ),
+                '{{}}'::jsonb
+              ) AS trait_counts
             """,
             organization_id,
             profile_id,
         )
+        if not row or int(row["rating_count"] or 0) == 0:
+            return empty_summary
+
+        star_distribution = row["star_distribution"] or {}
+        category_averages = row["category_averages"] or {}
+        trait_counts = row["trait_counts"] or {}
         return {
-            **summary,
-            "trait_counts": {str(row["trait"]): int(row["count"]) for row in trait_rows},
+            "rating_count": int(row["rating_count"] or 0),
+            "review_count": int(row["review_count"] or 0),
+            "average_stars": float(row["average_stars"] or 0),
+            "star_distribution": {
+                str(star_level): int(count) for star_level, count in dict(star_distribution).items()
+            },
+            "category_averages": {
+                str(category): float(average)
+                for category, average in dict(category_averages).items()
+            },
+            "trait_counts": {str(trait): int(count) for trait, count in dict(trait_counts).items()},
         }
 
     async def get_rating_summaries_batch(
