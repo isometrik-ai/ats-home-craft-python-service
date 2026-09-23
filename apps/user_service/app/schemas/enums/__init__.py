@@ -217,6 +217,7 @@ __all__ = [
     "DailyHelpHouseholdLinkStatus",
     "DailyHelpAvailabilityPeriod",
     "DailyHelpRatingTrait",
+    "DailyHelpReviewSort",
     "DEFAULT_DAILY_HELP_CATEGORY_NAMES",
     "WalkInStatus",
     "WalkInVisitUnitStatus",

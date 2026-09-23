@@ -867,6 +867,26 @@ class DailyHelpService:
             updated_at=format_iso_datetime(row.get("updated_at")),
         )
 
+    @staticmethod
+    def _build_rating_summary_response(
+        summary: dict[str, Any],
+    ) -> DailyHelpRatingSummaryResponse:
+        """Map repository rating aggregates to API shape."""
+        return DailyHelpRatingSummaryResponse(
+            rating_count=int(summary.get("rating_count") or 0),
+            review_count=int(summary.get("review_count") or 0),
+            average_stars=float(summary.get("average_stars") or 0),
+            star_distribution={
+                str(star_level): int(count)
+                for star_level, count in (summary.get("star_distribution") or {}).items()
+            },
+            category_averages={
+                str(category): float(average)
+                for category, average in (summary.get("category_averages") or {}).items()
+            },
+            trait_counts=dict(summary.get("trait_counts") or {}),
+        )
+
     async def _serialize_resident_household_link_item(
         self,
         row: dict[str, Any],
@@ -1120,11 +1140,7 @@ class DailyHelpService:
                 organization_id=self.organization_id,
                 profile_id=profile_id,
             )
-            rating_summary = DailyHelpRatingSummaryResponse(
-                rating_count=int(summary.get("rating_count") or 0),
-                average_stars=float(summary.get("average_stars") or 0),
-                trait_counts=dict(summary.get("trait_counts") or {}),
-            )
+            rating_summary = self._build_rating_summary_response(summary)
             review_rows = await self.repo.list_ratings_for_profile(
                 organization_id=self.organization_id,
                 profile_id=profile_id,
@@ -2858,6 +2874,14 @@ class DailyHelpService:
                 message_key="daily_help.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        if not await self._viewer_has_household_link(
+            unit_id=unit_id,
+            profile_id=profile_id,
+        ):
+            raise ValidationException(
+                message_key="daily_help.errors.rating_household_link_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
         traits = [trait.value for trait in body.traits]
         try:
@@ -2924,6 +2948,14 @@ class DailyHelpService:
                 message_key="daily_help.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        if not await self._viewer_has_household_link(
+            unit_id=unit_id,
+            profile_id=profile_id,
+        ):
+            raise ValidationException(
+                message_key="daily_help.errors.rating_household_link_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
         traits = [trait.value for trait in body.traits]
         updated = await self.repo.update_rating(
@@ -2962,11 +2994,42 @@ class DailyHelpService:
             organization_id=self.organization_id,
             profile_id=profile_id,
         )
-        return DailyHelpRatingSummaryResponse(
-            rating_count=int(summary.get("rating_count") or 0),
-            average_stars=float(summary.get("average_stars") or 0),
-            trait_counts=dict(summary.get("trait_counts") or {}),
+        return self._build_rating_summary_response(summary)
+
+    async def list_profile_reviews(
+        self,
+        *,
+        profile_id: str,
+        project_id: str | None = None,
+        contact_id: str | None = None,
+        unit_id: str | None = None,
+        stars: int | None = None,
+        sort: str = "most_recent",
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[DailyHelpReviewResponse], int]:
+        """Return paginated reviews for a profile with optional star filter."""
+        if contact_id and unit_id:
+            project_id = await self._ensure_resident_unit(
+                contact_id=contact_id,
+                unit_id=unit_id,
+            )
+        assert project_id
+        await self._get_profile_or_raise(project_id=project_id, profile_id=profile_id)
+        total = await self.repo.count_ratings_for_profile(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+            stars=stars,
         )
+        rows = await self.repo.list_ratings_for_profile_paginated(
+            organization_id=self.organization_id,
+            profile_id=profile_id,
+            stars=stars,
+            sort=sort,
+            page=page,
+            page_size=page_size,
+        )
+        return [self._serialize_review(row) for row in rows], total
 
     async def replace_availability_slots(
         self,

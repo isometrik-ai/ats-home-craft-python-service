@@ -876,6 +876,7 @@ async def test_update_rating_requires_existing_rating():
         return_value={"id": "profile-1", "status": DailyHelpStatus.ACTIVE.value}
     )
     svc.repo.update_rating = AsyncMock(return_value=None)
+    svc._viewer_has_household_link = AsyncMock(return_value=True)
 
     with pytest.raises(NotFoundException):
         await svc.update_rating(
@@ -884,6 +885,91 @@ async def test_update_rating_requires_existing_rating():
             profile_id="profile-1",
             body=UpdateDailyHelpRatingRequest(stars=Decimal("5.0")),
         )
+
+
+@pytest.mark.asyncio
+async def test_create_rating_requires_household_link():
+    from decimal import Decimal
+
+    from apps.user_service.app.schemas.daily_help import CreateDailyHelpRatingRequest
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._ensure_resident_unit = AsyncMock(return_value="project-1")
+    svc._get_profile_or_raise = AsyncMock(
+        return_value=_detail_row(status=DailyHelpStatus.ACTIVE.value)
+    )
+    svc._viewer_has_household_link = AsyncMock(return_value=False)
+
+    with pytest.raises(ValidationException):
+        await svc.create_rating(
+            contact_id="contact-1",
+            unit_id="unit-1",
+            profile_id="profile-1",
+            body=CreateDailyHelpRatingRequest(stars=Decimal("4.0")),
+        )
+
+
+@pytest.mark.asyncio
+async def test_list_profile_reviews_returns_paginated_rows():
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc._ensure_resident_unit = AsyncMock(return_value="project-1")
+    svc._get_profile_or_raise = AsyncMock(return_value=_detail_row())
+    svc.repo = MagicMock()
+    svc.repo.count_ratings_for_profile = AsyncMock(return_value=2)
+    svc.repo.list_ratings_for_profile_paginated = AsyncMock(
+        return_value=[
+            {
+                "id": "rating-1",
+                "unit_id": "unit-1",
+                "rated_by_contact_id": "contact-1",
+                "stars": 3.0,
+                "comment": "Average service",
+                "traits": ["quite_regular"],
+                "unit_code": "C-0502",
+                "unit_label": "C-0502",
+                "rated_by_name": "Rahul Mehta",
+                "created_at": datetime(2023, 8, 29, tzinfo=timezone.utc),
+                "updated_at": datetime(2023, 8, 29, tzinfo=timezone.utc),
+            }
+        ]
+    )
+
+    items, total = await svc.list_profile_reviews(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        stars=3,
+        sort="most_recent",
+        page=1,
+        page_size=20,
+    )
+
+    assert total == 2
+    assert len(items) == 1
+    assert items[0].rated_by_name == "Rahul Mehta"
+    assert items[0].stars == 3.0
+
+
+def test_build_rating_summary_response_includes_distribution():
+    summary = DailyHelpService._build_rating_summary_response(
+        {
+            "rating_count": 128,
+            "review_count": 18,
+            "average_stars": 4.4,
+            "star_distribution": {"5": 78, "4": 31, "3": 12, "2": 5, "1": 2},
+            "category_averages": {
+                "punctuality": 4.7,
+                "work_quality": 4.5,
+                "behavior": 4.6,
+                "communication": 4.1,
+            },
+            "trait_counts": {"very_punctual": 60},
+        }
+    )
+    assert summary.rating_count == 128
+    assert summary.review_count == 18
+    assert summary.star_distribution["5"] == 78
+    assert summary.category_averages["communication"] == 4.1
 
 
 def _detail_row(**overrides: object) -> dict[str, object]:
@@ -1937,8 +2023,16 @@ async def test_add_household_link_and_create_rating():
     svc.repo.insert_event = AsyncMock()
     svc.repo.insert_rating = AsyncMock()
     svc.repo.get_rating_summary = AsyncMock(
-        return_value={"rating_count": 1, "average_stars": 5.0, "trait_counts": {}}
+        return_value={
+            "rating_count": 1,
+            "review_count": 1,
+            "average_stars": 5.0,
+            "star_distribution": {"5": 1},
+            "category_averages": {},
+            "trait_counts": {},
+        }
     )
+    svc._viewer_has_household_link = AsyncMock(return_value=True)
 
     link = await svc.add_household_link(
         contact_id="contact-1",

@@ -194,6 +194,16 @@ class DailyHelpRatingTrait(str, Enum):
     QUITE_REGULAR = "quite_regular"
     EXCEPTIONAL_SERVICE = "exceptional_service"
     GREAT_ATTITUDE = "great_attitude"
+    GOOD_COMMUNICATION = "good_communication"
+
+
+class DailyHelpReviewSort(str, Enum):
+    """Sort options for paginated daily help review lists."""
+
+    MOST_RECENT = "most_recent"
+    OLDEST_FIRST = "oldest_first"
+    HIGHEST_RATED = "highest_rated"
+    LOWEST_RATED = "lowest_rated"
 
 
 DEFAULT_DAILY_HELP_CATEGORY_NAMES: tuple[str, ...] = (
