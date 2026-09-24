@@ -31,6 +31,15 @@ class TenantRequestType(str, Enum):
     MOVE_OUT = "move_out"
 
 
+class TenantMoveOutStatus(str, Enum):
+    """Move-out sub-state on an approved move-in tenant request."""
+
+    NONE = "none"
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
 class TenantRequestStatus(str, Enum):
     """Tenant request header status (Postgres tenant_request_status enum)."""
 
@@ -89,6 +98,9 @@ class TenantRequestEventType(str, Enum):
     CANCELLED = "cancelled"
     SUPERSEDED = "superseded"
     TENANT_INVITE_SENT = "tenant_invite_sent"
+    MOVE_OUT_REQUESTED = "move_out_requested"
+    MOVE_OUT_APPROVED = "move_out_approved"
+    MOVE_OUT_REJECTED = "move_out_rejected"
 
 
 class TenantRequestListBucket(str, Enum):

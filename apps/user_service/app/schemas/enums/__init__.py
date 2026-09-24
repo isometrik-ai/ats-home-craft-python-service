@@ -201,6 +201,7 @@ __all__ = [
     "MoveEventListBucket",
     "MoveEventOccupantType",
     "TenantRequestType",
+    "TenantMoveOutStatus",
     "TenantRequestStatus",
     "TenantRequestDocumentType",
     "ContactUnitDocumentType",

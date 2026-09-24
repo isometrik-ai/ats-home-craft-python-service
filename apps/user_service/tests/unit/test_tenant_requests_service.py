@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.enums import (
     TENANT_REQUESTS_EXPORT_MAX_ROWS,
     MoveEventType,
+    TenantMoveOutStatus,
     TenantRequestDocumentStatus,
     TenantRequestDocumentType,
     TenantRequestEventType,
@@ -95,6 +96,8 @@ def _request_row(**overrides: Any) -> dict[str, Any]:
         "move_in_date": date(2026, 8, 1),
         "move_in_fee": Decimal("0"),
         "request_type": TenantRequestType.MOVE_IN.value,
+        "move_out_status": TenantMoveOutStatus.NONE.value,
+        "move_out_requested_at": None,
         "status": TenantRequestStatus.SUBMITTED.value,
         "portal_access": False,
         "tenant_contact_id": None,
@@ -203,6 +206,7 @@ class _FakeTenantRequestsRepo:
         self.active_approved_by_tenant: dict[str, Any] | None = None
         self.open_request: dict[str, Any] | None = None
         self.last_insert_kwargs: dict[str, Any] | None = None
+        self.last_move_out_kwargs: dict[str, Any] | None = None
         self.last_tenancy_updates: dict[str, Any] | None = None
         self.reset_documents_called = False
 
@@ -275,6 +279,18 @@ class _FakeTenantRequestsRepo:
         del kwargs
         return list(self.list_rows), self.list_total
 
+    async def update_move_out_fields(self, **kwargs):
+        """Patch move-out sub-state on approved move-in row."""
+        self.last_move_out_kwargs = dict(kwargs)
+        self.row["move_out_status"] = kwargs.get("move_out_status")
+        self.row["move_out_date"] = kwargs.get("move_out_date")
+        self.row["owner_reason"] = kwargs.get("owner_reason")
+        self.row["move_out_requested_at"] = kwargs.get("move_out_requested_at")
+        if kwargs.get("clear_rejection_reason"):
+            self.row["rejection_reason"] = None
+        elif "rejection_reason" in kwargs:
+            self.row["rejection_reason"] = kwargs["rejection_reason"]
+
     async def update_request_status(self, **kwargs):
         """Update request header status."""
         if "status" in kwargs:
@@ -288,6 +304,8 @@ class _FakeTenantRequestsRepo:
             "admin_notes",
             "move_in_date",
             "move_in_fee",
+            "move_out_status",
+            "rejection_reason",
         ):
             if key in kwargs:
                 self.row[key] = kwargs[key]
@@ -857,6 +875,7 @@ async def test_sync_after_admin_move_out_supersedes_active_request() -> None:
     )
 
     assert repo.row["status"] == TenantRequestStatus.SUPERSEDED.value
+    assert repo.row["move_out_status"] == TenantMoveOutStatus.APPROVED.value
     assert repo.row["superseded_at"] is not None
     assert repo.events[-1]["event_type"] == TenantRequestEventType.SUPERSEDED.value
     assert repo.events[-1]["payload"]["reason"] == "admin_move_out"
@@ -1557,10 +1576,16 @@ async def test_create_move_out_request_success() -> None:
         ),
     )
 
-    assert result.request_type == TenantRequestType.MOVE_OUT.value
-    assert repo.last_insert_kwargs["request_type"] == TenantRequestType.MOVE_OUT.value
-    assert repo.last_insert_kwargs["tenant_contact_id"] == "tenant-1"
-    assert repo.last_insert_kwargs["owner_reason"] == "Lease ending"
+    assert result.request_type == TenantRequestType.MOVE_IN.value
+    assert result.status == TenantRequestStatus.APPROVED.value
+    assert result.move_out_status == TenantMoveOutStatus.PENDING.value
+    assert repo.last_move_out_kwargs is not None
+    assert repo.last_move_out_kwargs["move_out_status"] == TenantMoveOutStatus.PENDING.value
+    assert repo.last_move_out_kwargs["owner_reason"] == "Lease ending"
+    assert any(
+        event["event_type"] == TenantRequestEventType.MOVE_OUT_REQUESTED.value
+        for event in repo.events
+    )
 
 
 @pytest.mark.asyncio
@@ -1585,17 +1610,12 @@ async def test_approve_move_out_request_success() -> None:
     """Admin approve move-out releases tenant and supersedes move-in request."""
     repo = _FakeTenantRequestsRepo()
     repo.row = _request_row(
-        request_type=TenantRequestType.MOVE_OUT.value,
-        status=TenantRequestStatus.SUBMITTED.value,
+        status=TenantRequestStatus.APPROVED.value,
+        move_out_status=TenantMoveOutStatus.PENDING.value,
         tenant_contact_id="tenant-1",
         contact_unit_id="link-1",
         move_out_date=date(2026, 12, 1),
     )
-    repo.active_approved = {
-        "id": "approved-1",
-        "tenant_contact_id": "tenant-1",
-        "contact_unit_id": "link-1",
-    }
     move_events_repo = _FakeMoveEventsRepo()
     service = _service(repo=repo, move_events_repo=move_events_repo)
     service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
@@ -1608,10 +1628,12 @@ async def test_approve_move_out_request_success() -> None:
         body=ApproveMoveOutRequest(admin_notes="Confirmed"),
     )
 
-    assert result.status == TenantRequestStatus.APPROVED.value
+    assert result.status == TenantRequestStatus.SUPERSEDED.value
+    assert result.move_out_status == TenantMoveOutStatus.APPROVED.value
     assert move_events_repo.insert_calls
     assert move_events_repo.insert_calls[0]["move_type"] == MoveEventType.MOVE_OUT.value
-    assert repo.row["status"] == TenantRequestStatus.APPROVED.value
+    assert repo.row["status"] == TenantRequestStatus.SUPERSEDED.value
+    assert repo.row["move_out_status"] == TenantMoveOutStatus.APPROVED.value
 
 
 @pytest.mark.asyncio
@@ -1619,8 +1641,8 @@ async def test_reject_move_out_request_success() -> None:
     """Admin reject move-out keeps tenant unchanged."""
     repo = _FakeTenantRequestsRepo()
     repo.row = _request_row(
-        request_type=TenantRequestType.MOVE_OUT.value,
-        status=TenantRequestStatus.SUBMITTED.value,
+        status=TenantRequestStatus.APPROVED.value,
+        move_out_status=TenantMoveOutStatus.PENDING.value,
         tenant_contact_id="tenant-1",
         contact_unit_id="link-1",
         move_out_date=date(2026, 12, 1),
@@ -1633,26 +1655,31 @@ async def test_reject_move_out_request_success() -> None:
         body=RejectMoveOutRequest(rejection_reason="Incomplete notice"),
     )
 
-    assert result.status == TenantRequestStatus.REJECTED.value
-    assert repo.row["status"] == TenantRequestStatus.REJECTED.value
+    assert result.status == TenantRequestStatus.APPROVED.value
+    assert result.move_out_status == TenantMoveOutStatus.REJECTED.value
+    assert repo.row["status"] == TenantRequestStatus.APPROVED.value
+    assert repo.row["move_out_status"] == TenantMoveOutStatus.REJECTED.value
     assert any(
-        event.get("event_type") == TenantRequestEventType.REJECTED.value for event in repo.events
+        event.get("event_type") == TenantRequestEventType.MOVE_OUT_REJECTED.value
+        for event in repo.events
     )
 
 
-def test_derive_milestones_move_out_approved() -> None:
-    """Move-out requests expose a simplified milestone timeline."""
+def test_derive_milestones_move_out_pending_on_move_in_row() -> None:
+    """Approved move-in rows with pending move-out include move-out milestones."""
     milestones = TenantRequestsService._derive_milestones(
         row=_request_row(
-            request_type=TenantRequestType.MOVE_OUT.value,
             status=TenantRequestStatus.APPROVED.value,
-            approved_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            move_out_status=TenantMoveOutStatus.PENDING.value,
+            move_out_requested_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            approved_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
         ),
         events=[],
     )
-    assert milestones[0].key == "submitted"
-    assert milestones[1].completed is True
-    assert milestones[2].completed is False
+    assert milestones[3].key == "move_out_submitted"
+    assert milestones[3].completed is True
+    assert milestones[4].key == "move_out_completed"
+    assert milestones[4].completed is False
 
 
 @pytest.mark.asyncio

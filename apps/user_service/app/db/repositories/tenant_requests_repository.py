@@ -49,6 +49,8 @@ _TENANT_REQUEST_SELECT_COLUMNS = f"""
   tr.move_out_date,
   tr.move_in_fee,
   tr.request_type::text AS request_type,
+  tr.move_out_status::text AS move_out_status,
+  tr.move_out_requested_at,
   tr.status::text AS status,
   tr.portal_access,
   tr.owner_reason,
@@ -397,6 +399,50 @@ class TenantRequestsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def update_move_out_fields(
+        self,
+        *,
+        organization_id: str,
+        tenant_request_id: str,
+        move_out_status: str,
+        move_out_date: date,
+        owner_reason: str | None,
+        move_out_requested_at: datetime,
+        rejection_reason: str | None = None,
+        clear_rejection_reason: bool = False,
+    ) -> None:
+        """Patch move-out sub-state on an approved move-in tenant request."""
+        set_clauses = [
+            "move_out_status = $3::tenant_move_out_status",
+            "move_out_date = $4::date",
+            "owner_reason = $5",
+            "move_out_requested_at = $6::timestamptz",
+            "updated_at = now()",
+        ]
+        args: list[Any] = [
+            organization_id,
+            tenant_request_id,
+            move_out_status,
+            move_out_date,
+            owner_reason,
+            move_out_requested_at,
+        ]
+        if clear_rejection_reason:
+            set_clauses.append("rejection_reason = NULL")
+        elif rejection_reason is not None:
+            args.append(rejection_reason)
+            set_clauses.append(f"rejection_reason = ${len(args)}")
+        query = f"""
+            UPDATE tenant_requests
+            SET {", ".join(set_clauses)}
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+              AND request_type = 'move_in'::tenant_request_type
+              AND status = 'approved'::tenant_request_status
+              AND superseded_at IS NULL
+        """
+        await self.db_connection.execute(query, *args)
+
     async def update_tenancy_fields(
         self,
         *,
@@ -586,6 +632,7 @@ class TenantRequestsRepository(BaseRepository):
             "submitted_at": "timestamptz",
             "owner_reason": "text",
             "rejection_reason": "text",
+            "move_out_status": "tenant_move_out_status",
         }
         for key, cast in allowed.items():
             if key not in fields:
@@ -641,6 +688,8 @@ class TenantRequestsRepository(BaseRepository):
         owner_contact_id: str,
         unit_id: str | None,
         request_type: str | None = None,
+        move_out_status: str | None = None,
+        move_out_statuses: list[str] | None = None,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -650,9 +699,17 @@ class TenantRequestsRepository(BaseRepository):
         if unit_id:
             args.append(unit_id)
             filters.append(f"tr.unit_id = ${len(args)}::uuid")
-        if request_type:
+        if move_out_statuses:
+            args.append(move_out_statuses)
+            filters.append(f"tr.move_out_status = ANY(${len(args)}::tenant_move_out_status[])")
+        elif move_out_status:
+            args.append(move_out_status)
+            filters.append(f"tr.move_out_status = ${len(args)}::tenant_move_out_status")
+        elif request_type:
             args.append(request_type)
             filters.append(f"tr.request_type = ${len(args)}::tenant_request_type")
+        else:
+            filters.append("tr.request_type = 'move_in'::tenant_request_type")
         where_sql = " AND ".join(filters)
         count = await self.db_connection.fetchval(
             f"""
@@ -684,6 +741,8 @@ class TenantRequestsRepository(BaseRepository):
         search: str | None,
         unit_id: str | None,
         request_type: str | None = None,
+        move_out_status: str | None = None,
+        move_out_statuses: list[str] | None = None,
         project_id: str,
         limit: int,
         offset: int,
@@ -691,12 +750,21 @@ class TenantRequestsRepository(BaseRepository):
         """Paginated admin list scoped to a project."""
         filters: list[str] = ["tr.project_id = $2::uuid"]
         args: list[Any] = [organization_id, project_id]
-        if statuses:
-            args.append(statuses)
-            filters.append(f"tr.status = ANY(${len(args)}::tenant_request_status[])")
-        if request_type:
-            args.append(request_type)
-            filters.append(f"tr.request_type = ${len(args)}::tenant_request_type")
+        if move_out_statuses:
+            args.append(move_out_statuses)
+            filters.append(f"tr.move_out_status = ANY(${len(args)}::tenant_move_out_status[])")
+            filters.append("tr.request_type = 'move_in'::tenant_request_type")
+        elif move_out_status:
+            args.append(move_out_status)
+            filters.append(f"tr.move_out_status = ${len(args)}::tenant_move_out_status")
+            filters.append("tr.request_type = 'move_in'::tenant_request_type")
+        else:
+            if statuses:
+                args.append(statuses)
+                filters.append(f"tr.status = ANY(${len(args)}::tenant_request_status[])")
+            if request_type:
+                args.append(request_type)
+                filters.append(f"tr.request_type = ${len(args)}::tenant_request_type")
         if unit_id:
             args.append(unit_id)
             filters.append(f"tr.unit_id = ${len(args)}::uuid")
