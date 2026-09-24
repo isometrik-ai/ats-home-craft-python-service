@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
 )
 from apps.user_service.app.schemas.enums import (
     TENANT_REQUEST_REQUIRED_DOCUMENT_TYPES,
+    TenantMoveOutStatus,
     TenantRequestDocumentType,
     TenantRequestListBucket,
     TenantRequestStatus,
@@ -288,6 +289,8 @@ class TenantRequestListItemResponse(BaseModel):
     move_in_fee: str = "0"
     status: str
     request_type: str = TenantRequestType.MOVE_IN.value
+    move_out_status: str = TenantMoveOutStatus.NONE.value
+    move_out_requested_at: str | None = None
     portal_access: bool = False
     submitted_at: str | None = None
     approved_at: str | None = None
@@ -324,6 +327,8 @@ class TenantRequestResponse(BaseModel):
     move_in_fee: str = "0"
     status: str
     request_type: str = TenantRequestType.MOVE_IN.value
+    move_out_status: str = TenantMoveOutStatus.NONE.value
+    move_out_requested_at: str | None = None
     portal_access: bool = False
     tenant_contact_id: str | None = None
     contact_unit_id: str | None = None
