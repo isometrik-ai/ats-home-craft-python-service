@@ -226,7 +226,10 @@
       "multiple_primary_contacts": "Only one primary contact can be set for a company.",
       "linked_page_not_found": "Linked page not found",
       "product_not_found": "Product not found",
-      "key_person_not_found": "Key person not found"
+      "key_person_not_found": "Key person not found",
+      "project_scoped_create_requires_contact": "Project-scoped company create requires linking an existing contact on the project.",
+      "project_scoped_create_requires_existing_contact": "Project-scoped company create must link an existing contact; inline contact create is not supported on this route.",
+      "project_scoped_create_contact_not_on_project": "The linked contact must have an active or pending unit assignment on this project."
     },
     "success": {
       "company_created": "Company created successfully.",

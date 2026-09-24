@@ -57,6 +57,7 @@ class _FakeCompaniesRepo:
         for_update: dict[str, Any] | None = None,
         updated: dict[str, Any] | None = None,
         linked_to_project: bool = True,
+        contact_on_project: bool = True,
     ) -> None:
         self.companies = companies or []
         self.total = total if total is not None else len(self.companies)
@@ -69,6 +70,11 @@ class _FakeCompaniesRepo:
         self.last_update_kwargs: dict[str, Any] | None = None
         self.deleted_address_ids: list[str] | None = None
         self.linked_to_project = linked_to_project
+        self.contact_on_project = contact_on_project
+
+    async def contact_has_project_unit(self, **kwargs):
+        del kwargs
+        return self.contact_on_project
 
     async def company_linked_to_project(self, **kwargs):
         """Return configured project link flag."""
@@ -279,6 +285,35 @@ async def test_ensure_company_in_project_raises_when_not_linked():
 
     with pytest.raises(NotFoundException):
         await svc.ensure_company_in_project(company_id=COMPANY_ID, project_id=PROJECT_ID)
+
+
+@pytest.mark.asyncio
+async def test_validate_project_scoped_create_requires_contact_association():
+    """Project-scoped create rejects payloads without contact_association."""
+    svc = _service(companies_repo=_FakeCompaniesRepo())
+    body = CreateCompanyRequest(name="Acme")
+
+    with pytest.raises(ValidationException):
+        await svc.validate_project_scoped_create(project_id=PROJECT_ID, body=body)
+
+
+@pytest.mark.asyncio
+async def test_validate_project_scoped_create_requires_contact_on_project():
+    """Project-scoped create rejects contacts without units on the project."""
+    repo = _FakeCompaniesRepo(contact_on_project=False)
+    svc = _service(companies_repo=repo)
+    body = CreateCompanyRequest(
+        name="Acme",
+        contact_association=CompanyContactsCreate(
+            add_association=CompanyContactAssociationAdd(
+                contact_id=CONTACT_ID,
+                is_primary=False,
+            ),
+        ),
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.validate_project_scoped_create(project_id=PROJECT_ID, body=body)
 
 
 @pytest.mark.asyncio

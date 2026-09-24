@@ -9,7 +9,10 @@ import httpx
 import pytest
 
 import libs.shared_utils.typesense_service as ts_module
-from libs.shared_utils.typesense_service import TypesenseService
+from libs.shared_utils.typesense_service import (
+    TypesenseService,
+    escape_typesense_filter_value,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -18,6 +21,14 @@ def reset_typesense_client():
     ts_module._state.client = None
     yield
     ts_module._state.client = None
+
+
+def test_escape_typesense_filter_value_wraps_literals() -> None:
+    """Filter literals are backtick-wrapped and escaped."""
+    assert escape_typesense_filter_value("550e8400-e29b-41d4-a716-446655440000") == (
+        "`550e8400-e29b-41d4-a716-446655440000`"
+    )
+    assert escape_typesense_filter_value("a`b") == "`a\\`b`"
 
 
 def test_parse_import_response_success_lines() -> None:

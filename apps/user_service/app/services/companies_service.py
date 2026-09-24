@@ -85,7 +85,10 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
-from libs.shared_utils.typesense_service import TypesenseService
+from libs.shared_utils.typesense_service import (
+    TypesenseService,
+    escape_typesense_filter_value,
+)
 
 logger = get_logger("companies_service")
 
@@ -1192,6 +1195,43 @@ class CompaniesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+    async def validate_project_scoped_create(
+        self,
+        *,
+        project_id: str,
+        body: CreateCompanyRequest,
+    ) -> None:
+        """Ensure project-scoped create will be visible via contact_units on the project."""
+        org_id = self.user_context.organization_id
+        association = body.contact_association
+        if association is None:
+            raise ValidationException(
+                message_key="companies.errors.project_scoped_create_requires_contact",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if association.create_and_associate is not None:
+            raise ValidationException(
+                message_key="companies.errors.project_scoped_create_requires_existing_contact",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        add = association.add_association
+        if add is None:
+            raise ValidationException(
+                message_key="companies.errors.project_scoped_create_requires_contact",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        contact_id = (add.contact_id or "").strip()
+        on_project = await self.companies_repo.contact_has_project_unit(
+            contact_id=contact_id,
+            organization_id=org_id,
+            project_id=project_id,
+        )
+        if not on_project:
+            raise ValidationException(
+                message_key="companies.errors.project_scoped_create_contact_not_on_project",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     async def list_companies(
         self,
         *,
@@ -1833,7 +1873,8 @@ class CompaniesService:
         if status:
             filters.append(f"status:={status}")
         if project_id:
-            filters.append(f"project_ids:={project_id}")
+            safe_project_id = escape_typesense_filter_value(project_id)
+            filters.append(f"project_ids:={safe_project_id}")
         filter_by = " && ".join(filters)
 
         query_text = query.strip()

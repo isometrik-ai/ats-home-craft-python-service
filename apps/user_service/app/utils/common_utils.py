@@ -741,6 +741,7 @@ async def ensure_companies_or_resident_project_access(
 ) -> UserContext:
     """Use resident_management on a project scope; org companies permissions when omitted."""
     if project_id:
+        validate_uuid_format(project_id, "project ID")
         needs_edit = edit or create or delete
         permission_codes = RESIDENT_MANAGEMENT_EDIT if needs_edit else RESIDENT_MANAGEMENT_VIEW
         return await ensure_staff_project_access(

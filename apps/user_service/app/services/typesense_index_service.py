@@ -683,6 +683,26 @@ async def index_contacts_background(client_refs: Iterable[tuple[str, str]]) -> N
             await typesense.upsert_documents_bulk(documents)
 
 
+async def reindex_contact_and_linked_companies_background(
+    *,
+    contact_id: str,
+    organization_id: str,
+) -> None:
+    """Refresh contact and linked company Typesense docs after project membership changes."""
+    await index_contacts_background([(contact_id, organization_id)])
+    pool = await get_pool()
+    async with AcquireConnection(pool) as conn:
+        companies_repo = CompaniesRepository(conn)
+        company_ids = await companies_repo.list_company_ids_for_contact(
+            contact_id=contact_id,
+            organization_id=organization_id,
+        )
+    if company_ids:
+        await index_companies_background(
+            [(company_id, organization_id) for company_id in company_ids]
+        )
+
+
 async def index_companies_background(client_refs: Iterable[tuple[str, str]]) -> None:
     """Best-effort indexing of company documents into the companies collection."""
     client_ref_list = list(client_refs)

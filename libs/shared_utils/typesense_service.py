@@ -47,6 +47,12 @@ _SCOPED_KEY_TTL_SECONDS: Final[int] = 3_600  # 1 hour
 logger = get_logger("typesense_service")
 
 
+def escape_typesense_filter_value(value: str) -> str:
+    """Wrap a filter literal so special characters cannot alter filter_by semantics."""
+    escaped = value.replace("\\", "\\\\").replace("`", "\\`")
+    return f"`{escaped}`"
+
+
 def _default_schema_for_collection(
     *,
     collection_name: str,

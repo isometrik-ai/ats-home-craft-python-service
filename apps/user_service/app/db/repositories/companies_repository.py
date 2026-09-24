@@ -857,6 +857,50 @@ class CompaniesRepository(BaseRepository):
         )
         return [str(row["project_id"]) for row in rows if row.get("project_id")]
 
+    async def contact_has_project_unit(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+        project_id: str,
+    ) -> bool:
+        """Return whether the contact has an active/pending unit on the project."""
+        linked = await self.db_connection.fetchval(
+            """
+            SELECT EXISTS (
+              SELECT 1
+              FROM contact_units cu
+              WHERE cu.contact_id = $1::uuid
+                AND cu.organization_id = $2::uuid
+                AND cu.project_id = $3::uuid
+                AND cu.status IN ('active', 'pending')
+            )
+            """,
+            contact_id,
+            organization_id,
+            project_id,
+        )
+        return bool(linked)
+
+    async def list_company_ids_for_contact(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+    ) -> list[str]:
+        """Company ids linked to a contact via contact_companies."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT company_id::text AS company_id
+            FROM contact_companies
+            WHERE contact_id = $1::uuid
+              AND organization_id = $2::uuid
+            """,
+            contact_id,
+            organization_id,
+        )
+        return [str(row["company_id"]) for row in rows if row.get("company_id")]
+
     async def company_linked_to_project(
         self,
         *,

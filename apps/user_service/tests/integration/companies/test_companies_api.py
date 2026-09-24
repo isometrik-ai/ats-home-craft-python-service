@@ -10,7 +10,7 @@ from apps.user_service.tests.integration.helpers import (
     patch_ensure_companies_or_resident_project_access,
 )
 from apps.user_service.tests.utils.assertions import assert_error, assert_success
-from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 _COMPANIES_API = "apps.user_service.app.api.companies"
@@ -717,6 +717,34 @@ async def test_update_company_rejects_company_not_linked_to_project(monkeypatch,
         json={"name": "Updated Corp"},
     )
     assert_error(res, 404)
+
+
+@pytest.mark.asyncio
+async def test_create_company_rejects_without_project_contact_link(monkeypatch, client):
+    """POST create returns 422 when project-scoped create validation fails."""
+
+    async def fake_access(**kwargs):
+        del kwargs
+        return admin_context()
+
+    async def reject_validate(_self, **kwargs):
+        del _self, kwargs
+        raise ValidationException(
+            message_key="companies.errors.project_scoped_create_requires_contact",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    monkeypatch.setattr(
+        f"{_COMPANIES_API}.ensure_companies_or_resident_project_access",
+        fake_access,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.CompaniesService.validate_project_scoped_create",
+        reject_validate,
+    )
+
+    res = await client.post(f"{_companies_base()}", json={"name": "Acme Corp"})
+    assert_error(res, 422)
 
 
 @pytest.mark.asyncio

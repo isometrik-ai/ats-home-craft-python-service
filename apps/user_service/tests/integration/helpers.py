@@ -42,9 +42,17 @@ def patch_ensure_companies_or_resident_project_access(
         del self, kwargs
         return None
 
+    async def fake_validate_project_scoped_create(self, **kwargs):
+        del self, kwargs
+        return None
+
     monkeypatch.setattr(
         "apps.user_service.app.services.companies_service.CompaniesService.ensure_company_in_project",
         fake_ensure_company_in_project,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.CompaniesService.validate_project_scoped_create",
+        fake_validate_project_scoped_create,
     )
 
     async def fake_ensure_companies_or_resident_project_access(

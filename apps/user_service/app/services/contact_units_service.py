@@ -31,6 +31,9 @@ from apps.user_service.app.schemas.enums import (
     ContactUnitRelationship,
     ContactUnitStatus,
 )
+from apps.user_service.app.services.typesense_index_service import (
+    reindex_contact_and_linked_companies_background,
+)
 from apps.user_service.app.services.unit_occupancy_turnover_service import (
     UnitOccupancyTurnoverService,
 )
@@ -78,6 +81,18 @@ class ContactUnitsService:
         self.units_repo = UnitsRepository(db_connection)
         self.onboarding_repo = ContactOnboardingRepository(db_connection)
         self.contact_roles_repo = ContactRolesRepository(db_connection)
+
+    def _schedule_typesense_reindex_for_contact(self, contact_id: str) -> None:
+        """Best-effort Typesense refresh for contact project_ids and linked companies."""
+        org_id = self.user_context.organization_id
+        if not org_id:
+            return
+        asyncio.create_task(
+            reindex_contact_and_linked_companies_background(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+        )
 
     @staticmethod
     def _format_assign_date(value: Any) -> str | None:
@@ -294,6 +309,7 @@ class ContactUnitsService:
             organization_id=org_id,
             contact_id=contact_id,
         )
+        self._schedule_typesense_reindex_for_contact(contact_id)
         return {
             "items": self._confirmed_items(updated),
             "requires_default_unit": active_count > 1 and not has_default,
@@ -695,9 +711,12 @@ class ContactUnitsService:
             vacate_result=vacate_result,
             removal_reason="unassigned",
         )
+        previous_contact_id = vacate_result.get("previous_contact_id")
+        if previous_contact_id:
+            self._schedule_typesense_reindex_for_contact(str(previous_contact_id))
         return {
             "released_contact_unit_ids": vacate_result["released_contact_unit_ids"],
-            "previous_contact_id": vacate_result.get("previous_contact_id"),
+            "previous_contact_id": previous_contact_id,
             "unit_status": vacate_result.get("unit_status") or "vacant",
         }
 
@@ -757,11 +776,15 @@ class ContactUnitsService:
             )
             else "vacant"
         )
+        previous_contact_id = vacate_result.get("previous_contact_id")
+        if previous_contact_id:
+            self._schedule_typesense_reindex_for_contact(str(previous_contact_id))
+        self._schedule_typesense_reindex_for_contact(contact_id)
         return {
             "id": row["id"],
             "status": row["status"],
             "contact_id": contact_id,
-            "previous_contact_id": vacate_result.get("previous_contact_id"),
+            "previous_contact_id": previous_contact_id,
             "released_contact_unit_ids": vacate_result["released_contact_unit_ids"],
             "unit_status": unit_status,
             "assign_date": normalized.get("assign_date"),
@@ -791,4 +814,5 @@ class ContactUnitsService:
             contact_id=contact_id,
             allotment_row=full or row,
         )
+        self._schedule_typesense_reindex_for_contact(contact_id)
         return self._normalize_unit_row(full or row)

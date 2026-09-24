@@ -140,8 +140,10 @@ async def create_company(
             supabase_client=sb_client,
         )
         event_service = EventService(db_connection=db_connection)
+        await service.validate_project_scoped_create(project_id=project_id, body=body)
         result = await service.create_company(body)
         company_id = result["company_id"]
+        await service.ensure_company_in_project(company_id=str(company_id), project_id=project_id)
         request.state.audit_requested_id = str(company_id)
         request.state.audit_description = f"Created company: {company_id}"
         request.state.raw_audit_old_data = result.get("old_data")
