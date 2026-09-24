@@ -43,6 +43,7 @@ COMPANIES_COLLECTION_SCHEMA: dict[str, Any] = {
         {"name": "product_names", "type": "string[]", "optional": True},
         {"name": "custom_field_values", "type": "string[]", "optional": True},
         {"name": "custom_field_keys", "type": "string[]", "optional": True},
+        {"name": "project_ids", "type": "string[]", "facet": True, "optional": True},
         {"name": "enrichment_done", "type": "bool", "optional": True},
         {
             "name": "embedding",
@@ -76,7 +77,7 @@ COMPANY_SEARCH_PARAMS: dict[str, Any] = {
     "sort_by": "_text_match:desc,updated_at:desc",
     "facet_by": (
         "status,tags,industry,preferred_communication_channels,"
-        "address_countries,address_states,address_cities"
+        "address_countries,address_states,address_cities,project_ids"
     ),
     "max_facet_values": 25,
 }

@@ -6,6 +6,7 @@ import pytest
 
 from apps.user_service.app.utils.common_utils import (
     UserContext,
+    ensure_companies_or_resident_project_access,
     ensure_crm_or_resident_project_access,
     ensure_resident_access_for_unit,
     ensure_staff_project_access,
@@ -13,6 +14,7 @@ from apps.user_service.app.utils.common_utils import (
     user_has_any_permission,
 )
 from libs.shared_utils.common_query import (
+    COMPANIES_MANAGEMENT_CREATE,
     CONTACTS_MANAGEMENT_VIEW,
     PROJECT_SETUP_EDIT,
     PROJECTS_MANAGEMENT_EDIT,
@@ -378,6 +380,50 @@ async def test_ensure_crm_or_resident_project_access_uses_crm_without_project():
             current_user=current_user,
             db_connection=db,
             permission_codes=CONTACTS_MANAGEMENT_VIEW,
+            request=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_ensure_companies_or_resident_project_access_uses_resident_on_project():
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    with patch(
+        "apps.user_service.app.utils.common_utils.ensure_staff_project_access",
+        new=AsyncMock(return_value=_user_context()),
+    ) as staff_access:
+        await ensure_companies_or_resident_project_access(
+            current_user=current_user,
+            db_connection=db,
+            project_id=PROJECT_ID,
+        )
+        staff_access.assert_awaited_once_with(
+            current_user=current_user,
+            db_connection=db,
+            project_id=PROJECT_ID,
+            permission_codes=RESIDENT_MANAGEMENT_VIEW,
+            request=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_ensure_companies_or_resident_project_access_uses_companies_create_without_project():
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    with patch(
+        "apps.user_service.app.utils.common_utils.check_permissions",
+        new=AsyncMock(return_value=_user_context()),
+    ) as check_permissions:
+        await ensure_companies_or_resident_project_access(
+            current_user=current_user,
+            db_connection=db,
+            project_id=None,
+            create=True,
+        )
+        check_permissions.assert_awaited_once_with(
+            current_user=current_user,
+            db_connection=db,
+            permission_codes=COMPANIES_MANAGEMENT_CREATE,
             request=None,
         )
 

@@ -31,6 +31,68 @@ def patch_check_permissions(monkeypatch, module_path: str, org_id: str = "org-12
     monkeypatch.setattr(f"{module_path}.check_permissions", fake_check_permissions)
 
 
+def patch_ensure_companies_or_resident_project_access(
+    monkeypatch,
+    module_path: str,
+    org_id: str = "org-123",
+) -> None:
+    """Patch companies project access helper and project scope checks in tests."""
+
+    async def fake_ensure_company_in_project(self, **kwargs):
+        del self, kwargs
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.CompaniesService.ensure_company_in_project",
+        fake_ensure_company_in_project,
+    )
+
+    async def fake_ensure_companies_or_resident_project_access(
+        *,
+        current_user,
+        db_connection,
+        project_id=None,
+        edit=False,
+        create=False,
+        delete=False,
+        request=None,
+    ):
+        del (
+            current_user,
+            db_connection,
+            project_id,
+            edit,
+            create,
+            delete,
+            request,
+        )
+        return admin_context(org_id=org_id)
+
+    monkeypatch.setattr(
+        f"{module_path}.ensure_companies_or_resident_project_access",
+        fake_ensure_companies_or_resident_project_access,
+    )
+
+
+def patch_companies_project_access_denied(monkeypatch, module_path: str) -> None:
+    """Patch companies access helper to simulate forbidden project role."""
+
+    from libs.shared_utils.http_exceptions import ForbiddenException
+    from libs.shared_utils.status_codes import CustomStatusCode
+
+    async def fake_denied(**kwargs):
+        del kwargs
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+
+    monkeypatch.setattr(
+        f"{module_path}.ensure_companies_or_resident_project_access",
+        fake_denied,
+    )
+
+
 def patch_check_any_permissions(monkeypatch, module_path: str, org_id: str = "org-123") -> None:
     """Patch check_any_permissions on an API module to bypass RBAC in tests."""
 

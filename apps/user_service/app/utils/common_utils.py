@@ -28,6 +28,10 @@ from pydantic import BaseModel
 from apps.user_service.app.schemas.admin_access_management import PermissionItem
 from libs.shared_middleware.jwt_auth import check_user_access_async
 from libs.shared_utils.common_query import (
+    COMPANIES_MANAGEMENT_CREATE,
+    COMPANIES_MANAGEMENT_DELETE,
+    COMPANIES_MANAGEMENT_EDIT,
+    COMPANIES_MANAGEMENT_VIEW,
     CONTACTS_MANAGEMENT_EDIT,
     CONTACTS_MANAGEMENT_VIEW,
     PROJECT_MEMBERS_MANAGE,
@@ -717,6 +721,43 @@ async def ensure_crm_or_resident_project_access(
             request=request,
         )
     permission_codes = CONTACTS_MANAGEMENT_EDIT if edit else CONTACTS_MANAGEMENT_VIEW
+    return await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=permission_codes,
+        request=request,
+    )
+
+
+async def ensure_companies_or_resident_project_access(
+    *,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    project_id: str | None,
+    edit: bool = False,
+    create: bool = False,
+    delete: bool = False,
+    request: Request | None = None,
+) -> UserContext:
+    """Use resident_management on a project scope; org companies permissions when omitted."""
+    if project_id:
+        needs_edit = edit or create or delete
+        permission_codes = RESIDENT_MANAGEMENT_EDIT if needs_edit else RESIDENT_MANAGEMENT_VIEW
+        return await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=permission_codes,
+            request=request,
+        )
+    if delete:
+        permission_codes = COMPANIES_MANAGEMENT_DELETE
+    elif create:
+        permission_codes = COMPANIES_MANAGEMENT_CREATE
+    elif edit:
+        permission_codes = COMPANIES_MANAGEMENT_EDIT
+    else:
+        permission_codes = COMPANIES_MANAGEMENT_VIEW
     return await check_permissions(
         current_user=current_user,
         db_connection=db_connection,

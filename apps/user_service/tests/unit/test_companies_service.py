@@ -36,6 +36,7 @@ from libs.shared_utils.http_exceptions import (
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 COMPANY_ID = "660e8400-e29b-41d4-a716-446655440001"
 CONTACT_ID = "770e8400-e29b-41d4-a716-446655440002"
+PROJECT_ID = "880e8400-e29b-41d4-a716-446655440003"
 
 
 def _ctx() -> UserContext:
@@ -55,6 +56,7 @@ class _FakeCompaniesRepo:
         created: dict[str, Any] | None = None,
         for_update: dict[str, Any] | None = None,
         updated: dict[str, Any] | None = None,
+        linked_to_project: bool = True,
     ) -> None:
         self.companies = companies or []
         self.total = total if total is not None else len(self.companies)
@@ -66,6 +68,12 @@ class _FakeCompaniesRepo:
         self.last_create_kwargs: dict[str, Any] | None = None
         self.last_update_kwargs: dict[str, Any] | None = None
         self.deleted_address_ids: list[str] | None = None
+        self.linked_to_project = linked_to_project
+
+    async def company_linked_to_project(self, **kwargs):
+        """Return configured project link flag."""
+        del kwargs
+        return self.linked_to_project
 
     async def list_companies(self, **kwargs):
         """Return paginated companies."""
@@ -232,6 +240,45 @@ async def test_list_companies_returns_items(monkeypatch):
     assert result["total"] == 1
     assert result["items"][0]["name"] == "Acme Corp"
     assert repo.last_list_kwargs["organization_id"] == ORG_ID
+
+
+@pytest.mark.asyncio
+async def test_list_companies_forwards_project_id(monkeypatch):
+    """List companies passes project_id through to the repository."""
+    _patch_custom_fields(monkeypatch)
+    repo = _FakeCompaniesRepo(companies=[_company_row()], total=1)
+    svc = _service(companies_repo=repo)
+
+    await svc.list_companies(
+        search=None,
+        status=None,
+        dropdown_filters=None,
+        project_id=PROJECT_ID,
+        page=1,
+        page_size=20,
+    )
+
+    assert repo.last_list_kwargs is not None
+    assert repo.last_list_kwargs["project_id"] == PROJECT_ID
+
+
+@pytest.mark.asyncio
+async def test_ensure_company_in_project_succeeds_when_linked():
+    """ensure_company_in_project is a no-op when the company is on the project."""
+    repo = _FakeCompaniesRepo(linked_to_project=True)
+    svc = _service(companies_repo=repo)
+
+    await svc.ensure_company_in_project(company_id=COMPANY_ID, project_id=PROJECT_ID)
+
+
+@pytest.mark.asyncio
+async def test_ensure_company_in_project_raises_when_not_linked():
+    """ensure_company_in_project raises NotFound when the company is absent from the project."""
+    repo = _FakeCompaniesRepo(linked_to_project=False)
+    svc = _service(companies_repo=repo)
+
+    with pytest.raises(NotFoundException):
+        await svc.ensure_company_in_project(company_id=COMPANY_ID, project_id=PROJECT_ID)
 
 
 @pytest.mark.asyncio

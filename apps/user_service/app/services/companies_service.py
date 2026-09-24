@@ -1173,12 +1173,32 @@ class CompaniesService:
         elif not isinstance(raw_contacts, list):
             list_row["contacts"] = []
 
+    async def ensure_company_in_project(
+        self,
+        *,
+        company_id: str,
+        project_id: str,
+    ) -> None:
+        """Require the company to be linked via project contact_units."""
+        org_id = self.user_context.organization_id
+        linked = await self.companies_repo.company_linked_to_project(
+            company_id=company_id,
+            organization_id=org_id,
+            project_id=project_id,
+        )
+        if not linked:
+            raise NotFoundException(
+                message_key="companies.errors.company_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
     async def list_companies(
         self,
         *,
         search: str | None,
         status: str | None,
         dropdown_filters: Any = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
@@ -1197,6 +1217,7 @@ class CompaniesService:
             search=search,
             status=status,
             dropdown_filters=parsed_filters,
+            project_id=project_id,
             page=page,
             page_size=page_size,
         )
@@ -1804,12 +1825,15 @@ class CompaniesService:
         page: int,
         page_size: int,
         status: str | None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Search companies via Typesense (companies collection)."""
         org_id = self.user_context.organization_id
         filters = [f"organization_id:={org_id}"]
         if status:
             filters.append(f"status:={status}")
+        if project_id:
+            filters.append(f"project_ids:={project_id}")
         filter_by = " && ".join(filters)
 
         query_text = query.strip()

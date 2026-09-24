@@ -734,6 +734,7 @@ class CompaniesRepository(BaseRepository):
         search: str | None,
         status: str | None,
         dropdown_filters: dict[str, list[str]] | None = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -749,6 +750,22 @@ class CompaniesRepository(BaseRepository):
         if search:
             where.append(f"COALESCE(co.name,'') ILIKE ${next_param_index}")
             args.append(f"%{search.strip()}%")
+            next_param_index += 1
+        if project_id:
+            where.append(
+                f"""EXISTS (
+                  SELECT 1
+                  FROM contact_companies cc
+                  INNER JOIN contact_units cu
+                    ON cu.contact_id = cc.contact_id
+                   AND cu.organization_id = cc.organization_id
+                  WHERE cc.company_id = co.id
+                    AND cc.organization_id = co.organization_id
+                    AND cu.project_id = ${next_param_index}::uuid
+                    AND cu.status IN ('active', 'pending')
+                )"""
+            )
+            args.append(project_id)
             next_param_index += 1
 
         if dropdown_filters:
@@ -815,3 +832,55 @@ class CompaniesRepository(BaseRepository):
         )
         company_rows = [dict(company_row) for company_row in rows]
         return company_rows, int(total or 0)
+
+    async def list_company_project_ids(
+        self,
+        *,
+        company_id: str,
+        organization_id: str,
+    ) -> list[str]:
+        """Distinct project ids for a company via linked contacts' contact_units."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT cu.project_id::text AS project_id
+            FROM contact_companies cc
+            INNER JOIN contact_units cu
+              ON cu.contact_id = cc.contact_id
+             AND cu.organization_id = cc.organization_id
+            WHERE cc.company_id = $1::uuid
+              AND cc.organization_id = $2::uuid
+              AND cu.project_id IS NOT NULL
+              AND cu.status IN ('active', 'pending')
+            """,
+            company_id,
+            organization_id,
+        )
+        return [str(row["project_id"]) for row in rows if row.get("project_id")]
+
+    async def company_linked_to_project(
+        self,
+        *,
+        company_id: str,
+        organization_id: str,
+        project_id: str,
+    ) -> bool:
+        """Return whether the company has a member contact on the project."""
+        linked = await self.db_connection.fetchval(
+            """
+            SELECT EXISTS (
+              SELECT 1
+              FROM contact_companies cc
+              INNER JOIN contact_units cu
+                ON cu.contact_id = cc.contact_id
+               AND cu.organization_id = cc.organization_id
+              WHERE cc.company_id = $1::uuid
+                AND cc.organization_id = $2::uuid
+                AND cu.project_id = $3::uuid
+                AND cu.status IN ('active', 'pending')
+            )
+            """,
+            company_id,
+            organization_id,
+            project_id,
+        )
+        return bool(linked)
