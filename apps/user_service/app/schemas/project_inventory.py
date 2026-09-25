@@ -12,6 +12,7 @@ from apps.user_service.app.schemas.enums import (
     ConfigMediaKind,
     ContactUnitDocumentType,
     ContactUnitRelationship,
+    FacilityBookingArchetype,
     FacilityLocationType,
     FacilityStatus,
     FacilityType,
@@ -195,6 +196,7 @@ class FacilityListQuery(BaseModel):
     )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
+    is_bookable: bool | None = None
 
     @field_validator("facility_types", mode="before")
     @classmethod
@@ -210,6 +212,7 @@ def build_facility_list_query(
     search: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    is_bookable: bool | None = None,
 ) -> FacilityListQuery:
     """Build list query from raw query-string values."""
     normalized_search = search.strip() if search and search.strip() else None
@@ -219,6 +222,7 @@ def build_facility_list_query(
             search=normalized_search,
             page=page,
             page_size=page_size,
+            is_bookable=is_bookable,
         )
     expanded: list[str] = []
     for item in facility_types:
@@ -230,6 +234,7 @@ def build_facility_list_query(
         search=normalized_search,
         page=page,
         page_size=page_size,
+        is_bookable=is_bookable,
     )
 
 
@@ -260,6 +265,8 @@ class CreateFacilityRequest(BaseModel):
     longitude: float | None = None
     active: bool = True
     sort_order: int = Field(default=0, ge=0)
+    is_bookable: bool = False
+    booking_archetype: FacilityBookingArchetype | None = None
 
 
 class UpdateFacilityRequest(BaseModel):
@@ -289,6 +296,8 @@ class UpdateFacilityRequest(BaseModel):
     longitude: float | None = None
     active: bool | None = None
     sort_order: int | None = Field(default=None, ge=0)
+    is_bookable: bool | None = None
+    booking_archetype: FacilityBookingArchetype | None = None
 
 
 class FacilityListItemResponse(BaseModel):
@@ -305,6 +314,8 @@ class FacilityListItemResponse(BaseModel):
     parking_vehicle_category: ParkingVehicleCategory | None = None
     parking_user_type: ParkingUserType | None = None
     facility_subtype: str | None = None
+    is_bookable: bool = False
+    booking_archetype: FacilityBookingArchetype | None = None
 
 
 # ---------------------------------------------------------------------------

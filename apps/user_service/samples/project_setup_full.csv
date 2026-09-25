@@ -1,0 +1,30 @@
+record_type,project_code,tower_code,wing_code,config_code,parent_code,code,name,developer_name,community_admin_user_id,gstin,address_line_1,address_line_2,pin_code,city,state,country,primary_measurement_unit,possession_date,property_types,project_units_count,latitude,longitude,tower_type,basement_count,upper_floor_count,units_per_floor_default,numbering_pattern,starting_unit_number,custom_prefix,has_wings,floor_level,display_name,is_parking,gate_type,gate_status,is_open_24x7,lift_type,lift_capacity,serves_floors,config_kind,bedrooms,bathrooms,area_sqft,two_wheeler_parking_entitlement,four_wheeler_parking_entitlement,balconies,default_facing,commercial_unit_type,carpet_area_sqft,plot_type,facing,plot_no,plot_size_sqft,plot_description,plot_status,is_corner,inventory_quantity,unit_label,unit_status,is_parking_unit,facility_type,facility_subtype,location_type,facility_floor_level,facility_wing,capacity_persons,parking_slots,parking_user_type,parking_vehicle_category,slot_from,slot_to,media_kind,media_path,media_mime,media_size_bytes,overlay_entity_type,overlay_entity_ref,overlay_latitude,overlay_longitude,sort_order,active
+project,green-valley,,,,,green-valley,Green Valley Residency,ATS Developers,00000000-0000-4000-8000-000000000001,27AABCU9603R1ZX,Plot 12 Sector 45,,122001,Gurugram,Haryana,India,sq_ft,2026-12-31,residential;commercial,250,28.4595,77.0266,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+tower,green-valley,T-A,,,,T-A,Tower A,,,,,,,,,,,,,,28.4598,77.0268,residential,2,10,4,floor_unit,1,,true,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+wing,green-valley,T-A,W-A,,,W-A,East Wing,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+wing,green-valley,T-A,W-B,,,W-B,West Wing,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,2,true
+floor,green-valley,T-A,W-A,,,,,,,,,,,,,,,,,,,,,,,,,,,,-2,B2 Parking,true,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+floor,green-valley,T-A,W-A,,,,,,,,,,,,,,,,,,,,,,,,,,,,0,Ground Floor,false,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,2,true
+floor,green-valley,T-A,W-A,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,First Floor,false,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,3,true
+gate,green-valley,T-A,W-B,,,,West Wing Entry,,,,,,,,,,,,,,,,,,,,,,,,,,,both,active,false,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+lift,green-valley,T-A,,,,,Lift 1,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,passenger,8,-2;0;1,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+unit_config,green-valley,,,2BHK,,,2 BHK Standard,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,apartment,2,2,1150,1,1,2,east,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+unit_config,green-valley,,,3BHK,,,3 BHK Premium,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,apartment,3,3,1450,2,1,3,north,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,2,true
+unit_config,green-valley,,,SHOP-S,,,Retail Shop Small,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,commercial,,,,,,,,retail_shop,450,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,3,true
+floor_inventory,green-valley,T-A,W-A,2BHK,,,,,,,,,,,,,,,,,,,,,,,,,,,1,First Floor,,,,,,,,,,,,,,,,,,,,,,,,,2,,,,,,,,,,,,,,,,,,,,,,,,
+floor_inventory,green-valley,T-A,W-A,3BHK,,,,,,,,,,,,,,,,,,,,,,,,,,,1,First Floor,,,,,,,,,,,,,,,,,,,,,,,,,2,,,,,,,,,,,,,,,,,,,,,,,,
+unit,green-valley,T-A,W-A,2BHK,,A-101,,,,,,,,,,,,,,,,,,,,,,,,,1,First Floor,,,,,,,,,,,,,,,,,,,,,,,,,,Flat 101,vacant,false,,,,,,,,,,,,,,,,,,,,1,true
+unit,green-valley,T-A,W-A,3BHK,,A-102,,,,,,,,,,,,,,,,,,,,,,,,,1,First Floor,,,,,,,,,,,,,,,,,,,,,,,,,,Flat 102,vacant,false,,,,,,,,,,,,,,,,,,,,2,true
+facility,green-valley,,,,,,Clubhouse,,,,,,,,,,,,,,28.4596,77.0265,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,recreation,,indoor_clubhouse,,,200,,,,,,,,,,,,,,1,true
+facility,green-valley,,,,,,Visitor Parking,,,,,,,,,,,,,,28.4593,77.0262,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,parking,basement,outdoor_standalone,,,,80,visitors,four_wheeler,,,,,,,,,,,2,true
+parking_zone,green-valley,T-A,,,,,Tower A B2 Zone,,,,,,,,,,,,,,,,,,,,,,,,-2,B2 Parking,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,50,,,,,,,,,1,true
+project_media,green-valley,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,cover_image,org-abc/projects/green-valley/cover.jpg,image/jpeg,245760,,,,,1,true
+config_media,green-valley,,,2BHK,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,floor_plan,org-abc/projects/green-valley/configs/2bhk.pdf,application/pdf,524288,,,,,1,true
+site_map_overlay,green-valley,,,,,,Green Valley Center,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,project,green-valley,28.4595,77.0266,1,true
+site_map_overlay,green-valley,,,,,,Tower A,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,tower,T-A,28.4598,77.0268,2,true
+project,lakeview-plots,,,,,lakeview-plots,Lakeview Plots,ATS Developers,00000000-0000-4000-8000-000000000001,27AABCU9603R1ZP,Sector 78 NH-48,,122004,Gurugram,Haryana,India,gaj,2027-06-30,plots,120,28.4121,76.9558,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+unit_config,lakeview-plots,,,PL-R-V,,,Villa Plot,,,,,,,,,,,,,,28.4125,76.9560,,,,,,,,,,,,,,,,,,plot,,,,,,,,,,villa,north,,,,,,,,,,,,,,,,,,,,,,,,,,,,,1,true
+plot_item,lakeview-plots,,,PL-R-V,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,P-101,2400,Road-facing corner,empty,true,,,,,,,,,,,,,,,,,,,,,,,,1,true
+plot_item,lakeview-plots,,,PL-R-V,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,P-102,2200,Park-facing,empty,false,,,,,,,,,,,,,,,,,,,,,,,,2,true
+unit,lakeview-plots,,,PL-R-V,,P-101,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,P-101,,,,,,Plot 101,vacant,false,,,,,,,,,,,,,,,,,,,,1,true
+site_map_overlay,lakeview-plots,,,,,,Lakeview Entry,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,project,lakeview-plots,28.4121,76.9558,1,true

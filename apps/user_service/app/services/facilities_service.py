@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 import asyncpg
@@ -9,11 +10,24 @@ import asyncpg
 from apps.user_service.app.db.repositories.facilities_repository import (
     FacilitiesRepository,
 )
+from apps.user_service.app.db.repositories.facility_booking_config_repository import (
+    FacilityBookingConfigRepository,
+)
+from apps.user_service.app.db.repositories.facility_booking_inventory_repository import (
+    FacilityBookingInventoryRepository,
+)
+from apps.user_service.app.db.repositories.facility_reservations_repository import (
+    FacilityReservationsRepository,
+)
+from apps.user_service.app.db.repositories.facility_staff_assignments_repository import (
+    FacilityStaffAssignmentsRepository,
+)
 from apps.user_service.app.db.repositories.parking_slots_repository import (
     ParkingSlotsRepository,
 )
 from apps.user_service.app.db.repositories.towers_repository import TowersRepository
 from apps.user_service.app.schemas.enums import (
+    FacilityBookingArchetype,
     FacilityLocationType,
     FacilityType,
     ProjectSetupStep,
@@ -22,6 +36,10 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.schemas.project_inventory import (
     CreateFacilityRequest,
     UpdateFacilityRequest,
+)
+from apps.user_service.app.services.facility_booking.defaults import (
+    default_booking_config,
+    suggested_archetype,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.services.project_setup_validation import (
@@ -51,6 +69,10 @@ class FacilitiesService:
         self.facilities_repo = FacilitiesRepository(db_connection)
         self.parking_slots_repo = ParkingSlotsRepository(db_connection)
         self.towers_repo = TowersRepository(db_connection)
+        self.booking_config_repo = FacilityBookingConfigRepository(db_connection)
+        self.booking_inventory_repo = FacilityBookingInventoryRepository(db_connection)
+        self.reservations_repo = FacilityReservationsRepository(db_connection)
+        self.staff_assignments_repo = FacilityStaffAssignmentsRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection, user_context=user_context
         )
@@ -81,6 +103,8 @@ class FacilitiesService:
             )
             data["custom_prefix"] = body.custom_prefix
         data["extra_attributes"] = body.extra_attributes or {}
+        if body.booking_archetype:
+            data["booking_archetype"] = body.booking_archetype.value
         return data
 
     def _serialize_update_facility(self, body: UpdateFacilityRequest) -> dict[str, Any]:
@@ -98,6 +122,8 @@ class FacilitiesService:
             data["parking_vehicle_category"] = body.parking_vehicle_category.value
         if body.numbering_pattern:
             data["numbering_pattern"] = body.numbering_pattern.value
+        if body.booking_archetype:
+            data["booking_archetype"] = body.booking_archetype.value
         return data
 
     async def _resolve_tower_has_wings(
@@ -197,6 +223,12 @@ class FacilitiesService:
         data["organization_id"] = self._org_id
         data["project_id"] = project_id
         inserted = await self.facilities_repo.insert_facility(data)
+        if data.get("is_bookable"):
+            await self._provision_booking_config(
+                project_id=project_id,
+                facility=inserted,
+                capacity_persons=body.capacity_persons,
+            )
         if body.facility_type == FacilityType.PARKING and body.parking_slots:
             await self._provision_parking_slots(
                 project_id=project_id,
@@ -215,6 +247,7 @@ class FacilitiesService:
         search: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        is_bookable: bool | None = None,
     ) -> dict[str, Any]:
         """List facilities for a project."""
         await self.setup_service.ensure_project(project_id=project_id)
@@ -224,6 +257,7 @@ class FacilitiesService:
             facility_types=facility_types,
             status=status,
             search=search,
+            is_bookable=is_bookable,
             page=page,
             page_size=page_size,
         )
@@ -254,6 +288,9 @@ class FacilitiesService:
         current = await self._ensure_facility(project_id=project_id, facility_id=facility_id)
         patch = self._serialize_update_facility(body)
         merged = {**serialize_row(current), **patch}
+        await self._guard_booking_change(
+            project_id=project_id, facility_id=facility_id, current=current, merged=merged
+        )
         tower_has_wings = await self._resolve_tower_has_wings(
             project_id=project_id,
             data=merged,
@@ -265,11 +302,45 @@ class FacilitiesService:
             facility_id=facility_id,
             update_data=patch,
         )
+        if merged.get("is_bookable"):
+            existing = await self.booking_config_repo.get_config(
+                organization_id=self._org_id,
+                project_id=project_id,
+                facility_id=facility_id,
+            )
+            if not existing:
+                await self._provision_booking_config(
+                    project_id=project_id,
+                    facility=updated or merged,
+                    capacity_persons=merged.get("capacity_persons"),
+                )
+            elif self._archetype_changed(current, merged):
+                await self._reset_booking_config(
+                    project_id=project_id,
+                    facility_id=facility_id,
+                    archetype=str(merged.get("booking_archetype")),
+                    existing=existing,
+                )
         return serialize_facility_row(updated or {})
 
     async def delete_facility(self, *, project_id: str, facility_id: str) -> dict[str, Any]:
         """Delete a facility and its parking slots."""
         current = await self._ensure_facility(project_id=project_id, facility_id=facility_id)
+        upcoming = await self.reservations_repo.count_upcoming_active(
+            organization_id=self._org_id,
+            facility_id=facility_id,
+            from_date=date.today(),
+        )
+        if upcoming:
+            raise ValidationException(
+                message_key="project_setup.errors.facility_has_upcoming_bookings",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        await self.staff_assignments_repo.remove_facility(
+            organization_id=self._org_id,
+            project_id=project_id,
+            facility_id=facility_id,
+        )
         await self.parking_slots_repo.delete_by_facility(
             organization_id=self._org_id,
             project_id=project_id,
@@ -288,3 +359,125 @@ class FacilitiesService:
             project_id=project_id,
             step_key=ProjectSetupStep.FACILITIES.value,
         )
+
+    @staticmethod
+    def _archetype_of(row: dict[str, Any]) -> str | None:
+        """Return booking archetype string from a facility row."""
+        value = row.get("booking_archetype")
+        if hasattr(value, "value"):
+            return str(value.value)
+        return str(value) if value else None
+
+    def _archetype_changed(self, current: dict[str, Any], merged: dict[str, Any]) -> bool:
+        """Return whether the booking archetype changed between rows."""
+        return self._archetype_of(current) != self._archetype_of(merged)
+
+    async def _guard_booking_change(
+        self,
+        *,
+        project_id: str,
+        facility_id: str,
+        current: dict[str, Any],
+        merged: dict[str, Any],
+    ) -> None:
+        """Block disabling booking or changing archetype when upcoming reservations exist."""
+        _ = project_id
+        turning_off = current.get("is_bookable") and not merged.get("is_bookable")
+        changing_type = bool(merged.get("is_bookable")) and self._archetype_changed(current, merged)
+        if not turning_off and not changing_type:
+            return
+        upcoming = await self.reservations_repo.count_upcoming_active(
+            organization_id=self._org_id,
+            facility_id=facility_id,
+            from_date=date.today(),
+        )
+        if upcoming:
+            raise ValidationException(
+                message_key="project_setup.errors.facility_has_upcoming_bookings",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _provision_booking_config(
+        self,
+        *,
+        project_id: str,
+        facility: dict[str, Any],
+        capacity_persons: int | None,
+    ) -> None:
+        """Insert default booking config and a primary unit when booking is enabled."""
+        facility_id = str(facility["id"])
+        archetype = (
+            self._archetype_of(facility)
+            or suggested_archetype(str(facility.get("facility_type") or "")).value
+        )
+        defaults = default_booking_config(archetype)
+        setup = defaults.setup
+        if setup.event and capacity_persons:
+            setup = setup.model_copy(
+                update={
+                    "event": setup.event.model_copy(
+                        update={"max_participants": int(capacity_persons)}
+                    )
+                }
+            )
+        await self.booking_config_repo.insert_config(
+            {
+                "organization_id": self._org_id,
+                "project_id": project_id,
+                "facility_id": facility_id,
+                "description": "",
+                "slot_minutes": defaults.slot_minutes,
+                "accepting_bookings": True,
+                "default_hours": [h.model_dump(mode="json") for h in defaults.default_hours],
+                "pricing": defaults.pricing.model_dump(mode="json"),
+                "policies": defaults.policies.model_dump(mode="json"),
+                "setup": setup.model_dump(mode="json"),
+                "created_by_user_id": self.user_context.user_id,
+                "updated_by_user_id": self.user_context.user_id,
+            }
+        )
+        await self.booking_inventory_repo.insert(
+            "facility_booking_units",
+            organization_id=self._org_id,
+            project_id=project_id,
+            facility_id=facility_id,
+            data={"name": self._default_unit_name(archetype, facility.get("name"))},
+        )
+
+    async def _reset_booking_config(
+        self,
+        *,
+        project_id: str,
+        facility_id: str,
+        archetype: str,
+        existing: dict[str, Any],
+    ) -> None:
+        """Reset booking config to archetype defaults after a type change."""
+        _ = project_id
+        defaults = default_booking_config(archetype)
+        await self.booking_config_repo.update_config(
+            organization_id=self._org_id,
+            facility_id=facility_id,
+            expected_version=int(existing["version"]),
+            update_data={
+                "slot_minutes": defaults.slot_minutes,
+                "default_hours": [h.model_dump(mode="json") for h in defaults.default_hours],
+                "pricing": defaults.pricing.model_dump(mode="json"),
+                "policies": defaults.policies.model_dump(mode="json"),
+                "setup": defaults.setup.model_dump(mode="json"),
+                "updated_by_user_id": self.user_context.user_id,
+            },
+        )
+
+    @staticmethod
+    def _default_unit_name(archetype: str, facility_name: Any) -> str:
+        """Return the default primary unit label for a booking archetype."""
+        labels = {
+            FacilityBookingArchetype.SLOT.value: "Court 1",
+            FacilityBookingArchetype.TEE_TIME.value: "Tee sheet",
+            FacilityBookingArchetype.ROOM.value: "Room 1",
+        }
+        if archetype in labels:
+            return labels[archetype]
+        name = str(facility_name or "").strip()
+        return name or "Main space"

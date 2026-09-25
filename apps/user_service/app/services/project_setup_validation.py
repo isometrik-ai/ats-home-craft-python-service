@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from apps.user_service.app.schemas.enums import (
+    NON_BOOKABLE_FACILITY_TYPES,
+    FacilityBookingArchetype,
     FacilityLocationType,
     FacilityType,
     ParkingFacilitySubtype,
@@ -12,6 +14,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingVehicleCategory,
     UnitNumberingPattern,
 )
+from apps.user_service.app.services.facility_booking.defaults import suggested_archetype
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -86,6 +89,7 @@ def validate_facility_payload(
     """Validate conditional facility fields based on type and location."""
     # pylint: disable=too-complex
     facility_type = normalize_facility_type(data.get("facility_type"))
+    validate_booking_flags(data)
     location_type = data.get("location_type")
     if isinstance(location_type, FacilityLocationType):
         location_type = location_type.value
@@ -155,3 +159,22 @@ def validate_facility_payload(
             message_key="project_setup.errors.facility_parking_numbering_not_applicable",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
         )
+
+
+def validate_booking_flags(data: dict[str, Any]) -> None:
+    """Bookable facilities need an archetype and cannot be parking/utility."""
+    is_bookable = bool(data.get("is_bookable"))
+    facility_type = normalize_facility_type(data.get("facility_type"))
+    archetype = data.get("booking_archetype")
+    if isinstance(archetype, FacilityBookingArchetype):
+        archetype = archetype.value
+        data["booking_archetype"] = archetype
+    if not is_bookable:
+        return
+    if facility_type in NON_BOOKABLE_FACILITY_TYPES:
+        raise ValidationException(
+            message_key="project_setup.errors.facility_not_bookable_type",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+    if not archetype:
+        data["booking_archetype"] = suggested_archetype(facility_type).value

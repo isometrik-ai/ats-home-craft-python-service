@@ -201,6 +201,22 @@ async def test_list_facilities():
 
 
 @pytest.mark.asyncio
+async def test_list_facilities_filters_is_bookable():
+    conn = _FakeConn(rows=[{"id": FACILITY_ID}], fetchval_result=1)
+    repo = FacilitiesRepository(db_connection=conn)
+
+    await repo.list_facilities(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        is_bookable=True,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "is_bookable = $3" in count_query
+    assert count_args == (ORG_ID, PROJECT_ID, True)
+
+
+@pytest.mark.asyncio
 async def test_update_facility_with_data_and_empty_dict():
     conn = _FakeConn(row={"id": FACILITY_ID, "name": "Updated Gym"})
     repo = FacilitiesRepository(db_connection=conn)

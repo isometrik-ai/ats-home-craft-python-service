@@ -2288,6 +2288,7 @@ def get_facility_list_query(
     ),
     page: int = Query(default=1, ge=1, description="Page number (1-based)."),
     page_size: int = Query(default=20, ge=1, le=100, description="Items per page."),
+    is_bookable: bool | None = Query(default=None, description="Filter bookable facilities."),
 ) -> FacilityListQuery:
     """Parse facility list filters from query params."""
     return build_facility_list_query(
@@ -2296,6 +2297,7 @@ def get_facility_list_query(
         search=search,
         page=page,
         page_size=page_size,
+        is_bookable=is_bookable,
     )
 
 
@@ -2335,6 +2337,7 @@ async def list_facilities(
         search=query.search,
         page=query.page,
         page_size=query.page_size,
+        is_bookable=query.is_bookable,
     )
     items = result["items"]
     total = int(result["total"])
