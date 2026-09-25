@@ -77,6 +77,24 @@ _PROFILE_LIST_HOUSE_COUNT = """
 """
 
 
+def _coerce_jsonb_mapping(value: Any) -> dict[str, Any]:
+    """Normalize jsonb object columns that may arrive as JSON strings from the driver."""
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return {}
+        parsed = json.loads(stripped)
+        return parsed if isinstance(parsed, dict) else {}
+    try:
+        return dict(value)
+    except (TypeError, ValueError):
+        return {}
+
+
 class DailyHelpRepository(BaseRepository):
     """Database operations for daily help registry tables."""
 
@@ -1376,21 +1394,20 @@ class DailyHelpRepository(BaseRepository):
         if not row or int(row["rating_count"] or 0) == 0:
             return empty_summary
 
-        star_distribution = row["star_distribution"] or {}
-        category_averages = row["category_averages"] or {}
-        trait_counts = row["trait_counts"] or {}
+        star_distribution = _coerce_jsonb_mapping(row.get("star_distribution"))
+        category_averages = _coerce_jsonb_mapping(row.get("category_averages"))
+        trait_counts = _coerce_jsonb_mapping(row.get("trait_counts"))
         return {
             "rating_count": int(row["rating_count"] or 0),
             "review_count": int(row["review_count"] or 0),
             "average_stars": float(row["average_stars"] or 0),
             "star_distribution": {
-                str(star_level): int(count) for star_level, count in dict(star_distribution).items()
+                str(star_level): int(count) for star_level, count in star_distribution.items()
             },
             "category_averages": {
-                str(category): float(average)
-                for category, average in dict(category_averages).items()
+                str(category): float(average) for category, average in category_averages.items()
             },
-            "trait_counts": {str(trait): int(count) for trait, count in dict(trait_counts).items()},
+            "trait_counts": {str(trait): int(count) for trait, count in trait_counts.items()},
         }
 
     async def get_rating_summaries_batch(
