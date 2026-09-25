@@ -18,7 +18,6 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
-    RESIDENT_MANAGEMENT_VIEW,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import ForbiddenException
@@ -340,7 +339,7 @@ async def test_user_has_any_permission():
 
 
 @pytest.mark.asyncio
-async def test_ensure_crm_or_resident_project_access_uses_resident_on_project():
+async def test_ensure_crm_or_resident_project_access_uses_contacts_on_project():
     db = MagicMock()
     current_user = {"sub": USER_ID}
     with patch(
@@ -356,7 +355,7 @@ async def test_ensure_crm_or_resident_project_access_uses_resident_on_project():
             current_user=current_user,
             db_connection=db,
             project_id=PROJECT_ID,
-            permission_codes=RESIDENT_MANAGEMENT_VIEW,
+            permission_codes=CONTACTS_MANAGEMENT_VIEW,
             request=None,
         )
 
