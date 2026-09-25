@@ -468,7 +468,12 @@ class CompaniesService:
             body=body,
         )
 
-    async def create_company(self, body: CreateCompanyRequest) -> dict[str, Any]:
+    async def create_company(
+        self,
+        body: CreateCompanyRequest,
+        *,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
         """Create a company (ADR section 2).
 
         Supports:
@@ -577,6 +582,10 @@ class CompaniesService:
             raise
         company_id = str(created["company_id"])
         company = created["company"]
+        await self._link_company_to_project_if_requested(
+            company_id=company_id,
+            project_id=project_id,
+        )
 
         created_contact_row, created_contact_id = self._extract_created_contact(created=created)
         self._validate_contact_link_outcome(
@@ -1136,7 +1145,70 @@ class CompaniesService:
             await self.contacts_repo.create_contact_addresses(address_rows)
         return contact_id, dict(contact_row)
 
-    async def get_company_details(self, *, company_id: str) -> dict[str, Any]:
+    async def _ensure_project_exists(self, *, project_id: str) -> None:
+        """Require that ``project_id`` belongs to the current organization."""
+        from apps.user_service.app.db.repositories.projects_repository import (
+            ProjectsRepository,
+        )
+
+        org_id = self.user_context.organization_id
+        assert org_id
+        project = await ProjectsRepository(self.db_connection).get_project(
+            organization_id=org_id,
+            project_id=project_id,
+        )
+        if not project:
+            raise NotFoundException(
+                message_key="project_setup.errors.project_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def _ensure_company_project_scope(
+        self,
+        *,
+        company_id: str,
+        project_id: str | None,
+    ) -> None:
+        """When ``project_id`` is set, require a ``project_companies`` link."""
+        if not project_id:
+            return
+        org_id = self.user_context.organization_id
+        assert org_id
+        linked = await self.companies_repo.is_company_linked_to_project(
+            organization_id=org_id,
+            company_id=company_id,
+            project_id=project_id,
+        )
+        if not linked:
+            raise ValidationException(
+                message_key="projects.errors.company_not_linked",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _link_company_to_project_if_requested(
+        self,
+        *,
+        company_id: str,
+        project_id: str | None,
+    ) -> None:
+        """Link a newly created company to a project when scoped."""
+        if not project_id:
+            return
+        await self._ensure_project_exists(project_id=project_id)
+        org_id = self.user_context.organization_id
+        assert org_id
+        await self.companies_repo.link_company_to_project(
+            organization_id=org_id,
+            project_id=project_id,
+            company_id=company_id,
+        )
+
+    async def get_company_details(
+        self,
+        *,
+        company_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
         """Return company details with member contacts (list shape) and addresses."""
         org_id = self.user_context.organization_id
         details = await self.companies_repo.get_company_details(
@@ -1148,6 +1220,7 @@ class CompaniesService:
                 message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await self._ensure_company_project_scope(company_id=company_id, project_id=project_id)
 
         _stringify_company_detail_uuids(details)
         _coerce_company_detail_json_lists(details)
@@ -1179,6 +1252,7 @@ class CompaniesService:
         search: str | None,
         status: str | None,
         dropdown_filters: Any = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
@@ -1197,6 +1271,7 @@ class CompaniesService:
             search=search,
             status=status,
             dropdown_filters=parsed_filters,
+            project_id=project_id,
             page=page,
             page_size=page_size,
         )
@@ -1204,7 +1279,12 @@ class CompaniesService:
             self._normalize_company_list_row(list_row)
         return {"items": rows, "total": total}
 
-    async def soft_delete_company(self, *, company_id: str) -> dict[str, Any]:
+    async def soft_delete_company(
+        self,
+        *,
+        company_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
         """Soft-delete a company (sets status='deleted') via the same DB update path as PATCH."""
         org_id = self.user_context.organization_id
         current = await self.companies_repo.get_company_for_update(
@@ -1216,6 +1296,7 @@ class CompaniesService:
                 message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await self._ensure_company_project_scope(company_id=company_id, project_id=project_id)
         updated = await self.companies_repo.update_company(
             company_id=company_id,
             organization_id=org_id,
@@ -1233,6 +1314,7 @@ class CompaniesService:
         *,
         company_id: str,
         body: UpdateCompanyRequest,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Patch a company (scalar fields + JSONB lists + addresses table).
 
@@ -1252,6 +1334,7 @@ class CompaniesService:
                 message_key="companies.errors.company_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await self._ensure_company_project_scope(company_id=company_id, project_id=project_id)
         current: dict[str, Any] = dict(current_raw)
         current["contacts"] = coerce_json_list(current.get("contacts"))
 
@@ -1804,12 +1887,15 @@ class CompaniesService:
         page: int,
         page_size: int,
         status: str | None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Search companies via Typesense (companies collection)."""
         org_id = self.user_context.organization_id
         filters = [f"organization_id:={org_id}"]
         if status:
             filters.append(f"status:={status}")
+        if project_id:
+            filters.append(f"project_ids:={project_id}")
         filter_by = " && ".join(filters)
 
         query_text = query.strip()
