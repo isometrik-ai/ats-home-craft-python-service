@@ -1864,6 +1864,8 @@ class CompaniesService:
         filters = [f"organization_id:={org_id}"]
         if status:
             filters.append(f"status:={status}")
+        elif project_id:
+            filters.append(f"status:!={ClientStatus.DELETED.value}")
         if project_id:
             filters.append(f"project_ids:={project_id}")
         filter_by = " && ".join(filters)
@@ -1903,6 +1905,36 @@ class CompaniesService:
                 params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
 
         search_response = await self.typesense.search(params)
+        search_response = await self._search_companies_project_id_fallback(
+            search_response=search_response,
+            params=params,
+            filters=filters,
+            organization_id=org_id,
+            project_id=project_id,
+        )
         hits = search_response.get("hits") or []
         rows = self.typesense_hits_to_company_summary_rows(hits)
         return {"items": rows, "total": search_response.get("found", 0)}
+
+    async def _search_companies_project_id_fallback(
+        self,
+        *,
+        search_response: dict[str, Any],
+        params: dict[str, Any],
+        filters: list[str],
+        organization_id: str,
+        project_id: str | None,
+    ) -> dict[str, Any]:
+        """Retry project search by linked company ids when indexed project_ids miss."""
+        if not project_id or search_response.get("hits"):
+            return search_response
+        company_ids = await self.companies_repo.list_company_ids_for_project(
+            organization_id=organization_id,
+            project_id=project_id,
+        )
+        if not company_ids:
+            return search_response
+        fallback_filters = [part for part in filters if not part.startswith("project_ids:=")]
+        fallback_filters.append(f"id:=[{','.join(company_ids)}]")
+        params["filter_by"] = " && ".join(fallback_filters)
+        return await self.typesense.search(params)

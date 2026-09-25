@@ -923,10 +923,39 @@ class CompaniesRepository(BaseRepository):
             """
             SELECT pc.project_id::text AS project_id
             FROM project_companies pc
+            INNER JOIN companies co
+              ON co.id = pc.company_id
+             AND co.organization_id = pc.organization_id
             WHERE pc.organization_id = $1::uuid
               AND pc.company_id = $2::uuid
+              AND co.status != $3
             """,
             organization_id,
             company_id,
+            ClientStatus.DELETED.value,
         )
         return [str(row["project_id"]) for row in rows if row.get("project_id")]
+
+    async def list_company_ids_for_project(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+    ) -> list[str]:
+        """Return non-deleted company ids linked to a project."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT pc.company_id::text AS company_id
+            FROM project_companies pc
+            INNER JOIN companies co
+              ON co.id = pc.company_id
+             AND co.organization_id = pc.organization_id
+            WHERE pc.organization_id = $1::uuid
+              AND pc.project_id = $2::uuid
+              AND co.status != $3
+            """,
+            organization_id,
+            project_id,
+            ClientStatus.DELETED.value,
+        )
+        return [str(row["company_id"]) for row in rows if row.get("company_id")]

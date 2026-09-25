@@ -540,6 +540,7 @@ async def test_search_companies_filters_by_indexed_project_id():
     typesense.embed_query_text = AsyncMock(return_value=None)
     typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
     svc._typesense = typesense
+    svc.companies_repo.list_company_ids_for_project = AsyncMock(return_value=[])
     project_id = "33333333-3333-3333-3333-333333333333"
 
     await svc.search_companies(
@@ -552,6 +553,7 @@ async def test_search_companies_filters_by_indexed_project_id():
 
     params = typesense.search.await_args.args[0]
     assert f"project_ids:={project_id}" in params["filter_by"]
+    assert f"status:!={ClientStatus.DELETED.value}" in params["filter_by"]
     assert "id:=[" not in params["filter_by"]
 
 
