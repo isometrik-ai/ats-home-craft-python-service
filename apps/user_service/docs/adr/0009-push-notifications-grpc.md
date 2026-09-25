@@ -212,17 +212,17 @@ Feed rows are keyed by the same `tenant_id`, `project_id`, and `user_id` we send
 
 ### Home Craft notification types (integrated)
 
-| `type`                      | `feed_type`  | Events (message key prefix)                                       |
-| --------------------------- | ------------ | ----------------------------------------------------------------- |
-| `NOTIFICATION_TYPE_WALK_IN` | `walk_in`    | `awaiting`, `approved`, `rejected`, `entered`                     |
-| `NOTIFICATION_TYPE_PASS`    | `pass`       | `checked_in`, `checked_out`                                       |
-| `NOTIFICATION_TYPE_PASS`    | `daily_help` | `checked_in`, `checked_out` (daily help pass)                     |
-| `NOTIFICATION_TYPE_TENANT`  | `tenant`     | `submitted`, `document_verified`, `document_rejected`, `approved` |
-| `NOTIFICATION_TYPE_FEE`     | `fee`        | `invoice_issued`, `payment_reminder`                              |
-| `NOTIFICATION_TYPE_MOVE`    | `move`       | `recorded`                                                        |
-| `NOTIFICATION_TYPE_VEHICLE` | `vehicle`    | `submitted`, `approved`, `rejected`                               |
-| `notice_published`          | `notices`    | `published`                                                       |
-| `NOTIFICATION_TYPE_SYSTEM`  | `system`     | *(not wired)*                                                     |
+| `type`                      | `feed_type`        | Events (message key prefix)                                                                                              |
+| --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `NOTIFICATION_TYPE_WALK_IN` | `walk_in`          | `awaiting`, `approved`, `rejected`, `entered`                                                                            |
+| `NOTIFICATION_TYPE_PASS`    | `pass`             | `checked_in`, `checked_out`                                                                                              |
+| `NOTIFICATION_TYPE_PASS`    | `daily_help`       | `checked_in`, `checked_out` (daily help pass)                                                                            |
+| `NOTIFICATION_TYPE_TENANT`  | `tenant`           | `submitted`, `document_verified`, `document_rejected`, `approved`                                                        |
+| `NOTIFICATION_TYPE_FEE`     | `fee`              | `invoice_issued`, `payment_reminder`                                                                                     |
+| `NOTIFICATION_TYPE_MOVE`    | `move`             | `recorded`                                                                                                               |
+| `NOTIFICATION_TYPE_VEHICLE` | `vehicle`          | `submitted`, `approved`, `rejected`                                                                                      |
+| `notice_published`          | `notices`          | `published`                                                                                                              |
+| `NOTIFICATION_TYPE_SYSTEM`  | `facility_booking` | confirmed, submitted, approval_requested, approved, rejected, checked_in, cancelled, rescheduled, no_show, charge_posted |
 
 Full trigger/recipient/API matrix: [push-notifications-flow.md §6](../push-notifications-flow.md#6-integrated-push-notifications-catalog).
 

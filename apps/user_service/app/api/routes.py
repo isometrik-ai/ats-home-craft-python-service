@@ -33,6 +33,12 @@ from apps.user_service.app.api.external_entity_lists import (
     router as external_entity_lists_router,
 )
 from apps.user_service.app.api.external_leads import router as external_leads_router
+from apps.user_service.app.api.facility_booking_admin import (
+    router as facility_booking_admin_router,
+)
+from apps.user_service.app.api.facility_booking_resident import (
+    router as facility_booking_resident_router,
+)
 from apps.user_service.app.api.fee_configuration import (
     router as fee_configuration_router,
 )
@@ -109,6 +115,8 @@ router.include_router(notices_internal_router)
 router.include_router(community_events_router)
 router.include_router(community_events_resident_router)
 router.include_router(community_events_internal_router)
+router.include_router(facility_booking_admin_router)
+router.include_router(facility_booking_resident_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
 router.include_router(walk_ins_router)

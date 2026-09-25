@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from apps.user_service.app.schemas.enums import (
+    FacilityBookingArchetype,
     FacilityLocationType,
     FacilityStatus,
     FacilityType,
@@ -66,6 +67,15 @@ def _service() -> FacilitiesService:
     svc.parking_slots_repo.delete_by_facility = AsyncMock()
     svc.towers_repo = MagicMock()
     svc.towers_repo.get_tower = AsyncMock(return_value={"id": TOWER_ID, "has_wings": True})
+    svc.booking_config_repo = MagicMock()
+    svc.booking_config_repo.insert_config = AsyncMock()
+    svc.booking_config_repo.get_config = AsyncMock(return_value=None)
+    svc.booking_inventory_repo = MagicMock()
+    svc.booking_inventory_repo.insert = AsyncMock()
+    svc.reservations_repo = MagicMock()
+    svc.reservations_repo.count_upcoming_active = AsyncMock(return_value=0)
+    svc.staff_assignments_repo = MagicMock()
+    svc.staff_assignments_repo.remove_facility = AsyncMock()
     return svc
 
 
@@ -179,6 +189,7 @@ async def test_list_facilities_forwards_search_to_repository():
         facility_types=None,
         status=None,
         search="Gym",
+        is_bookable=None,
         page=1,
         page_size=20,
     )
@@ -315,3 +326,46 @@ async def test_complete_facilities_marks_step():
 
     assert result["step_key"] == "facilities"
     svc.setup_service.complete_step.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_bookable_facility_provisions_default_config():
+    """Bookable facilities get a default booking config and unit."""
+    svc = _service()
+    body = _create_body(
+        name="Tennis",
+        facility_type=FacilityType.SPORTS,
+        parking_slots=None,
+        parking_user_type=None,
+        parking_vehicle_category=None,
+        facility_subtype=None,
+        is_bookable=True,
+        booking_archetype=FacilityBookingArchetype.SLOT,
+    )
+    await svc.create_facility(project_id=PROJECT_ID, body=body)
+
+    svc.booking_config_repo.insert_config.assert_awaited_once()
+    svc.booking_inventory_repo.insert.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_parking_facility_cannot_be_bookable():
+    """Parking facilities cannot be marked bookable."""
+    svc = _service()
+    with pytest.raises(ValidationException):
+        await svc.create_facility(
+            project_id=PROJECT_ID,
+            body=_create_body(is_bookable=True, booking_archetype=FacilityBookingArchetype.SLOT),
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_facility_blocked_when_upcoming_reservations_exist():
+    """Upcoming reservations block facility deletion."""
+    svc = _service()
+    svc.reservations_repo.count_upcoming_active = AsyncMock(return_value=2)
+
+    with pytest.raises(ValidationException):
+        await svc.delete_facility(project_id=PROJECT_ID, facility_id=FACILITY_ID)
+
+    svc.facilities_repo.delete_facility.assert_not_awaited()

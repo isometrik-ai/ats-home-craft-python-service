@@ -896,7 +896,7 @@ async def list_contact_units(
     ),
     project_id: str | None = Query(
         default=None,
-        description="When set, requires resident_management.view on the project.",
+        description="When set, requires contacts_management.view on the project.",
     ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),

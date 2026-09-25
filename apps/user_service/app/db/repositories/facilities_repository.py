@@ -13,6 +13,7 @@ _FACILITY_COLUMN_CASTS: dict[str, str] = {
     "parking_user_type": "::parking_user_type",
     "parking_vehicle_category": "::parking_vehicle_category",
     "numbering_pattern": "::unit_numbering_pattern",
+    "booking_archetype": "::facility_booking_archetype",
 }
 
 _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
@@ -40,6 +41,8 @@ _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
     "longitude",
     "active",
     "sort_order",
+    "is_bookable",
+    "booking_archetype",
 )
 
 
@@ -93,6 +96,7 @@ class FacilitiesRepository(BaseRepository):
         facility_types: list[str] | None = None,
         status: str | None = None,
         search: str | None = None,
+        is_bookable: bool | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -118,6 +122,10 @@ class FacilitiesRepository(BaseRepository):
                 conditions.append(f"name ILIKE ${idx}")
                 values.append(f"%{trimmed}%")
                 idx += 1
+        if is_bookable is not None:
+            conditions.append(f"is_bookable = ${idx}")
+            values.append(is_bookable)
+            idx += 1
         where_sql = " AND ".join(conditions)
         total = await self.db_connection.fetchval(
             f"""

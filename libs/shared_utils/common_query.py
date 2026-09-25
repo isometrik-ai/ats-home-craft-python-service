@@ -46,6 +46,12 @@ NOTICES_MANAGEMENT_EDIT = "notices_management.edit"
 COMMUNITY_EVENTS_MANAGEMENT_VIEW = "community_events_management.view"
 COMMUNITY_EVENTS_MANAGEMENT_EDIT = "community_events_management.edit"
 
+FACILITY_BOOKING_MANAGEMENT_VIEW = "facility_booking_management.view"
+FACILITY_BOOKING_MANAGEMENT_CONFIGURE = "facility_booking_management.configure"
+FACILITY_BOOKING_MANAGEMENT_APPROVE = "facility_booking_management.approve"
+FACILITY_BOOKING_MANAGEMENT_OPERATE = "facility_booking_management.operate"
+FACILITY_BOOKING_MANAGEMENT_BILLING = "facility_booking_management.billing"
+
 DAILY_HELP_MANAGEMENT_VIEW = "daily_help_management.view"
 DAILY_HELP_MANAGEMENT_CREATE = "daily_help_management.create"
 DAILY_HELP_MANAGEMENT_UPDATE = "daily_help_management.update"
@@ -451,6 +457,36 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "Edit Community Events",
         "Create and manage community events within assigned projects",
         "community_events",
+    ),
+    (
+        FACILITY_BOOKING_MANAGEMENT_VIEW,
+        "View Facility Bookings",
+        "View bookable facilities, availability and reservations",
+        "facility_booking",
+    ),
+    (
+        FACILITY_BOOKING_MANAGEMENT_CONFIGURE,
+        "Configure Facility Booking",
+        "Configure booking rules, inventory, schedules, closures and staff",
+        "facility_booking",
+    ),
+    (
+        FACILITY_BOOKING_MANAGEMENT_APPROVE,
+        "Approve Facility Bookings",
+        "Approve or reject reservations that need management approval",
+        "facility_booking",
+    ),
+    (
+        FACILITY_BOOKING_MANAGEMENT_OPERATE,
+        "Operate Facility Bookings",
+        "Book for residents, check in, complete, cancel and mark no-shows",
+        "facility_booking",
+    ),
+    (
+        FACILITY_BOOKING_MANAGEMENT_BILLING,
+        "Facility Booking Billing",
+        "Manage facility booking charges, wallets and invoices",
+        "facility_booking",
     ),
     (
         DAILY_HELP_MANAGEMENT_VIEW,

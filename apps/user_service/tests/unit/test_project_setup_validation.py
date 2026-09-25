@@ -148,3 +148,31 @@ def test_validate_facility_numbering_not_applicable_for_non_parking():
                 "numbering_pattern": "sequential",
             }
         )
+
+
+def test_validate_facility_parking_cannot_be_bookable():
+    """Parking facilities cannot be marked bookable."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "parking",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "parking_slots": 10,
+                "parking_user_type": "visitors",
+                "parking_vehicle_category": "four_wheeler",
+                "facility_subtype": "open",
+                "is_bookable": True,
+                "booking_archetype": "slot",
+            }
+        )
+
+
+def test_validate_facility_bookable_defaults_archetype():
+    """Bookable facilities without an archetype get a suggested default."""
+    data = {
+        "facility_type": "sports",
+        "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+        "is_bookable": True,
+    }
+    validate_facility_payload(data)
+    assert data["booking_archetype"] == "slot"

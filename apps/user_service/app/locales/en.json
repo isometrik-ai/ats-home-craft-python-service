@@ -424,6 +424,8 @@
       "facility_parking_subtype_invalid": "Invalid parking subtype. Allowed values: covered, open, basement, stilt, podium, ev_charging.",
       "facility_parking_numbering_not_applicable": "Numbering pattern fields apply only to parking facilities.",
       "facility_starting_slot_number_invalid": "Starting slot number must be at least 1 for parking facilities.",
+      "facility_not_bookable_type": "Parking and utility facilities cannot be marked bookable.",
+      "facility_has_upcoming_bookings": "This facility has upcoming reservations and cannot be changed or deleted.",
       "community_admin_not_org_member": "The selected community admin must be an active member of this organization."
     },
     "success": {
@@ -1023,6 +1025,72 @@
           "body": "{title}"
         }
       },
+      "facility_booking": {
+        "confirmed": {
+          "title": "Booking confirmed",
+          "body": "{facility_label} is confirmed.{charge_text}"
+        },
+        "submitted": {
+          "title": "Submitted for approval",
+          "body": "{facility_label} request is awaiting community approval."
+        },
+        "approval_requested": {
+          "title": "Approval requested",
+          "body": "{host_name} requested {facility_label}."
+        },
+        "approved": {
+          "title": "Booking approved",
+          "body": "{facility_label} booking approved.{deposit_text}"
+        },
+        "rejected": {
+          "title": "Booking rejected",
+          "body": "{facility_label} request was rejected. Reason: {reason}"
+        },
+        "checked_in": {
+          "title": "Checked in",
+          "body": "Enjoy {facility_label}!"
+        },
+        "cancelled": {
+          "title": "Booking cancelled",
+          "body": "{facility_label} cancelled. {summary}"
+        },
+        "cancelled_by_staff": {
+          "title": "Booking cancelled by staff",
+          "body": "{facility_label} booking was cancelled by the community. Reason: {reason}"
+        },
+        "rescheduled": {
+          "title": "Booking rescheduled",
+          "body": "{facility_label} moved to the new time."
+        },
+        "rescheduled_by_staff": {
+          "title": "Booking rescheduled by staff",
+          "body": "{facility_label} was moved to a new time by the community."
+        },
+        "reschedule_submitted": {
+          "title": "Reschedule submitted",
+          "body": "{facility_label} reschedule is awaiting community approval."
+        },
+        "no_show": {
+          "title": "No-show recorded",
+          "body": "{facility_label} marked as no-show. Fee {amount} applied."
+        },
+        "charge_posted": {
+          "title": "Charge posted to your account",
+          "body": "{amount} — {description}. It will appear on your next invoice."
+        },
+        "invoice_generated": {
+          "title": "Invoice generated",
+          "body": "{number} for {amount} is due {due_date}. Pay via wallet, online or at the community office."
+        },
+        "payment_received": {
+          "title": "Payment received",
+          "body": "{number} paid via {method}. Thank you!"
+        },
+        "wallet_updated": {
+          "title": "Wallet updated",
+          "body": "Your wallet was {direction} {amount}: {reason}"
+        }
+      },
       "community_events": {
         "published": {
           "title": "New community event",
@@ -1270,6 +1338,90 @@
       "booking_verified": "Booking verified successfully.",
       "complete_past_completed": "Past events marked as completed.",
       "reminders_sent": "Event reminders sent successfully."
+    }
+  },
+  "facility_booking": {
+    "errors": {
+      "config_not_found": "Booking configuration was not found for this facility.",
+      "config_version_conflict": "This booking configuration was updated by someone else. Reload and try again.",
+      "duplicate_inventory": "A record with the same name or date already exists.",
+      "schedule_overlap": "Schedule periods cannot overlap.",
+      "too_many_units": "This facility has reached the maximum number of bookable units.",
+      "unit_not_found": "Bookable unit not found.",
+      "schedule_not_found": "Schedule period not found.",
+      "block_not_found": "Inventory block not found.",
+      "closure_not_found": "Closure not found.",
+      "maintenance_not_found": "Maintenance window not found.",
+      "invalid_date_range": "End date must be on or after the start date.",
+      "project_member_not_found": "Project member not found.",
+      "assignment_not_found": "Staff assignment not found.",
+      "project_not_accessible": "You do not have access to this community.",
+      "facility_not_assigned": "You are not assigned to operate this facility.",
+      "host_unit_not_accessible": "The selected flat is not available for this resident.",
+      "host_not_in_project": "The selected resident is not part of this community.",
+      "facility_not_bookable": "This facility is not accepting bookings.",
+      "invalid_draft": "This booking cannot be made for the selected time.",
+      "invalid_transition": "This action is not allowed for the current reservation status.",
+      "reservation_not_found": "Reservation not found.",
+      "reservation_not_accessible": "You do not have access to this reservation.",
+      "reschedule_not_allowed": "This reservation can no longer be rescheduled.",
+      "invalid_charge_amount": "Charge amount must be greater than zero.",
+      "invalid_topup_method": "Wallet top-up must be collected as cash or online.",
+      "payment_method_disabled": "This payment method is currently disabled.",
+      "wallet_credit_exceeded": "This payment would exceed the wallet credit limit.",
+      "invoice_not_found": "Invoice not found.",
+      "invoice_not_accessible": "You do not have access to this invoice.",
+      "invoice_already_paid": "This invoice is already paid."
+    },
+    "success": {
+      "facilities_retrieved": "Bookable facilities retrieved successfully.",
+      "config_retrieved": "Facility booking setup retrieved successfully.",
+      "config_updated": "Facility booking setup saved successfully.",
+      "unit_created": "Bookable unit created successfully.",
+      "unit_updated": "Bookable unit updated successfully.",
+      "unit_deleted": "Bookable unit deleted successfully.",
+      "schedule_created": "Schedule period created successfully.",
+      "schedule_updated": "Schedule period updated successfully.",
+      "schedule_deleted": "Schedule period deleted successfully.",
+      "block_created": "Inventory block created successfully.",
+      "block_deleted": "Inventory block deleted successfully.",
+      "closure_created": "Closure created successfully.",
+      "closure_deleted": "Closure deleted successfully.",
+      "maintenance_created": "Maintenance window created successfully.",
+      "maintenance_deleted": "Maintenance window deleted successfully.",
+      "availability_retrieved": "Availability retrieved successfully.",
+      "usage_retrieved": "Weekly usage retrieved successfully.",
+      "quote_retrieved": "Booking quote retrieved successfully.",
+      "draft_validated": "Booking draft validated successfully.",
+      "reservation_created": "Reservation created successfully.",
+      "reservations_retrieved": "Reservations retrieved successfully.",
+      "reservation_retrieved": "Reservation retrieved successfully.",
+      "reservation_approved": "Reservation approved successfully.",
+      "reservation_rejected": "Reservation rejected successfully.",
+      "reservation_checked_in": "Guest checked in successfully.",
+      "reservation_completed": "Reservation completed successfully.",
+      "reservation_no_show": "Reservation marked as no-show.",
+      "reservation_cancelled": "Reservation cancelled successfully.",
+      "reservation_rescheduled": "Reservation rescheduled successfully.",
+      "cancel_quote_retrieved": "Cancellation preview retrieved successfully.",
+      "note_added": "Note added successfully.",
+      "assignments_retrieved": "Staff assignments retrieved successfully.",
+      "assignment_saved": "Staff assignment saved successfully.",
+      "assignment_deleted": "Staff assignment deleted successfully.",
+      "settings_retrieved": "Booking settings retrieved successfully.",
+      "settings_updated": "Booking settings updated successfully.",
+      "ledger_retrieved": "Booking ledger retrieved successfully.",
+      "unbilled_retrieved": "Unbilled booking charges retrieved successfully.",
+      "charge_posted": "Charge posted to the resident account.",
+      "payments_overview_retrieved": "Booking payments overview retrieved successfully.",
+      "invoices_retrieved": "Booking invoices retrieved successfully.",
+      "invoices_generated": "Booking invoices generated successfully.",
+      "invoice_retrieved": "Booking invoice retrieved successfully.",
+      "invoice_paid": "Invoice payment recorded successfully.",
+      "wallet_retrieved": "Wallet retrieved successfully.",
+      "wallet_topped_up": "Wallet topped up successfully.",
+      "wallet_adjusted": "Wallet updated successfully.",
+      "wallet_limit_updated": "Wallet credit limit updated successfully."
     }
   }
 }

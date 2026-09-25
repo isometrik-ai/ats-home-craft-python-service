@@ -706,9 +706,9 @@ async def ensure_crm_or_resident_project_access(
     edit: bool = False,
     request: Request | None = None,
 ) -> UserContext:
-    """Use resident_management on a project scope; org CRM permissions when project_id is omitted."""
+    """Use project contacts_management when scoped; org CRM permissions when project_id is omitted."""
     if project_id:
-        permission_codes = RESIDENT_MANAGEMENT_EDIT if edit else RESIDENT_MANAGEMENT_VIEW
+        permission_codes = CONTACTS_MANAGEMENT_EDIT if edit else CONTACTS_MANAGEMENT_VIEW
         return await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
@@ -773,7 +773,7 @@ async def ensure_resident_or_crm_contact_access(
     edit: bool = False,
     request: Request | None = None,
 ) -> UserContext:
-    """Prefer unit-scoped resident access, then project-scoped, then org CRM permissions."""
+    """Prefer unit-scoped resident access, then project resident, then org CRM permissions."""
     if unit_id:
         return await ensure_resident_access_for_unit(
             current_user=current_user,
@@ -782,11 +782,20 @@ async def ensure_resident_or_crm_contact_access(
             edit=edit,
             request=request,
         )
-    return await ensure_crm_or_resident_project_access(
+    if project_id:
+        permission_codes = RESIDENT_MANAGEMENT_EDIT if edit else RESIDENT_MANAGEMENT_VIEW
+        return await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=permission_codes,
+            request=request,
+        )
+    permission_codes = CONTACTS_MANAGEMENT_EDIT if edit else CONTACTS_MANAGEMENT_VIEW
+    return await check_permissions(
         current_user=current_user,
         db_connection=db_connection,
-        project_id=project_id,
-        edit=edit,
+        permission_codes=permission_codes,
         request=request,
     )
 

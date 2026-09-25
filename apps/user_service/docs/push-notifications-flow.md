@@ -288,16 +288,17 @@ ______________________________________________________________________
 
 ### 6.1 Summary
 
-| Feature          | Events | gRPC `type` / `feed_type`                                                               | Primary API / trigger                  |
-| ---------------- | ------ | --------------------------------------------------------------------------------------- | -------------------------------------- |
-| Walk-in          | 4      | `NOTIFICATION_TYPE_WALK_IN` / `walk_in`                                                 | `walk_ins.py`, `walk_ins_owner.py`     |
-| Visitor pass     | 2      | `NOTIFICATION_TYPE_PASS` / `pass`                                                       | `gate_passes.py`                       |
-| Daily help       | 6      | `NOTIFICATION_TYPE_DAILY_HELP` / `daily_help` (review); `NOTIFICATION_TYPE_PASS` (gate) | `daily_help.py`, `gate_passes.py`      |
-| Tenant request   | 4      | `NOTIFICATION_TYPE_TENANT` / `tenant`                                                   | `tenant_requests.py`, owner create API |
-| Fee invoice      | 2      | `NOTIFICATION_TYPE_FEE` / `fee`                                                         | `fee_invoices.py`, reminder job        |
-| Move event       | 1      | `NOTIFICATION_TYPE_MOVE` / `move`                                                       | `move_events.py`                       |
-| Vehicle          | 3      | `NOTIFICATION_TYPE_VEHICLE` / `vehicle`                                                 | contact onboarding / admin review APIs |
-| Community notice | 1      | `notice_published` / `notices`                                                          | `notices.py`, scheduled publish job    |
+| Feature          | Events | gRPC `type` / `feed_type`                                                               | Primary API / trigger                                       |
+| ---------------- | ------ | --------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Walk-in          | 4      | `NOTIFICATION_TYPE_WALK_IN` / `walk_in`                                                 | `walk_ins.py`, `walk_ins_owner.py`                          |
+| Visitor pass     | 2      | `NOTIFICATION_TYPE_PASS` / `pass`                                                       | `gate_passes.py`                                            |
+| Daily help       | 6      | `NOTIFICATION_TYPE_DAILY_HELP` / `daily_help` (review); `NOTIFICATION_TYPE_PASS` (gate) | `daily_help.py`, `gate_passes.py`                           |
+| Tenant request   | 4      | `NOTIFICATION_TYPE_TENANT` / `tenant`                                                   | `tenant_requests.py`, owner create API                      |
+| Fee invoice      | 2      | `NOTIFICATION_TYPE_FEE` / `fee`                                                         | `fee_invoices.py`, reminder job                             |
+| Move event       | 1      | `NOTIFICATION_TYPE_MOVE` / `move`                                                       | `move_events.py`                                            |
+| Vehicle          | 3      | `NOTIFICATION_TYPE_VEHICLE` / `vehicle`                                                 | contact onboarding / admin review APIs                      |
+| Community notice | 1      | `notice_published` / `notices`                                                          | `notices.py`, scheduled publish job                         |
+| Facility booking | 15     | `NOTIFICATION_TYPE_SYSTEM` / `facility_booking`                                         | `facility_booking_admin.py`, `facility_booking_resident.py` |
 
 ### 6.2 Dispatch helpers (`PushNotificationDispatcher`)
 

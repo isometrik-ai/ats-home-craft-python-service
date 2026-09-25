@@ -1435,8 +1435,9 @@ async def test_list_facilities(monkeypatch, client):
         search=None,
         page=1,
         page_size=20,
+        is_bookable=None,
     ):
-        del _self, project_id, status, search, page, page_size
+        del _self, project_id, status, search, page, page_size, is_bookable
         assert facility_types == ["sports", "events"]
         return {"items": [_FAKE_FACILITY], "total": 1}
 
@@ -1469,8 +1470,9 @@ async def test_list_facilities_accepts_comma_separated_types(monkeypatch, client
         search=None,
         page=1,
         page_size=20,
+        is_bookable=None,
     ):
-        del _self, project_id, status, page, page_size
+        del _self, project_id, status, page, page_size, is_bookable
         captured["facility_types"] = facility_types
         return {"items": [_FAKE_FACILITY], "total": 1}
 
@@ -1503,8 +1505,9 @@ async def test_list_facilities_with_search(monkeypatch, client):
         search=None,
         page=1,
         page_size=20,
+        is_bookable=None,
     ):
-        del _self, project_id, facility_types, status, page, page_size
+        del _self, project_id, facility_types, status, page, page_size, is_bookable
         captured["search"] = search
         return {"items": [_FAKE_FACILITY], "total": 1}
 
@@ -1538,8 +1541,9 @@ async def test_list_facilities_search_trims_whitespace(monkeypatch, client):
         search=None,
         page=1,
         page_size=20,
+        is_bookable=None,
     ):
-        del _self, project_id, facility_types, status, page, page_size
+        del _self, project_id, facility_types, status, page, page_size, is_bookable
         captured["search"] = search
         return {"items": [_FAKE_FACILITY], "total": 1}
 
@@ -1572,11 +1576,13 @@ async def test_list_facilities_search_with_status_and_types(monkeypatch, client)
         search=None,
         page=1,
         page_size=20,
+        is_bookable=None,
     ):
         del _self, project_id, page, page_size
         captured["facility_types"] = facility_types
         captured["status"] = status
         captured["search"] = search
+        captured["is_bookable"] = is_bookable
         return {"items": [_FAKE_FACILITY], "total": 1}
 
     monkeypatch.setattr(
@@ -1596,6 +1602,42 @@ async def test_list_facilities_search_with_status_and_types(monkeypatch, client)
     assert captured["search"] == "club"
     assert captured["status"] == "active"
     assert captured["facility_types"] == ["recreation"]
+    assert captured["is_bookable"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_facilities_forwards_is_bookable(monkeypatch, client):
+    """GET facilities forwards is_bookable to the service."""
+
+    _patch_projects_access(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    async def fake_list_facilities(
+        _self,
+        *,
+        project_id: str,
+        facility_types=None,
+        status=None,
+        search=None,
+        page=1,
+        page_size=20,
+        is_bookable=None,
+    ):
+        del _self, project_id, facility_types, status, search, page, page_size
+        captured["is_bookable"] = is_bookable
+        return {"items": [_FAKE_FACILITY], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.facilities_service.FacilitiesService.list_facilities",
+        fake_list_facilities,
+    )
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/facilities",
+        params={"is_bookable": "true"},
+    )
+    assert_success(res, 200)
+    assert captured["is_bookable"] is True
 
 
 @pytest.mark.asyncio

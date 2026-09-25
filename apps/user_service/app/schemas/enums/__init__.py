@@ -7,6 +7,7 @@ from apps.user_service.app.schemas.enums.auth_org import *
 from apps.user_service.app.schemas.enums.billing_notices import *
 from apps.user_service.app.schemas.enums.community_events import *
 from apps.user_service.app.schemas.enums.crm import *
+from apps.user_service.app.schemas.enums.facility_booking import *
 from apps.user_service.app.schemas.enums.pets import *
 from apps.user_service.app.schemas.enums.project_fields import *
 from apps.user_service.app.schemas.enums.property import *
@@ -227,4 +228,30 @@ __all__ = [
     "PetVaccinationStatus",
     "PetGender",
     "PetStatus",
+    "FacilityBookingArchetype",
+    "FacilityReservationStatus",
+    "FacilityReservationEventType",
+    "FacilityReservationActorType",
+    "FacilityParticipantKind",
+    "FacilityRateUnit",
+    "FacilityPriceMode",
+    "FacilityMembershipMode",
+    "FacilityReservationListTab",
+    "FacilityBookingLedgerType",
+    "FacilityBookingInvoiceStatus",
+    "FacilityBookingInvoiceFrequency",
+    "FacilityBookingPaymentMethod",
+    "FacilityBookingWalletTxnType",
+    "UNBILLED_LEDGER_TYPES",
+    "INVOICEABLE_LEDGER_TYPES",
+    "INVOICE_FREQUENCY_DAYS",
+    "LEDGER_ACTIVITY_LABELS",
+    "ACTIVE_RESERVATION_STATUSES",
+    "WEEKLY_CAP_COUNTABLE_STATUSES",
+    "NON_BOOKABLE_FACILITY_TYPES",
+    "FACILITY_BOOKING_MAX_UNITS",
+    "FACILITY_BOOKING_MAX_PARTICIPANTS",
+    "FACILITY_BOOKING_MAX_RANGE_DAYS",
+    "FACILITY_BOOKING_MONTH_VIEW_DAYS",
+    "FACILITY_BOOKING_POLICY_DOCUMENT_MAX_BYTES",
 ]
