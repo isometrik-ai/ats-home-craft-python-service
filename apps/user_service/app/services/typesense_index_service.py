@@ -581,6 +581,10 @@ async def _build_company_document(
     )
     if not details:
         return None
+    project_ids = await companies_repo.list_project_ids_for_company(
+        organization_id=organization_id,
+        company_id=company_id,
+    )
 
     (
         contacts,
@@ -609,6 +613,7 @@ async def _build_company_document(
     document: dict[str, Any] = {
         "id": str(details["id"]),
         "organization_id": str(details["organization_id"]),
+        "project_ids": project_ids or None,
         "status": details.get("status"),
         "name": details.get("name") or "",
         "industry": details.get("industry") or None,

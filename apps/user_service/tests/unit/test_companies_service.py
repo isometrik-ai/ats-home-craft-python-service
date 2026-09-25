@@ -77,9 +77,15 @@ class _FakeCompaniesRepo:
         del company_id, organization_id
         return self.details
 
-    async def get_company_for_update(self, *, company_id: str, organization_id: str):
+    async def get_company_for_update(
+        self,
+        *,
+        company_id: str,
+        organization_id: str,
+        project_id: str | None = None,
+    ):
         """Return locked company row for update flows."""
-        del company_id, organization_id
+        del company_id, organization_id, project_id
         return self.for_update
 
     async def update_company(self, **kwargs):
@@ -524,6 +530,29 @@ async def test_search_companies():
 
     assert result["total"] == 1
     assert result["items"][0]["name"] == "Acme Corp"
+
+
+@pytest.mark.asyncio
+async def test_search_companies_filters_by_indexed_project_id():
+    """Project search uses the indexed project_ids field, not an id list."""
+    svc = _service()
+    typesense = MagicMock()
+    typesense.embed_query_text = AsyncMock(return_value=None)
+    typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
+    svc._typesense = typesense
+    project_id = "33333333-3333-3333-3333-333333333333"
+
+    await svc.search_companies(
+        query="acme",
+        page=1,
+        page_size=10,
+        status=None,
+        project_id=project_id,
+    )
+
+    params = typesense.search.await_args.args[0]
+    assert f"project_ids:={project_id}" in params["filter_by"]
+    assert "id:=[" not in params["filter_by"]
 
 
 @pytest.mark.asyncio

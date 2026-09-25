@@ -9,6 +9,7 @@ COMPANIES_COLLECTION_SCHEMA: dict[str, Any] = {
     "fields": [
         {"name": "id", "type": "string"},
         {"name": "organization_id", "type": "string", "facet": True},
+        {"name": "project_ids", "type": "string[]", "facet": True, "optional": True},
         {"name": "status", "type": "string", "facet": True},
         {"name": "name", "type": "string"},
         {"name": "industry", "type": "string", "facet": True, "optional": True},
@@ -76,7 +77,7 @@ COMPANY_SEARCH_PARAMS: dict[str, Any] = {
     "sort_by": "_text_match:desc,updated_at:desc",
     "facet_by": (
         "status,tags,industry,preferred_communication_channels,"
-        "address_countries,address_states,address_cities"
+        "address_countries,address_states,address_cities,project_ids"
     ),
     "max_facet_values": 25,
 }

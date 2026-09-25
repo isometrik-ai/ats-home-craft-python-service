@@ -1247,11 +1247,11 @@ class CompaniesService:
         project_id: str | None = None,
     ) -> dict[str, Any]:
         """Soft-delete a company (sets status='deleted') via the same DB update path as PATCH."""
-        await self._require_company_in_project(company_id=company_id, project_id=project_id)
         org_id = self.user_context.organization_id
         current = await self.companies_repo.get_company_for_update(
             company_id=company_id,
             organization_id=org_id,
+            project_id=project_id,
         )
         if not current:
             raise NotFoundException(
@@ -1262,6 +1262,7 @@ class CompaniesService:
             company_id=company_id,
             organization_id=org_id,
             update_data={"status": ClientStatus.DELETED.value},
+            project_id=project_id,
         )
         if not updated:
             raise NotFoundException(
@@ -1285,11 +1286,11 @@ class CompaniesService:
         - `custom_fields` uses the same merge/validation logic as v1.
         - `addresses` are stored in `company_addresses` table, updated via delta ops.
         """
-        await self._require_company_in_project(company_id=company_id, project_id=project_id)
         org_id = self.user_context.organization_id
         current_raw = await self.companies_repo.get_company_for_update(
             company_id=company_id,
             organization_id=org_id,
+            project_id=project_id,
         )
         if not current_raw:
             raise NotFoundException(
@@ -1304,7 +1305,13 @@ class CompaniesService:
             company_id=company_id,
             organization_id=org_id,
             update_data=update_data,
+            project_id=project_id,
         )
+        if update_data and updated_row is None:
+            raise NotFoundException(
+                message_key="companies.errors.company_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
         # Derive the post-update snapshot in-memory (no extra DB read).
         new_snapshot: dict[str, Any] = dict(current)
         if isinstance(updated_row, dict):
@@ -1468,6 +1475,7 @@ class CompaniesService:
         company_id: str,
         organization_id: str,
         update_data: dict[str, Any],
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Update a company if there are changes to persist."""
         if not update_data:
@@ -1476,6 +1484,7 @@ class CompaniesService:
             company_id=company_id,
             organization_id=organization_id,
             update_data=update_data,
+            project_id=project_id,
         )
 
     async def _maybe_apply_contacts_update_delta(
@@ -1856,13 +1865,7 @@ class CompaniesService:
         if status:
             filters.append(f"status:={status}")
         if project_id:
-            company_ids = await self.companies_repo.list_company_ids_for_project(
-                organization_id=org_id,
-                project_id=project_id,
-            )
-            if not company_ids:
-                return {"items": [], "total": 0}
-            filters.append(f"id:=[{','.join(company_ids)}]")
+            filters.append(f"project_ids:={project_id}")
         filter_by = " && ".join(filters)
 
         query_text = query.strip()

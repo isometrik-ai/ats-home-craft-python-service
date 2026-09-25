@@ -273,6 +273,7 @@ class TypesenseCompanyDocument(BaseModel):
 
     id: str
     organization_id: str
+    project_ids: list[str] | None = None
     status: str | None = None
     name: str
 

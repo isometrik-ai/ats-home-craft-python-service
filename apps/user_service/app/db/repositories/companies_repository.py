@@ -418,12 +418,36 @@ class CompaniesRepository(BaseRepository):
             "contact_found": bool(fetched_row.get("contact_found")),
         }
 
-    async def get_company_for_update(self, *, company_id: str, organization_id: str) -> dict | None:
+    async def get_company_for_update(
+        self,
+        *,
+        company_id: str,
+        organization_id: str,
+        project_id: str | None = None,
+    ) -> dict | None:
         """Get a company for update (DB-shaped details + `FOR UPDATE` lock).
 
         Returns the same shape as `get_company_details` (contacts/leads/addresses included),
-        while locking the `companies` row for consistency in update flows.
+        while locking the `companies` row for consistency in update flows. When ``project_id``
+        is set, the matching ``project_companies`` row is locked in the same transaction so an
+        unlink cannot commit before the following write.
         """
+        if project_id:
+            linked = await self.db_connection.fetchval(
+                """
+                SELECT pc.id
+                FROM project_companies pc
+                WHERE pc.organization_id = $1::uuid
+                  AND pc.project_id = $2::uuid
+                  AND pc.company_id = $3::uuid
+                FOR UPDATE
+                """,
+                organization_id,
+                project_id,
+                company_id,
+            )
+            if linked is None:
+                return None
         fetched_row = await self.db_connection.fetchrow(
             """
             SELECT
@@ -546,19 +570,32 @@ class CompaniesRepository(BaseRepository):
         company_id: str,
         organization_id: str,
         update_data: dict[str, Any],
+        project_id: str | None = None,
     ) -> dict | None:
         """Update scalar and JSONB columns on a company and return the updated row."""
         id_param = len(update_data) + 1
         org_param = len(update_data) + 2
         status_param = len(update_data) + 3
+        where_sql = (
+            f"WHERE id = ${id_param}::uuid "
+            f"AND organization_id = ${org_param}::uuid "
+            f"AND status != ${status_param}"
+        )
+        where_params: list[Any] = [company_id, organization_id, ClientStatus.DELETED.value]
+        if project_id:
+            project_param = status_param + 1
+            where_sql += (
+                f" AND EXISTS ("
+                f"SELECT 1 FROM project_companies pc "
+                f"WHERE pc.company_id = companies.id "
+                f"AND pc.organization_id = companies.organization_id "
+                f"AND pc.project_id = ${project_param}::uuid)"
+            )
+            where_params.append(project_id)
         return await self.update_returning(
             table="companies",
-            where_sql=(
-                f"WHERE id = ${id_param}::uuid "
-                f"AND organization_id = ${org_param}::uuid "
-                f"AND status != ${status_param}"
-            ),
-            where_params=[company_id, organization_id, ClientStatus.DELETED.value],
+            where_sql=where_sql,
+            where_params=where_params,
             update_data=update_data,
             jsonb_columns=COMPANY_JSONB_COLUMNS,
             touch_updated_at=True,
@@ -875,26 +912,21 @@ class CompaniesRepository(BaseRepository):
         )
         return linked is not None
 
-    async def list_company_ids_for_project(
+    async def list_project_ids_for_company(
         self,
         *,
         organization_id: str,
-        project_id: str,
+        company_id: str,
     ) -> list[str]:
-        """Return non-deleted company ids linked to a project."""
+        """Return project ids linked to a company, for search indexing."""
         rows = await self.db_connection.fetch(
             """
-            SELECT pc.company_id::text AS company_id
+            SELECT pc.project_id::text AS project_id
             FROM project_companies pc
-            INNER JOIN companies co
-              ON co.id = pc.company_id
-             AND co.organization_id = pc.organization_id
             WHERE pc.organization_id = $1::uuid
-              AND pc.project_id = $2::uuid
-              AND co.status != $3
+              AND pc.company_id = $2::uuid
             """,
             organization_id,
-            project_id,
-            ClientStatus.DELETED.value,
+            company_id,
         )
-        return [str(row["company_id"]) for row in rows if row.get("company_id")]
+        return [str(row["project_id"]) for row in rows if row.get("project_id")]
