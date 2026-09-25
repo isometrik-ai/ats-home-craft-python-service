@@ -734,6 +734,7 @@ class CompaniesRepository(BaseRepository):
         search: str | None,
         status: str | None,
         dropdown_filters: dict[str, list[str]] | None = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -749,6 +750,18 @@ class CompaniesRepository(BaseRepository):
         if search:
             where.append(f"COALESCE(co.name,'') ILIKE ${next_param_index}")
             args.append(f"%{search.strip()}%")
+            next_param_index += 1
+        if project_id:
+            where.append(
+                f"""EXISTS (
+                  SELECT 1
+                  FROM project_companies pc
+                  WHERE pc.organization_id = co.organization_id
+                    AND pc.company_id = co.id
+                    AND pc.project_id = ${next_param_index}::uuid
+                )"""
+            )
+            args.append(project_id)
             next_param_index += 1
 
         if dropdown_filters:
@@ -815,3 +828,73 @@ class CompaniesRepository(BaseRepository):
         )
         company_rows = [dict(company_row) for company_row in rows]
         return company_rows, int(total or 0)
+
+    async def link_company_to_project(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        company_id: str,
+    ) -> None:
+        """Associate a company with a project. Existing links are left unchanged."""
+        await self.db_connection.execute(
+            """
+            INSERT INTO project_companies (organization_id, project_id, company_id)
+            VALUES ($1::uuid, $2::uuid, $3::uuid)
+            ON CONFLICT (project_id, company_id) DO NOTHING
+            """,
+            organization_id,
+            project_id,
+            company_id,
+        )
+
+    async def company_linked_to_project(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        company_id: str,
+    ) -> bool:
+        """Return whether the company is linked to the project in this organization."""
+        linked = await self.db_connection.fetchval(
+            """
+            SELECT 1
+            FROM project_companies pc
+            INNER JOIN companies co
+              ON co.id = pc.company_id
+             AND co.organization_id = pc.organization_id
+            WHERE pc.organization_id = $1::uuid
+              AND pc.project_id = $2::uuid
+              AND pc.company_id = $3::uuid
+              AND co.status != $4
+            """,
+            organization_id,
+            project_id,
+            company_id,
+            ClientStatus.DELETED.value,
+        )
+        return linked is not None
+
+    async def list_company_ids_for_project(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+    ) -> list[str]:
+        """Return non-deleted company ids linked to a project."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT pc.company_id::text AS company_id
+            FROM project_companies pc
+            INNER JOIN companies co
+              ON co.id = pc.company_id
+             AND co.organization_id = pc.organization_id
+            WHERE pc.organization_id = $1::uuid
+              AND pc.project_id = $2::uuid
+              AND co.status != $3
+            """,
+            organization_id,
+            project_id,
+            ClientStatus.DELETED.value,
+        )
+        return [str(row["company_id"]) for row in rows if row.get("company_id")]

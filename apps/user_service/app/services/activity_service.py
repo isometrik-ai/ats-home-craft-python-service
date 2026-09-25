@@ -238,6 +238,7 @@ class ActivityService:
         self,
         *,
         company_id: str,
+        project_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -252,6 +253,7 @@ class ActivityService:
             organization_id=self.user_context.organization_id,
             table_name="companies",
             record_id=company_id,
+            project_id=project_id,
             limit=limit,
             offset=offset,
         )

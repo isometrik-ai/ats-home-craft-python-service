@@ -56,7 +56,7 @@ async def test_create_company(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_create_company(_self, body):
+    async def fake_create_company(_self, body, *, project_id=None):
         del _self
         assert body.name == "Acme Corp"
         return {
@@ -128,8 +128,10 @@ async def test_list_companies(monkeypatch, client):
         dropdown_filters=None,
         page=1,
         page_size=20,
+        project_id=None,
     ):
         del _self, search, status, dropdown_filters
+        assert project_id == PROJECT_ID
         assert page == 1
         assert page_size == 20
         return {"items": [_FAKE_COMPANY_SUMMARY], "total": 1}
@@ -179,7 +181,7 @@ async def test_get_company_details(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, project_id=None):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
@@ -202,7 +204,7 @@ async def test_update_company(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_update_company(_self, *, company_id: str, body):
+    async def fake_update_company(_self, *, company_id: str, body, project_id=None):
         del _self
         assert company_id == COMPANY_ID
         assert body.name == "Updated Corp"
@@ -243,7 +245,7 @@ async def test_delete_company(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_soft_delete(_self, *, company_id: str):
+    async def fake_soft_delete(_self, *, company_id: str, project_id=None):
         del _self
         assert company_id == COMPANY_ID
         return {
@@ -282,7 +284,7 @@ async def test_create_company_with_lead(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_create_company(_self, body):
+    async def fake_create_company(_self, body, *, project_id=None):
         del _self, body
         return {
             "company_id": COMPANY_ID,
@@ -343,12 +345,14 @@ async def test_get_company_activity(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, project_id=None):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
 
-    async def fake_get_activity(_self, *, company_id: str, limit: int, offset: int):
+    async def fake_get_activity(
+        _self, *, company_id: str, limit: int, offset: int, project_id=None
+    ):
         del _self, company_id, limit, offset
         return ([{"action": "UPDATE"}], 1)
 
@@ -372,12 +376,14 @@ async def test_get_company_activity_empty_with_total(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, project_id=None):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
 
-    async def fake_get_activity(_self, *, company_id: str, limit: int, offset: int):
+    async def fake_get_activity(
+        _self, *, company_id: str, limit: int, offset: int, project_id=None
+    ):
         del _self, company_id, limit, offset
         return ([], 5)
 
@@ -405,12 +411,14 @@ async def test_get_company_activity_empty_no_data(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, project_id=None):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
 
-    async def fake_get_activity(_self, *, company_id: str, limit: int, offset: int):
+    async def fake_get_activity(
+        _self, *, company_id: str, limit: int, offset: int, project_id=None
+    ):
         del _self, company_id, limit, offset
         return ([], 0)
 
@@ -481,7 +489,7 @@ async def test_enrich_company(monkeypatch, client):
         lambda: None,
     )
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, project_id=None):
         del _self
         assert company_id == COMPANY_ID
         return {
@@ -528,7 +536,7 @@ async def test_update_company_with_contact_association(monkeypatch, client):
 
     patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_update_company(_self, *, company_id: str, body):
+    async def fake_update_company(_self, *, company_id: str, body, project_id=None):
         del _self, body
         assert company_id == COMPANY_ID
         return {

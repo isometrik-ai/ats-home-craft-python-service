@@ -147,7 +147,7 @@ async def create_company(
             supabase_client=sb_client,
         )
         event_service = EventService(db_connection=db_connection)
-        result = await service.create_company(body)
+        result = await service.create_company(body, project_id=project_id)
         company_id = result["company_id"]
         request.state.audit_requested_id = str(company_id)
         request.state.audit_description = f"Created company: {company_id}"
@@ -231,6 +231,7 @@ async def list_companies(
         dropdown_filters=dropdown_filters,
         page=body.page,
         page_size=body.page_size,
+        project_id=project_id,
     )
     items = [
         CompanySummaryResponse.model_validate(summary_row).model_dump(
@@ -296,11 +297,12 @@ async def get_company_activity(
 
     # Ensure company exists (and org-scoped) before returning activity.
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
-    await service.get_company_details(company_id=company_id)
+    await service.get_company_details(company_id=company_id, project_id=project_id)
 
     activity_service = ActivityService(user_context=user_context, db_connection=db_connection)
     items, total = await activity_service.get_company_activity(
         company_id=company_id,
+        project_id=project_id,
         limit=page_size,
         offset=(page - 1) * page_size,
     )
@@ -386,6 +388,7 @@ async def search_companies(
         page=page,
         page_size=page_size,
         status=status.value if status else None,
+        project_id=project_id,
     )
     items = [
         CompanySummaryResponse.model_validate(summary_row).model_dump(
@@ -453,7 +456,7 @@ async def get_company_details(
         request=request,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
-    details = await service.get_company_details(company_id=company_id)
+    details = await service.get_company_details(company_id=company_id, project_id=project_id)
     details = CompanyDetailsResponse.model_validate(details).model_dump(exclude_none=True)
     return success_response(
         request=request,
@@ -515,7 +518,7 @@ async def enrich_company(
         organization_id = user_context.organization_id
 
         service = CompaniesService(db_connection=db_connection, user_context=user_context)
-        details = await service.get_company_details(company_id=company_id)
+        details = await service.get_company_details(company_id=company_id, project_id=project_id)
 
         addresses_payload: list[dict[str, Any]] = []
         raw_addresses = details.get("addresses") or []
@@ -646,7 +649,11 @@ async def update_company(
             "user_email": user_context.email,
             "organization_id": user_context.organization_id,
         }
-        result = await service.update_company(company_id=company_id, body=body)
+        result = await service.update_company(
+            company_id=company_id,
+            body=body,
+            project_id=project_id,
+        )
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = result.get("new_data")
@@ -781,7 +788,10 @@ async def delete_company(
             "user_email": user_context.email,
             "organization_id": user_context.organization_id,
         }
-        deleted = await service.soft_delete_company(company_id=company_id)
+        deleted = await service.soft_delete_company(
+            company_id=company_id,
+            project_id=project_id,
+        )
         request.state.raw_audit_old_data = deleted.get("old_data")
         request.state.raw_audit_new_data = deleted.get("new_data")
         event = await event_service.create_lifecycle_event(

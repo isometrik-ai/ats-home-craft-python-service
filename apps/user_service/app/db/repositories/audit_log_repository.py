@@ -314,6 +314,7 @@ class AuditLogRepository:
         organization_id: str,
         table_name: str,
         record_id: str,
+        project_id: str | None = None,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -325,12 +326,22 @@ class AuditLogRepository:
         ``SELECT`` omits ``COUNT(*) OVER ()`` so PostgreSQL does not evaluate joins/window over
         every matching row before ``LIMIT``—only the requested page is fully joined.
         """
-        count_query = """
+        project_clause = ""
+        query_args: list[Any] = [organization_id, table_name, record_id]
+        limit_index = 4
+        if project_id:
+            project_clause = " AND al.project_id = $4::uuid"
+            query_args.append(project_id)
+            limit_index = 5
+        offset_index = limit_index + 1
+        status_index = offset_index + 1
+        count_query = f"""
             SELECT COUNT(*)::int AS total
             FROM audit_logs al
             WHERE al.organization_id = $1
               AND al.table_name = $2
               AND al.record_id = $3
+              {project_clause}
         """
         page_query = f"""
             SELECT
@@ -366,7 +377,7 @@ class AuditLogRepository:
             LEFT JOIN organization_members om
                 ON om.user_id = al.user_id
                AND om.organization_id = al.organization_id
-               AND om.status != $6
+               AND om.status != ${status_index}
             LEFT JOIN lead_stages old_ls
                 ON old_ls.organization_id = al.organization_id
                AND old_ls.id = NULLIF(al.old_values->'data'->>'stage_id', '')::uuid
@@ -380,24 +391,16 @@ class AuditLogRepository:
             WHERE al.organization_id = $1
               AND al.table_name = $2
               AND al.record_id = $3
+              {project_clause}
             ORDER BY al.timestamp DESC, al.id DESC
-            LIMIT $4 OFFSET $5
+            LIMIT ${limit_index} OFFSET ${offset_index}
         """
         # Same connection: run sequentially (asyncpg does not allow concurrent commands).
-        count_row = await self.db_connection.fetchrow(
-            count_query,
-            organization_id,
-            table_name,
-            record_id,
-        )
+        count_row = await self.db_connection.fetchrow(count_query, *query_args)
+        page_args = [*query_args, limit, offset, OrganizationMemberStatus.DELETED.value]
         rows = await self.db_connection.fetch(
             page_query,
-            organization_id,
-            table_name,
-            record_id,
-            limit,
-            offset,
-            OrganizationMemberStatus.DELETED.value,
+            *page_args,
         )
         total = int((count_row or {}).get("total") or 0)
         if not rows:

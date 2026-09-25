@@ -468,7 +468,28 @@ class CompaniesService:
             body=body,
         )
 
-    async def create_company(self, body: CreateCompanyRequest) -> dict[str, Any]:
+    async def _require_company_in_project(self, *, company_id: str, project_id: str | None) -> None:
+        """Reject company operations that are outside the authorized project."""
+        if not project_id:
+            return
+        org_id = self.user_context.organization_id
+        linked = await self.companies_repo.company_linked_to_project(
+            organization_id=org_id,
+            project_id=project_id,
+            company_id=company_id,
+        )
+        if not linked:
+            raise NotFoundException(
+                message_key="companies.errors.company_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def create_company(
+        self,
+        body: CreateCompanyRequest,
+        *,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
         """Create a company (ADR section 2).
 
         Supports:
@@ -642,6 +663,13 @@ class CompaniesService:
             )
         else:
             created_lead_id = None
+
+        if project_id:
+            await self.companies_repo.link_company_to_project(
+                organization_id=org_id,
+                project_id=project_id,
+                company_id=company_id,
+            )
 
         return {
             "company_id": company_id,
@@ -1136,8 +1164,14 @@ class CompaniesService:
             await self.contacts_repo.create_contact_addresses(address_rows)
         return contact_id, dict(contact_row)
 
-    async def get_company_details(self, *, company_id: str) -> dict[str, Any]:
+    async def get_company_details(
+        self,
+        *,
+        company_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
         """Return company details with member contacts (list shape) and addresses."""
+        await self._require_company_in_project(company_id=company_id, project_id=project_id)
         org_id = self.user_context.organization_id
         details = await self.companies_repo.get_company_details(
             company_id=company_id,
@@ -1179,6 +1213,7 @@ class CompaniesService:
         search: str | None,
         status: str | None,
         dropdown_filters: Any = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> dict[str, Any]:
@@ -1197,6 +1232,7 @@ class CompaniesService:
             search=search,
             status=status,
             dropdown_filters=parsed_filters,
+            project_id=project_id,
             page=page,
             page_size=page_size,
         )
@@ -1204,8 +1240,14 @@ class CompaniesService:
             self._normalize_company_list_row(list_row)
         return {"items": rows, "total": total}
 
-    async def soft_delete_company(self, *, company_id: str) -> dict[str, Any]:
+    async def soft_delete_company(
+        self,
+        *,
+        company_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
         """Soft-delete a company (sets status='deleted') via the same DB update path as PATCH."""
+        await self._require_company_in_project(company_id=company_id, project_id=project_id)
         org_id = self.user_context.organization_id
         current = await self.companies_repo.get_company_for_update(
             company_id=company_id,
@@ -1233,6 +1275,7 @@ class CompaniesService:
         *,
         company_id: str,
         body: UpdateCompanyRequest,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Patch a company (scalar fields + JSONB lists + addresses table).
 
@@ -1242,6 +1285,7 @@ class CompaniesService:
         - `custom_fields` uses the same merge/validation logic as v1.
         - `addresses` are stored in `company_addresses` table, updated via delta ops.
         """
+        await self._require_company_in_project(company_id=company_id, project_id=project_id)
         org_id = self.user_context.organization_id
         current_raw = await self.companies_repo.get_company_for_update(
             company_id=company_id,
@@ -1804,12 +1848,21 @@ class CompaniesService:
         page: int,
         page_size: int,
         status: str | None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Search companies via Typesense (companies collection)."""
         org_id = self.user_context.organization_id
         filters = [f"organization_id:={org_id}"]
         if status:
             filters.append(f"status:={status}")
+        if project_id:
+            company_ids = await self.companies_repo.list_company_ids_for_project(
+                organization_id=org_id,
+                project_id=project_id,
+            )
+            if not company_ids:
+                return {"items": [], "total": 0}
+            filters.append(f"id:=[{','.join(company_ids)}]")
         filter_by = " && ".join(filters)
 
         query_text = query.strip()
