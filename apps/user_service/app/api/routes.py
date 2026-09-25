@@ -161,7 +161,7 @@ async def api_status():
             "/custom-fields",
             "/projects",
             "/maintenance-fees",
-            "/companies",
+            "/projects/{project_id}/companies",
             "/leads",
             "/lead-stages",
             "/dashboard",

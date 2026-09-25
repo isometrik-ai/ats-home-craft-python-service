@@ -40,7 +40,7 @@ from apps.user_service.app.services.typesense_index_service import (
     delete_company_background,
 )
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    ensure_staff_project_access,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -53,7 +53,7 @@ from libs.shared_utils.common_query import (
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
-router = APIRouter(prefix="/companies", tags=["Companies"])
+router = APIRouter(prefix="/projects", tags=["Companies"])
 
 CLIENT_KAFKA_TOPICS: list[KafkaTopics] = [KafkaTopics.CRM_EVENTS]
 
@@ -69,7 +69,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 
 @handle_api_exceptions("create company")
 @router.post(
-    "",
+    "/{project_id}/companies",
     status_code=http_status.HTTP_201_CREATED,
     summary="Create a company",
     description=(
@@ -98,6 +98,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 async def create_company(
     request: Request,
     background_tasks: BackgroundTasks,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
@@ -110,6 +111,7 @@ async def create_company(
     Args:
         request: FastAPI request (audit context).
         background_tasks: Schedules events, indexing, and enrichment.
+        project_id: Project identifier (UUID string).
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
         sb_client: Supabase client for auth-related operations when needed.
@@ -123,12 +125,15 @@ async def create_company(
     lead_created_event: dict | None = None
     lead_event_key: str | None = None
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_CREATE,
+            request=request,
         )
         request.state.audit_table = "companies"
+        request.state.audit_project_id = project_id
         request.state.audit_description = "Created company"
         request.state.audit_risk_level = "high"
         request.state.audit_user_context = {
@@ -196,7 +201,7 @@ async def create_company(
 
 @handle_api_exceptions("list companies")
 @router.post(
-    "/list",
+    "/{project_id}/companies/list",
     status_code=http_status.HTTP_200_OK,
     summary="List companies (database)",
     responses=COMMON_ERROR_RESPONSES,
@@ -204,15 +209,18 @@ async def create_company(
 @limiter.limit("100/minute")
 async def list_companies(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     body: ListCompaniesRequest = Body(...),
 ):
     """List companies from PostgreSQL with pagination."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
 
@@ -257,7 +265,7 @@ async def list_companies(
 
 @handle_api_exceptions("get company activity")
 @router.get(
-    "/activity/{company_id}/",
+    "/{project_id}/companies/activity/{company_id}/",
     status_code=http_status.HTTP_200_OK,
     description=(
         "Activity feed for a company. `page` / `page_size` paginate (newest first). "
@@ -270,6 +278,7 @@ async def list_companies(
 @limiter.limit("100/minute")
 async def get_company_activity(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     company_id: str = Path(..., description="Company identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -277,10 +286,12 @@ async def get_company_activity(
     page_size: int = Query(20, ge=1, le=100, description="Audit log rows per page"),
 ):
     """Get activity for a company (offset pagination)."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
 
     # Ensure company exists (and org-scoped) before returning activity.
@@ -331,7 +342,7 @@ async def get_company_activity(
 
 @handle_api_exceptions("search companies")
 @router.get(
-    "/search",
+    "/{project_id}/companies/search",
     status_code=http_status.HTTP_200_OK,
     summary="Search companies (Typesense)",
     responses=COMMON_ERROR_RESPONSES,
@@ -339,6 +350,7 @@ async def get_company_activity(
 @limiter.limit("100/minute")
 async def search_companies(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     query: str = Query(..., min_length=2),
@@ -350,6 +362,7 @@ async def search_companies(
 
     Args:
         request: FastAPI request.
+        project_id: Project identifier (UUID string).
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
         query: Search text (min 2 characters).
@@ -360,10 +373,12 @@ async def search_companies(
     Returns:
         Paginated list response with company summaries from Typesense.
     """
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
     result = await service.search_companies(
@@ -405,7 +420,7 @@ async def search_companies(
 
 @handle_api_exceptions("get company details")
 @router.get(
-    "/{company_id}",
+    "/{project_id}/companies/{company_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Get company details",
     responses=COMMON_ERROR_RESPONSES,
@@ -413,6 +428,7 @@ async def search_companies(
 @limiter.limit("100/minute")
 async def get_company_details(
     request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     company_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -421,6 +437,7 @@ async def get_company_details(
 
     Args:
         request: FastAPI request.
+        project_id: Project identifier (UUID string).
         company_id: Company identifier.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
@@ -428,10 +445,12 @@ async def get_company_details(
     Returns:
         Success response with company detail payload.
     """
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
     details = await service.get_company_details(company_id=company_id)
@@ -447,7 +466,7 @@ async def get_company_details(
 
 @handle_api_exceptions("enrich company")
 @router.post(
-    "/{company_id}/enrich",
+    "/{project_id}/companies/{company_id}/enrich",
     status_code=http_status.HTTP_202_ACCEPTED,
     summary="Trigger company enrichment",
     description="Triggers enrichment for a company using the latest persisted data.",
@@ -464,6 +483,7 @@ async def get_company_details(
 async def enrich_company(
     request: Request,
     background_tasks: BackgroundTasks,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     company_id: str = Path(..., description="Company identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -471,6 +491,7 @@ async def enrich_company(
     """Trigger enrichment for a company (best-effort async)."""
     require_client_enrichment_enabled()
     request.state.audit_table = "companies"
+    request.state.audit_project_id = project_id
     request.state.audit_requested_id = company_id
     request.state.audit_description = f"Triggered enrichment for company: {company_id}"
     request.state.audit_risk_level = "medium"
@@ -479,10 +500,12 @@ async def enrich_company(
     organization_id: str | None = None
     payload_data: dict[str, Any] = {}
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_EDIT,
+            request=request,
         )
         request.state.audit_user_context = {
             "user_id": user_context.user_id,
@@ -550,7 +573,7 @@ async def enrich_company(
 
 @handle_api_exceptions("update company")
 @router.patch(
-    "/{company_id}",
+    "/{project_id}/companies/{company_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Update a company",
     description=(
@@ -575,6 +598,7 @@ async def enrich_company(
 async def update_company(
     request: Request,
     background_tasks: BackgroundTasks,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     company_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -586,6 +610,7 @@ async def update_company(
     Args:
         request: FastAPI request (audit context).
         background_tasks: Schedules events and Typesense re-indexing.
+        project_id: Project identifier (UUID string).
         company_id: Company identifier.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
@@ -598,10 +623,12 @@ async def update_company(
     update_event: dict | None = None
     related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_EDIT,
+            request=request,
         )
         service = CompaniesService(
             db_connection=db_connection,
@@ -610,6 +637,7 @@ async def update_company(
         )
         event_service = EventService(db_connection=db_connection)
         request.state.audit_table = "companies"
+        request.state.audit_project_id = project_id
         request.state.audit_requested_id = company_id
         request.state.audit_description = f"Updated company: {company_id}"
         request.state.audit_risk_level = "medium"
@@ -698,7 +726,7 @@ async def update_company(
 
 @handle_api_exceptions("delete company")
 @router.delete(
-    "/{company_id}",
+    "/{project_id}/companies/{company_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Delete a company (soft delete)",
     responses=COMMON_ERROR_RESPONSES,
@@ -714,6 +742,7 @@ async def update_company(
 async def delete_company(
     request: Request,
     background_tasks: BackgroundTasks,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
     company_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -723,6 +752,7 @@ async def delete_company(
     Args:
         request: FastAPI request (audit context).
         background_tasks: Schedules Kafka publish and Typesense de-index.
+        project_id: Project identifier (UUID string).
         company_id: Company identifier.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
@@ -732,14 +762,17 @@ async def delete_company(
     """
     event: dict | None = None
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_DELETE,
+            request=request,
         )
         service = CompaniesService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
         request.state.audit_table = "companies"
+        request.state.audit_project_id = project_id
         request.state.audit_requested_id = company_id
         request.state.audit_description = f"Deleted company: {company_id}"
         request.state.audit_risk_level = "high"
