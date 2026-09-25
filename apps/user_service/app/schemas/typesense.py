@@ -286,6 +286,7 @@ class TypesenseCompanyDocument(BaseModel):
     contact_emails: list[str] | None = None
     contact_phone_numbers: list[str] | None = None
     tags: list[str] | None = None
+    project_ids: list[str] | None = None
 
     description: str | None = None
     target_market_segments: list[str] | None = None

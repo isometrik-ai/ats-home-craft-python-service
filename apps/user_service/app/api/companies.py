@@ -40,7 +40,7 @@ from apps.user_service.app.services.typesense_index_service import (
     delete_company_background,
 )
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    ensure_staff_project_access_optional,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -65,6 +65,14 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     429: {"description": "Too many requests (rate limited)."},
     500: {"description": "Internal server error."},
 }
+
+OPTIONAL_PROJECT_ID_QUERY = Query(
+    None,
+    description=(
+        "Optional project scope (UUID string). When set, enforces project-scoped "
+        "companies_management permissions and filters or validates via project_companies."
+    ),
+)
 
 
 @handle_api_exceptions("create company")
@@ -102,6 +110,7 @@ async def create_company(
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
     body: CreateCompanyRequest = Body(...),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """Create a company.
 
@@ -114,6 +123,8 @@ async def create_company(
         current_user: Authenticated user claims from JWT.
         sb_client: Supabase client for auth-related operations when needed.
         body: Company create payload.
+        project_id: Optional project scope (UUID string); links the company via
+            project_companies when set.
 
     Returns:
         Created response envelope (201).
@@ -123,10 +134,12 @@ async def create_company(
     lead_created_event: dict | None = None
     lead_event_key: str | None = None
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access_optional(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_CREATE,
+            request=request,
         )
         request.state.audit_table = "companies"
         request.state.audit_description = "Created company"
@@ -142,7 +155,7 @@ async def create_company(
             supabase_client=sb_client,
         )
         event_service = EventService(db_connection=db_connection)
-        result = await service.create_company(body)
+        result = await service.create_company(body, project_id=project_id)
         company_id = result["company_id"]
         request.state.audit_requested_id = str(company_id)
         request.state.audit_description = f"Created company: {company_id}"
@@ -207,12 +220,15 @@ async def list_companies(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
     body: ListCompaniesRequest = Body(...),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """List companies from PostgreSQL with pagination."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
 
@@ -221,6 +237,7 @@ async def list_companies(
         search=body.search,
         status=body.status.value if body.status else None,
         dropdown_filters=dropdown_filters,
+        project_id=project_id,
         page=body.page,
         page_size=body.page_size,
     )
@@ -275,17 +292,20 @@ async def get_company_activity(
     current_user: dict = Depends(get_user_from_auth),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Audit log rows per page"),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """Get activity for a company (offset pagination)."""
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
 
     # Ensure company exists (and org-scoped) before returning activity.
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
-    await service.get_company_details(company_id=company_id)
+    await service.get_company_details(company_id=company_id, project_id=project_id)
 
     activity_service = ActivityService(user_context=user_context, db_connection=db_connection)
     items, total = await activity_service.get_company_activity(
@@ -345,6 +365,7 @@ async def search_companies(
     status: ClientStatus | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """Search companies via Typesense (companies collection).
 
@@ -356,14 +377,17 @@ async def search_companies(
         status: Optional status filter.
         page: 1-based page index.
         page_size: Page size (max 100).
+        project_id: Optional project filter — companies linked via project_companies.
 
     Returns:
         Paginated list response with company summaries from Typesense.
     """
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
     result = await service.search_companies(
@@ -371,6 +395,7 @@ async def search_companies(
         page=page,
         page_size=page_size,
         status=status.value if status else None,
+        project_id=project_id,
     )
     items = [
         CompanySummaryResponse.model_validate(summary_row).model_dump(
@@ -416,6 +441,7 @@ async def get_company_details(
     company_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """Get company details including linked contacts and addresses.
 
@@ -424,17 +450,20 @@ async def get_company_details(
         company_id: Company identifier.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
+        project_id: Optional project scope; requires a project_companies link when set.
 
     Returns:
         Success response with company detail payload.
     """
-    user_context = await check_permissions(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
+        project_id=project_id,
         permission_codes=COMPANIES_MANAGEMENT_VIEW,
+        request=request,
     )
     service = CompaniesService(db_connection=db_connection, user_context=user_context)
-    details = await service.get_company_details(company_id=company_id)
+    details = await service.get_company_details(company_id=company_id, project_id=project_id)
     details = CompanyDetailsResponse.model_validate(details).model_dump(exclude_none=True)
     return success_response(
         request=request,
@@ -467,6 +496,7 @@ async def enrich_company(
     company_id: str = Path(..., description="Company identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """Trigger enrichment for a company (best-effort async)."""
     require_client_enrichment_enabled()
@@ -479,10 +509,12 @@ async def enrich_company(
     organization_id: str | None = None
     payload_data: dict[str, Any] = {}
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access_optional(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_EDIT,
+            request=request,
         )
         request.state.audit_user_context = {
             "user_id": user_context.user_id,
@@ -492,7 +524,10 @@ async def enrich_company(
         organization_id = user_context.organization_id
 
         service = CompaniesService(db_connection=db_connection, user_context=user_context)
-        details = await service.get_company_details(company_id=company_id)
+        details = await service.get_company_details(
+            company_id=company_id,
+            project_id=project_id,
+        )
 
         addresses_payload: list[dict[str, Any]] = []
         raw_addresses = details.get("addresses") or []
@@ -580,6 +615,7 @@ async def update_company(
     current_user: dict = Depends(get_user_from_auth),
     sb_client: AsyncClient = Depends(supabase_service),
     body: UpdateCompanyRequest = Body(...),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """Patch company fields, nested data, and optional contact associations.
 
@@ -591,6 +627,7 @@ async def update_company(
         current_user: Authenticated user claims from JWT.
         sb_client: Supabase client.
         body: Partial update payload.
+        project_id: Optional project scope; requires a project_companies link when set.
 
     Returns:
         Success response envelope.
@@ -598,10 +635,12 @@ async def update_company(
     update_event: dict | None = None
     related_lifecycle_events: list[tuple[dict[str, Any], str]] = []
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access_optional(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_EDIT,
+            request=request,
         )
         service = CompaniesService(
             db_connection=db_connection,
@@ -618,7 +657,11 @@ async def update_company(
             "user_email": user_context.email,
             "organization_id": user_context.organization_id,
         }
-        result = await service.update_company(company_id=company_id, body=body)
+        result = await service.update_company(
+            company_id=company_id,
+            body=body,
+            project_id=project_id,
+        )
         changed_fields = list(body.model_dump(exclude_unset=True, exclude_none=True).keys())
         request.state.raw_audit_old_data = result.get("old_data")
         request.state.raw_audit_new_data = result.get("new_data")
@@ -717,6 +760,7 @@ async def delete_company(
     company_id: str = Path(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
 ):
     """Soft-delete a company.
 
@@ -726,16 +770,19 @@ async def delete_company(
         company_id: Company identifier.
         db_connection: PostgreSQL connection (request-scoped).
         current_user: Authenticated user claims from JWT.
+        project_id: Optional project scope; requires a project_companies link when set.
 
     Returns:
         Success response envelope.
     """
     event: dict | None = None
     async with db_connection.transaction():
-        user_context = await check_permissions(
+        user_context = await ensure_staff_project_access_optional(
             current_user=current_user,
             db_connection=db_connection,
+            project_id=project_id,
             permission_codes=COMPANIES_MANAGEMENT_DELETE,
+            request=request,
         )
         service = CompaniesService(db_connection=db_connection, user_context=user_context)
         event_service = EventService(db_connection=db_connection)
@@ -748,7 +795,10 @@ async def delete_company(
             "user_email": user_context.email,
             "organization_id": user_context.organization_id,
         }
-        deleted = await service.soft_delete_company(company_id=company_id)
+        deleted = await service.soft_delete_company(
+            company_id=company_id,
+            project_id=project_id,
+        )
         request.state.raw_audit_old_data = deleted.get("old_data")
         request.state.raw_audit_new_data = deleted.get("new_data")
         event = await event_service.create_lifecycle_event(
