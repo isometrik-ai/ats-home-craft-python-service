@@ -378,6 +378,22 @@ async def test_ratings():
     assert summary["trait_counts"]["punctual"] == 1
 
     conn.row = {
+        "rating_count": 1,
+        "average_stars": Decimal("4.00"),
+        "review_count": 0,
+        "star_distribution": '{"4": 1}',
+        "category_averages": '{"punctuality": 4.0}',
+        "trait_counts": '{"very_punctual": 1}',
+    }
+    summary_from_json_strings = await repo.get_rating_summary(
+        organization_id=ORG,
+        profile_id=PROFILE,
+    )
+    assert summary_from_json_strings["star_distribution"]["4"] == 1
+    assert summary_from_json_strings["category_averages"]["punctuality"] == 4.0
+    assert summary_from_json_strings["trait_counts"]["very_punctual"] == 1
+
+    conn.row = {
         "rating_count": 0,
         "average_stars": Decimal("0"),
         "review_count": 0,
