@@ -5,12 +5,40 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from pydantic import BaseModel
+
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.db.repositories.facility_booking_config_repository import (
     decode_jsonb,
 )
+from apps.user_service.app.schemas.facility_booking_inventory import (
+    BookingUnitResponse,
+    ClosureResponse,
+    MaintenanceWindowResponse,
+    SchedulePeriodResponse,
+    SlotBlockResponse,
+)
 
 _SCHEDULE_JSONB: frozenset[str] = frozenset({"hours"})
+_INVENTORY_UUID_COLUMNS: frozenset[str] = frozenset(
+    {
+        "organization_id",
+        "project_id",
+        "facility_id",
+        "unit_id",
+        "created_by_user_id",
+    }
+)
+_INVENTORY_DATE_COLUMNS: frozenset[str] = frozenset(
+    {"starts_on", "ends_on", "closed_on", "on_date"}
+)
+_RESPONSE_MODELS: dict[str, type[BaseModel]] = {
+    "facility_booking_units": BookingUnitResponse,
+    "facility_schedule_periods": SchedulePeriodResponse,
+    "facility_slot_blocks": SlotBlockResponse,
+    "facility_closures": ClosureResponse,
+    "facility_maintenance_windows": MaintenanceWindowResponse,
+}
 
 # table -> (insert columns, order by)
 _TABLES: dict[str, tuple[list[str], str]] = {
@@ -59,6 +87,14 @@ class FacilityBookingInventoryRepository(BaseRepository):
             return decode_jsonb(row, _SCHEDULE_JSONB)
         return row
 
+    def _serialize_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
+        """Normalize DB row types to the API response shape."""
+        decoded = self._decode(table, dict(row))
+        model = _RESPONSE_MODELS.get(table)
+        if model is None:
+            return decoded
+        return model.model_validate(decoded).model_dump(mode="json")
+
     async def insert(
         self,
         table: str,
@@ -82,8 +118,10 @@ class FacilityBookingInventoryRepository(BaseRepository):
                 }
             ],
             jsonb_columns=_SCHEDULE_JSONB,
+            uuid_columns=_INVENTORY_UUID_COLUMNS,
+            date_columns=_INVENTORY_DATE_COLUMNS,
         )
-        return self._decode(table, rows[0])
+        return self._serialize_row(table, rows[0])
 
     async def list_rows(
         self,
@@ -117,7 +155,9 @@ class FacilityBookingInventoryRepository(BaseRepository):
             organization_id,
             facility_id,
         )
-        return self._decode(table, dict(row)) if row else None
+        if not row:
+            return None
+        return self._serialize_row(table, row)
 
     async def update(
         self,
@@ -139,7 +179,9 @@ class FacilityBookingInventoryRepository(BaseRepository):
             update_data=update_data,
             jsonb_columns=_SCHEDULE_JSONB,
         )
-        return self._decode(table, row) if row else None
+        if not row:
+            return None
+        return self._serialize_row(table, row)
 
     async def delete(
         self, table: str, *, organization_id: str, facility_id: str, row_id: str

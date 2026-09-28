@@ -30,6 +30,24 @@ def _row_columns_present(rows: Iterable[dict[str, Any]], columns: Iterable[str])
     return [c for c in allowed if c in present]
 
 
+def _insert_placeholder(
+    param_index: int,
+    column: str,
+    *,
+    jsonb_columns: frozenset[str],
+    uuid_columns: frozenset[str],
+    date_columns: frozenset[str],
+) -> str:
+    """Build a typed INSERT placeholder for PostgreSQL."""
+    if column in jsonb_columns:
+        return f"${param_index}::jsonb"
+    if column in uuid_columns:
+        return f"${param_index}::uuid"
+    if column in date_columns:
+        return f"${param_index}::date"
+    return f"${param_index}"
+
+
 def rows_with_default_address_data(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Coerce missing/null ``address_data`` to ``{}`` for NOT NULL jsonb columns."""
     normalized: list[dict[str, Any]] = []
@@ -55,6 +73,8 @@ class BaseRepository:
         optional_columns: list[str],
         rows: list[dict[str, Any]],
         jsonb_columns: frozenset[str] = frozenset(),
+        uuid_columns: frozenset[str] = frozenset(),
+        date_columns: frozenset[str] = frozenset(),
         on_conflict_sql: str | None = None,
     ) -> list[dict[str, Any]]:
         """Insert many rows in one statement and RETURNING *.
@@ -66,10 +86,19 @@ class BaseRepository:
 
         columns = list(required_columns) + _row_columns_present(rows, optional_columns)
         ncols = len(columns)
-        placeholders = [
-            "(" + ", ".join(f"${i * ncols + j + 1}" for j in range(ncols)) + ")"
-            for i in range(len(rows))
-        ]
+        placeholders = []
+        for i in range(len(rows)):
+            typed = [
+                _insert_placeholder(
+                    i * ncols + j + 1,
+                    columns[j],
+                    jsonb_columns=jsonb_columns,
+                    uuid_columns=uuid_columns,
+                    date_columns=date_columns,
+                )
+                for j in range(ncols)
+            ]
+            placeholders.append("(" + ", ".join(typed) + ")")
 
         values_flat: list[Any] = []
         for row in rows:
