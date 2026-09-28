@@ -35,14 +35,18 @@ from apps.user_service.app.services.lead_service import LeadService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     handle_api_exceptions,
+    user_has_any_permission,
 )
-from libs.shared_middleware.jwt_auth import check_user_access_async, get_user_from_auth
+from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
     LEADS_MANAGEMENT_CREATE,
     LEADS_MANAGEMENT_DELETE,
     LEADS_MANAGEMENT_EDIT,
     LEADS_MANAGEMENT_VIEW,
     LEADS_MANAGEMENT_VIEW_SYSTEM,
+)
+from libs.shared_utils.project_permission_aliases import (
+    expand_org_ceiling_permission_codes,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -173,11 +177,11 @@ async def get_lead_activity(
         permission_codes=LEADS_MANAGEMENT_VIEW,
     )
 
-    can_view_system_leads = await check_user_access_async(
-        permission_code=[LEADS_MANAGEMENT_VIEW_SYSTEM],
-        user_id=user_context.user_id,
-        organization_id=user_context.organization_id,
+    can_view_system_leads = await user_has_any_permission(
+        permission_codes=expand_org_ceiling_permission_codes([LEADS_MANAGEMENT_VIEW_SYSTEM]),
+        user_context=user_context,
         db_connection=db_connection,
+        organization_id=user_context.organization_id,
     )
     effective_owner_id = None if can_view_system_leads else user_context.user_id
 
@@ -260,11 +264,11 @@ async def list_leads(
         permission_codes=LEADS_MANAGEMENT_VIEW,
     )
 
-    can_view_system_leads = await check_user_access_async(
-        permission_code=[LEADS_MANAGEMENT_VIEW_SYSTEM],
-        user_id=user_context.user_id,
-        organization_id=user_context.organization_id,
+    can_view_system_leads = await user_has_any_permission(
+        permission_codes=expand_org_ceiling_permission_codes([LEADS_MANAGEMENT_VIEW_SYSTEM]),
+        user_context=user_context,
         db_connection=db_connection,
+        organization_id=user_context.organization_id,
     )
     effective_owner_id = body.owner_id if can_view_system_leads else user_context.user_id
 
@@ -341,11 +345,11 @@ async def get_lead(
         permission_codes=LEADS_MANAGEMENT_VIEW,
     )
 
-    can_view_system_leads = await check_user_access_async(
-        permission_code=[LEADS_MANAGEMENT_VIEW_SYSTEM],
-        user_id=user_context.user_id,
-        organization_id=user_context.organization_id,
+    can_view_system_leads = await user_has_any_permission(
+        permission_codes=expand_org_ceiling_permission_codes([LEADS_MANAGEMENT_VIEW_SYSTEM]),
+        user_context=user_context,
         db_connection=db_connection,
+        organization_id=user_context.organization_id,
     )
     effective_owner_id = None if can_view_system_leads else user_context.user_id
 
