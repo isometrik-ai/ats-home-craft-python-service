@@ -36,7 +36,7 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "clubhouse_golden.json"
 
 @cache
 def _fixture() -> dict:
-    return json.loads(FIXTURE_PATH.read_text())
+    return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
 def _d(value: str | None) -> date | None:

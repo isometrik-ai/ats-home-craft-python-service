@@ -603,6 +603,10 @@ async def _build_company_document(
     )
     key_people_names = _extract_company_key_people_names(details)
     product_names = _extract_company_product_names(details)
+    project_ids = await companies_repo.list_company_project_ids(
+        company_id=company_id,
+        organization_id=organization_id,
+    )
 
     created_at, updated_at = _extract_created_updated(details)
 
@@ -621,6 +625,7 @@ async def _build_company_document(
         "contact_emails": contact_emails or None,
         "contact_phone_numbers": contact_phone_numbers or None,
         "tags": details.get("tags") or [],
+        "project_ids": project_ids or None,
         "description": details.get("description") or "",
         "target_market_segments": details.get("target_market_segments") or [],
         "current_tech_stack": details.get("current_tech_stack") or [],

@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import (
+    patch_ensure_staff_project_access_optional,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 
 COMPANY_ID = "company-1"
@@ -50,9 +52,9 @@ _FAKE_COMPANY_DETAILS = {
 async def test_create_company(monkeypatch, client):
     """POST /companies creates a company."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_create_company(_self, body):
+    async def fake_create_company(_self, body, **kwargs):
         del _self
         assert body.name == "Acme Corp"
         return {
@@ -114,7 +116,7 @@ async def test_create_company(monkeypatch, client):
 async def test_list_companies(monkeypatch, client):
     """POST /companies/list returns paginated companies."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
     async def fake_list_companies(
         _self,
@@ -122,10 +124,11 @@ async def test_list_companies(monkeypatch, client):
         search=None,
         status=None,
         dropdown_filters=None,
+        project_id=None,
         page=1,
         page_size=20,
     ):
-        del _self, search, status, dropdown_filters
+        del _self, search, status, dropdown_filters, project_id
         assert page == 1
         assert page_size == 20
         return {"items": [_FAKE_COMPANY_SUMMARY], "total": 1}
@@ -149,7 +152,7 @@ async def test_list_companies(monkeypatch, client):
 async def test_list_companies_empty(monkeypatch, client):
     """POST /companies/list returns empty collection."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
     async def fake_list_companies(_self, **kwargs):
         del _self, kwargs
@@ -173,9 +176,9 @@ async def test_list_companies_empty(monkeypatch, client):
 async def test_get_company_details(monkeypatch, client):
     """GET /companies/{company_id} returns company details."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, **kwargs):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
@@ -196,9 +199,9 @@ async def test_get_company_details(monkeypatch, client):
 async def test_update_company(monkeypatch, client):
     """PATCH /companies/{company_id} updates a company."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_update_company(_self, *, company_id: str, body):
+    async def fake_update_company(_self, *, company_id: str, body, **kwargs):
         del _self
         assert company_id == COMPANY_ID
         assert body.name == "Updated Corp"
@@ -237,9 +240,9 @@ async def test_update_company(monkeypatch, client):
 async def test_delete_company(monkeypatch, client):
     """DELETE /companies/{company_id} soft-deletes a company."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_soft_delete(_self, *, company_id: str):
+    async def fake_soft_delete(_self, *, company_id: str, **kwargs):
         del _self
         assert company_id == COMPANY_ID
         return {
@@ -276,9 +279,9 @@ async def test_delete_company(monkeypatch, client):
 async def test_create_company_with_lead(monkeypatch, client):
     """POST /companies publishes lead lifecycle event when a lead is created."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_create_company(_self, body):
+    async def fake_create_company(_self, body, **kwargs):
         del _self, body
         return {
             "company_id": COMPANY_ID,
@@ -337,9 +340,9 @@ async def test_create_company_with_lead(monkeypatch, client):
 async def test_get_company_activity(monkeypatch, client):
     """GET /companies/activity/{id}/ returns audit activity."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, **kwargs):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
@@ -366,9 +369,9 @@ async def test_get_company_activity(monkeypatch, client):
 async def test_get_company_activity_empty_with_total(monkeypatch, client):
     """GET /companies/activity/{id}/ handles empty page with non-zero total."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, **kwargs):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
@@ -399,9 +402,9 @@ async def test_get_company_activity_empty_with_total(monkeypatch, client):
 async def test_get_company_activity_empty_no_data(monkeypatch, client):
     """GET /companies/activity/{id}/ returns no_data when total is zero."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, **kwargs):
         del _self
         assert company_id == COMPANY_ID
         return _FAKE_COMPANY_DETAILS
@@ -429,7 +432,7 @@ async def test_get_company_activity_empty_no_data(monkeypatch, client):
 async def test_search_companies(monkeypatch, client):
     """GET /companies/search returns Typesense hits."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
     async def fake_search_companies(_self, **kwargs):
         del _self, kwargs
@@ -450,7 +453,7 @@ async def test_search_companies(monkeypatch, client):
 async def test_search_companies_empty(monkeypatch, client):
     """GET /companies/search returns empty collection."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
     async def fake_search_companies(_self, **kwargs):
         del _self, kwargs
@@ -471,13 +474,13 @@ async def test_search_companies_empty(monkeypatch, client):
 async def test_enrich_company(monkeypatch, client):
     """POST /companies/{id}/enrich triggers enrichment."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
     monkeypatch.setattr(
         "apps.user_service.app.api.companies.require_client_enrichment_enabled",
         lambda: None,
     )
 
-    async def fake_get_company_details(_self, *, company_id: str):
+    async def fake_get_company_details(_self, *, company_id: str, **kwargs):
         del _self
         assert company_id == COMPANY_ID
         return {
@@ -522,9 +525,9 @@ async def test_enrich_company(monkeypatch, client):
 async def test_update_company_with_contact_association(monkeypatch, client):
     """PATCH /companies/{id} emits contact association lifecycle events."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.companies")
+    patch_ensure_staff_project_access_optional(monkeypatch, "apps.user_service.app.api.companies")
 
-    async def fake_update_company(_self, *, company_id: str, body):
+    async def fake_update_company(_self, *, company_id: str, body, **kwargs):
         del _self, body
         assert company_id == COMPANY_ID
         return {

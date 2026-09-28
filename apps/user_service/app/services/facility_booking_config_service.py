@@ -7,7 +7,11 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import asyncpg
-from asyncpg import UniqueViolationError
+from asyncpg import (
+    CheckViolationError,
+    ForeignKeyViolationError,
+    UniqueViolationError,
+)
 
 from apps.user_service.app.db.repositories.facility_booking_config_repository import (
     FacilityBookingConfigRepository,
@@ -294,6 +298,21 @@ class FacilityBookingConfigService:
             raise ConflictException(
                 message_key="facility_booking.errors.schedule_overlap",
                 custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        except ForeignKeyViolationError as exc:
+            if "created_by_user_id" in str(exc):
+                raise ValidationException(
+                    message_key="facility_booking.errors.invalid_actor_reference",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                ) from exc
+            raise ValidationException(
+                message_key="facility_booking.errors.inventory_reference_invalid",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            ) from exc
+        except CheckViolationError as exc:
+            raise ValidationException(
+                message_key="facility_booking.errors.inventory_constraint_violation",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
             ) from exc
 
     async def create_unit(
