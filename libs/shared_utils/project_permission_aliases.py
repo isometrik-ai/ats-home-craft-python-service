@@ -205,6 +205,7 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
 
     if permission_code in {
         VISITOR_MANAGEMENT_VIEW,
+        VISITOR_MANAGEMENT_VERIFY,
         NOTICES_MANAGEMENT_VIEW,
         COMMUNITY_EVENTS_MANAGEMENT_VIEW,
         FACILITY_BOOKING_MANAGEMENT_VIEW,

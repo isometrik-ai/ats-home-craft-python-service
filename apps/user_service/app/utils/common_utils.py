@@ -631,6 +631,47 @@ async def ensure_staff_project_access(
     )
 
 
+def _visitor_gate_org_ceiling_codes() -> list[str]:
+    """Org-role codes that may attempt gate verify when the pass project is unknown."""
+    from libs.shared_utils.common_query import VISITOR_MANAGEMENT_VERIFY
+    from libs.shared_utils.project_permission_aliases import (
+        expand_org_ceiling_permission_codes,
+    )
+
+    return _expand_project_view_permission_codes(
+        expand_org_ceiling_permission_codes([VISITOR_MANAGEMENT_VERIFY])
+    )
+
+
+async def ensure_visitor_gate_access(
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    *,
+    project_id: str | None,
+    request: Request | None = None,
+) -> UserContext:
+    """Gate pass verify/check-in/out — project role verify or org-wide gate staff ceiling."""
+    from libs.shared_utils.common_query import VISITOR_MANAGEMENT_VERIFY
+
+    if project_id:
+        return await ensure_staff_project_access(
+            current_user=current_user,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=VISITOR_MANAGEMENT_VERIFY,
+            request=request,
+        )
+
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    await require_any_permission(
+        permission_codes=_visitor_gate_org_ceiling_codes(),
+        user_context=user_context,
+        db_connection=db_connection,
+        organization_id=user_context.organization_id,
+    )
+    return user_context
+
+
 async def ensure_security_project_member_access(
     current_user: dict,
     db_connection: asyncpg.Connection,

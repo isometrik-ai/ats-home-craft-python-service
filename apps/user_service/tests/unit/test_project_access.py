@@ -9,6 +9,7 @@ from apps.user_service.app.utils.common_utils import (
     ensure_crm_or_resident_project_access,
     ensure_resident_access_for_unit,
     ensure_staff_project_access,
+    ensure_visitor_gate_access,
     require_any_permission,
     user_has_any_permission,
 )
@@ -18,6 +19,7 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    VISITOR_MANAGEMENT_VERIFY,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import ForbiddenException
@@ -260,6 +262,63 @@ async def test_ensure_staff_project_access_assigned_allows_matching_project_role
             db_connection=db,
             project_id=PROJECT_ID,
             permission_codes=VISITOR_MANAGEMENT_VIEW,
+        )
+        assert ctx.project_member_role == "security"
+
+
+@pytest.mark.asyncio
+async def test_ensure_visitor_gate_access_uses_project_role_verify():
+    """Gate endpoints must honor project-role visitor_management.verify (not org-only)."""
+    db = MagicMock()
+    current_user = {"sub": USER_ID}
+    setup_mock = MagicMock()
+    setup_mock.ensure_project = AsyncMock(return_value={"id": PROJECT_ID})
+    repo_mock = MagicMock()
+    repo_mock.get_active_member_with_role = AsyncMock(
+        return_value={
+            "project_role_id": ROLE_ID,
+            "role_slug": "security",
+            "user_id": USER_ID,
+        }
+    )
+    roles_repo_mock = MagicMock()
+    roles_repo_mock.get_permission_codes_for_role = AsyncMock(
+        return_value={VISITOR_MANAGEMENT_VERIFY, PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
+    )
+
+    with (
+        patch(
+            "apps.user_service.app.utils.common_utils.extract_user_context",
+            new=AsyncMock(return_value=_user_context()),
+        ),
+        patch(
+            "apps.user_service.app.utils.common_utils.require_any_permission",
+            new=AsyncMock(),
+        ),
+        patch(
+            "apps.user_service.app.services.project_setup_service.ProjectSetupService",
+            return_value=setup_mock,
+        ),
+        patch(
+            "apps.user_service.app.utils.common_utils.check_user_access_async",
+            new=AsyncMock(
+                side_effect=lambda **kwargs: kwargs["permission_code"]
+                in ([PROJECTS_MANAGEMENT_VIEW_ASSIGNED], [VISITOR_MANAGEMENT_VERIFY])
+            ),
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository",
+            return_value=repo_mock,
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.project_roles_repository.ProjectRolesRepository",
+            return_value=roles_repo_mock,
+        ),
+    ):
+        ctx = await ensure_visitor_gate_access(
+            current_user=current_user,
+            db_connection=db,
+            project_id=PROJECT_ID,
         )
         assert ctx.project_member_role == "security"
 

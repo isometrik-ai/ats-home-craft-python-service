@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.db.repositories.passes_repository import PassesRepository
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.gate_passes import (
@@ -19,11 +20,11 @@ from apps.user_service.app.services.pass_verification_service import (
 )
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    ensure_visitor_gate_access,
+    extract_user_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.common_query import VISITOR_MANAGEMENT_VERIFY
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -54,10 +55,20 @@ async def verify_pass(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Look up a pass by 4-digit code before admitting a guest."""
-    user_context = await check_permissions(
+    base_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = base_context.organization_id
+    pass_row = (
+        await PassesRepository(db_connection).get_by_code(
+            organization_id=str(org_id),
+            code=body.code,
+        )
+        if org_id
+        else None
+    )
+    user_context = await ensure_visitor_gate_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        project_id=str(pass_row["project_id"]) if pass_row else None,
         request=request,
     )
     service = PassVerificationService(
@@ -96,10 +107,20 @@ async def check_in_pass(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Record guest entry at the gate."""
-    user_context = await check_permissions(
+    base_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = base_context.organization_id
+    pass_row = (
+        await PassesRepository(db_connection).get_by_id(
+            organization_id=str(org_id),
+            pass_id=pass_id,
+        )
+        if org_id
+        else None
+    )
+    user_context = await ensure_visitor_gate_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        project_id=str(pass_row["project_id"]) if pass_row else None,
         request=request,
     )
     service = PassVerificationService(
@@ -147,10 +168,20 @@ async def check_out_pass(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Record guest exit at the gate."""
-    user_context = await check_permissions(
+    base_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = base_context.organization_id
+    pass_row = (
+        await PassesRepository(db_connection).get_by_id(
+            organization_id=str(org_id),
+            pass_id=pass_id,
+        )
+        if org_id
+        else None
+    )
+    user_context = await ensure_visitor_gate_access(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        project_id=str(pass_row["project_id"]) if pass_row else None,
         request=request,
     )
     service = PassVerificationService(

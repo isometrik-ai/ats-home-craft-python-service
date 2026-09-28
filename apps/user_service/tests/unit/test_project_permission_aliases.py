@@ -16,6 +16,7 @@ from libs.shared_utils.common_query import (
     RESIDENT_MANAGEMENT_VIEW,
     SETTINGS_MANAGEMENT_EDIT,
     VEHICLE_MANAGEMENT_DELETE,
+    VISITOR_MANAGEMENT_VERIFY,
     VISITOR_MANAGEMENT_VIEW,
     WORK_ORDER_MANAGEMENT_APPROVE,
     WORK_ORDER_MANAGEMENT_EDIT,
@@ -112,6 +113,7 @@ def test_project_code_allowed_by_org_ceiling_expands_view_assigned():
     """Staff with only view_assigned must retain project permissions in my-permissions."""
     org_codes = {PROJECTS_MANAGEMENT_VIEW_ASSIGNED}
     assert project_code_allowed_by_org_ceiling(org_codes, VISITOR_MANAGEMENT_VIEW)
+    assert project_code_allowed_by_org_ceiling(org_codes, VISITOR_MANAGEMENT_VERIFY)
     assert project_code_allowed_by_org_ceiling(org_codes, MOVE_EVENTS_MANAGEMENT_VIEW)
 
 

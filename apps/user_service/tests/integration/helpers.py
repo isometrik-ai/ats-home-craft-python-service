@@ -51,6 +51,21 @@ def patch_check_any_permissions(monkeypatch, module_path: str, org_id: str = "or
     )
 
 
+def patch_ensure_visitor_gate_access(
+    monkeypatch, module_path: str, org_id: str = "org-123"
+) -> None:
+    """Patch ensure_visitor_gate_access on an API module to bypass RBAC in tests."""
+
+    async def fake_ensure_visitor_gate_access(**kwargs):
+        del kwargs
+        return admin_context(org_id=org_id)
+
+    monkeypatch.setattr(
+        f"{module_path}.ensure_visitor_gate_access",
+        fake_ensure_visitor_gate_access,
+    )
+
+
 def patch_ensure_staff_project_access(
     monkeypatch, module_path: str, org_id: str = "org-123"
 ) -> None:

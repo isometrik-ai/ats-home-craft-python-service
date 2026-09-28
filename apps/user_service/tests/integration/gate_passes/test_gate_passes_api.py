@@ -2,7 +2,7 @@
 
 import pytest
 
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import patch_ensure_visitor_gate_access
 from apps.user_service.tests.utils.assertions import assert_success
 
 PASS_ID = "pass-1"
@@ -28,7 +28,7 @@ _FAKE_CHECK_IN_RESULT = {
 async def test_verify_pass(monkeypatch, client):
     """POST /passes/verify looks up a pass by code."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.gate_passes")
+    patch_ensure_visitor_gate_access(monkeypatch, "apps.user_service.app.api.gate_passes")
 
     async def fake_verify(_self, *, code: str, gate_id=None):
         del _self, gate_id
@@ -53,7 +53,7 @@ async def test_verify_pass(monkeypatch, client):
 async def test_check_in_pass(monkeypatch, client):
     """POST /passes/{pass_id}/check-in records entry."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.gate_passes")
+    patch_ensure_visitor_gate_access(monkeypatch, "apps.user_service.app.api.gate_passes")
 
     async def fake_check_in(_self, *, pass_id: str, body):
         del _self
@@ -83,7 +83,7 @@ async def test_check_in_pass(monkeypatch, client):
 async def test_check_out_pass(monkeypatch, client):
     """POST /passes/{pass_id}/check-out records exit."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.gate_passes")
+    patch_ensure_visitor_gate_access(monkeypatch, "apps.user_service.app.api.gate_passes")
 
     async def fake_check_out(_self, *, pass_id: str, body):
         del _self
