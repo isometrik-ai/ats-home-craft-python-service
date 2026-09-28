@@ -496,6 +496,29 @@ async def test_soft_delete_company_not_found():
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_search_companies_project_filter():
+    """search_companies adds project_ids Typesense filter when project_id is set."""
+    svc = _service()
+    fake_typesense = MagicMock()
+    fake_typesense.embed_query_text = AsyncMock(return_value=None)
+    fake_typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
+    svc._typesense = fake_typesense
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+
+    await svc.search_companies(
+        query="acme",
+        page=1,
+        page_size=20,
+        status=None,
+        project_id=project_id,
+    )
+
+    params = fake_typesense.search.await_args.args[0]
+    assert f"project_ids:={project_id}" in params["filter_by"]
+
+
+@pytest.mark.asyncio
 async def test_search_companies():
     """search_companies queries Typesense and maps hits."""
     svc = _service()

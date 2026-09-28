@@ -734,6 +734,7 @@ class CompaniesRepository(BaseRepository):
         search: str | None,
         status: str | None,
         dropdown_filters: dict[str, list[str]] | None = None,
+        project_id: str | None = None,
         page: int,
         page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -749,6 +750,18 @@ class CompaniesRepository(BaseRepository):
         if search:
             where.append(f"COALESCE(co.name,'') ILIKE ${next_param_index}")
             args.append(f"%{search.strip()}%")
+            next_param_index += 1
+        if project_id:
+            where.append(
+                f"""EXISTS (
+                  SELECT 1
+                  FROM project_companies pc
+                  WHERE pc.organization_id = co.organization_id
+                    AND pc.company_id = co.id
+                    AND pc.project_id = ${next_param_index}::uuid
+                )"""
+            )
+            args.append(project_id)
             next_param_index += 1
 
         if dropdown_filters:
@@ -815,3 +828,71 @@ class CompaniesRepository(BaseRepository):
         )
         company_rows = [dict(company_row) for company_row in rows]
         return company_rows, int(total or 0)
+
+    async def list_company_project_ids(
+        self,
+        *,
+        company_id: str,
+        organization_id: str,
+    ) -> list[str]:
+        """Distinct project ids linked to a company via ``project_companies``."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT pc.project_id::text AS project_id
+            FROM project_companies pc
+            WHERE pc.organization_id = $1::uuid
+              AND pc.company_id = $2::uuid
+            """,
+            organization_id,
+            company_id,
+        )
+        return [str(row["project_id"]) for row in rows if row.get("project_id")]
+
+    async def is_company_linked_to_project(
+        self,
+        *,
+        organization_id: str,
+        company_id: str,
+        project_id: str,
+    ) -> bool:
+        """Return whether the company is linked to the given project."""
+        linked = await self.db_connection.fetchval(
+            """
+            SELECT 1
+            FROM project_companies pc
+            WHERE pc.organization_id = $1::uuid
+              AND pc.company_id = $2::uuid
+              AND pc.project_id = $3::uuid
+            LIMIT 1
+            """,
+            organization_id,
+            company_id,
+            project_id,
+        )
+        return linked is not None
+
+    async def link_company_to_project(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        company_id: str,
+        label: str | None = None,
+    ) -> None:
+        """Associate a company with a project (idempotent on duplicate link)."""
+        await self.db_connection.execute(
+            """
+            INSERT INTO project_companies (
+              organization_id,
+              project_id,
+              company_id,
+              label
+            )
+            VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+            ON CONFLICT (project_id, company_id) DO NOTHING
+            """,
+            organization_id,
+            project_id,
+            company_id,
+            label,
+        )

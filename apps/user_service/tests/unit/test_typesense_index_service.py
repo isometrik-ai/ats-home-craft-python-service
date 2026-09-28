@@ -279,6 +279,10 @@ def test_extract_company_address_products_key_people():
 async def test_build_company_document(monkeypatch):
     """_build_company_document validates and shapes company docs."""
 
+    async def fake_list_company_project_ids(self, *, company_id: str, organization_id: str):
+        del self, company_id, organization_id
+        return ["proj-1"]
+
     async def fake_get_company_details(self, *, company_id: str, organization_id: str):
         del self, company_id, organization_id
         return {
@@ -301,6 +305,11 @@ async def test_build_company_document(monkeypatch):
 
     monkeypatch.setattr(tis.CompaniesRepository, "__init__", lambda self, conn: None)
     monkeypatch.setattr(tis.CompaniesRepository, "get_company_details", fake_get_company_details)
+    monkeypatch.setattr(
+        tis.CompaniesRepository,
+        "list_company_project_ids",
+        fake_list_company_project_ids,
+    )
     monkeypatch.setattr(tis, "_extract_company_custom_field_facets", fake_custom_facets)
 
     doc = await tis._build_company_document(
@@ -312,6 +321,7 @@ async def test_build_company_document(monkeypatch):
     assert doc["id"] == "co-1"
     assert doc["email"] == "hi@acme.com"
     assert doc["custom_field_keys"] == ["tier"]
+    assert doc["project_ids"] == ["proj-1"]
 
 
 @pytest.mark.asyncio

@@ -85,6 +85,27 @@ async def test_list_companies_search_filter():
 
 
 @pytest.mark.asyncio
+async def test_list_companies_project_filter():
+    """List adds project_companies EXISTS filter when project_id is provided."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = CompaniesRepository(db_connection=conn)
+    project_id = "770e8400-e29b-41d4-a716-446655440002"
+
+    await repo.list_companies(
+        organization_id=ORG_ID,
+        search=None,
+        status=None,
+        project_id=project_id,
+        page=1,
+        page_size=20,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "project_companies" in count_query
+    assert project_id in count_args
+
+
+@pytest.mark.asyncio
 async def test_list_companies_status_filter():
     """List adds status predicate when provided."""
     conn = _FakeConn(rows=[], val=0)
