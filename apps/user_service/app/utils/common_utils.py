@@ -638,18 +638,34 @@ async def ensure_security_project_member_access(
     permission_codes: list[str] | str,
     request: Request | None = None,
 ) -> UserContext:
-    """Require staff project access and an active security project_members assignment."""
+    """Authorize daily help submission flows for gate security or daily-help creators.
+
+    Project staff with ``daily_help_management.create`` may list/submit/resubmit
+    (e.g. Security Manager). Otherwise require an active project member whose role
+    slug is ``security`` and who passes ``permission_codes`` (typically verify).
+    """
     from apps.user_service.app.db.repositories.projects_repository import (
         ProjectsRepository,
     )
     from apps.user_service.app.schemas.enums import ProjectMemberRole
+    from libs.shared_utils.common_query import DAILY_HELP_MANAGEMENT_CREATE
 
-    user_context = await ensure_staff_project_access(
-        current_user=current_user,
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    try:
+        return await ensure_staff_project_access_for_context(
+            user_context=user_context,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=DAILY_HELP_MANAGEMENT_CREATE,
+        )
+    except ForbiddenException:
+        pass
+
+    user_context = await ensure_staff_project_access_for_context(
+        user_context=user_context,
         db_connection=db_connection,
         project_id=project_id,
         permission_codes=permission_codes,
-        request=request,
     )
     org_id = user_context.organization_id
     assert org_id and user_context.user_id
