@@ -477,8 +477,13 @@ async def ensure_staff_project_access_for_context(
     db_connection: asyncpg.Connection,
     project_id: str,
     permission_codes: list[str] | str,
+    require_action_permission: bool = False,
 ) -> UserContext:
-    """Enforce project access for an already-resolved staff user context."""
+    """Enforce project access for an already-resolved staff user context.
+
+    When ``require_action_permission`` is True, org-wide ``projects_management.view``
+    alone does not grant access; the caller must satisfy ``permission_codes``.
+    """
     from apps.user_service.app.db.repositories.projects_repository import (
         ProjectsRepository,
     )
@@ -507,7 +512,16 @@ async def ensure_staff_project_access_for_context(
         organization_id=org_id,
         db_connection=db_connection,
     )
-    if has_org_wide:
+    if has_org_wide and not require_action_permission:
+        return user_context
+
+    if has_org_wide and require_action_permission:
+        await require_any_permission(
+            permission_codes=action_codes,
+            user_context=user_context,
+            db_connection=db_connection,
+            organization_id=org_id,
+        )
         return user_context
 
     await require_any_permission(
@@ -657,6 +671,7 @@ async def ensure_security_project_member_access(
             db_connection=db_connection,
             project_id=project_id,
             permission_codes=DAILY_HELP_MANAGEMENT_CREATE,
+            require_action_permission=True,
         )
     except ForbiddenException:
         pass
