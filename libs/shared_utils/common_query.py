@@ -263,30 +263,30 @@ DEFAULT_PERMISSIONS = [
         "Remove contacts from the system",
         "contacts",
     ),
-    # companies management
+    # vendor management (companies_management.* codes)
     (
         "companies_management.view",
-        "View Companies",
-        "View company list and details",
-        "companies",
+        "View Vendors",
+        "View vendor list and details",
+        "vendor",
     ),
     (
         "companies_management.create",
-        "Create Companies",
-        "Create new companies",
-        "companies",
+        "Create Vendors",
+        "Create new vendors",
+        "vendor",
     ),
     (
         "companies_management.edit",
-        "Edit Companies",
-        "Modify company information",
-        "companies",
+        "Edit Vendors",
+        "Modify vendor information",
+        "vendor",
     ),
     (
         "companies_management.delete",
-        "Delete Companies",
-        "Remove companies from the system",
-        "companies",
+        "Delete Vendors",
+        "Remove vendors from the system",
+        "vendor",
     ),
     # projects management
     (
@@ -616,6 +616,30 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "Delete Project Contacts",
         "Remove contacts within assigned projects",
         "contacts",
+    ),
+    (
+        COMPANIES_MANAGEMENT_VIEW,
+        "View Project Vendors",
+        "View vendors within assigned projects",
+        "vendor",
+    ),
+    (
+        COMPANIES_MANAGEMENT_CREATE,
+        "Create Project Vendors",
+        "Create vendors within assigned projects",
+        "vendor",
+    ),
+    (
+        COMPANIES_MANAGEMENT_EDIT,
+        "Edit Project Vendors",
+        "Modify vendors within assigned projects",
+        "vendor",
+    ),
+    (
+        COMPANIES_MANAGEMENT_DELETE,
+        "Delete Project Vendors",
+        "Remove vendors within assigned projects",
+        "vendor",
     ),
     (
         VISITOR_MANAGEMENT_VIEW,

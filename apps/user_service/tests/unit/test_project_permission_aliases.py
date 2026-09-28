@@ -1,6 +1,7 @@
 """Unit tests for project permission alias helpers."""
 
 from libs.shared_utils.common_query import (
+    COMPANIES_MANAGEMENT_EDIT,
     CONTACTS_MANAGEMENT_EDIT,
     DAILY_HELP_MANAGEMENT_DELETE,
     DEFAULT_PROJECT_PERMISSIONS,
@@ -191,4 +192,21 @@ def test_default_project_permissions_contacts_includes_edit():
 def test_contacts_edit_ceiling_requires_projects_management_edit():
     ceiling = org_ceiling_permission_codes(CONTACTS_MANAGEMENT_EDIT)
     assert CONTACTS_MANAGEMENT_EDIT in ceiling
+    assert PROJECTS_MANAGEMENT_EDIT in ceiling
+
+
+def test_default_project_permissions_vendor_includes_edit():
+    """Role editor vendor group must expose view, create, edit, and delete."""
+    vendor_entries = [entry for entry in DEFAULT_PROJECT_PERMISSIONS if entry[3] == "vendor"]
+    codes = {entry[0] for entry in vendor_entries}
+    assert len(vendor_entries) == 4
+    assert COMPANIES_MANAGEMENT_EDIT in codes
+    edit_entry = next(entry for entry in vendor_entries if entry[0] == COMPANIES_MANAGEMENT_EDIT)
+    assert edit_entry[1] == "Edit Project Vendors"
+    assert edit_entry[2] == "Modify vendors within assigned projects"
+
+
+def test_companies_edit_ceiling_requires_projects_management_edit():
+    ceiling = org_ceiling_permission_codes(COMPANIES_MANAGEMENT_EDIT)
+    assert COMPANIES_MANAGEMENT_EDIT in ceiling
     assert PROJECTS_MANAGEMENT_EDIT in ceiling
