@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
+from apps.user_service.app.db.repositories.passes_repository import PassesRepository
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.gate_passes import (
@@ -19,11 +20,13 @@ from apps.user_service.app.services.pass_verification_service import (
 )
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
-    check_permissions,
+    ensure_staff_project_access,
+    extract_user_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import VISITOR_MANAGEMENT_VERIFY
+from libs.shared_utils.http_exceptions import ForbiddenException, NotFoundException
 from libs.shared_utils.response_factory import success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -37,6 +40,29 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     429: {"description": "Too many requests (rate limited)."},
     500: {"description": "Internal server error."},
 }
+
+
+async def _ensure_gate_access_for_pass(
+    *,
+    current_user: dict,
+    db_connection: asyncpg.Connection,
+    pass_row: dict,
+    request: Request,
+):
+    """Resolve project from the pass and enforce visitor_management.verify."""
+    project_id = pass_row.get("project_id")
+    if not project_id:
+        raise ForbiddenException(
+            message_key="errors.insufficient_permissions",
+            custom_code=CustomStatusCode.FORBIDDEN,
+        )
+    return await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=str(project_id),
+        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        request=request,
+    )
 
 
 @handle_api_exceptions("verify visitor pass")
@@ -54,10 +80,26 @@ async def verify_pass(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Look up a pass by 4-digit code before admitting a guest."""
-    user_context = await check_permissions(
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = user_context.organization_id
+    if not org_id:
+        raise ForbiddenException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+    pass_row = await PassesRepository(db_connection).get_by_code(
+        organization_id=org_id,
+        code=body.code,
+    )
+    if not pass_row:
+        raise NotFoundException(
+            message_key="passes.errors.pass_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    user_context = await _ensure_gate_access_for_pass(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        pass_row=pass_row,
         request=request,
     )
     service = PassVerificationService(
@@ -96,10 +138,26 @@ async def check_in_pass(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Record guest entry at the gate."""
-    user_context = await check_permissions(
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = user_context.organization_id
+    if not org_id:
+        raise ForbiddenException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+    pass_row = await PassesRepository(db_connection).get_by_id(
+        organization_id=org_id,
+        pass_id=pass_id,
+    )
+    if not pass_row:
+        raise NotFoundException(
+            message_key="passes.errors.pass_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    user_context = await _ensure_gate_access_for_pass(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        pass_row=pass_row,
         request=request,
     )
     service = PassVerificationService(
@@ -147,10 +205,26 @@ async def check_out_pass(
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Record guest exit at the gate."""
-    user_context = await check_permissions(
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    org_id = user_context.organization_id
+    if not org_id:
+        raise ForbiddenException(
+            message_key="auth.errors.session_not_found",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+    pass_row = await PassesRepository(db_connection).get_by_id(
+        organization_id=org_id,
+        pass_id=pass_id,
+    )
+    if not pass_row:
+        raise NotFoundException(
+            message_key="passes.errors.pass_not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+    user_context = await _ensure_gate_access_for_pass(
         current_user=current_user,
         db_connection=db_connection,
-        permission_codes=VISITOR_MANAGEMENT_VERIFY,
+        pass_row=pass_row,
         request=request,
     )
     service = PassVerificationService(

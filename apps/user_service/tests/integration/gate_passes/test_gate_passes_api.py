@@ -2,7 +2,9 @@
 
 import pytest
 
-from apps.user_service.tests.integration.helpers import patch_check_permissions
+from apps.user_service.tests.integration.helpers import (
+    patch_ensure_staff_project_access,
+)
 from apps.user_service.tests.utils.assertions import assert_success
 
 PASS_ID = "pass-1"
@@ -23,12 +25,43 @@ _FAKE_CHECK_IN_RESULT = {
     "gate_id": "gate-1",
 }
 
+_FAKE_PASS_ROW = {
+    "id": PASS_ID,
+    "project_id": "project-1",
+    "code": "4821",
+}
+
+
+def _patch_gate_pass_access(monkeypatch) -> None:
+    patch_ensure_staff_project_access(monkeypatch, "apps.user_service.app.api.gate_passes")
+
+    async def fake_get_by_code(_self, *, organization_id: str, code: str):
+        del _self, organization_id
+        if code == "4821":
+            return dict(_FAKE_PASS_ROW)
+        return None
+
+    async def fake_get_by_id(_self, *, organization_id: str, pass_id: str):
+        del _self, organization_id
+        if pass_id == PASS_ID:
+            return dict(_FAKE_PASS_ROW)
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.gate_passes.PassesRepository.get_by_code",
+        fake_get_by_code,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.api.gate_passes.PassesRepository.get_by_id",
+        fake_get_by_id,
+    )
+
 
 @pytest.mark.asyncio
 async def test_verify_pass(monkeypatch, client):
     """POST /passes/verify looks up a pass by code."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.gate_passes")
+    _patch_gate_pass_access(monkeypatch)
 
     async def fake_verify(_self, *, code: str, gate_id=None):
         del _self, gate_id
@@ -53,7 +86,7 @@ async def test_verify_pass(monkeypatch, client):
 async def test_check_in_pass(monkeypatch, client):
     """POST /passes/{pass_id}/check-in records entry."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.gate_passes")
+    _patch_gate_pass_access(monkeypatch)
 
     async def fake_check_in(_self, *, pass_id: str, body):
         del _self
@@ -83,7 +116,7 @@ async def test_check_in_pass(monkeypatch, client):
 async def test_check_out_pass(monkeypatch, client):
     """POST /passes/{pass_id}/check-out records exit."""
 
-    patch_check_permissions(monkeypatch, "apps.user_service.app.api.gate_passes")
+    _patch_gate_pass_access(monkeypatch)
 
     async def fake_check_out(_self, *, pass_id: str, body):
         del _self
