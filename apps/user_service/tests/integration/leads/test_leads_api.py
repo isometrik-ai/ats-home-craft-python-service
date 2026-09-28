@@ -31,12 +31,12 @@ def _patch_leads_access(monkeypatch) -> None:
 
     patch_check_permissions(monkeypatch, "apps.user_service.app.api.leads")
 
-    async def fake_check_user_access_async(*_args, **_kwargs):
+    async def fake_user_has_any_permission(*_args, **_kwargs):
         return True
 
     monkeypatch.setattr(
-        "apps.user_service.app.api.leads.check_user_access_async",
-        fake_check_user_access_async,
+        "apps.user_service.app.api.leads.user_has_any_permission",
+        fake_user_has_any_permission,
     )
 
 

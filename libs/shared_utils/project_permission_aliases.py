@@ -19,6 +19,10 @@ from libs.shared_utils.common_query import (
     DAILY_HELP_MANAGEMENT_REVIEW,
     DAILY_HELP_MANAGEMENT_UPDATE,
     DAILY_HELP_MANAGEMENT_VIEW,
+    EMAIL_TEMPLATES_MANAGEMENT_CREATE,
+    EMAIL_TEMPLATES_MANAGEMENT_DELETE,
+    EMAIL_TEMPLATES_MANAGEMENT_EDIT,
+    EMAIL_TEMPLATES_MANAGEMENT_VIEW,
     FACILITY_BOOKING_MANAGEMENT_APPROVE,
     FACILITY_BOOKING_MANAGEMENT_BILLING,
     FACILITY_BOOKING_MANAGEMENT_CONFIGURE,
@@ -27,6 +31,11 @@ from libs.shared_utils.common_query import (
     FINANCE_MANAGEMENT_ADMIN,
     FINANCE_MANAGEMENT_EDIT,
     FINANCE_MANAGEMENT_VIEW,
+    LEADS_MANAGEMENT_CREATE,
+    LEADS_MANAGEMENT_DELETE,
+    LEADS_MANAGEMENT_EDIT,
+    LEADS_MANAGEMENT_VIEW,
+    LEADS_MANAGEMENT_VIEW_SYSTEM,
     MOVE_EVENTS_MANAGEMENT_EDIT,
     MOVE_EVENTS_MANAGEMENT_VIEW,
     NOTICES_MANAGEMENT_EDIT,
@@ -44,8 +53,15 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_EDIT,
     RESIDENT_MANAGEMENT_VIEW,
+    ROLES_MANAGEMENT_EDIT,
+    ROLES_MANAGEMENT_VIEW,
+    SETTINGS_MANAGEMENT_BILLING,
+    SETTINGS_MANAGEMENT_EDIT,
+    SETTINGS_MANAGEMENT_VIEW,
     TENANT_REQUESTS_MANAGEMENT_EDIT,
     TENANT_REQUESTS_MANAGEMENT_VIEW,
+    USERS_MANAGEMENT_EDIT,
+    USERS_MANAGEMENT_VIEW,
     VEHICLE_MANAGEMENT_DELETE,
     VEHICLE_MANAGEMENT_EDIT,
     VEHICLE_MANAGEMENT_VIEW,
@@ -60,6 +76,28 @@ from libs.shared_utils.common_query import (
 
 # All permission codes that may appear on a project role template.
 PROJECT_SCOPABLE_PERMISSION_CODES: frozenset[str] = PROJECT_PERMISSION_CODES
+
+# Org-wide API codes that use projects_management ceiling but are not on project roles yet.
+ORG_ONLY_API_CEILING_CODES: frozenset[str] = frozenset(
+    {
+        LEADS_MANAGEMENT_VIEW,
+        LEADS_MANAGEMENT_VIEW_SYSTEM,
+        LEADS_MANAGEMENT_CREATE,
+        LEADS_MANAGEMENT_EDIT,
+        LEADS_MANAGEMENT_DELETE,
+        EMAIL_TEMPLATES_MANAGEMENT_VIEW,
+        EMAIL_TEMPLATES_MANAGEMENT_CREATE,
+        EMAIL_TEMPLATES_MANAGEMENT_EDIT,
+        EMAIL_TEMPLATES_MANAGEMENT_DELETE,
+        SETTINGS_MANAGEMENT_VIEW,
+        SETTINGS_MANAGEMENT_EDIT,
+        SETTINGS_MANAGEMENT_BILLING,
+    }
+)
+
+API_CEILING_ENTITY_CODES: frozenset[str] = (
+    PROJECT_SCOPABLE_PERMISSION_CODES | ORG_ONLY_API_CEILING_CODES
+)
 
 # Org-only gates: assigned-project access is enforced via org role + project_members.
 PROJECT_ACCESS_ONLY_CODES: frozenset[str] = frozenset(
@@ -153,8 +191,14 @@ def project_role_grants_any(
 
 def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
     """Org-role codes that satisfy the ceiling for a project-scoped API action."""
+    if permission_code == SETTINGS_MANAGEMENT_VIEW:
+        return frozenset({USERS_MANAGEMENT_VIEW, ROLES_MANAGEMENT_VIEW})
+
+    if permission_code in {SETTINGS_MANAGEMENT_EDIT, SETTINGS_MANAGEMENT_BILLING}:
+        return frozenset({USERS_MANAGEMENT_EDIT, ROLES_MANAGEMENT_EDIT})
+
     codes = {permission_code}
-    if permission_code not in PROJECT_SCOPABLE_PERMISSION_CODES:
+    if permission_code not in API_CEILING_ENTITY_CODES:
         return frozenset(codes)
 
     codes.add(PROJECTS_MANAGEMENT_VIEW)
@@ -174,8 +218,13 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
         BUSINESS_DASHBOARD_VIEW,
         CONTACTS_MANAGEMENT_VIEW,
         COMPANIES_MANAGEMENT_VIEW,
+        LEADS_MANAGEMENT_VIEW,
+        EMAIL_TEMPLATES_MANAGEMENT_VIEW,
     }:
         codes.add(PROJECTS_MANAGEMENT_VIEW_ASSIGNED)
+
+    if permission_code == LEADS_MANAGEMENT_VIEW_SYSTEM:
+        return frozenset({LEADS_MANAGEMENT_VIEW_SYSTEM, PROJECTS_MANAGEMENT_VIEW})
 
     if permission_code in {
         WORK_ORDER_MANAGEMENT_MANAGE,
@@ -214,6 +263,12 @@ def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
         COMPANIES_MANAGEMENT_CREATE,
         COMPANIES_MANAGEMENT_EDIT,
         COMPANIES_MANAGEMENT_DELETE,
+        LEADS_MANAGEMENT_CREATE,
+        LEADS_MANAGEMENT_EDIT,
+        LEADS_MANAGEMENT_DELETE,
+        EMAIL_TEMPLATES_MANAGEMENT_CREATE,
+        EMAIL_TEMPLATES_MANAGEMENT_EDIT,
+        EMAIL_TEMPLATES_MANAGEMENT_DELETE,
     }:
         codes.add(PROJECTS_MANAGEMENT_EDIT)
 

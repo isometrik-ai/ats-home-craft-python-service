@@ -44,6 +44,7 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.project_permission_aliases import (
+    API_CEILING_ENTITY_CODES,
     expand_org_ceiling_permission_codes,
     project_role_grants_any,
 )
@@ -295,6 +296,15 @@ async def require_permission(
             permission_codes = [permission_code]
         else:
             permission_codes = permission_code
+
+        if permission_codes and all(code in API_CEILING_ENTITY_CODES for code in permission_codes):
+            await require_any_permission(
+                permission_codes=expand_org_ceiling_permission_codes(permission_codes),
+                user_context=user_context,
+                db_connection=db_connection,
+                organization_id=organization_id,
+            )
+            return
 
         has_permission = await check_user_access_async(
             permission_code=permission_codes,

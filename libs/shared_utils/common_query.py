@@ -98,7 +98,13 @@ LEADS_MANAGEMENT_VIEW_SYSTEM = "leads_management.view_system"
 
 BUSINESS_DASHBOARD_VIEW = "business.dashboard.view"
 
+USERS_MANAGEMENT_VIEW = "users_management.view"
+USERS_MANAGEMENT_EDIT = "users_management.edit"
 USERS_MANAGEMENT_DELETE = "users_management.delete"
+
+SETTINGS_MANAGEMENT_VIEW = "settings_management.view"
+SETTINGS_MANAGEMENT_EDIT = "settings_management.edit"
+SETTINGS_MANAGEMENT_BILLING = "settings_management.billing"
 
 # Audit Logs
 # "view_system" is intended to mean org-wide (system-level) audit logs visibility.
@@ -194,25 +200,6 @@ DEFAULT_PERMISSIONS = [
         "View organization-wide audit logs",
         "audit_logs",
     ),
-    # System Settings
-    (
-        "settings_management.view",
-        "View Settings",
-        "View system settings",
-        "settings",
-    ),
-    (
-        "settings_management.edit",
-        "Edit Settings",
-        "Modify system settings",
-        "settings",
-    ),
-    (
-        "settings_management.billing",
-        "Manage Billing",
-        "Access billing and subscription",
-        "settings",
-    ),
     # Permissions Management
     (
         "permissions_management.view",
@@ -237,56 +224,6 @@ DEFAULT_PERMISSIONS = [
         "Delete Permissions",
         "Remove permissions",
         "permissions",
-    ),
-    # contacts management
-    (
-        "contacts_management.view",
-        "View Contacts",
-        "View contact list and details",
-        "contacts",
-    ),
-    (
-        "contacts_management.create",
-        "Create Contacts",
-        "Create new contacts",
-        "contacts",
-    ),
-    (
-        "contacts_management.edit",
-        "Edit Contacts",
-        "Modify contact information",
-        "contacts",
-    ),
-    (
-        "contacts_management.delete",
-        "Delete Contacts",
-        "Remove contacts from the system",
-        "contacts",
-    ),
-    # vendor management (companies_management.* codes)
-    (
-        "companies_management.view",
-        "View Vendors",
-        "View vendor list and details",
-        "vendor",
-    ),
-    (
-        "companies_management.create",
-        "Create Vendors",
-        "Create new vendors",
-        "vendor",
-    ),
-    (
-        "companies_management.edit",
-        "Edit Vendors",
-        "Modify vendor information",
-        "vendor",
-    ),
-    (
-        "companies_management.delete",
-        "Delete Vendors",
-        "Remove vendors from the system",
-        "vendor",
     ),
     # projects management
     (
@@ -350,67 +287,11 @@ DEFAULT_PERMISSIONS = [
         "Remove custom fields from the system",
         "custom_fields",
     ),
-    # lead stages management
-    (
-        "leads_management.view",
-        "View Leads",
-        "View leads list and details",
-        "leads",
-    ),
-    (
-        LEADS_MANAGEMENT_VIEW_SYSTEM,
-        "View System Leads",
-        "View organization-wide leads",
-        "leads",
-    ),
-    (
-        "leads_management.create",
-        "Create Leads",
-        "Create new leads",
-        "leads",
-    ),
-    (
-        "leads_management.edit",
-        "Edit Leads",
-        "Modify lead information",
-        "leads",
-    ),
-    (
-        "leads_management.delete",
-        "Delete Leads",
-        "Remove leads from the system",
-        "leads",
-    ),
     (
         BUSINESS_DASHBOARD_VIEW,
         "View Dashboard",
         "View organization CRM dashboard metrics",
         "dashboard",
-    ),
-    # Email Templates
-    (
-        EMAIL_TEMPLATES_MANAGEMENT_VIEW,
-        "View Email Templates",
-        "View email template list and details",
-        "email_templates",
-    ),
-    (
-        EMAIL_TEMPLATES_MANAGEMENT_CREATE,
-        "Create Email Templates",
-        "Create email templates",
-        "email_templates",
-    ),
-    (
-        EMAIL_TEMPLATES_MANAGEMENT_EDIT,
-        "Edit Email Templates",
-        "Modify email templates",
-        "email_templates",
-    ),
-    (
-        EMAIL_TEMPLATES_MANAGEMENT_DELETE,
-        "Delete Email Templates",
-        "Remove email templates",
-        "email_templates",
     ),
 ]
 
@@ -706,10 +587,10 @@ PERMISSION_SELECT_FIELDS = """
 """
 
 # Permission constants (new permission codes with _management suffix)
-SETTINGS_SYSTEM_MANAGE = "settings_management.edit"
+SETTINGS_SYSTEM_MANAGE = SETTINGS_MANAGEMENT_EDIT
 SETTINGS_ROLES_MANAGE = ROLES_MANAGEMENT_EDIT
-SETTINGS_USERS_MANAGE = "users_management.edit"
-SETTINGS_USERS_VIEW = "users_management.view"
+SETTINGS_USERS_MANAGE = USERS_MANAGEMENT_EDIT
+SETTINGS_USERS_VIEW = USERS_MANAGEMENT_VIEW
 SETTINGS_PERMISSIONS_MANAGE = ROLES_MANAGEMENT_EDIT
 
 # CRM entity permissions that require custom-fields management permissions on a role.

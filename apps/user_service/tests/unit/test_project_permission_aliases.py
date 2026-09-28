@@ -4,7 +4,9 @@ from libs.shared_utils.common_query import (
     COMPANIES_MANAGEMENT_EDIT,
     CONTACTS_MANAGEMENT_EDIT,
     DAILY_HELP_MANAGEMENT_DELETE,
+    DEFAULT_PERMISSIONS,
     DEFAULT_PROJECT_PERMISSIONS,
+    LEADS_MANAGEMENT_VIEW,
     MOVE_EVENTS_MANAGEMENT_VIEW,
     NOTICES_MANAGEMENT_EDIT,
     PROJECT_SETUP_EDIT,
@@ -12,6 +14,7 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_VIEW,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_VIEW,
+    SETTINGS_MANAGEMENT_EDIT,
     VEHICLE_MANAGEMENT_DELETE,
     VISITOR_MANAGEMENT_VIEW,
     WORK_ORDER_MANAGEMENT_APPROVE,
@@ -210,3 +213,35 @@ def test_companies_edit_ceiling_requires_projects_management_edit():
     ceiling = org_ceiling_permission_codes(COMPANIES_MANAGEMENT_EDIT)
     assert COMPANIES_MANAGEMENT_EDIT in ceiling
     assert PROJECTS_MANAGEMENT_EDIT in ceiling
+
+
+def test_org_permissions_exclude_crm_entity_catalog():
+    """CRM entity permissions are not in the org catalog."""
+    org_codes = {entry[0] for entry in DEFAULT_PERMISSIONS}
+    assert "contacts_management.view" not in org_codes
+    assert "companies_management.view" not in org_codes
+    assert "leads_management.view" not in org_codes
+    assert "email_templates_management.view" not in org_codes
+    assert "settings_management.view" not in org_codes
+    assert "settings_management.edit" not in org_codes
+    assert "settings_management.billing" not in org_codes
+
+
+def test_project_permissions_exclude_leads_and_email_templates_for_now():
+    """Leads and email templates are deferred from the project role editor."""
+    project_codes = {entry[0] for entry in DEFAULT_PROJECT_PERMISSIONS}
+    assert LEADS_MANAGEMENT_VIEW not in project_codes
+    assert "email_templates_management.view" not in project_codes
+
+
+def test_leads_view_uses_org_ceiling_without_project_catalog():
+    ceiling = org_ceiling_permission_codes(LEADS_MANAGEMENT_VIEW)
+    assert PROJECTS_MANAGEMENT_VIEW in ceiling
+    assert PROJECTS_MANAGEMENT_VIEW_ASSIGNED in ceiling
+
+
+def test_settings_edit_uses_users_or_roles_management_ceiling():
+    ceiling = org_ceiling_permission_codes(SETTINGS_MANAGEMENT_EDIT)
+    assert "users_management.edit" in ceiling
+    assert "roles_management.edit" in ceiling
+    assert SETTINGS_MANAGEMENT_EDIT not in ceiling
