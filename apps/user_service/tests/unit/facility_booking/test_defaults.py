@@ -8,7 +8,10 @@ from apps.user_service.app.schemas.enums import (
     FacilityPriceMode,
     FacilityType,
 )
-from apps.user_service.app.schemas.facility_booking_config import FacilitySetup, SlotSetup
+from apps.user_service.app.schemas.facility_booking_config import (
+    FacilitySetup,
+    SlotSetup,
+)
 from apps.user_service.app.services.facility_booking.defaults import (
     DEFAULT_ROOM_BLOCK_CATEGORIES,
     default_booking_config,

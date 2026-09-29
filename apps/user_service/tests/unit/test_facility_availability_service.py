@@ -7,11 +7,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from apps.user_service.app.schemas.enums import FacilityBookingArchetype, FacilityParticipantKind
-from apps.user_service.app.schemas.facility_booking import ParticipantInput, ReservationDraftRequest
-from apps.user_service.app.services.facility_availability_service import FacilityAvailabilityService
-from apps.user_service.app.services.facility_booking.defaults import default_booking_config
-from apps.user_service.app.services.facility_booking.snapshot import snapshot_from_rows
+from apps.user_service.app.schemas.enums import (
+    FacilityBookingArchetype,
+    FacilityParticipantKind,
+)
+from apps.user_service.app.schemas.facility_booking import (
+    ParticipantInput,
+    ReservationDraftRequest,
+)
+from apps.user_service.app.services.facility_availability_service import (
+    FacilityAvailabilityService,
+)
+from apps.user_service.app.services.facility_booking.defaults import (
+    default_booking_config,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 
@@ -178,7 +187,11 @@ async def test_quote_raises_when_invalid() -> None:
     with patch.object(
         svc,
         "evaluate_draft",
-        return_value={"ok": False, "errors": [{"code": "closed", "message": "Closed"}], "quote": {}},
+        return_value={
+            "ok": False,
+            "errors": [{"code": "closed", "message": "Closed"}],
+            "quote": {},
+        },
     ):
         with pytest.raises(ValidationException):
             await svc.quote(project_id=PROJECT_ID, body=body, host_contact_id=CONTACT_ID)

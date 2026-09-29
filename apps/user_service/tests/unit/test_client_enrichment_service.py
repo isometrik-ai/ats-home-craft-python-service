@@ -70,6 +70,15 @@ def test_merge_update_none_existing_returns_copy():
     assert result == {"name": ""}
 
 
+def test_merge_update_preserves_existing_nonempty_collections():
+    """Empty enrichment lists/dicts do not overwrite populated existing values."""
+    update = {"tags": [], "meta": {}}
+    existing = {"tags": ["vip"], "meta": {"tier": "gold"}}
+    result = _merge_update_without_overwriting_empty(update, existing)
+    assert "tags" not in result
+    assert "meta" not in result
+
+
 def test_first_country_from_addresses_empty():
     """_first_country_from_addresses returns None when no addresses."""
     assert _first_country_from_addresses({}) is None

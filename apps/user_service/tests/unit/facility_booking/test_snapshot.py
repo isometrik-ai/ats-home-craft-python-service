@@ -7,7 +7,9 @@ from datetime import date
 import pytest
 
 from apps.user_service.app.schemas.enums import FacilityBookingArchetype
-from apps.user_service.app.services.facility_booking.defaults import default_booking_config
+from apps.user_service.app.services.facility_booking.defaults import (
+    default_booking_config,
+)
 from apps.user_service.app.services.facility_booking.snapshot import (
     engine_reservation,
     snapshot_from_rows,

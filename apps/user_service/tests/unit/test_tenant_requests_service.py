@@ -2072,3 +2072,59 @@ async def test_assert_no_other_inflight_request_conflict() -> None:
             unit_id=UNIT_ID,
             tenant_request_id=REQUEST_ID,
         )
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request_rejects_inflight_move_out() -> None:
+    """Move-out cannot be requested twice while one is already pending."""
+    repo = _FakeTenantRequestsRepo()
+    repo.active_approved = {"id": "approved-1", "tenant_contact_id": "tenant-1"}
+    repo.row = _request_row(
+        id="approved-1",
+        status=TenantRequestStatus.APPROVED.value,
+        tenant_contact_id="tenant-1",
+        move_out_status=TenantMoveOutStatus.PENDING.value,
+    )
+    service = _service(repo=repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+    with pytest.raises(ConflictException):
+        await service.create_move_out_request(
+            owner_contact_id=OWNER_ID,
+            body=CreateMoveOutRequest(
+                unit_id=UNIT_ID,
+                move_out_date=date.today() + timedelta(days=7),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_assert_tenancy_update_allowed_validation_branches() -> None:
+    """Tenancy updates require approved, non-superseded rows with due move-out dates."""
+    svc = _service()
+    with pytest.raises(ValidationException):
+        await svc._assert_tenancy_update_allowed(
+            row=_request_row(status=TenantRequestStatus.SUBMITTED.value),
+        )
+    with pytest.raises(ValidationException):
+        await svc._assert_tenancy_update_allowed(
+            row=_request_row(
+                status=TenantRequestStatus.APPROVED.value,
+                superseded_at=datetime.now(timezone.utc),
+            ),
+        )
+    with pytest.raises(ValidationException):
+        await svc._assert_tenancy_update_allowed(
+            row=_request_row(
+                status=TenantRequestStatus.APPROVED.value,
+                move_out_status=TenantMoveOutStatus.PENDING.value,
+            ),
+        )
+    with pytest.raises(ValidationException):
+        await svc._assert_tenancy_update_allowed(
+            row=_request_row(
+                status=TenantRequestStatus.APPROVED.value,
+                move_out_date=None,
+            ),
+        )

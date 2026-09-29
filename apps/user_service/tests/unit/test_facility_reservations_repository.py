@@ -289,9 +289,7 @@ async def test_list_events_empty_and_rows() -> None:
 
 @pytest.mark.asyncio
 async def test_list_active_in_range_decodes_jsonb() -> None:
-    conn = _FakeConn(
-        rows=[{"id": RESERVATION_ID, "quote": json.dumps({"total": 1})}]
-    )
+    conn = _FakeConn(rows=[{"id": RESERVATION_ID, "quote": json.dumps({"total": 1})}])
     repo = FacilityReservationsRepository(db_connection=conn)
     start = date(2026, 6, 1)
     end = date(2026, 6, 30)

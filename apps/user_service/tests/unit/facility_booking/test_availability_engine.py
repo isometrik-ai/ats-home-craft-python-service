@@ -9,13 +9,14 @@ from apps.user_service.app.schemas.enums import FacilityBookingArchetype
 from apps.user_service.app.schemas.facility_booking import DayAvailability, MonthDayView
 from apps.user_service.app.schemas.facility_booking_config import DayHours
 from apps.user_service.app.services.facility_booking import availability
-from apps.user_service.app.services.facility_booking.defaults import default_booking_config
+from apps.user_service.app.services.facility_booking.defaults import (
+    default_booking_config,
+)
 from apps.user_service.app.services.facility_booking.types import (
     BookingDraft,
     BookingUnit,
     EngineReservation,
     FacilitySnapshot,
-    MaintenanceWindow,
     Participant,
     SchedulePeriod,
     SlotBlock,
@@ -44,7 +45,9 @@ def _slot_facility(**overrides) -> FacilitySnapshot:
     return replace(base, **overrides) if overrides else base
 
 
-def _ctx(facility: FacilitySnapshot, *, now: datetime, active=None) -> availability.AvailabilityContext:
+def _ctx(
+    facility: FacilitySnapshot, *, now: datetime, active=None
+) -> availability.AvailabilityContext:
     return availability.AvailabilityContext(
         facility=facility,
         active=active or [],
@@ -277,7 +280,9 @@ def test_slot_view_closed_and_tee_partial_booking():
     assert day_view.units[0].slots[0].state == "blocked"
     assert day_view.units[0].slots[0].reason == "Closed"
 
-    open_facility = replace(facility, hours=[DayHours(open=8 * 60, close=10 * 60, closed=False) for _ in range(7)])
+    open_facility = replace(
+        facility, hours=[DayHours(open=8 * 60, close=10 * 60, closed=False) for _ in range(7)]
+    )
     reservation = EngineReservation(
         id="res-tee",
         facility_id="fac-tee",
@@ -295,7 +300,9 @@ def test_slot_view_closed_and_tee_partial_booking():
         ],
         host_name="Host",
     )
-    tee_ctx = availability.AvailabilityContext(facility=open_facility, active=[reservation], now=now)
+    tee_ctx = availability.AvailabilityContext(
+        facility=open_facility, active=[reservation], now=now
+    )
     tee_day = availability.get_day_availability(tee_ctx, day)
     slot = tee_day.units[0].slots[0]
     assert slot.state == "booked"
@@ -304,7 +311,7 @@ def test_slot_view_closed_and_tee_partial_booking():
 
 def test_month_overview_outside_schedule_and_slot_summary_states():
     """Month overview notes outside schedule; slot summary handles zero slots."""
-    defaults = default_booking_config(FacilityBookingArchetype.SLOT)
+    default_booking_config(FacilityBookingArchetype.SLOT)
     facility = _slot_facility(
         schedules=[
             SchedulePeriod(

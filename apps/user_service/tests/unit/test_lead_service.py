@@ -1114,3 +1114,70 @@ async def test_delete_lead_returns_or_raises():
     assert exc_info.value.message_key == "leads.errors.not_found"
     assert not stage_repo.calls
     assert not user_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_validate_lead_references_noop():
+    """Reference validation is skipped when there is nothing to validate."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    await service._fetch_and_validate_lead_references(
+        ORG_ID,
+        stage_id_to_validate=None,
+        company_ids=[],
+        contact_ids=[],
+    )
+    assert "fetch_lead_reference_validation" not in lead_repo.calls
+
+
+@pytest.mark.asyncio
+async def test_fetch_and_validate_lead_references_missing_company():
+    """Missing company ids raise not found."""
+    service, lead_repo, _, _ = _service_with_fakes()
+    lead_repo.lead_reference_validation_result = (True, set(), set())
+    with pytest.raises(NotFoundException) as exc_info:
+        await service._fetch_and_validate_lead_references(
+            ORG_ID,
+            stage_id_to_validate=None,
+            company_ids=[CLIENT_ID],
+            contact_ids=[],
+        )
+    assert exc_info.value.message_key == "companies.errors.company_not_found"
+
+
+@pytest.mark.asyncio
+async def test_ensure_user_exists_missing():
+    """Explicit owner validation fails when user is absent."""
+    service, _, _, user_repo = _service_with_fakes()
+    user_repo.get_user_details_by_id_result = None
+    with pytest.raises(NotFoundException) as exc_info:
+        await service._ensure_user_exists(OWNER_ID)
+    assert exc_info.value.message_key == "users.errors.user_not_found"
+
+
+@pytest.mark.asyncio
+async def test_create_lead_unique_violation_contact(monkeypatch):
+    """Database unique violations on contacts map to duplicate contact errors."""
+    from asyncpg import UniqueViolationError
+
+    from libs.shared_utils.http_exceptions import DuplicateValueException
+
+    service, lead_repo, _, _ = _service_with_fakes()
+    _patch_custom_field_service(monkeypatch, {})
+
+    async def _raise_unique(_lead_row, **_kwargs):
+        exc = UniqueViolationError("duplicate")
+        exc.__dict__["constraint_name"] = "lead_contacts_pkey"
+        raise exc
+
+    lead_repo.create_lead = _raise_unique  # type: ignore[method-assign]
+    with pytest.raises(DuplicateValueException) as exc_info:
+        await service.create_lead(CreateLeadRequest(name="Lead", stage_id=STAGE_ID_1))
+    assert exc_info.value.message_key == "leads.errors.duplicate_contact"
+
+
+def test_apply_lead_scalar_updates_notes_null():
+    """Scalar update mapping serializes explicit null notes to empty list."""
+    body = UpdateLeadRequest(notes=None)
+    update_data: dict[str, Any] = {}
+    LeadService._apply_lead_scalar_updates(body, update_data)
+    assert update_data["notes"] == []

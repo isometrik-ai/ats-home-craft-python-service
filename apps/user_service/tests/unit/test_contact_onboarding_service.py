@@ -1260,3 +1260,21 @@ async def test_get_household_summary_requires_unit_access():
 
     with pytest.raises(ValidationException):
         await svc.get_household_summary(contact_id="contact-1", unit_id="unit-1")
+
+
+@pytest.mark.asyncio
+async def test_get_status_accepts_legacy_contact_type_argument():
+    """get_status accepts optional contact_type for API compatibility."""
+    svc = _service()
+    svc._ensure_onboarding = AsyncMock()
+    svc._is_profile_complete = AsyncMock(return_value=True)
+    svc._list_pending_self_units = AsyncMock(return_value=[])
+    svc.contact_units_repo.count_active_units = AsyncMock(return_value=1)
+    svc.contact_units_repo.has_default_login = AsyncMock(return_value=True)
+    svc._is_household_only_contact = AsyncMock(return_value=False)
+    svc._is_review_complete = AsyncMock(return_value=True)
+
+    result = await svc.get_status(contact_id="contact-1", contact_type="owner")
+
+    assert result["profile_complete"] is True
+    svc._ensure_onboarding.assert_awaited_once()

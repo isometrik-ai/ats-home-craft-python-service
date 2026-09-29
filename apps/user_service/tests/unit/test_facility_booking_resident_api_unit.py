@@ -37,10 +37,10 @@ from apps.user_service.app.schemas.facility_booking import (
     CancelReservationRequest,
     CreateResidentReservationRequest,
     PayInvoiceRequest,
+    RescheduleReservationRequest,
     ResidentReservationDraftRequest,
     ResidentReservationListQuery,
     ResidentWalletTopUpRequest,
-    RescheduleReservationRequest,
 )
 from apps.user_service.app.utils.common_utils import UserContext
 

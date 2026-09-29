@@ -125,7 +125,9 @@ async def test_cancelled_paths() -> None:
         refund=150,
         reason="Changed plans",
     )
-    assert "Cancellation fee" in svc.dispatcher.send_to_contact.await_args.kwargs["params"]["summary"]
+    assert (
+        "Cancellation fee" in svc.dispatcher.send_to_contact.await_args.kwargs["params"]["summary"]
+    )
 
 
 @pytest.mark.asyncio
@@ -213,9 +215,7 @@ async def test_dispatch_swallows_errors() -> None:
     with patch(
         "apps.user_service.app.services.facility_booking_notification_service.logger"
     ) as log:
-        await svc.submitted(
-            contact_id=CONTACT, reservation_id=RESERVATION, facility_label="Hall"
-        )
+        await svc.submitted(contact_id=CONTACT, reservation_id=RESERVATION, facility_label="Hall")
         log.exception.assert_called_once()
 
     svc.dispatcher.send_to_org_members = AsyncMock(side_effect=RuntimeError("down"))

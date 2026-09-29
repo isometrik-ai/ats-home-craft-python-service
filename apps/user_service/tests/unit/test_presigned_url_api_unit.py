@@ -25,7 +25,9 @@ def test_get_r2_client_builds_boto3_client():
         patch.object(presigned_url_module, "R2_ACCESS_KEY", "key"),
         patch.object(presigned_url_module, "R2_SECRET_KEY", "secret"),
         patch.object(presigned_url_module, "R2_ACCOUNT_ID", "acct"),
-        patch("apps.user_service.app.api.presigned_url.boto3.client", return_value=fake_client) as mock_client,
+        patch(
+            "apps.user_service.app.api.presigned_url.boto3.client", return_value=fake_client
+        ) as mock_client,
     ):
         client = get_r2_client()
 

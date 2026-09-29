@@ -65,12 +65,13 @@ from apps.user_service.app.api.projects import (
     list_floor_inventory,
     list_floors,
     list_my_projects,
+    list_parking_zones,
     list_plot_items,
     list_project_media,
     list_project_members,
     list_project_roles,
     list_project_vehicle_requests,
-    list_parking_zones,
+    list_projects,
     list_site_map_overlays,
     list_tower_gates,
     list_tower_lifts,
@@ -93,7 +94,6 @@ from apps.user_service.app.api.projects import (
     update_unit,
     update_unit_config,
     upsert_floor_inventory,
-    list_projects,
 )
 from apps.user_service.app.schemas.contact_onboarding import (
     DeleteProjectVehicleRequest,
@@ -126,6 +126,7 @@ from apps.user_service.app.schemas.project_inventory import (
     CreateUnitDocumentRequest,
     CreateUnitRequest,
     FacilityListQuery,
+    FloorInventoryItem,
     ListProjectUnitsFilterQuery,
     ListProjectUnitsQuery,
     ReassignUnitOwnerRequest,
@@ -134,7 +135,6 @@ from apps.user_service.app.schemas.project_inventory import (
     UpdateUnitConfigRequest,
     UpdateUnitRequest,
     UpsertFloorInventoryRequest,
-    FloorInventoryItem,
 )
 from apps.user_service.app.schemas.project_members import (
     AssignProjectMemberRequest,
@@ -445,9 +445,7 @@ async def test_list_projects_empty_and_populated(mock_service_cls, mock_perms):
     )
     assert empty.status_code == 200
 
-    service.list_projects = AsyncMock(
-        return_value={"items": [_project_summary()], "total": 1}
-    )
+    service.list_projects = AsyncMock(return_value={"items": [_project_summary()], "total": 1})
     populated = await list_projects(
         request=_request(),
         db_connection=MagicMock(),
@@ -499,9 +497,7 @@ async def test_list_my_projects(mock_service_cls, mock_extract):
 @patch("apps.user_service.app.api.projects._staff_project_access", new_callable=AsyncMock)
 @patch("apps.user_service.app.api.projects.ProjectSetupService")
 @patch("apps.user_service.app.api.projects.ProjectsService")
-async def test_project_crud_status_and_media(
-    mock_projects_cls, mock_setup_cls, mock_access
-):
+async def test_project_crud_status_and_media(mock_projects_cls, mock_setup_cls, mock_access):
     mock_access.return_value = _user_context()
     setup = mock_setup_cls.return_value
     setup.get_status = AsyncMock(
@@ -695,9 +691,7 @@ async def test_tower_group_handlers(mock_towers_cls, mock_access):
         )
     ).status_code == 201
     assert (
-        await list_towers(
-            request=req, project_id=PROJECT_ID, db_connection=db, current_user=user
-        )
+        await list_towers(request=req, project_id=PROJECT_ID, db_connection=db, current_user=user)
     ).status_code == 200
     assert (
         await get_tower_detail(
@@ -857,9 +851,7 @@ async def test_tower_group_handlers(mock_towers_cls, mock_access):
 @patch("apps.user_service.app.api.projects._staff_project_access", new_callable=AsyncMock)
 @patch("apps.user_service.app.api.projects.UnitConfigsService")
 @patch("apps.user_service.app.api.projects.InventoryService")
-async def test_configs_plots_and_inventory(
-    mock_inventory_cls, mock_configs_cls, mock_access
-):
+async def test_configs_plots_and_inventory(mock_inventory_cls, mock_configs_cls, mock_access):
     mock_access.return_value = _user_context()
     configs = mock_configs_cls.return_value
     configs.create_config = AsyncMock(return_value={"id": str(uuid4())})
@@ -1052,7 +1044,9 @@ async def test_facilities_units_and_passes(
 
     facilities = mock_facilities_cls.return_value
     facilities.create_facility = AsyncMock(return_value={"id": FACILITY_ID})
-    facilities.list_facilities = AsyncMock(return_value={"items": [{"id": FACILITY_ID}], "total": 1})
+    facilities.list_facilities = AsyncMock(
+        return_value={"items": [{"id": FACILITY_ID}], "total": 1}
+    )
     facilities.list_parking_slots = AsyncMock(return_value=[{"id": "slot-1"}])
     facilities.update_facility = AsyncMock(return_value={"id": FACILITY_ID})
     facilities.delete_facility = AsyncMock(return_value={"old_data": {}})
@@ -1326,9 +1320,7 @@ async def test_facilities_units_and_passes(
 @patch("apps.user_service.app.api.projects._staff_project_access", new_callable=AsyncMock)
 @patch("apps.user_service.app.api.projects.UnitsService")
 @patch("apps.user_service.app.api.projects.SiteMapService")
-async def test_parking_zones_site_map_and_location(
-    mock_site_cls, mock_units_cls, mock_access
-):
+async def test_parking_zones_site_map_and_location(mock_site_cls, mock_units_cls, mock_access):
     mock_access.return_value = _user_context()
     units = mock_units_cls.return_value
     units.list_parking_zones = AsyncMock(return_value=[{"id": str(uuid4())}])
@@ -1381,7 +1373,9 @@ async def test_parking_zones_site_map_and_location(
             body=UpdateProjectLocationRequest(latitude=19.0, longitude=72.0),
         )
     ).status_code == 200
-    from apps.user_service.app.schemas.project_inventory import CreateSiteMapOverlayRequest
+    from apps.user_service.app.schemas.project_inventory import (
+        CreateSiteMapOverlayRequest,
+    )
 
     overlay_body = CreateSiteMapOverlaysRequest(
         items=[
@@ -1419,7 +1413,9 @@ async def test_parking_zones_site_map_and_location(
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.api.projects._project_staff_management_access", new_callable=AsyncMock)
+@patch(
+    "apps.user_service.app.api.projects._project_staff_management_access", new_callable=AsyncMock
+)
 @patch("apps.user_service.app.api.projects._staff_project_access", new_callable=AsyncMock)
 @patch("apps.user_service.app.api.projects.extract_user_context", new_callable=AsyncMock)
 @patch("apps.user_service.app.api.projects.ProjectMembersService")

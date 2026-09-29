@@ -165,17 +165,13 @@ async def test_seed_default_roles_for_project():
     for role_def in DEFAULT_PROJECT_ROLE_DEFINITIONS:
         assert slug_to_id[role_def.slug] == f"role-id-{role_def.slug}"
 
-    role_inserts = [
-        call for call in conn.fetchrow_calls if "INSERT INTO project_roles" in call[0]
-    ]
+    role_inserts = [call for call in conn.fetchrow_calls if "INSERT INTO project_roles" in call[0]]
     assert len(role_inserts) == len(DEFAULT_PROJECT_ROLE_DEFINITIONS)
 
     perm_fetch_query, perm_fetch_args = conn.fetch_calls[0]
     assert "FROM project_permissions" in perm_fetch_query
     assert perm_fetch_args[0] == ORG_ID
-    expected_codes = {
-        code for codes in DEFAULT_PROJECT_ROLE_PERMISSIONS.values() for code in codes
-    }
+    expected_codes = {code for codes in DEFAULT_PROJECT_ROLE_PERMISSIONS.values() for code in codes}
     assert set(perm_fetch_args[1]) == expected_codes
 
     assert len(conn.execute_calls) > 0

@@ -9,6 +9,7 @@ import pytest
 from starlette.requests import Request
 
 from apps.user_service.app.api.facility_booking_admin import (
+    add_reservation_note,
     adjust_wallet,
     admin_cancel_reservation,
     admin_reschedule_reservation,
@@ -59,7 +60,6 @@ from apps.user_service.app.api.facility_booking_admin import (
     update_schedule,
     update_settings,
     upsert_staff_assignment,
-    add_reservation_note,
 )
 from apps.user_service.app.schemas.enums import FacilityBookingPaymentMethod
 from apps.user_service.app.schemas.facility_booking import (
@@ -69,15 +69,18 @@ from apps.user_service.app.schemas.facility_booking import (
     PayInvoiceRequest,
     RaiseChargeRequest,
     RejectReservationRequest,
-    ReservationNoteRequest,
     RescheduleReservationRequest,
+    ReservationNoteRequest,
     StaffReservationDraftRequest,
     StaffReservationListQuery,
     WalletAdjustRequest,
     WalletLimitRequest,
     WalletTopUpRequest,
 )
-from apps.user_service.app.schemas.facility_booking_config import DayHours, UpdateFacilityBookingConfigRequest
+from apps.user_service.app.schemas.facility_booking_config import (
+    DayHours,
+    UpdateFacilityBookingConfigRequest,
+)
 from apps.user_service.app.schemas.facility_booking_inventory import (
     CreateBookingUnitRequest,
     CreateClosureRequest,
@@ -151,7 +154,9 @@ def _workspace() -> dict:
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock)
+@patch(
+    "apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock
+)
 @patch("apps.user_service.app.api.facility_booking_admin.FacilityBookingConfigService")
 async def test_admin_config_and_inventory_handlers(mock_config_cls, mock_staff):
     _staff_patch(mock_staff)
@@ -348,7 +353,9 @@ async def test_admin_config_and_inventory_handlers(mock_config_cls, mock_staff):
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock)
+@patch(
+    "apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock
+)
 @patch("apps.user_service.app.api.facility_booking_admin.FacilityAvailabilityService")
 async def test_admin_availability_handlers(mock_avail_cls, mock_staff):
     _staff_patch(mock_staff)
@@ -436,8 +443,13 @@ async def test_admin_availability_handlers(mock_avail_cls, mock_staff):
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.api.facility_booking_admin.ensure_can_operate_facility", new_callable=AsyncMock)
-@patch("apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock)
+@patch(
+    "apps.user_service.app.api.facility_booking_admin.ensure_can_operate_facility",
+    new_callable=AsyncMock,
+)
+@patch(
+    "apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock
+)
 @patch("apps.user_service.app.api.facility_booking_admin.FacilityReservationService")
 async def test_admin_reservation_handlers(mock_res_cls, mock_staff, mock_operate):
     _staff_patch(mock_staff)
@@ -593,7 +605,9 @@ async def test_admin_reservation_handlers(mock_res_cls, mock_staff, mock_operate
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock)
+@patch(
+    "apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock
+)
 @patch("apps.user_service.app.api.facility_booking_admin.FacilityBookingConfigService")
 async def test_admin_staff_assignments_and_settings(mock_config_cls, mock_staff):
     _staff_patch(mock_staff)
@@ -657,7 +671,9 @@ async def test_admin_staff_assignments_and_settings(mock_config_cls, mock_staff)
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock)
+@patch(
+    "apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock
+)
 @patch("apps.user_service.app.api.facility_booking_admin.FacilityBookingNotificationService")
 @patch("apps.user_service.app.api.facility_booking_admin.FacilityBookingLedgerService")
 async def test_admin_ledger_handlers(mock_ledger_cls, mock_notify_cls, mock_staff):
@@ -728,7 +744,9 @@ async def test_admin_ledger_handlers(mock_ledger_cls, mock_notify_cls, mock_staf
 
 
 @pytest.mark.asyncio
-@patch("apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock)
+@patch(
+    "apps.user_service.app.api.facility_booking_admin.ensure_booking_staff", new_callable=AsyncMock
+)
 @patch("apps.user_service.app.api.facility_booking_admin.FacilityBookingBillingService")
 async def test_admin_billing_and_wallet_handlers(mock_billing_cls, mock_staff):
     _staff_patch(mock_staff)
