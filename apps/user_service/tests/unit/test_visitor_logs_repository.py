@@ -451,6 +451,9 @@ async def test_list_logs_includes_daily_check_in_count_for_daily_help():
     count_query, _ = conn.fetchval_calls[0]
     assert "daily_check_in_count" in count_query
     assert PassEventType.CHECKED_IN.value in count_query
+    assert "sub_type," in count_query.replace(" ", "")
+    assert "daily_help_profile_id" in count_query
+    assert "p.daily_help_id::text AS daily_help_profile_id" in count_query
 
 
 @pytest.mark.asyncio
