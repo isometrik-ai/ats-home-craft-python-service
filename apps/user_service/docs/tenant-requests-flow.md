@@ -426,7 +426,6 @@ ______________________________________________________________________
 | [move-events-flow.md](./move-events-flow.md)               | Admin move-in/out ledger; `sync_after_admin_move_in/out`; shared turnover service |
 | [project-setup-flow.md](./project-setup-flow.md)           | Units must exist from project setup                                               |
 | [passes-flow.md](./passes-flow.md)                         | Same owner JWT pattern; different domain                                          |
-| [fee-flow.md](./fee-flow.md)                               | No direct coupling in phase 1                                                     |
 
 ### Difference from household member add
 

@@ -29,7 +29,6 @@ ______________________________________________________________________
 | Visitor passes      | [passes-flow.md](./passes-flow.md)                         | [0003](./adr/0003-visitor-passes.md)                                                                |
 | Pass validation     | [passes-validation-flow.md](./passes-validation-flow.md)   | [0004](./adr/0004-pass-validation-gate.md)                                                          |
 | Move events         | [move-events-flow.md](./move-events-flow.md)               | [0005](./adr/0005-move-events.md)                                                                   |
-| Project fees        | [fee-flow.md](./fee-flow.md)                               | [0006](./adr/0006-project-fee-configuration.md)                                                     |
 | Tenant requests     | [tenant-requests-flow.md](./tenant-requests-flow.md)       | [0007](./adr/0007-tenant-requests.md)                                                               |
 | Walk-in entries     | [walk-in-flow.md](./walk-in-flow.md)                       | [0008](./adr/0008-walk-in-entries.md)                                                               |
 | Push notifications  | [push-notifications-flow.md](./push-notifications-flow.md) | [0009](./adr/0009-push-notifications-grpc.md)                                                       |

@@ -596,10 +596,6 @@ async def test_get_unit_detail_builds_payload():
         "assigned_at": "2026-07-15T00:00:00+00:00",
     }
     service.units_repo.count_unit_vehicles.return_value = (1, 1)
-    service.invoices_repo = AsyncMock()
-    service.invoices_repo.sum_outstanding_by_unit.return_value = 0
-    service.invoices_repo.latest_monthly_fee_by_unit.return_value = 300000
-
     mock_docs_service = MagicMock()
     mock_docs_service.list_documents_for_owner_contact_unit = AsyncMock(return_value=[])
 
@@ -655,8 +651,8 @@ async def test_get_unit_detail_builds_payload():
     assert data["two_wheeler_parking_entitlement"] == 1
     assert data["four_wheeler_parking_entitlement"] == 1
     assert data["vehicles_count"] == 1
-    assert data["financials"]["base_fee_monthly"] == 3000.0
-    assert data["financials"]["outstanding_amount"] == 0.0
+    assert data["financials"]["base_fee_monthly"] is None
+    assert data["financials"]["outstanding_amount"] is None
 
 
 class _FakeUnitsRepo:
