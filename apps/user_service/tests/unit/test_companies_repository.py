@@ -120,11 +120,32 @@ async def test_list_companies_status_filter():
     )
 
     count_query, count_args = conn.fetchval_calls[0]
-    assert "co.status = $3" in count_query
+    assert "co.status = $2" in count_query
     assert ClientStatus.ACTIVE.value in count_args
+    assert ClientStatus.DELETED.value not in count_args
     _, list_args = conn.fetch_calls[0]
     assert list_args[-2] == 10
     assert list_args[-1] == 10
+
+
+@pytest.mark.asyncio
+async def test_list_companies_deleted_status_filter():
+    """List can return deleted companies when status=deleted is requested."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = CompaniesRepository(db_connection=conn)
+
+    await repo.list_companies(
+        organization_id=ORG_ID,
+        search=None,
+        status=ClientStatus.DELETED.value,
+        page=1,
+        page_size=20,
+    )
+
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "co.status != 'deleted'" not in count_query
+    assert "co.status = $2" in count_query
+    assert count_args == (ORG_ID, ClientStatus.DELETED.value)
 
 
 @pytest.mark.asyncio
