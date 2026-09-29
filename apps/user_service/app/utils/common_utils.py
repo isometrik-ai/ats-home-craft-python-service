@@ -477,8 +477,13 @@ async def ensure_staff_project_access_for_context(
     db_connection: asyncpg.Connection,
     project_id: str,
     permission_codes: list[str] | str,
+    require_action_permission: bool = False,
 ) -> UserContext:
-    """Enforce project access for an already-resolved staff user context."""
+    """Enforce project access for an already-resolved staff user context.
+
+    When ``require_action_permission`` is True, org-wide ``projects_management.view``
+    alone does not grant access; the caller must satisfy ``permission_codes``.
+    """
     from apps.user_service.app.db.repositories.projects_repository import (
         ProjectsRepository,
     )
@@ -507,7 +512,16 @@ async def ensure_staff_project_access_for_context(
         organization_id=org_id,
         db_connection=db_connection,
     )
-    if has_org_wide:
+    if has_org_wide and not require_action_permission:
+        return user_context
+
+    if has_org_wide and require_action_permission:
+        await require_any_permission(
+            permission_codes=action_codes,
+            user_context=user_context,
+            db_connection=db_connection,
+            organization_id=org_id,
+        )
         return user_context
 
     await require_any_permission(
@@ -638,18 +652,35 @@ async def ensure_security_project_member_access(
     permission_codes: list[str] | str,
     request: Request | None = None,
 ) -> UserContext:
-    """Require staff project access and an active security project_members assignment."""
+    """Authorize daily help submission flows for gate security or daily-help creators.
+
+    Project staff with ``daily_help_management.create`` may list/submit/resubmit
+    (e.g. Security Manager). Otherwise require an active project member whose role
+    slug is ``security`` and who passes ``permission_codes`` (typically verify).
+    """
     from apps.user_service.app.db.repositories.projects_repository import (
         ProjectsRepository,
     )
     from apps.user_service.app.schemas.enums import ProjectMemberRole
+    from libs.shared_utils.common_query import DAILY_HELP_MANAGEMENT_CREATE
 
-    user_context = await ensure_staff_project_access(
-        current_user=current_user,
+    user_context = await extract_user_context(current_user, db_connection, request=request)
+    try:
+        return await ensure_staff_project_access_for_context(
+            user_context=user_context,
+            db_connection=db_connection,
+            project_id=project_id,
+            permission_codes=DAILY_HELP_MANAGEMENT_CREATE,
+            require_action_permission=True,
+        )
+    except ForbiddenException:
+        pass
+
+    user_context = await ensure_staff_project_access_for_context(
+        user_context=user_context,
         db_connection=db_connection,
         project_id=project_id,
         permission_codes=permission_codes,
-        request=request,
     )
     org_id = user_context.organization_id
     assert org_id and user_context.user_id
