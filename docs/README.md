@@ -100,6 +100,6 @@ ______________________________________________________________________
 
 ## ADR index
 
-Platform ADRs live under [apps/user_service/docs/adr/](../apps/user_service/docs/adr/README.md) — 0001–0014.
+Platform ADRs live under [apps/user_service/docs/adr/](../apps/user_service/docs/adr/README.md) — 0001–0018.
 
 When adding a new ADR, place it in the service that owns the domain.

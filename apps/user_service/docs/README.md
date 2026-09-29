@@ -37,6 +37,8 @@ ______________________________________________________________________
 | Community events    | [events-flow.md](./events-flow.md)                         | [0014](./adr/0014-community-events.md)                                                              |
 | Parking allotment   | [parking-allotment-flow.md](./parking-allotment-flow.md)   | —                                                                                                   |
 | Household pets      | [pets-flow.md](./pets-flow.md)                             | [0016](./adr/0016-pets.md)                                                                          |
+| Facility booking    | [facility-booking-flow.md](./facility-booking-flow.md)     | [0017](./adr/0017-facility-booking.md)                                                              |
+| Fee configuration   | [fee-configuration-flow.md](./fee-configuration-flow.md)   | [0018](./adr/0018-fee-configuration.md)                                                             |
 
 Full ADR index: [adr/README.md](./adr/README.md)
 

@@ -225,6 +225,7 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             VEHICLE_MANAGEMENT_EDIT,
             VEHICLE_MANAGEMENT_DELETE,
             RESIDENT_MANAGEMENT_VIEW,
+            FINANCE_MANAGEMENT_VIEW,
             WORK_ORDER_MANAGEMENT_MANAGE,
         }
     ),

@@ -8,6 +8,7 @@ from apps.user_service.app.schemas.enums.billing_notices import *
 from apps.user_service.app.schemas.enums.community_events import *
 from apps.user_service.app.schemas.enums.crm import *
 from apps.user_service.app.schemas.enums.facility_booking import *
+from apps.user_service.app.schemas.enums.fee_configuration import *
 from apps.user_service.app.schemas.enums.pets import *
 from apps.user_service.app.schemas.enums.project_fields import *
 from apps.user_service.app.schemas.enums.property import *
@@ -237,6 +238,12 @@ __all__ = [
     "FacilityBookingInvoiceFrequency",
     "FacilityBookingPaymentMethod",
     "FacilityBookingWalletTxnType",
+    "FeeBillingCycle",
+    "FeeFrequency",
+    "FeeHeadCategory",
+    "FeeHeadKind",
+    "FeeHeadStatus",
+    "FeeStartRule",
     "UNBILLED_LEDGER_TYPES",
     "INVOICEABLE_LEDGER_TYPES",
     "INVOICE_FREQUENCY_DAYS",
