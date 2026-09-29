@@ -952,6 +952,13 @@ async def test_ensure_security_project_member_access_requires_security_role():
     """Security routes reject members without the security role."""
     current_user = {"sub": "user-1", "email": "u@example.com"}
     staff_ctx = UserContext(user_id="user-1", email="u@example.com", organization_id="org-1")
+    # Development branch tries daily-help create bypass first; must fail so role check runs.
+    for_context_mock = AsyncMock(
+        side_effect=[
+            ForbiddenException(message_key="errors.forbidden"),
+            staff_ctx,
+        ]
+    )
     with (
         patch.object(
             common_utils_module,
@@ -961,7 +968,7 @@ async def test_ensure_security_project_member_access_requires_security_role():
         patch.object(
             common_utils_module,
             "ensure_staff_project_access_for_context",
-            AsyncMock(return_value=staff_ctx),
+            for_context_mock,
         ),
         patch.object(
             common_utils_module,
