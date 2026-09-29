@@ -68,6 +68,13 @@ class ResidentVisitorActivityListItemResponse(BaseModel):
     visitor_type: str
     pass_code: str | None = None
     daily_help_category_name: str | None = None
+    daily_help_profile_id: str | None = Field(
+        None,
+        description=(
+            "Daily help profile UUID for type=daily_help. "
+            "Use to navigate to GET /v1/daily-help/{profile_id}."
+        ),
+    )
     validity_type: str | None = None
     scheduled_from: str | None = None
     scheduled_until: str | None = None
@@ -125,6 +132,10 @@ class ResidentVisitorActivityPassDetailResponse(BaseModel):
     visit_status: str
     visitor_type: str
     daily_help_category_name: str | None = None
+    daily_help_profile_id: str | None = Field(
+        None,
+        description="Daily help profile UUID when type=daily_help.",
+    )
     in_time: str | None = None
     out_time: str | None = None
     time_spent_minutes: int | None = None

@@ -325,6 +325,7 @@ def test_normalize_list_item_maps_allowed_by_and_entries_on_day():
         "visit_status": VisitorLogVisitStatus.EXITED.value,
         "visitor_type": VisitorType.VISITOR.value,
         "daily_check_in_count": 2,
+        "daily_help_profile_id": "profile-1",
     }
 
     guest_item = ResidentVisitorActivitiesService._normalize_list_item(guest_row)
@@ -338,3 +339,4 @@ def test_normalize_list_item_maps_allowed_by_and_entries_on_day():
     assert guest_item["entries_on_day"] is None
     assert daily_help_item["allowed_by"] is None
     assert daily_help_item["entries_on_day"] == 2
+    assert daily_help_item["daily_help_profile_id"] == "profile-1"

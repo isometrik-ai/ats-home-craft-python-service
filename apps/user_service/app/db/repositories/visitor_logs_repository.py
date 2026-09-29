@@ -41,6 +41,7 @@ _UNION_OUTPUT_COLUMNS = """
   source,
   pass_id,
   pass_type,
+  sub_type,
   guest_name,
   visitor_phone_isd_code,
   visitor_phone_number,
@@ -68,6 +69,7 @@ _UNION_OUTPUT_COLUMNS = """
   flats_count,
   pass_image_path,
   daily_help_category_name,
+  daily_help_profile_id,
   visitor_photo_paths,
   vehicle_photo_paths,
   daily_check_in_count,
@@ -518,7 +520,8 @@ TRIM(
               END AS daily_check_in_count,
               COALESCE(ci.occurred_at, p.valid_from) AS sort_time,
               p.created_at AS tie_breaker,
-              dhc.name AS daily_help_category_name
+              dhc.name AS daily_help_category_name,
+              p.daily_help_id::text AS daily_help_profile_id
             FROM passes p
             LEFT JOIN units u ON u.id = p.unit_id
             LEFT JOIN towers t ON t.id = u.tower_id
@@ -645,7 +648,8 @@ TRIM(
               NULL::integer AS daily_check_in_count,
               COALESCE(w.entered_at, w.requested_at) AS sort_time,
               w.created_at AS tie_breaker,
-              NULL::text AS daily_help_category_name
+              NULL::text AS daily_help_category_name,
+              NULL::text AS daily_help_profile_id
             FROM walk_in_entries w
             LEFT JOIN organization_members requester
               ON requester.organization_id = w.organization_id
