@@ -622,3 +622,32 @@ async def test_get_custom_field_name_map_caches_definitions(monkeypatch):
 
     assert mapping["root-1"] == "Vehicle details"
     assert mapping["sub-1"] == "Wheel type"
+
+
+@pytest.mark.asyncio
+async def test_get_custom_field_name_map_without_db_connection():
+    """Custom field map lookup is empty when service has no DB connection."""
+    service = ActivityService(user_context=_ctx(), db_connection=None)
+    mapping = await service._get_custom_field_name_map(entity_type=EntityType.CONTACT)
+    assert mapping == {}
+    cached = await service._get_custom_field_name_map(entity_type=EntityType.CONTACT)
+    assert cached == {}
+
+
+def test_normalize_and_enrich_custom_fields_non_list_passthrough():
+    """Custom field enrichment leaves non-list values unchanged."""
+    enriched = ActivityService._normalize_and_enrich_custom_fields_value(
+        {"field_id": "f1"},
+        field_name_map={"f1": "Name"},
+    )
+    assert enriched == {"field_id": "f1"}
+
+
+def test_normalize_and_enrich_custom_fields_skips_bad_items():
+    """Custom field enrichment ignores malformed list entries."""
+    enriched = ActivityService._normalize_and_enrich_custom_fields_value(
+        ["bad", {"field_id": "f1"}],
+        field_name_map={"f1": "Label"},
+    )
+    assert enriched[0] == "bad"
+    assert enriched[1]["field_name"] == "Label"

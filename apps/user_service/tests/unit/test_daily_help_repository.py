@@ -9,6 +9,7 @@ import pytest
 
 from apps.user_service.app.db.repositories.daily_help_repository import (
     DailyHelpRepository,
+    _coerce_jsonb_mapping,
 )
 
 ORG = "11111111-1111-1111-1111-111111111111"
@@ -553,3 +554,50 @@ async def test_slots_and_attendance():
         attendance_date="2026-05-10",
     )
     assert absence["id"] == "absence-1"
+
+
+def test_coerce_jsonb_mapping_handles_strings_and_invalid_values():
+    assert _coerce_jsonb_mapping(None) == {}
+    assert _coerce_jsonb_mapping('{"a": 1}') == {"a": 1}
+    assert _coerce_jsonb_mapping("   ") == {}
+    assert _coerce_jsonb_mapping('["not-a-dict"]') == {}
+    assert _coerce_jsonb_mapping(object()) == {}
+
+
+@pytest.mark.asyncio
+async def test_remove_all_active_links_for_unit():
+    conn = _FakeConn(rows=[{"id": "link-1", "profile_id": PROFILE}])
+    repo = DailyHelpRepository(db_connection=conn)
+
+    rows = await repo.remove_all_active_links_for_unit(
+        organization_id=ORG,
+        unit_id=UNIT,
+        removal_reason="Unit vacated",
+    )
+
+    assert rows[0]["id"] == "link-1"
+    assert "UPDATE daily_help_household_links" in conn.fetch_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_list_rating_traits_batch_empty_and_grouped():
+    conn = _FakeConn()
+    repo = DailyHelpRepository(db_connection=conn)
+
+    assert await repo.list_rating_traits_batch(organization_id=ORG, rating_ids=[]) == {}
+
+    conn.rows = [
+        {"rating_id": "rating-1", "trait": "great_attitude"},
+        {"rating_id": "rating-1", "trait": "very_punctual"},
+    ]
+    grouped = await repo.list_rating_traits_batch(
+        organization_id=ORG,
+        rating_ids=["rating-1", "rating-1"],
+    )
+    assert grouped["rating-1"] == ["great_attitude", "very_punctual"]
+
+
+def test_rating_review_order_clause_variants():
+    assert DailyHelpRepository._rating_review_order_clause("oldest_first").startswith("ORDER BY")
+    assert "stars DESC" in DailyHelpRepository._rating_review_order_clause("highest_rated")
+    assert "stars ASC" in DailyHelpRepository._rating_review_order_clause("lowest_rated")

@@ -3046,3 +3046,61 @@ async def test_validate_contact_auth_identity_update_email_conflict(mock_user_re
         )
 
     assert exc_info.value.message_key == "clients.errors.email_already_exists"
+
+
+def test_normalize_email_item_and_primary_identity():
+    """Email helpers normalize pydantic models and pick primary addresses."""
+    from apps.user_service.app.services import contacts_service as cs
+
+    assert cs._normalize_email_item({"email": "a@b.com"})["email"] == "a@b.com"
+    assert cs._normalize_email_item(Email(email="x@y.com", is_primary=True))["is_primary"] is True
+    assert cs._normalize_email_item("not-an-email") == {}
+    assert (
+        cs._get_primary_email_identity(
+            [{"email": "other@example.com"}, Email(email="Primary@Example.com", is_primary=True)],
+        )
+        == "primary@example.com"
+    )
+
+
+def test_merge_reused_auth_user_contact_payloads_merges_login_identity():
+    """Reused auth users force primary login email/phone onto contact payloads."""
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    email_norm, emails, phones = svc._merge_reused_auth_user_contact_payloads(
+        reused_auth_user={"email": "Auth@Example.com", "phone": "+919876543210"},
+        email_norm="",
+        emails_payload=[
+            {"email": "auth@example.com", "label": "Work", "is_primary": False},
+            {"email": "alt@example.com", "is_primary": False},
+        ],
+        phones_payload=[
+            {
+                "phone_number": "9876543210",
+                "phone_isd_code": "+91",
+                "is_primary": False,
+            },
+            {
+                "phone_number": "1111111111",
+                "phone_isd_code": "+91",
+                "is_primary": False,
+            },
+        ],
+    )
+    assert email_norm == "auth@example.com"
+    assert emails[0]["is_primary"] is True
+    assert emails[0].get("label") == "Work"
+    assert any(item["email"] == "alt@example.com" for item in emails)
+    assert phones[0]["is_primary"] is True
+
+
+def test_infer_company_name_invalid_registrable_domain(monkeypatch):
+    """Company inference returns None when registrable domain is not usable."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_sld",
+        lambda _domain: "localhost",
+    )
+    assert ContactsService._infer_company_name_from_email("user@localhost") is None

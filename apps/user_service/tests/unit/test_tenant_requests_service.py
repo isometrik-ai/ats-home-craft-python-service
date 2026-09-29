@@ -1665,6 +1665,27 @@ async def test_reject_move_out_request_success() -> None:
     )
 
 
+def test_derive_milestones_move_out_request_rejected() -> None:
+    """Move-out request rows build rejected milestone from events."""
+    rejected_at = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    milestones = TenantRequestsService._derive_milestones(
+        row=_request_row(
+            request_type=TenantRequestType.MOVE_OUT.value,
+            status=TenantRequestStatus.REJECTED.value,
+        ),
+        events=[
+            {
+                "event_type": TenantRequestEventType.REJECTED.value,
+                "occurred_at": rejected_at,
+            }
+        ],
+    )
+    assert milestones[0].key == "submitted"
+    assert milestones[2].key == "move_out_rejected"
+    assert milestones[2].completed is True
+    assert milestones[2].occurred_at == "2026-03-01T00:00:00+00:00"
+
+
 def test_derive_milestones_move_out_pending_on_move_in_row() -> None:
     """Approved move-in rows with pending move-out include move-out milestones."""
     milestones = TenantRequestsService._derive_milestones(
@@ -1794,3 +1815,260 @@ async def test_export_csv_sanitizes_formula_injection() -> None:
         query=TenantRequestExportQuery(format="csv"),
     )
     assert "'=HYPERLINK" in csv_text
+
+
+def test_push_dispatcher_lazy_init() -> None:
+    """Push dispatcher is created on first use."""
+    svc = TenantRequestsService(db_connection=MagicMock(), user_context=_ctx())
+    assert svc._push_dispatcher is None
+    dispatcher = svc._push()
+    assert dispatcher is svc._push()
+    assert svc._push_dispatcher is not None
+
+
+def test_format_decimal_and_date_helpers() -> None:
+    """Static format helpers stringify decimals and dates."""
+    assert TenantRequestsService._format_decimal(Decimal("10.50")) == "10.50"
+    assert TenantRequestsService._format_decimal(None) is None
+    assert TenantRequestsService._format_date(date(2026, 1, 2)) == "2026-01-02"
+
+
+def test_document_display_name_unknown_type_title_case() -> None:
+    """Unknown document types fall back to a title-cased label."""
+    name = TenantRequestsService._document_display_name({"document_type": "custom_doc"})
+    assert name == "Custom Doc"
+
+
+def test_document_display_name_empty_type() -> None:
+    """Missing document type uses generic label."""
+    assert TenantRequestsService._document_display_name({}) == "Document"
+
+
+def test_resolve_move_out_list_filters() -> None:
+    """Move-out list filters map buckets to move_out_status values."""
+    pending, statuses = TenantRequestsService._resolve_move_out_list_filters(
+        request_type=TenantRequestType.MOVE_OUT,
+        bucket=TenantRequestListBucket.PENDING_REVIEW,
+    )
+    assert pending == TenantMoveOutStatus.PENDING.value
+    assert statuses is None
+
+    _, all_statuses = TenantRequestsService._resolve_move_out_list_filters(
+        request_type=TenantRequestType.MOVE_OUT,
+        bucket=None,
+    )
+    assert TenantMoveOutStatus.APPROVED.value in all_statuses
+
+
+@pytest.mark.asyncio
+async def test_get_admin_request_wrong_project_raises() -> None:
+    """Admin fetch rejects tenant requests outside the project scope."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(project_id="other-project")
+    svc = _service(repo=repo)
+    with pytest.raises(NotFoundException):
+        await svc.get_admin_request(
+            project_id=PROJECT_ID,
+            tenant_request_id=REQUEST_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_notify_document_review_skips_missing_contact() -> None:
+    """Document review push is skipped when contact_id is absent."""
+    svc = _service()
+    push_mock = AsyncMock()
+    svc._push_dispatcher = MagicMock()
+    svc._push_dispatcher.send_to_contact = push_mock
+    await svc._notify_document_review(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+        document_id=DOC_ID,
+        contact_id="",
+        request_row=_request_row(),
+        document={"document_type": "id_proof"},
+        message_key="tenant_requests.notifications.document_verified",
+        idempotency_suffix="verified",
+    )
+    push_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_sync_header_status_skips_move_out_requests() -> None:
+    """Move-out requests do not derive header status from documents."""
+    svc = _service()
+    row = _request_row(
+        request_type=TenantRequestType.MOVE_OUT.value,
+        status=TenantRequestStatus.SUBMITTED.value,
+    )
+    updated = await svc._sync_header_status_from_documents(
+        row=row,
+        documents=[{"status": TenantRequestDocumentStatus.REJECTED.value}],
+    )
+    assert updated is row
+
+
+def test_format_decimal_accepts_string_values() -> None:
+    """Non-decimal numeric values are stringified for API output."""
+    assert TenantRequestsService._format_decimal("1250.00") == "1250.00"
+
+
+def test_build_owner_and_unit_summaries() -> None:
+    """Summary builders return None without ids and populate join fields."""
+    svc = _service()
+    assert svc._build_owner_summary({}) is None
+    assert svc._build_unit_summary({}) is None
+    owner = svc._build_owner_summary(
+        {
+            "submitted_by_contact_id": OWNER_ID,
+            "owner_first_name": "Owner",
+            "owner_last_name": "One",
+            "owner_phones": [
+                {"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}
+            ],
+            "owner_emails": [{"email": "owner@example.com", "is_primary": True}],
+            "owner_profile_photo_url": " https://cdn.example/o.png ",
+        }
+    )
+    assert owner is not None
+    assert owner["contact_id"] == OWNER_ID
+    assert owner["email"] == "owner@example.com"
+    unit = svc._build_unit_summary(
+        {
+            "unit_id": UNIT_ID,
+            "unit_code": "A-101",
+            "unit_label": "A-101",
+            "unit_status": "occupied",
+            "unit_sort_order": 1,
+        }
+    )
+    assert unit is not None
+    assert unit["id"] == UNIT_ID
+
+
+def test_coerce_row_date_variants() -> None:
+    """Date coercion accepts date, datetime, and ISO strings."""
+    svc = _service()
+    assert svc._coerce_row_date(date(2026, 2, 1)) == date(2026, 2, 1)
+    assert svc._coerce_row_date(datetime(2026, 2, 2, tzinfo=timezone.utc)) == date(2026, 2, 2)
+    assert svc._coerce_row_date("2026-02-03") == date(2026, 2, 3)
+    assert svc._coerce_row_date(None) is None
+
+
+def test_assert_move_out_pending_row_validation() -> None:
+    """Move-out assertions require pending sub-state on approved rows."""
+    svc = _service()
+    with pytest.raises(ValidationException):
+        svc._assert_move_out_pending_row(
+            _request_row(move_out_status=TenantMoveOutStatus.NONE.value)
+        )
+    with pytest.raises(ValidationException):
+        svc._assert_move_out_pending_row(
+            _request_row(
+                move_out_status=TenantMoveOutStatus.PENDING.value,
+                status=TenantRequestStatus.SUBMITTED.value,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request_no_active_tenancy() -> None:
+    """Move-out fails when no approved tenancy exists for the unit."""
+    repo = _FakeTenantRequestsRepo()
+    repo.active_approved = None
+    service = _service(repo=repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+    with pytest.raises(ValidationException) as exc:
+        await service.create_move_out_request(
+            owner_contact_id=OWNER_ID,
+            body=CreateMoveOutRequest(
+                unit_id=UNIT_ID,
+                move_out_date=date.today() + timedelta(days=5),
+            ),
+        )
+    assert exc.value.message_key == "tenant_requests.errors.no_active_tenancy"
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request_tenant_mismatch() -> None:
+    """Move-out fails when active tenant does not match approved tenancy."""
+    repo = _FakeTenantRequestsRepo()
+    repo.active_approved = {"id": "approved-1", "tenant_contact_id": "other-tenant"}
+    service = _service(repo=repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+    with pytest.raises(ValidationException) as exc:
+        await service.create_move_out_request(
+            owner_contact_id=OWNER_ID,
+            body=CreateMoveOutRequest(
+                unit_id=UNIT_ID,
+                move_out_date=date.today() + timedelta(days=5),
+            ),
+        )
+    assert exc.value.message_key == "tenant_requests.errors.no_active_tenancy"
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request_rejects_past_date() -> None:
+    """Move-out date must be today or in the future."""
+    repo = _FakeTenantRequestsRepo()
+    repo.active_approved = {"id": "approved-1", "tenant_contact_id": "tenant-1"}
+    service = _service(repo=repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+    with pytest.raises(ValidationException) as exc:
+        await service.create_move_out_request(
+            owner_contact_id=OWNER_ID,
+            body=CreateMoveOutRequest(
+                unit_id=UNIT_ID,
+                move_out_date=date.today() - timedelta(days=1),
+            ),
+        )
+    assert exc.value.message_key == "tenant_requests.errors.move_out_date_in_past"
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_request_unique_violation() -> None:
+    """Concurrent move-out submissions surface as conflict."""
+    repo = _FakeTenantRequestsRepo()
+    repo.active_approved = {"id": "approved-1", "tenant_contact_id": "tenant-1"}
+    repo.row = _request_row(
+        id="approved-1",
+        status=TenantRequestStatus.APPROVED.value,
+        tenant_contact_id="tenant-1",
+    )
+
+    async def _raise_unique(**_kwargs):
+        raise UniqueViolationError("duplicate move-out")
+
+    repo.update_move_out_fields = _raise_unique  # type: ignore[method-assign]
+    service = _service(repo=repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+    with pytest.raises(ConflictException):
+        await service.create_move_out_request(
+            owner_contact_id=OWNER_ID,
+            body=CreateMoveOutRequest(
+                unit_id=UNIT_ID,
+                move_out_date=date.today() + timedelta(days=10),
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_assert_no_other_inflight_request_conflict() -> None:
+    """Tenancy updates reject when another open request exists on the unit."""
+    repo = _FakeTenantRequestsRepo()
+    repo.open_request = {"id": "other-request"}
+    svc = _service(repo=repo)
+    with pytest.raises(ConflictException):
+        await svc._assert_no_other_inflight_request(
+            unit_id=UNIT_ID,
+            tenant_request_id=REQUEST_ID,
+        )

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from apps.user_service.app.schemas.community_events import (
+    AdminCreateEventBookingRequest,
     CreateEventBookingRequest,
     MarkBookingPaidRequest,
 )
@@ -109,6 +110,21 @@ class TestComputeBookingAmounts:
         assert tax == 0
         assert total == 58900
 
+    def test_priced_child_tickets_included_in_subtotal(self) -> None:
+        event = _published_event(
+            child_ticket_mode=CommunityEventChildTicketMode.PRICED.value,
+            child_price_minor=10000,
+            apply_tax=False,
+        )
+        subtotal, tax, total = CommunityEventBookingService.compute_booking_amounts(
+            adult_tickets=1,
+            child_tickets=2,
+            event=event,
+        )
+        assert subtotal == 78900
+        assert tax == 0
+        assert total == 78900
+
 
 class TestBookingOpen:
     def test_closed_when_past_deadline(self) -> None:
@@ -120,6 +136,13 @@ class TestBookingOpen:
     def test_open_when_published_and_future_deadline(self) -> None:
         event = _published_event()
         assert CommunityEventBookingService._is_booking_open(event) is True
+
+    def test_closed_when_event_already_ended(self) -> None:
+        event = _published_event(
+            end_date=date.today() - timedelta(days=2),
+            end_time=None,
+        )
+        assert CommunityEventBookingService._is_booking_open(event) is False
 
 
 class TestFacilityValidation:
@@ -493,3 +516,96 @@ async def test_cancel_booking_not_found_and_already_cancelled():
         await svc.cancel_booking(
             contact_id=CONTACT_ID, project_id=PROJECT_ID, booking_id=BOOKING_ID
         )
+
+
+@pytest.mark.asyncio
+async def test_create_admin_booking_and_optional_mark_paid():
+    svc = _service()
+    event = _published_event(project_id=PROJECT_ID, id=EVENT_ID)
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=event)
+    svc.repo.count_active_tickets_for_contact = AsyncMock(return_value=0)
+    svc.repo.allocate_booking_sequence = AsyncMock(return_value=3)
+    svc.repo.insert_booking = AsyncMock(
+        return_value={
+            "id": BOOKING_ID,
+            "display_code": "BKG-3",
+            "currency": "INR",
+            "payment_status": CommunityEventPaymentStatus.PENDING.value,
+        }
+    )
+    svc.repo.adjust_event_aggregates_on_booking = AsyncMock()
+    svc.repo.insert_audit_log = AsyncMock()
+    svc.mark_paid = AsyncMock(return_value={"id": BOOKING_ID, "payment_status": "paid"})
+
+    result = await svc.create_admin_booking(
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+        body=AdminCreateEventBookingRequest(
+            contact_id=CONTACT_ID,
+            adult_tickets=1,
+            child_tickets=0,
+            mark_paid=True,
+            payment_notes="Cash",
+        ),
+    )
+
+    assert result["payment_status"] == "paid"
+    svc.mark_paid.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_admin_booking_rejects_mark_paid_on_free_event():
+    svc = _service()
+    event = _published_event(
+        project_id=PROJECT_ID,
+        id=EVENT_ID,
+        event_type=CommunityEventType.FREE.value,
+    )
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=event)
+
+    with pytest.raises(ValidationException):
+        await svc.create_admin_booking(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            body=AdminCreateEventBookingRequest(
+                contact_id=CONTACT_ID,
+                adult_tickets=1,
+                child_tickets=0,
+                mark_paid=True,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_cancel_booking_rejects_other_contact():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(
+        return_value={
+            "id": BOOKING_ID,
+            "project_id": PROJECT_ID,
+            "contact_id": "someone-else",
+            "booking_status": CommunityEventBookingStatus.CONFIRMED.value,
+            "total_tickets": 1,
+            "event_id": EVENT_ID,
+        }
+    )
+
+    with pytest.raises(ValidationException):
+        await svc.cancel_booking(
+            contact_id=CONTACT_ID,
+            project_id=PROJECT_ID,
+            booking_id=BOOKING_ID,
+        )
+
+
+@pytest.mark.asyncio
+async def test_promote_waitlist_noops_when_capacity_full():
+    svc = _service()
+    svc.db_connection.fetchrow = AsyncMock(return_value={"project_id": PROJECT_ID})
+    svc.repo.fetch_event_by_id = AsyncMock(
+        return_value={"total_capacity": 10, "tickets_booked": 10}
+    )
+
+    await svc._promote_waitlist(event_id=EVENT_ID)
+
+    svc.repo.fetch_oldest_waitlisted_booking.assert_not_called()

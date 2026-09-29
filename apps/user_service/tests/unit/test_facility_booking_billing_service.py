@@ -12,13 +12,18 @@ from apps.user_service.app.schemas.facility_booking import (
     GenerateInvoicesRequest,
     PayInvoiceRequest,
     WalletAdjustRequest,
+    WalletLimitRequest,
     WalletTopUpRequest,
 )
 from apps.user_service.app.services.facility_booking_billing_service import (
     FacilityBookingBillingService,
 )
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.http_exceptions import (
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
 
 PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 CONTACT_ID = "33333333-3333-3333-3333-333333333333"
@@ -193,3 +198,287 @@ async def test_pay_invoice_rejects_already_paid():
             invoice_id=INVOICE_ID,
             body=PayInvoiceRequest(method=FacilityBookingPaymentMethod.CASH),
         )
+
+
+@pytest.mark.asyncio
+async def test_get_wallet_and_set_limit():
+    svc = _service()
+    result = await svc.get_wallet(project_id=PROJECT_ID, contact_id=CONTACT_ID)
+    assert result["balance"] == 500
+    assert result["credit_limit"] == 10000
+
+    svc.wallets.set_limit = AsyncMock()
+    await svc.set_limit(
+        project_id=PROJECT_ID,
+        contact_id=CONTACT_ID,
+        body=WalletLimitRequest(limit=2000),
+    )
+    svc.wallets.set_limit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_top_up_success_and_disabled_cash():
+    svc = _service()
+    svc.config_service.get_settings = AsyncMock(
+        return_value={
+            "invoice_frequency": "monthly",
+            "wallet_enabled": True,
+            "online_enabled": True,
+            "cash_enabled": False,
+            "wallet_credit_limit": 10000,
+        }
+    )
+    with pytest.raises(ValidationException):
+        await svc.top_up(
+            project_id=PROJECT_ID,
+            body=WalletTopUpRequest(
+                contact_id=CONTACT_ID, amount=100, method=FacilityBookingPaymentMethod.CASH
+            ),
+        )
+
+    svc.config_service.get_settings = AsyncMock(
+        return_value={
+            "invoice_frequency": "monthly",
+            "wallet_enabled": True,
+            "online_enabled": True,
+            "cash_enabled": True,
+            "wallet_credit_limit": 10000,
+        }
+    )
+    result = await svc.top_up(
+        project_id=PROJECT_ID,
+        body=WalletTopUpRequest(
+            contact_id=CONTACT_ID, amount=100, method=FacilityBookingPaymentMethod.CASH
+        ),
+    )
+    assert result["balance"] == 800
+    svc.wallets.insert_transaction.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_adjust_success_and_zero_amount():
+    svc = _service()
+    with pytest.raises(ValidationException):
+        await svc.adjust(
+            project_id=PROJECT_ID,
+            body=WalletAdjustRequest(contact_id=CONTACT_ID, amount=0, reason="noop"),
+        )
+
+    await svc.adjust(
+        project_id=PROJECT_ID,
+        body=WalletAdjustRequest(contact_id=CONTACT_ID, amount=100, reason="Bonus"),
+    )
+    svc.notifier.wallet_updated.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_and_get_invoice():
+    svc = _service()
+    svc.invoices.list_project = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": INVOICE_ID,
+                    "contact_id": CONTACT_ID,
+                    "number": "INV-1",
+                    "status": "issued",
+                    "lines": [],
+                    "total": 100,
+                    "period_label": "Sep",
+                    "due_date": date(2026, 10, 1),
+                }
+            ],
+            1,
+        )
+    )
+    rows, total = await svc.list_invoices(project_id=PROJECT_ID)
+    assert total == 1
+    assert rows[0]["number"] == "INV-1"
+
+    svc.invoices.get = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc.get_invoice(project_id=PROJECT_ID, invoice_id=INVOICE_ID)
+
+    svc.invoices.get = AsyncMock(
+        return_value={
+            "id": INVOICE_ID,
+            "contact_id": "other",
+            "number": "INV-1",
+            "status": "issued",
+            "lines": [],
+            "total": 1,
+            "period_label": "Sep",
+            "due_date": date(2026, 10, 1),
+        }
+    )
+    with pytest.raises(ForbiddenException):
+        await svc.get_invoice(project_id=PROJECT_ID, invoice_id=INVOICE_ID, contact_id=CONTACT_ID)
+
+
+@pytest.mark.asyncio
+async def test_generate_invoices_skips_non_positive_totals():
+    svc = _service()
+    svc.invoices.count_for_year = AsyncMock(return_value=0)
+    svc.ledger_repo.list_invoiceable = AsyncMock(
+        return_value=[
+            {
+                "id": "e1",
+                "contact_id": CONTACT_ID,
+                "description": "Refund",
+                "amount": -100,
+                "reservation_id": None,
+            }
+        ]
+    )
+    result = await svc.generate_invoices(project_id=PROJECT_ID, body=GenerateInvoicesRequest())
+    assert result["created"] == 0
+    svc.invoices.insert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_pay_invoice_cash_and_wallet_limit():
+    svc = _service()
+    svc.invoices.get = AsyncMock(
+        return_value={
+            "id": INVOICE_ID,
+            "contact_id": CONTACT_ID,
+            "number": "INV-1",
+            "status": "issued",
+            "lines": [],
+            "total": 50000,
+            "period_label": "Sep",
+            "due_date": date(2026, 10, 1),
+        }
+    )
+    with pytest.raises(ValidationException):
+        await svc.pay_invoice(
+            project_id=PROJECT_ID,
+            invoice_id=INVOICE_ID,
+            body=PayInvoiceRequest(method=FacilityBookingPaymentMethod.WALLET),
+        )
+
+    svc.invoices.get = AsyncMock(
+        return_value={
+            "id": INVOICE_ID,
+            "contact_id": CONTACT_ID,
+            "number": "INV-1",
+            "status": "issued",
+            "lines": [],
+            "total": 200,
+            "period_label": "Sep",
+            "due_date": date(2026, 10, 1),
+        }
+    )
+    svc.invoices.mark_paid = AsyncMock(
+        return_value={
+            "id": INVOICE_ID,
+            "contact_id": CONTACT_ID,
+            "number": "INV-1",
+            "status": "paid",
+            "lines": [],
+            "total": 200,
+            "period_label": "Sep",
+            "due_date": date(2026, 10, 1),
+            "paid_via": "cash",
+        }
+    )
+    paid = await svc.pay_invoice(
+        project_id=PROJECT_ID,
+        invoice_id=INVOICE_ID,
+        body=PayInvoiceRequest(method=FacilityBookingPaymentMethod.CASH),
+    )
+    assert paid["status"] == "paid"
+    svc.wallets.update_balance.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_overview_aggregates_metrics():
+    svc = _service()
+    svc.ledger = MagicMock()
+    svc.ledger.unbilled = AsyncMock(return_value={"unbilled_total": 300, "unbilled_contacts": 2})
+    svc.invoices.list_project = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": INVOICE_ID,
+                    "contact_id": CONTACT_ID,
+                    "number": "INV-1",
+                    "status": "issued",
+                    "lines": [],
+                    "total": 200,
+                    "period_label": "Sep",
+                    "due_date": date(2026, 10, 1),
+                }
+            ],
+            1,
+        )
+    )
+    svc.ledger_repo.list_payments_for_month = AsyncMock(
+        return_value=[{"method": "wallet", "amount": -50}]
+    )
+    svc.wallets.list_project = AsyncMock(return_value=[{"contact_id": CONTACT_ID, "balance": 400}])
+    overview = await svc.overview(project_id=PROJECT_ID)
+    assert overview["unbilled_total"] == 300
+    assert overview["outstanding_count"] == 1
+    assert overview["wallet_float"] == 400
+
+
+@pytest.mark.asyncio
+async def test_require_member_and_payment_guards():
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_project_membership = AsyncMock(return_value=False)
+    with pytest.raises(ValidationException):
+        await svc.get_wallet(project_id=PROJECT_ID, contact_id=CONTACT_ID)
+
+    svc.contact_units_repo.contact_has_active_project_membership = AsyncMock(return_value=True)
+    svc.invoices.get = AsyncMock(
+        return_value={
+            "id": INVOICE_ID,
+            "contact_id": CONTACT_ID,
+            "number": "INV-1",
+            "status": "issued",
+            "lines": [],
+            "total": 100,
+            "period_label": "Sep",
+            "due_date": date(2026, 10, 1),
+        }
+    )
+    with pytest.raises(ValidationException):
+        await svc.pay_invoice(
+            project_id=PROJECT_ID,
+            invoice_id=INVOICE_ID,
+            body=PayInvoiceRequest(method=FacilityBookingPaymentMethod.ONLINE),
+            allowed_methods={"cash"},
+        )
+
+    svc.config_service.get_settings = AsyncMock(
+        return_value={
+            "invoice_frequency": "monthly",
+            "wallet_enabled": False,
+            "online_enabled": False,
+            "cash_enabled": False,
+            "wallet_credit_limit": 10000,
+        }
+    )
+    with pytest.raises(ValidationException):
+        await svc.pay_invoice(
+            project_id=PROJECT_ID,
+            invoice_id=INVOICE_ID,
+            body=PayInvoiceRequest(method=FacilityBookingPaymentMethod.CASH),
+        )
+
+
+@pytest.mark.asyncio
+async def test_effective_limit_uses_wallet_override():
+    svc = _service()
+    svc.wallets.get_or_create = AsyncMock(
+        return_value={
+            "id": "w1",
+            "contact_id": CONTACT_ID,
+            "balance": 500,
+            "credit_limit": 2500,
+        }
+    )
+    wallet = await svc.get_wallet(project_id=PROJECT_ID, contact_id=CONTACT_ID)
+    assert wallet["credit_limit"] == 2500
+    assert wallet["custom_limit"] is True

@@ -8,9 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import BackgroundTasks
 
+from apps.user_service.app.schemas.companies import CreateCompanyRequestStandalone
 from apps.user_service.app.schemas.contacts import CreateContactRequestStandalone
 from apps.user_service.app.schemas.enums import KafkaTopics
-from apps.user_service.app.schemas.leads import CreateLeadRequest, LeadContactCreate
+from apps.user_service.app.schemas.leads import (
+    CreateLeadCompany,
+    CreateLeadRequest,
+    LeadContactCreate,
+)
 from apps.user_service.app.services.external_leads_service import (
     ExternalLeadCreateResult,
     ExternalLeadsService,
@@ -272,3 +277,122 @@ def test_schedule_create_post_commit_registers_background_tasks():
     mock_index.assert_called_once()
     mock_enrich.assert_called_once()
     assert len(background_tasks.tasks) >= 2
+
+
+@pytest.mark.asyncio
+async def test_create_or_reuse_contact_reraises_unrelated_conflict():
+    """Only email-already-exists conflicts are converted to reuse."""
+    service = _service()
+    service.contacts_service.create_contact = AsyncMock(
+        side_effect=ConflictException(message_key="contacts.errors.other")
+    )
+    with pytest.raises(ConflictException):
+        await service._create_or_reuse_contact(
+            CreateContactRequestStandalone(email="x@example.com", phones=[])
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_or_reuse_contact_conflict_without_client_id():
+    """Email conflict without client_id cannot be reused."""
+    service = _service()
+    service.contacts_service.create_contact = AsyncMock(
+        side_effect=ConflictException(
+            message_key="contacts.errors.email_already_exists",
+            params={},
+        )
+    )
+    with pytest.raises(ConflictException):
+        await service._create_or_reuse_contact(
+            CreateContactRequestStandalone(email="dup@example.com", phones=[])
+        )
+
+
+def test_ensure_lead_linked_to_company_noop_on_empty_id():
+    """Blank company ids are ignored."""
+    service = _service()
+    lead_payload = _lead_payload()
+    service._ensure_lead_linked_to_company(lead_payload, company_id="  ")
+    assert lead_payload.company is None
+
+
+def test_ensure_lead_linked_to_company_keeps_existing_different_company():
+    """Existing company link is not overwritten by a different id."""
+    service = _service()
+    lead_payload = _lead_payload(
+        company=CreateLeadCompany(company_id="existing-co", label="Primary")
+    )
+    service._ensure_lead_linked_to_company(lead_payload, company_id=COMPANY_ID)
+    assert lead_payload.company.company_id == "existing-co"
+
+
+def test_apply_create_audit_state_company_only_medium_risk():
+    """Lead-only company create uses medium risk when no inline contact."""
+    request = SimpleNamespace(state=SimpleNamespace())
+    result = ExternalLeadCreateResult(
+        created={"id": LEAD_ID},
+        lead_payload=_lead_payload(),
+        created_contact_id=None,
+        created_company_id=None,
+        lead_company_id=COMPANY_ID,
+        contact_created_events=[],
+        lead_created_event=None,
+        lead_event_key=None,
+        contact_result=None,
+        company_result=None,
+    )
+    with patch(
+        "apps.user_service.app.services.external_leads_service.LeadService._normalize_lead_audit_snapshot",
+        return_value={"id": LEAD_ID},
+    ):
+        ExternalLeadsService.apply_create_audit_state(
+            request, result=result, user_context=_ctx(), external_actor=False
+        )
+    assert "new company" in request.state.audit_description
+    assert request.state.audit_risk_level == "high"
+
+
+def test_build_create_response_data_lead_company_only():
+    """Response prefers lead_company_id over inline contact company."""
+    result = ExternalLeadCreateResult(
+        created={"id": LEAD_ID},
+        lead_payload=_lead_payload(),
+        created_contact_id=None,
+        created_company_id=COMPANY_ID,
+        lead_company_id="lead-co",
+        contact_created_events=[],
+        lead_created_event=None,
+        lead_event_key=None,
+        contact_result=None,
+        company_result=None,
+    )
+    data = ExternalLeadsService.build_create_response_data(result)
+    assert data["company_id"] == "lead-co"
+    assert data["contact_company_id"] == COMPANY_ID
+
+
+@pytest.mark.asyncio
+async def test_create_lead_with_lead_only_company():
+    """Inline company create links lead.company without contact."""
+    service = _service()
+    service.lead_service.create_lead = AsyncMock(return_value={"id": LEAD_ID})
+    service.companies_service.create_company = AsyncMock(
+        return_value={
+            "company_id": COMPANY_ID,
+            "created_entities": [{"entity_table": "companies", "entity_id": COMPANY_ID}],
+        }
+    )
+    service.event_service.create_lifecycle_event = AsyncMock(return_value={"event_id": "evt-1"})
+    with patch(
+        "apps.user_service.app.services.external_leads_service.CompaniesService.create_lifecycle_events_for_created_entities",
+        new=AsyncMock(return_value=[({"event_id": "evt-co"}, COMPANY_ID)]),
+    ):
+        result = await service.create_lead_with_optional_contact(
+            lead=_lead_payload(contacts=[LeadContactCreate(contact_id=CONTACT_ID)]),
+            contact=None,
+            lead_contact_label=None,
+            create_company=CreateCompanyRequestStandalone(name="Acme"),
+            require_linked_contact=False,
+        )
+    assert result.lead_company_id == COMPANY_ID
+    assert result.lead_payload.company.company_id == COMPANY_ID

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -401,3 +402,121 @@ async def test_get_embedding_client_caches_instance(monkeypatch) -> None:
     first = await ts_module._get_embedding_client()
     second = await ts_module._get_embedding_client()
     assert first is second is fake
+
+
+def test_parse_import_response_skips_blank_lines() -> None:
+    """Import parser ignores empty NDJSON lines."""
+    assert TypesenseService._parse_import_response("\n  \n") == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_raises_non_404_http_error() -> None:
+    """ensure_collection propagates non-404 HTTP errors from GET collection."""
+    service = TypesenseService(collection_name="contacts")
+
+    async def fake_request(self, method, path, **_kwargs):
+        del self, method, path
+        response = MagicMock()
+        response.status_code = 500
+        raise httpx.HTTPStatusError(
+            "server error",
+            request=MagicMock(),
+            response=response,
+        )
+
+    with patch.object(TypesenseService, "_request", fake_request):
+        with pytest.raises(httpx.HTTPStatusError):
+            await service.ensure_collection()
+
+
+@pytest.mark.asyncio
+async def test_ensure_collection_early_return_when_cached() -> None:
+    """Second ensure_collection call returns immediately when already ensured."""
+    service = TypesenseService(collection_name="contacts")
+    service._ensured = True
+    request_mock = AsyncMock()
+    with patch.object(TypesenseService, "_request", request_mock):
+        await service.ensure_collection()
+    request_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_request_retries_retryable_http_status(monkeypatch) -> None:
+    """_request retries when Typesense returns a retryable HTTP status."""
+    service = TypesenseService(collection_name="contacts")
+    attempts = {"count": 0}
+
+    async def fake_client_request(*_args, **_kwargs):
+        attempts["count"] += 1
+        response = MagicMock()
+        response.status_code = 429
+        response.raise_for_status = MagicMock(
+            side_effect=httpx.HTTPStatusError(
+                "rate limited",
+                request=MagicMock(),
+                response=response,
+            )
+        )
+        if attempts["count"] >= 2:
+            response.status_code = 200
+            response.raise_for_status = MagicMock()
+        return response
+
+    mock_client = MagicMock()
+    mock_client.request = fake_client_request
+    with patch.object(ts_module, "get_typesense_http_client", AsyncMock(return_value=mock_client)):
+        with patch.object(service._settings.typesense, "num_retries", 1, create=True):
+            response = await service._request("GET", "/health")
+    assert response.status_code == 200
+    assert attempts["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_embed_documents_mixed_empty_and_nonempty(monkeypatch) -> None:
+    """_embed_documents maps vectors only for documents with embeddable text."""
+    mock_client = AsyncMock()
+    mock_client.embeddings.create = AsyncMock(
+        return_value=MagicMock(data=[MagicMock(embedding=[0.5])])
+    )
+
+    async def fake_get_client():
+        return mock_client
+
+    monkeypatch.setattr(ts_module, "_get_embedding_client", fake_get_client)
+    vectors = await ts_module._embed_documents(
+        [{"id": "1"}, {"full_name": "Jane Doe"}],
+    )
+    assert vectors[0] is None
+    assert vectors[1] == [0.5]
+
+
+@pytest.mark.asyncio
+async def test_upsert_documents_bulk_parse_failure_raises() -> None:
+    """upsert_documents_bulk re-raises when import response JSON is invalid."""
+    service = TypesenseService(collection_name="contacts")
+
+    async def fake_request(self, method, path, **_kwargs):
+        del self, method, path
+        response = MagicMock()
+        response.status_code = 200
+        response.raise_for_status = MagicMock()
+        response.text = "not-json"
+        return response
+
+    with patch.object(TypesenseService, "_request", fake_request):
+        with patch.object(TypesenseService, "ensure_collection", AsyncMock()):
+            with patch.object(ts_module, "_embed_documents", AsyncMock(return_value=[None])):
+                with pytest.raises(JSONDecodeError):
+                    await service.upsert_documents_bulk([{"id": "1", "name": "Acme"}])
+
+
+@pytest.mark.asyncio
+async def test_get_embedding_client_double_checked_lock(monkeypatch) -> None:
+    """Concurrent embedding client creation returns the same cached client."""
+    ts_module._embedding_state.client = None
+    fake = MagicMock()
+    monkeypatch.setattr(ts_module, "AsyncOpenAI", MagicMock(return_value=fake))
+    monkeypatch.setattr(ts_module.shared_settings, "openai_api_key", "sk-test")
+    ts_module._embedding_state.client = fake
+    same = await ts_module._get_embedding_client()
+    assert same is fake

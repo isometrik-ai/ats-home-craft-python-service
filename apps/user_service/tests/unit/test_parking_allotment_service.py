@@ -384,3 +384,436 @@ async def test_allot_slot_creates_allotment_and_assigns_slot():
     assert result.parking_vehicle_category == ParkingVehicleCategory.FOUR_WHEELER
     svc.repo.insert_allotment.assert_awaited_once()
     svc.slots_repo.assign_slot.assert_awaited_once()
+
+
+def test_format_date_and_event_payload_helpers():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    assert svc._format_date(None) is None
+    assert svc._format_date(date(2026, 3, 1)) == "2026-03-01"
+    assert svc._format_date("2026-03-01") == "2026-03-01"
+    assert svc._normalize_event_payload('{"a": 1}') == {"a": 1}
+    assert svc._normalize_event_payload(["bad"]) == {}
+    assert svc._active_allotments_from_row([{"allotment_id": "a1"}, "skip"]) == [
+        {"allotment_id": "a1"}
+    ]
+    assert svc._slot_type_label("basement") == "Basement"
+    assert svc._slot_type_label("custom_type") == "Custom Type"
+
+
+def test_slot_allowed_actions_and_vehicle_category():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    assert svc._slot_allowed_actions(
+        display_status=ParkingSlotDisplayStatus.VISITOR_POOL.value
+    ) == [
+        "details",
+        "history",
+    ]
+    assert "reassign" in svc._slot_allowed_actions(
+        display_status=ParkingSlotDisplayStatus.ALLOTTED.value
+    )
+    assert svc._slot_allowed_actions(display_status="unknown") == ["details", "history"]
+    assert (
+        ParkingAllotmentService._slot_vehicle_category({"parking_vehicle_category": "two_wheeler"})
+        == "two_wheeler"
+    )
+    assert (
+        ParkingAllotmentService._resolve_parking_vehicle_category(
+            {"parking_vehicle_category": "two_wheeler"}
+        )
+        == ParkingVehicleCategory.TWO_WHEELER
+    )
+    assert ParkingAllotmentService._resolve_slot_type({}) == ParkingFacilitySubtype.OPEN.value
+
+
+def test_unit_allowed_actions_without_entitlement():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    assert (
+        svc._unit_allowed_actions(
+            two_wheeler_parking_entitlement=0,
+            four_wheeler_parking_entitlement=0,
+            included_two_wheeler_slots_assigned=0,
+            included_four_wheeler_slots_assigned=0,
+            slots_assigned=0,
+        )
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_list_scope_rejects_invalid_facility():
+    from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.facilities_repo = MagicMock()
+    svc.facilities_repo.get_facility = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc._resolve_list_scope(
+            project_id="project-1",
+            tower_id=None,
+            facility_id="facility-1",
+        )
+
+    svc.facilities_repo.get_facility = AsyncMock(
+        return_value={"id": "facility-1", "facility_type": "clubhouse", "tower_id": "tower-1"}
+    )
+    with pytest.raises(NotFoundException):
+        await svc._resolve_list_scope(
+            project_id="project-1",
+            tower_id=None,
+            facility_id="facility-1",
+        )
+
+    svc.facilities_repo.get_facility = AsyncMock(
+        return_value={"id": "facility-1", "facility_type": "parking", "tower_id": "tower-1"}
+    )
+    with pytest.raises(ValidationException):
+        await svc._resolve_list_scope(
+            project_id="project-1",
+            tower_id="tower-2",
+            facility_id="facility-1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_get_summary_and_list_slots():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc._resolve_list_scope = AsyncMock(return_value=(None, None))
+    svc.repo = MagicMock()
+    svc.repo.get_summary = AsyncMock(
+        return_value={
+            "total_slots": 3,
+            "allotted": 1,
+            "free_to_allot": 2,
+            "visitor_pool": 0,
+            "blocked": 0,
+            "units_short_of_entitlement": 0,
+        }
+    )
+    svc.repo.list_slots = AsyncMock(return_value=([_slot_row()], 1))
+
+    summary = await svc.get_summary(project_id="project-1")
+    assert summary.total_slots == 3
+
+    items, total = await svc.list_slots(
+        project_id="project-1",
+        page=1,
+        page_size=20,
+    )
+    assert total == 1
+    assert items[0].slot_code == "A-B2-002"
+
+
+@pytest.mark.asyncio
+async def test_get_slot_detail_and_history_not_found():
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.get_slot_row = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.get_slot_detail(project_id="project-1", slot_id="missing")
+
+    with pytest.raises(NotFoundException):
+        await svc.list_slot_history(project_id="project-1", slot_id="missing")
+
+
+@pytest.mark.asyncio
+async def test_list_units_loads_slot_metadata():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.repo.list_units = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "unit-1",
+                    "code": "A-1804",
+                    "configuration_label": "3 BHK",
+                    "two_wheeler_parking_entitlement": 0,
+                    "four_wheeler_parking_entitlement": 0,
+                    "slots_assigned": 0,
+                    "included_two_wheeler_slots_assigned": 0,
+                    "included_four_wheeler_slots_assigned": 0,
+                    "active_allotments": [],
+                }
+            ],
+            1,
+        )
+    )
+
+    items, total = await svc.list_units(project_id="project-1", page=1, page_size=20)
+
+    assert total == 1
+    assert items[0].entitlement_status == "none"
+
+
+@pytest.mark.asyncio
+async def test_validate_slot_for_allotment_errors():
+    from apps.user_service.app.schemas.enums import ParkingUserType
+    from libs.shared_utils.http_exceptions import (
+        ConflictException,
+        NotFoundException,
+        ValidationException,
+    )
+
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.repo = MagicMock()
+    svc.repo.get_slot_row = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc._validate_slot_for_allotment(project_id="project-1", slot_id="slot-1")
+
+    svc.repo.get_slot_row = AsyncMock(
+        return_value=_slot_row(display_status=ParkingSlotDisplayStatus.ALLOTTED.value)
+    )
+    with pytest.raises(ConflictException):
+        await svc._validate_slot_for_allotment(project_id="project-1", slot_id="slot-1")
+
+    svc.repo.get_slot_row = AsyncMock(
+        return_value=_slot_row(
+            display_status=ParkingSlotDisplayStatus.FREE.value,
+            parking_user_type=ParkingUserType.VISITORS.value,
+        )
+    )
+    with pytest.raises(ValidationException):
+        await svc._validate_slot_for_allotment(project_id="project-1", slot_id="slot-1")
+
+
+@pytest.mark.asyncio
+async def test_validate_unit_included_entitlement_branches():
+    from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.repo = MagicMock()
+    svc.repo.get_unit_allotment_context = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc._validate_unit_for_allotment(
+            project_id="project-1",
+            unit_id="unit-1",
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+        )
+
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "is_parking": True,
+            "two_wheeler_parking_entitlement": 0,
+            "four_wheeler_parking_entitlement": 0,
+        }
+    )
+    with pytest.raises(ValidationException):
+        await svc._validate_unit_for_allotment(
+            project_id="project-1",
+            unit_id="unit-1",
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+        )
+
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "is_parking": False,
+            "two_wheeler_parking_entitlement": 0,
+            "four_wheeler_parking_entitlement": 0,
+            "included_slots_assigned": 0,
+        }
+    )
+    with pytest.raises(ValidationException):
+        await svc._validate_unit_for_allotment(
+            project_id="project-1",
+            unit_id="unit-1",
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+        )
+
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "is_parking": False,
+            "two_wheeler_parking_entitlement": 1,
+            "four_wheeler_parking_entitlement": 0,
+            "included_slots_assigned": 1,
+            "included_two_wheeler_slots_assigned": 1,
+            "included_four_wheeler_slots_assigned": 0,
+        }
+    )
+    with pytest.raises(ValidationException):
+        await svc._validate_unit_for_allotment(
+            project_id="project-1",
+            unit_id="unit-1",
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_allot_slot_assign_conflict_and_vehicle_review():
+    from libs.shared_utils.http_exceptions import ConflictException
+
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.slots_repo = MagicMock()
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "is_parking": False,
+            "two_wheeler_parking_entitlement": 0,
+            "four_wheeler_parking_entitlement": 2,
+            "included_slots_assigned": 0,
+            "included_two_wheeler_slots_assigned": 0,
+            "included_four_wheeler_slots_assigned": 0,
+            "slots_assigned": 0,
+        }
+    )
+    svc.repo.insert_allotment = AsyncMock(return_value={"id": "allotment-1"})
+    svc.slots_repo.assign_slot = AsyncMock(return_value=None)
+    svc.repo.get_slot_row = AsyncMock(return_value=_slot_row())
+
+    with pytest.raises(ConflictException):
+        await svc.allot_slot(
+            project_id="project-1",
+            slot_id="slot-1",
+            body=AllotParkingSlotRequest(
+                unit_id="unit-1",
+                effective_from=date(2026, 8, 16),
+                allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+            ),
+        )
+
+    svc.slots_repo.assign_slot = AsyncMock(return_value={"id": "slot-1"})
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.get_slot_row = AsyncMock(
+        side_effect=[
+            _slot_row(),
+            _slot_row(display_status=ParkingSlotDisplayStatus.ALLOTTED.value, unit_id="unit-1"),
+        ]
+    )
+    svc._create_allotment = AsyncMock()
+    await svc.allot_slot_for_vehicle_review(
+        project_id="project-1",
+        unit_id="unit-1",
+        slot_id="slot-1",
+    )
+    svc._create_allotment.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_release_reassign_block_and_unblock_slot():
+    from apps.user_service.app.schemas.enums import ParkingSlotEventType
+    from apps.user_service.app.schemas.parking_allotment import (
+        BlockParkingSlotRequest,
+        ReassignParkingSlotRequest,
+        ReleaseParkingSlotRequest,
+    )
+    from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
+
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo = MagicMock()
+    svc.slots_repo = MagicMock()
+    svc.repo.get_active_allotment_by_slot = AsyncMock(
+        return_value={"id": "allotment-1", "unit_id": "unit-1"}
+    )
+    svc.repo.release_allotment = AsyncMock(return_value={"id": "allotment-1"})
+    svc.repo.clear_vehicle_slot_references = AsyncMock()
+    svc.slots_repo.release_slot = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+    svc.repo.get_active_allotment_by_slot = AsyncMock(return_value=None)
+    with pytest.raises(ConflictException):
+        await svc.release_slot(
+            project_id="project-1",
+            slot_id="slot-1",
+            body=ReleaseParkingSlotRequest(reason="done"),
+        )
+
+    svc.repo.get_active_allotment_by_slot = AsyncMock(
+        return_value={"id": "allotment-1", "unit_id": "unit-1"}
+    )
+    svc.repo.get_slot_row = AsyncMock(
+        side_effect=[
+            _slot_row(display_status=ParkingSlotDisplayStatus.FREE.value),
+            _slot_row(display_status=ParkingSlotDisplayStatus.FREE.value),
+        ]
+    )
+    await svc.release_slot(
+        project_id="project-1",
+        slot_id="slot-1",
+        body=ReleaseParkingSlotRequest(reason="done"),
+    )
+    svc.repo.insert_event.assert_awaited()
+    assert (
+        svc.repo.insert_event.await_args.kwargs["event_type"] == ParkingSlotEventType.RELEASED.value
+    )
+
+    svc.repo.get_slot_row = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc.block_slot(
+            project_id="project-1",
+            slot_id="slot-1",
+            body=BlockParkingSlotRequest(reason="maintenance"),
+        )
+
+    svc.repo.get_slot_row = AsyncMock(
+        side_effect=[
+            _slot_row(display_status=ParkingSlotDisplayStatus.FREE.value),
+            _slot_row(display_status=ParkingSlotDisplayStatus.BLOCKED.value),
+        ]
+    )
+    svc.slots_repo.block_slot = AsyncMock(return_value={"id": "slot-1"})
+    await svc.block_slot(
+        project_id="project-1",
+        slot_id="slot-1",
+        body=BlockParkingSlotRequest(reason="maintenance"),
+    )
+
+    svc.repo.get_slot_row = AsyncMock(
+        side_effect=[
+            _slot_row(display_status=ParkingSlotDisplayStatus.BLOCKED.value),
+            _slot_row(display_status=ParkingSlotDisplayStatus.FREE.value),
+        ]
+    )
+    svc.slots_repo.unblock_slot = AsyncMock(return_value={"id": "slot-1"})
+    await svc.unblock_slot(project_id="project-1", slot_id="slot-1")
+
+    svc.repo.get_slot_row = AsyncMock(
+        return_value=_slot_row(display_status=ParkingSlotDisplayStatus.ALLOTTED.value)
+    )
+    svc.repo.get_active_allotment_by_slot = AsyncMock(
+        return_value={"id": "allotment-1", "unit_id": "unit-old"}
+    )
+    svc.repo.release_allotment = AsyncMock(return_value={"id": "allotment-1"})
+    svc.repo.insert_allotment = AsyncMock(return_value={"id": "allotment-2"})
+    svc.slots_repo.assign_slot = AsyncMock(return_value={"id": "slot-1"})
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-new",
+            "is_parking": False,
+            "two_wheeler_parking_entitlement": 0,
+            "four_wheeler_parking_entitlement": 2,
+            "included_two_wheeler_slots_assigned": 0,
+            "included_four_wheeler_slots_assigned": 0,
+            "slots_assigned": 0,
+        }
+    )
+    svc.repo.get_slot_row = AsyncMock(
+        side_effect=[
+            _slot_row(display_status=ParkingSlotDisplayStatus.ALLOTTED.value, unit_id="unit-old"),
+            _slot_row(display_status=ParkingSlotDisplayStatus.ALLOTTED.value, unit_id="unit-new"),
+        ]
+    )
+    await svc.reassign_slot(
+        project_id="project-1",
+        slot_id="slot-1",
+        body=ReassignParkingSlotRequest(
+            unit_id="unit-new",
+            effective_from=date(2026, 8, 16),
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+            reason="move",
+        ),
+    )

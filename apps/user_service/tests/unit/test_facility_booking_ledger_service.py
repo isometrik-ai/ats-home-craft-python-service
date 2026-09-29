@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -131,3 +131,147 @@ async def test_unbilled_rolls_up_contact_net():
     assert result["unbilled_total"] == 600
     assert result["unbilled_contacts"] == 1
     assert result["contacts"][0]["amount"] == 600
+
+
+@pytest.mark.asyncio
+async def test_post_skips_zero_amount():
+    svc = _service()
+    svc.repo.insert = AsyncMock()
+
+    result = await svc.post(
+        project_id=PROJECT_ID,
+        contact_id=CONTACT_ID,
+        entry_type="charge",
+        description="noop",
+        amount=0,
+    )
+
+    assert result == {}
+    svc.repo.insert.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_reservation_and_statement():
+    posted = datetime(2026, 9, 24, 10, 0, tzinfo=timezone.utc)
+    row = {
+        "id": "l1",
+        "contact_id": CONTACT_ID,
+        "contact_name": "Ada",
+        "reservation_id": "r1",
+        "facility_name": "Tennis",
+        "invoice_id": None,
+        "entry_type": "charge",
+        "description": "Booking",
+        "amount": 100,
+        "method": None,
+        "posted_at": posted,
+    }
+    svc = _service()
+    svc.repo.list_for_reservation = AsyncMock(return_value=[row])
+    svc.repo.list_for_contact = AsyncMock(return_value=([row], 1))
+    svc.repo.contact_balance = AsyncMock(return_value=100)
+
+    reservation_entries = await svc.list_reservation(
+        project_id=PROJECT_ID,
+        reservation_id="r1",
+    )
+    assert reservation_entries[0]["amount"] == 100
+
+    statement = await svc.statement(
+        project_id=PROJECT_ID,
+        contact_id=CONTACT_ID,
+    )
+    assert statement["balance"] == 100
+    assert len(statement["entries"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_project_returns_total():
+    svc = _service()
+    svc.repo.list_project = AsyncMock(return_value=([], 0))
+
+    entries, total = await svc.list_project(project_id=PROJECT_ID)
+
+    assert entries == []
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_raise_charge_reservation_not_found():
+    from libs.shared_utils.http_exceptions import NotFoundException
+
+    svc = _service()
+    svc.reservations_repo.get_reservation = AsyncMock(return_value=None)
+
+    with pytest.raises(NotFoundException):
+        await svc.raise_charge(
+            project_id=PROJECT_ID,
+            body=RaiseChargeRequest(
+                contact_id=CONTACT_ID,
+                description="Late fee",
+                amount=100,
+                reservation_id="missing-reservation",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_raise_charge_rejects_non_positive_amount():
+    svc = _service()
+
+    with (
+        patch(
+            "apps.user_service.app.services.facility_booking_ledger_service.ts_round",
+            return_value=0,
+        ),
+        pytest.raises(ValidationException),
+    ):
+        await svc.raise_charge(
+            project_id=PROJECT_ID,
+            body=RaiseChargeRequest(
+                contact_id=CONTACT_ID,
+                description="Invalid",
+                amount=0.4,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_unbilled_picks_oldest_posted_at():
+    older = datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)
+    newer = datetime(2026, 9, 24, 10, 0, tzinfo=timezone.utc)
+    svc = _service()
+    svc.repo.list_unbilled = AsyncMock(
+        return_value=[
+            {
+                "id": "1",
+                "contact_id": CONTACT_ID,
+                "contact_name": None,
+                "reservation_id": "r1",
+                "facility_name": "Tennis",
+                "invoice_id": None,
+                "entry_type": "charge",
+                "description": "Newer",
+                "amount": 100,
+                "method": None,
+                "posted_at": newer,
+            },
+            {
+                "id": "2",
+                "contact_id": CONTACT_ID,
+                "contact_name": "Ada",
+                "reservation_id": "r1",
+                "facility_name": "Tennis",
+                "invoice_id": None,
+                "entry_type": "charge",
+                "description": "Older",
+                "amount": 50,
+                "method": None,
+                "posted_at": older,
+            },
+        ]
+    )
+
+    result = await svc.unbilled(project_id=PROJECT_ID)
+
+    assert str(result["contacts"][0]["oldest_at"]).startswith("2026-09-20")
