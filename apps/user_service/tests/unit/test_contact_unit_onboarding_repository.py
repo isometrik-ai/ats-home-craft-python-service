@@ -222,3 +222,34 @@ async def test_all_unit_steps_terminal_false():
         organization_id=ORG_ID,
         contact_id=CONTACT_ID,
     )
+
+
+@pytest.mark.asyncio
+async def test_all_unit_steps_terminal_for_units_empty_ids():
+    """Empty unit id list short-circuits to False."""
+    conn = _FakeConn()
+    repo = ContactUnitOnboardingRepository(db_connection=conn)
+    assert not await repo.all_unit_steps_terminal_for_units(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        contact_unit_ids=[],
+    )
+    assert conn.fetchval_calls == []
+
+
+@pytest.mark.asyncio
+async def test_all_unit_steps_terminal_for_units_scoped_query():
+    """Terminal check scopes to provided contact_unit ids."""
+    conn = _FakeConn(fetchval_result=True)
+    repo = ContactUnitOnboardingRepository(db_connection=conn)
+    assert await repo.all_unit_steps_terminal_for_units(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        contact_unit_ids=[CONTACT_UNIT_ID],
+    )
+    query, args = conn.fetchval_calls[0]
+    assert "selected_units AS" in query
+    assert args[0] == ORG_ID
+    assert args[1] == CONTACT_ID
+    assert list(args[2]) == list(UNIT_ONBOARDING_STEP_KEYS)
+    assert CONTACT_UNIT_ID in args[3]

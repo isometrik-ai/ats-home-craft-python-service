@@ -1,4 +1,4 @@
-"""Unit tests for parking allotment API route handlers."""
+"""Unit tests for parking allotment admin API route handlers."""
 
 from __future__ import annotations
 
@@ -9,41 +9,53 @@ import pytest
 from starlette.requests import Request
 
 from apps.user_service.app.api.parking_allotment import (
+    allot_parking_slot_from_unit,
     allot_parking_slot_to_unit,
+    block_parking_slot,
+    get_parking_allotment_slot_detail,
     get_parking_allotment_summary,
     get_parking_allotment_unit,
+    list_parking_allotment_slot_history,
     list_parking_allotment_slots,
-)
-from apps.user_service.app.schemas.enums import (
-    ParkingAllotmentBasis,
-    ParkingFacilitySubtype,
-    ParkingSlotDisplayStatus,
-    ParkingVehicleCategory,
+    list_parking_allotment_units,
+    reassign_parking_slot,
+    release_parking_slot,
+    unblock_parking_slot,
 )
 from apps.user_service.app.schemas.parking_allotment import (
     AllotParkingSlotRequest,
-    ParkingAllotmentSlotDetailResponse,
+    BlockParkingSlotRequest,
     ParkingAllotmentSlotListQuery,
     ParkingAllotmentSummaryQuery,
-    ParkingAllotmentSummaryResponse,
-    ParkingAllotmentUnitListItemResponse,
+    ParkingAllotmentUnitListQuery,
+    ReassignParkingSlotRequest,
+    ReleaseParkingSlotRequest,
+    UnitAllotParkingSlotRequest,
 )
 from apps.user_service.app.utils.common_utils import UserContext
 
-PROJECT_ID = "660e8400-e29b-41d4-a716-446655440001"
-SLOT_ID = "880e8400-e29b-41d4-a716-446655440003"
-UNIT_ID = "770e8400-e29b-41d4-a716-446655440002"
+PROJECT_ID = "11111111-1111-1111-1111-111111111111"
+SLOT_ID = "22222222-2222-2222-2222-222222222222"
+UNIT_ID = "33333333-3333-3333-3333-333333333333"
+
+
+@pytest.fixture(autouse=True)
+def _skip_audit_logging():
+    with patch(
+        "apps.user_service.app.dependencies.audit_logs.audit_decorator._log_audit_event",
+        new_callable=AsyncMock,
+    ):
+        yield
 
 
 def _request() -> Request:
     return Request(
         {
             "type": "http",
-            "method": "POST",
-            "path": "/v1/projects/test/parking-allotment/slots/allot",
-            "headers": [(b"lan", b"en")],
+            "method": "GET",
+            "path": "/parking-allotment",
+            "headers": [],
             "client": ("127.0.0.1", 50000),
-            "query_string": b"",
         }
     )
 
@@ -56,86 +68,104 @@ def _user_context() -> UserContext:
     )
 
 
+def _slot_mutation():
+    return MagicMock(model_dump=lambda: {"id": SLOT_ID, "slot_code": "P-101"})
+
+
+def _summary():
+    return MagicMock(
+        model_dump=lambda: {
+            "total_slots": 10,
+            "allotted": 4,
+            "free_to_allot": 5,
+            "visitor_pool": 0,
+            "blocked": 1,
+            "units_short_of_entitlement": 2,
+        }
+    )
+
+
+def _list_item():
+    return MagicMock(model_dump=lambda: {"id": SLOT_ID, "slot_code": "P-101"})
+
+
 @pytest.mark.asyncio
 @patch(
     "apps.user_service.app.api.parking_allotment.ensure_staff_project_access",
     new_callable=AsyncMock,
 )
 @patch("apps.user_service.app.api.parking_allotment.ParkingAllotmentService")
-async def test_get_parking_allotment_summary(mock_service_cls, mock_access):
+async def test_parking_allotment_read_handlers(mock_service_cls, mock_access):
     mock_access.return_value = _user_context()
-    mock_service_cls.return_value.get_summary = AsyncMock(
-        return_value=ParkingAllotmentSummaryResponse(
-            total_slots=106,
-            allotted=60,
-            free_to_allot=33,
-            visitor_pool=9,
-            blocked=4,
-            units_short_of_entitlement=30,
+    service = mock_service_cls.return_value
+    service.get_summary = AsyncMock(return_value=_summary())
+    service.list_slots = AsyncMock(return_value=([_list_item()], 1))
+    service.get_slot_detail = AsyncMock(return_value=_slot_mutation())
+    service.list_slot_history = AsyncMock(
+        return_value=[MagicMock(model_dump=lambda: {"id": "evt-1"})]
+    )
+    service.list_units = AsyncMock(return_value=([_list_item()], 1))
+    service.get_unit = AsyncMock(return_value=_list_item())
+
+    assert (
+        await get_parking_allotment_summary(
+            request=_request(),
+            project_id=PROJECT_ID,
+            query=ParkingAllotmentSummaryQuery(),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
         )
-    )
+    ).status_code == 200
 
-    response = await get_parking_allotment_summary(
-        request=_request(),
-        project_id=PROJECT_ID,
-        query=ParkingAllotmentSummaryQuery(),
-        db_connection=MagicMock(),
-        current_user={"sub": "staff-1"},
-    )
-    assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.api.parking_allotment.ensure_staff_project_access",
-    new_callable=AsyncMock,
-)
-@patch("apps.user_service.app.api.parking_allotment.ParkingAllotmentService")
-async def test_list_parking_allotment_slots(mock_service_cls, mock_access):
-    mock_access.return_value = _user_context()
-    mock_service_cls.return_value.list_slots = AsyncMock(return_value=([], 0))
-
-    response = await list_parking_allotment_slots(
-        request=_request(),
-        project_id=PROJECT_ID,
-        query=ParkingAllotmentSlotListQuery(),
-        db_connection=MagicMock(),
-        current_user={"sub": "staff-1"},
-    )
-    assert response.status_code == 200
-
-
-@pytest.mark.asyncio
-@patch(
-    "apps.user_service.app.api.parking_allotment.ensure_staff_project_access",
-    new_callable=AsyncMock,
-)
-@patch("apps.user_service.app.api.parking_allotment.ParkingAllotmentService")
-async def test_get_parking_allotment_unit(mock_service_cls, mock_access):
-    mock_access.return_value = _user_context()
-    mock_service_cls.return_value.get_unit = AsyncMock(
-        return_value=ParkingAllotmentUnitListItemResponse(
-            id=UNIT_ID,
-            code="A-1804",
-            configuration_label="3 BHK",
-            two_wheeler_parking_entitlement=1,
-            four_wheeler_parking_entitlement=1,
-            slots_assigned=1,
-            entitlement_status="short",
-            entitlement_short_by=1,
-            slots_held=[],
-            allowed_actions=["allot_slot"],
+    assert (
+        await list_parking_allotment_slots(
+            request=_request(),
+            project_id=PROJECT_ID,
+            query=ParkingAllotmentSlotListQuery(),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
         )
-    )
+    ).status_code == 200
 
-    response = await get_parking_allotment_unit(
-        request=_request(),
-        project_id=PROJECT_ID,
-        unit_id=UNIT_ID,
-        db_connection=MagicMock(),
-        current_user={"sub": "staff-1"},
-    )
-    assert response.status_code == 200
+    assert (
+        await get_parking_allotment_slot_detail(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await list_parking_allotment_slot_history(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await list_parking_allotment_units(
+            request=_request(),
+            project_id=PROJECT_ID,
+            query=ParkingAllotmentUnitListQuery(),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await get_parking_allotment_unit(
+            request=_request(),
+            project_id=PROJECT_ID,
+            unit_id=UNIT_ID,
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -144,34 +174,91 @@ async def test_get_parking_allotment_unit(mock_service_cls, mock_access):
     new_callable=AsyncMock,
 )
 @patch("apps.user_service.app.api.parking_allotment.ParkingAllotmentService")
-async def test_allot_parking_slot_to_unit(mock_service_cls, mock_access):
+async def test_parking_allotment_mutation_handlers(mock_service_cls, mock_access):
     mock_access.return_value = _user_context()
-    mock_service_cls.return_value.allot_slot = AsyncMock(
-        return_value=ParkingAllotmentSlotDetailResponse(
-            id=SLOT_ID,
-            slot_code="A-B2-002",
-            slot_code_label="A-B2-002",
-            level_label="B2",
-            bay_label="Bay B",
-            slot_type=ParkingFacilitySubtype.BASEMENT,
-            slot_type_label="Basement",
-            parking_vehicle_category=ParkingVehicleCategory.FOUR_WHEELER,
-            status=ParkingSlotDisplayStatus.ALLOTTED,
-            facility_id="facility-1",
-            slot_number=2,
-        )
-    )
+    service = mock_service_cls.return_value
+    mutation = _slot_mutation()
+    service.allot_slot = AsyncMock(return_value=mutation)
+    service.reassign_slot = AsyncMock(return_value=mutation)
+    service.release_slot = AsyncMock(return_value=mutation)
+    service.block_slot = AsyncMock(return_value=mutation)
+    service.unblock_slot = AsyncMock(return_value=mutation)
+    service.allot_slot_to_unit = AsyncMock(return_value=mutation)
 
-    response = await allot_parking_slot_to_unit(
-        request=_request(),
-        project_id=PROJECT_ID,
-        slot_id=SLOT_ID,
-        body=AllotParkingSlotRequest(
-            unit_id="unit-1",
-            effective_from=date(2026, 8, 16),
-            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
-        ),
-        db_connection=MagicMock(),
-        current_user={"sub": "staff-1"},
-    )
-    assert response.status_code == 200
+    effective = date(2026, 4, 1)
+
+    assert (
+        await allot_parking_slot_to_unit(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            body=AllotParkingSlotRequest(unit_id=UNIT_ID, effective_from=effective),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await reassign_parking_slot(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            body=ReassignParkingSlotRequest(unit_id=UNIT_ID, effective_from=effective),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await release_parking_slot(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            body=None,
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await release_parking_slot(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            body=ReleaseParkingSlotRequest(reason="tenant moved out"),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await block_parking_slot(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            body=BlockParkingSlotRequest(reason="maintenance"),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await unblock_parking_slot(
+            request=_request(),
+            project_id=PROJECT_ID,
+            slot_id=SLOT_ID,
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+
+    assert (
+        await allot_parking_slot_from_unit(
+            request=_request(),
+            project_id=PROJECT_ID,
+            unit_id=UNIT_ID,
+            body=UnitAllotParkingSlotRequest(slot_id=SLOT_ID, effective_from=effective),
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200

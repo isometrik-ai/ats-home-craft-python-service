@@ -287,3 +287,30 @@ async def test_add_text_episode_uses_driver_and_mentions_edge(monkeypatch) -> No
     assert episode_call.kwargs["group_id"] == "org_org-1"
     mentions_call = driver.execute_query.await_args_list[1]
     assert mentions_call.kwargs["group_id"] == "org_org-1"
+
+
+@pytest.mark.asyncio
+async def test_init_graphiti_client_skips_when_already_initialized(monkeypatch) -> None:
+    """init_graphiti_client is a no-op when a client is already cached."""
+    from libs.shared_utils import graphiti_service as gs
+
+    gs._graphiti_state.client = object()
+    called = {"init": False}
+
+    def _should_not_run(*_args, **_kwargs):
+        called["init"] = True
+
+    monkeypatch.setattr(gs, "is_graphiti_configured", _should_not_run)
+    await gs.init_graphiti_client()
+    assert called["init"] is False
+
+
+@pytest.mark.asyncio
+async def test_init_graphiti_client_skips_when_not_configured(monkeypatch) -> None:
+    """init_graphiti_client exits early when Graphiti settings are absent."""
+    from libs.shared_utils import graphiti_service as gs
+
+    gs._graphiti_state.client = None
+    monkeypatch.setattr(gs, "is_graphiti_configured", lambda _cfg: False)
+    await gs.init_graphiti_client()
+    assert gs._graphiti_state.client is None

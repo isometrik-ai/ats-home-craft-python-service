@@ -39,15 +39,10 @@ from apps.user_service.app.api.facility_booking_admin import (
 from apps.user_service.app.api.facility_booking_resident import (
     router as facility_booking_resident_router,
 )
-from apps.user_service.app.api.fee_configuration import (
-    router as fee_configuration_router,
-)
-from apps.user_service.app.api.fee_invoices import router as fee_invoices_router
 from apps.user_service.app.api.gate_passes import router as gate_passes_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.leads import router as leads_router
-from apps.user_service.app.api.maintenance_fees import router as maintenance_fees_router
 from apps.user_service.app.api.move_events import router as move_events_router
 from apps.user_service.app.api.notices import router as notices_router
 from apps.user_service.app.api.notices_internal import router as notices_internal_router
@@ -79,6 +74,9 @@ from apps.user_service.app.api.user_push_tokens import router as user_push_token
 from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
+)
+from apps.user_service.app.api.visitor_activities_resident import (
+    router as visitor_activities_resident_router,
 )
 from apps.user_service.app.api.visitor_logs import router as visitor_logs_router
 from apps.user_service.app.api.walk_ins import router as walk_ins_router
@@ -119,6 +117,7 @@ router.include_router(facility_booking_admin_router)
 router.include_router(facility_booking_resident_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
+router.include_router(visitor_activities_resident_router)
 router.include_router(walk_ins_router)
 router.include_router(walk_ins_owner_router)
 router.include_router(visitor_logs_router)
@@ -126,9 +125,6 @@ router.include_router(move_events_router)
 router.include_router(custom_fields_router)
 router.include_router(projects_router)
 router.include_router(parking_allotment_router)
-router.include_router(fee_configuration_router)
-router.include_router(fee_invoices_router)
-router.include_router(maintenance_fees_router)
 router.include_router(external_clients_router)
 router.include_router(external_email_templates_router)
 router.include_router(external_leads_router)
@@ -168,7 +164,6 @@ async def api_status():
             "/move-events",
             "/custom-fields",
             "/projects",
-            "/maintenance-fees",
             "/companies",
             "/leads",
             "/lead-stages",

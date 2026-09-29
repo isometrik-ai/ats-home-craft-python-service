@@ -13,6 +13,8 @@ from apps.user_service.app.db.repositories.invite_repository import (
 )
 from apps.user_service.app.schemas.enums import (
     INVITE_ACCEPT_MSG_KEY_NEW_ACCOUNT,
+    BloodGroup,
+    Gender,
     InviteAcceptAuthKind,
     InviteStatus,
 )
@@ -29,7 +31,9 @@ from libs.shared_utils.http_exceptions import (
     ConflictException,
     ForbiddenException,
     GoneException,
+    InternalServerErrorException,
     NotFoundException,
+    ServiceUnavailableException,
 )
 
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
@@ -833,3 +837,292 @@ async def test_get_role_data_not_found():
     service.role_repository.get_role_by_id = AsyncMock(return_value=None)
     with pytest.raises(NotFoundException):
         await service._get_role_data(ROLE_ID, ORG_ID)  # pylint: disable=protected-access
+
+
+def test_invite_row_audit_fields_iso_and_non_iso():
+    """Audit snapshots stringify ids and ISO-format timestamps."""
+    from apps.user_service.app.services.invite_service import _invite_row_audit_fields
+
+    snapshot = _invite_row_audit_fields(
+        {
+            "id": "inv-1",
+            "organization_id": ORG_ID,
+            "email": "invitee@example.com",
+            "role_id": ROLE_ID,
+            "status": InviteStatus.PENDING.value,
+            "invited_by": INVITER_ID,
+            "expires_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    assert snapshot["invite_id"] == "inv-1"
+    assert snapshot["expires_at"].startswith("2026-01-01")
+    assert snapshot["created_at"] == "2026-01-01T00:00:00Z"
+
+
+def test_projects_from_metadata_skips_invalid_entries():
+    """Metadata project lists ignore non-dict rows and missing project ids."""
+    assignments = InviteService._projects_from_metadata(  # pylint: disable=protected-access
+        {
+            "projects": [
+                "bad",
+                {"project_role_id": ROLE_ID},
+                {"project_id": PROJECT_ID, "project_role_id": PROJECT_ROLE_ID},
+            ]
+        }
+    )
+    assert assignments == [
+        {"project_id": PROJECT_ID, "project_role_id": PROJECT_ROLE_ID},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_build_invite_metadata_optional_profile_fields():
+    """Create metadata stores optional profile and designation fields."""
+    service = InviteService(user_context=None, db_connection=None)
+    body = InviteCreateRequest(
+        email="invitee@example.com",
+        first_name="Jane",
+        role_id=UUID(ROLE_ID),
+        avatar_url="https://cdn.example/avatar.png",
+        gender=Gender.FEMALE,
+        dob=" 1990-05-01 ",
+        blood_group=BloodGroup.O_POSITIVE,
+        designation="  Sales Lead ",
+    )
+    metadata = service._build_invite_metadata(body)  # pylint: disable=protected-access
+    assert metadata["avatar_url"] == "https://cdn.example/avatar.png"
+    assert metadata["gender"] == Gender.FEMALE.value
+    assert metadata["dob"] == "1990-05-01"
+    assert metadata["blood_group"] == BloodGroup.O_POSITIVE.value
+    assert metadata["designation"] == "Sales Lead"
+
+
+@pytest.mark.asyncio
+async def test_add_invitee_to_team_adds_team_project_when_not_on_invite():
+    """Team assignment also adds invitee to the team's project when missing."""
+    service = InviteService(user_context=None, db_connection=None)
+    service.team_repository = MagicMock()
+    service.team_repository.get_team_detail = AsyncMock(
+        return_value=({"id": TEAM_ID, "project_id": PROJECT_ID}, [])
+    )
+    service.team_repository._insert_team_members = AsyncMock()  # pylint: disable=protected-access
+    service._add_invitee_to_project = AsyncMock()  # pylint: disable=protected-access
+
+    await service._add_invitee_to_team(  # pylint: disable=protected-access
+        team_id=TEAM_ID,
+        organization_id=ORG_ID,
+        user_id=USER_ID,
+        added_by=INVITER_ID,
+        invite_project_ids=set(),
+    )
+
+    service._add_invitee_to_project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_validate_project_in_org_not_found():
+    """Project validation rejects ids outside the organization."""
+    service = _invite_service()
+    service.projects_repository.get_project = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await service._validate_project_in_org(PROJECT_ID, ORG_ID)  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_add_invitee_to_project_resolves_default_role():
+    """Project assignment resolves default community-admin role when omitted."""
+    service = _invite_service()
+    service.projects_repository.upsert_member = AsyncMock()
+    with patch(
+        "apps.user_service.app.services.project_roles_service.ProjectRolesService"
+    ) as mock_roles_cls:
+        mock_roles_cls.return_value.resolve_role_id_for_slug = AsyncMock(
+            return_value=PROJECT_ROLE_ID
+        )
+        await service._add_invitee_to_project(  # pylint: disable=protected-access
+            project_id=PROJECT_ID,
+            project_role_id=None,
+            organization_id=ORG_ID,
+            user_id=USER_ID,
+        )
+    service.projects_repository.upsert_member.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_authenticate_existing_user_non_400_auth_error():
+    """Non-400 AuthApiError maps to generic authentication failure."""
+    service = _invite_service()
+    service.supabase_anon_client = MagicMock()
+    auth_error = AuthApiError("server", status=500, code="server_error")
+    with patch(
+        "apps.user_service.app.services.invite_service.login_user",
+        AsyncMock(side_effect=auth_error),
+    ):
+        with pytest.raises(BadRequestException):
+            await service._authenticate_existing_user(  # pylint: disable=protected-access
+                "invitee@example.com",
+                "Secret123!",
+            )
+
+
+@pytest.mark.asyncio
+async def test_authenticate_existing_user_missing_session():
+    """Missing auth session raises InternalServerErrorException."""
+    service = _invite_service()
+    service.supabase_anon_client = MagicMock()
+    with patch(
+        "apps.user_service.app.services.invite_service.login_user",
+        AsyncMock(return_value=MagicMock(user=None)),
+    ):
+        with pytest.raises(InternalServerErrorException):
+            await service._authenticate_existing_user(  # pylint: disable=protected-access
+                "invitee@example.com",
+                "Secret123!",
+            )
+
+
+@pytest.mark.asyncio
+async def test_signup_new_user_auth_error():
+    """Signup AuthApiError maps to BadRequestException."""
+    service = _invite_service()
+    service.supabase_anon_client = MagicMock()
+    auth_error = AuthApiError("bad", status=400, code="signup_failed")
+    with patch(
+        "apps.user_service.app.services.invite_service.sign_up_supabase_user",
+        AsyncMock(side_effect=auth_error),
+    ):
+        with pytest.raises(BadRequestException):
+            await service._signup_new_user(MagicMock())  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_signup_new_user_empty_result():
+    """Empty signup result raises InternalServerErrorException."""
+    service = _invite_service()
+    service.supabase_anon_client = MagicMock()
+    with patch(
+        "apps.user_service.app.services.invite_service.sign_up_supabase_user",
+        AsyncMock(return_value=None),
+    ):
+        with pytest.raises(InternalServerErrorException):
+            await service._signup_new_user(MagicMock())  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_authenticate_or_signup_passwordless_without_supabase_clients():
+    """Passwordless existing users require configured Supabase clients."""
+    service = _invite_service()
+    service.user_repository.get_auth_user_by_email = AsyncMock(
+        return_value={"encrypted_password": None}
+    )
+    with pytest.raises(ServiceUnavailableException):
+        await service._authenticate_or_signup_user(  # pylint: disable=protected-access
+            email="invitee@example.com",
+            password=None,
+            inv_meta={"first_name": "Jane"},
+            phone_number=None,
+            phone_isd_code=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_subscription_invalid_json():
+    """Invalid subscription JSON raises ForbiddenException."""
+    service = _invite_service()
+    with pytest.raises(ForbiddenException):
+        await service.validate_organization_subscription(
+            {"id": ORG_ID, "subscription": "{not-json"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_subscription_invalid_end_date():
+    """Invalid subscription end dates raise ForbiddenException."""
+    service = _invite_service()
+    with pytest.raises(ForbiddenException):
+        await service.validate_organization_subscription(
+            {
+                "id": ORG_ID,
+                "subscription": {"max_users": 10, "end_date": "not-a-date"},
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_resend_invitation_not_found():
+    """Resend rejects missing invitations."""
+    service = _invite_service(ctx=_ctx())
+    service.invite_repository.get_invite_by_id = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await service.resend_invitation("missing-inv")
+
+
+@pytest.mark.asyncio
+async def test_resend_invitation_forbidden_org():
+    """Resend rejects invitations from another organization."""
+    service = _invite_service(ctx=_ctx())
+    service.invite_repository.get_invite_by_id = AsyncMock(
+        return_value={"id": "inv-1", "organization_id": "00000000-0000-4000-8000-000000000099"}
+    )
+    with pytest.raises(ForbiddenException):
+        await service.resend_invitation("inv-1")
+
+
+@pytest.mark.asyncio
+async def test_accept_invite_missing_isometrik_credentials():
+    """Accept rejects organizations without isometrik application settings."""
+    service = _invite_service()
+    service.invite_repository.get_invite_by_token = AsyncMock(return_value=_pending_invite())
+    service.invite_repository.check_user_membership = AsyncMock(return_value=False)
+    service.organization_repository.get_organization_by_id = AsyncMock(
+        return_value={"id": ORG_ID, "settings": "{}"}
+    )
+    service.role_repository.get_role_by_id = AsyncMock(
+        return_value={"id": ROLE_ID, "name": "Member"}
+    )
+    service.user_repository.get_auth_user_by_email = AsyncMock(return_value=None)
+    body = InviteAcceptBySettingPasswordRequest(token="invite-token", password="Secret123!")
+    with patch(
+        "apps.user_service.app.services.invite_service.sign_up_supabase_user",
+        AsyncMock(
+            return_value=MagicMock(
+                session=MagicMock(access_token="access"),
+                user=MagicMock(id=USER_ID, email="invitee@example.com", user_metadata={}),
+            )
+        ),
+    ):
+        with pytest.raises(NotFoundException):
+            await service.accept_and_set_password(body)
+
+
+@pytest.mark.asyncio
+async def test_accept_invite_organization_not_found():
+    """Accept rejects when organization row is missing."""
+    service = _invite_service()
+    service.invite_repository.get_invite_by_token = AsyncMock(return_value=_pending_invite())
+    service.invite_repository.check_user_membership = AsyncMock(return_value=False)
+    service.organization_repository.get_organization_by_id = AsyncMock(return_value=None)
+    body = InviteAcceptBySettingPasswordRequest(token="invite-token", password="Secret123!")
+    with pytest.raises(NotFoundException):
+        await service.accept_and_set_password(body)
+
+
+def test_build_invite_list_item_invalid_metadata_type():
+    """List items treat non-dict metadata as empty."""
+    service = InviteService(user_context=None, db_connection=None)
+    item = service.build_invite_list_item(
+        {
+            "id": "inv-1",
+            "email": "invitee@example.com",
+            "role_id": ROLE_ID,
+            "status": "pending",
+            "invited_by": INVITER_ID,
+            "expires_at": "2024-12-26T10:00:00Z",
+            "created_at": "2024-12-19T10:00:00Z",
+            "updated_at": "2024-12-19T10:00:00Z",
+            "metadata": 42,
+        }
+    )
+    assert item["first_name"] is None
+    assert item["projects"] == []

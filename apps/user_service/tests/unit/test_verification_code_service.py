@@ -22,6 +22,7 @@ from libs.shared_utils.http_exceptions import (
     ConflictException,
     ForbiddenException,
     GoneException,
+    InternalServerErrorException,
     TooManyRequestsException,
     UnauthorizedException,
 )
@@ -643,3 +644,313 @@ def test_get_client_ip_from_client_host():
     """get_client_ip falls back to request.client.host."""
     req = types.SimpleNamespace(headers={}, client=types.SimpleNamespace(host="7.7.7.7"))
     assert VerificationCodeService.get_client_ip(req) == "7.7.7.7"
+
+
+def test_get_client_ip_from_x_real_ip():
+    """get_client_ip uses sanitized X-Real-IP when forwarded header absent."""
+    req = types.SimpleNamespace(
+        headers={"X-Real-IP": "198.51.100.10"},
+        client=types.SimpleNamespace(host="127.0.0.1"),
+    )
+    assert VerificationCodeService.get_client_ip(req) == "198.51.100.10"
+
+
+def test_get_client_ip_from_forwarded_for():
+    """get_client_ip prefers sanitized X-Forwarded-For."""
+    req = types.SimpleNamespace(
+        headers={"X-Forwarded-For": "203.0.113.1, 198.51.100.2"},
+        client=types.SimpleNamespace(host="127.0.0.1"),
+    )
+    assert VerificationCodeService.get_client_ip(req) == "203.0.113.1"
+
+
+def test_get_client_ip_unknown_when_missing():
+    """get_client_ip returns unknown when no usable headers exist."""
+    req = types.SimpleNamespace(headers={}, client=None)
+    assert VerificationCodeService.get_client_ip(req) == "unknown"
+
+
+def test_normalize_phone_strips_plus():
+    assert VerificationCodeService._normalize_phone("+919999999999") == "919999999999"
+    assert VerificationCodeService._normalize_phone("") == ""
+
+
+def test_combine_phone_requires_both_parts():
+    assert VerificationCodeService._combine_phone("9999999999", "+1") == "+19999999999"
+    assert VerificationCodeService._combine_phone(None, "+1") is None
+
+
+@pytest.mark.asyncio
+async def test_get_supabase_client_with_token(service, monkeypatch):
+    """Configured Supabase returns async client with bearer headers."""
+    svc, _, _ = service
+    fake_client = MagicMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.app_settings.shared_settings.supabase.url",
+        "https://example.supabase.co",
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.app_settings.shared_settings.supabase.anon_key",
+        "anon-key",
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.supabase.create_async_client",
+        AsyncMock(return_value=fake_client),
+    )
+    client = await svc._get_supabase_client_with_token("token-abc")
+    assert client is fake_client
+
+
+@pytest.mark.asyncio
+async def test_get_supabase_client_missing_config(service, monkeypatch):
+    """Missing Supabase config raises internal error."""
+    svc, _, _ = service
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.app_settings.shared_settings.supabase.url",
+        "",
+    )
+    with pytest.raises(InternalServerErrorException):
+        await svc._get_supabase_client_with_token("token-abc")
+
+
+@pytest.mark.asyncio
+async def test_validate_and_set_session_expired_token(service, monkeypatch):
+    """Expired JWT claims are rejected."""
+    svc, _, _ = service
+    svc.supabase_client = MagicMock()
+    fake_user = types.SimpleNamespace(id="u1")
+    fake_auth = types.SimpleNamespace(
+        get_user=AsyncMock(return_value=types.SimpleNamespace(user=fake_user)),
+    )
+    fake_client = types.SimpleNamespace(auth=fake_auth)
+    monkeypatch.setattr(svc, "_get_supabase_client_with_token", AsyncMock(return_value=fake_client))
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.get_claims_from_token",
+        AsyncMock(return_value={"exp": 1}),
+    )
+    with pytest.raises(UnauthorizedException):
+        await svc._validate_and_set_session("token-abc")
+
+
+@pytest.mark.asyncio
+async def test_validate_and_set_session_invalid_user(service, monkeypatch):
+    """Missing Supabase user response is unauthorized."""
+    svc, _, _ = service
+    fake_auth = types.SimpleNamespace(get_user=AsyncMock(return_value=None))
+    fake_client = types.SimpleNamespace(auth=fake_auth)
+    monkeypatch.setattr(svc, "_get_supabase_client_with_token", AsyncMock(return_value=fake_client))
+    with pytest.raises(UnauthorizedException):
+        await svc._validate_and_set_session("token-abc")
+
+
+def test_validate_verification_record_missing_raises(service):
+    """Missing verification record raises bad request."""
+    svc, _, _ = service
+    with pytest.raises(BadRequestException):
+        svc._validate_verification_record(
+            None,
+            VerifyVerificationCodeRequest(
+                type=VerificationType.EMAIL,
+                verification_id="ver-1",
+                verification_code="123456",
+                email="user@example.com",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_validate_and_set_session_missing_supabase_client(service, monkeypatch):
+    """Session validation requires configured service-level Supabase client."""
+    svc, _, _ = service
+    svc.supabase_client = None
+    fake_user = types.SimpleNamespace(id="u1")
+    fake_auth = types.SimpleNamespace(
+        get_user=AsyncMock(return_value=types.SimpleNamespace(user=fake_user)),
+    )
+    fake_client = types.SimpleNamespace(auth=fake_auth)
+    monkeypatch.setattr(svc, "_get_supabase_client_with_token", AsyncMock(return_value=fake_client))
+    with pytest.raises(InternalServerErrorException):
+        await svc._validate_and_set_session("token-abc")
+
+
+@pytest.mark.asyncio
+async def test_validate_and_set_session_persists_session(service, monkeypatch):
+    """Valid session is stored in memory and optional persistent storage."""
+    svc, _, _ = service
+    svc.supabase_client = MagicMock()
+    fake_user = types.SimpleNamespace(id="u1")
+    fake_storage = AsyncMock()
+    fake_auth = types.SimpleNamespace(
+        get_user=AsyncMock(return_value=types.SimpleNamespace(user=fake_user)),
+        _storage_key="sb-auth-token",
+        _persist_session=True,
+        _storage=fake_storage,
+        _in_memory_session=None,
+    )
+    fake_client = types.SimpleNamespace(auth=fake_auth)
+    fake_session = types.SimpleNamespace(access_token="token-abc")
+    monkeypatch.setattr(svc, "_get_supabase_client_with_token", AsyncMock(return_value=fake_client))
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.get_claims_from_token",
+        AsyncMock(return_value={"exp": int(datetime.now(timezone.utc).timestamp()) + 7200}),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.SupabaseSession",
+        MagicMock(return_value=fake_session),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.verification_code_service.model_dump_json",
+        MagicMock(return_value="{}"),
+    )
+    await svc._validate_and_set_session("token-abc")
+    assert fake_auth._in_memory_session is fake_session
+    fake_storage.set_item.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_user_email_retries_when_mismatch(service):
+    """Email update retries when post-update lookup still shows old email."""
+    svc, _, _ = service
+    admin = MagicMock()
+    admin.get_user_by_id = AsyncMock(
+        side_effect=[
+            types.SimpleNamespace(
+                user=types.SimpleNamespace(user_metadata={}, email="old@example.com")
+            ),
+            types.SimpleNamespace(
+                user=types.SimpleNamespace(email="old@example.com"),
+            ),
+        ]
+    )
+    admin.update_user_by_id = AsyncMock(
+        return_value=types.SimpleNamespace(user=types.SimpleNamespace())
+    )
+    svc.supabase_client = types.SimpleNamespace(auth=types.SimpleNamespace(admin=admin))
+    svc.organization_member_repository.update_user_email_by_user_id = AsyncMock(return_value=1)
+
+    assert await svc._update_user_email("u1", "new@example.com") is True
+    assert admin.update_user_by_id.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_update_user_email_failure_raises(service):
+    """Failed admin update raises internal server error."""
+    svc, _, _ = service
+    admin = MagicMock()
+    admin.get_user_by_id = AsyncMock(
+        return_value=types.SimpleNamespace(
+            user=types.SimpleNamespace(user_metadata={}, email="old@example.com")
+        )
+    )
+    admin.update_user_by_id = AsyncMock(return_value=None)
+    svc.supabase_client = types.SimpleNamespace(auth=types.SimpleNamespace(admin=admin))
+    with pytest.raises(InternalServerErrorException):
+        await svc._update_user_email("u1", "new@example.com")
+
+
+@pytest.mark.asyncio
+async def test_update_user_phone_retries_metadata_mismatch(service):
+    """Phone update retries when response metadata does not match."""
+    svc, _, _ = service
+    admin = MagicMock()
+    admin.get_user_by_id = AsyncMock(
+        return_value=types.SimpleNamespace(
+            user=types.SimpleNamespace(user_metadata={"phone_number": "111"})
+        )
+    )
+    admin.update_user_by_id = AsyncMock(
+        side_effect=[
+            types.SimpleNamespace(
+                user=types.SimpleNamespace(
+                    user_metadata={"phone_number": "111", "phone_isd_code": "+1"}
+                )
+            ),
+            types.SimpleNamespace(user=types.SimpleNamespace(user_metadata={})),
+        ]
+    )
+    svc.supabase_client = types.SimpleNamespace(auth=types.SimpleNamespace(admin=admin))
+    svc.organization_member_repository.update_user_phone_by_user_id = AsyncMock(return_value=1)
+
+    assert await svc._update_user_phone("u1", "222", "+1") is True
+    assert admin.update_user_by_id.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_update_email_or_phone_missing_phone_parts(service, monkeypatch):
+    """Phone update requires both phone number and ISD code."""
+    svc, _, _ = service
+    monkeypatch.setattr(svc, "_validate_and_set_session", AsyncMock())
+    with pytest.raises(InternalServerErrorException):
+        await svc._update_email_or_phone(
+            "u1",
+            "+1222",
+            "PHONE_NUMBER_UPDATE",
+            "token",
+            phone_number=None,
+            phone_isd_code="+1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_email_or_phone_wraps_unexpected_errors(service, monkeypatch):
+    """Unexpected update failures are wrapped as internal server errors."""
+    svc, _, _ = service
+    monkeypatch.setattr(
+        svc,
+        "_validate_and_set_session",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    with pytest.raises(InternalServerErrorException):
+        await svc._update_email_or_phone(
+            "u1",
+            "new@example.com",
+            "EMAIL_UPDATE",
+            "token",
+        )
+
+
+def test_determine_triggered_text_phone_update(service):
+    """Authenticated phone verification maps to phone update trigger."""
+    svc, _, _ = service
+    data = SendVerificationCodeRequest(
+        type=VerificationType.PHONE_NUMBER,
+        phone_number="9999999999",
+        phone_isd_code="+1",
+    )
+    assert svc._determine_triggered_text(data, {"sub": "u1"}) == "PHONE_NUMBER_UPDATE"
+
+
+@pytest.mark.asyncio
+async def test_validate_unauthenticated_phone_missing_number(service, monkeypatch):
+    """Signup phone flow rejects when combined phone cannot be built."""
+    svc, _, _ = service
+    monkeypatch.setattr(svc, "_combine_phone", lambda *_args, **_kwargs: None)
+    with pytest.raises(BadRequestException):
+        await svc._validate_unauthenticated_user_input(
+            SendVerificationCodeRequest(
+                type=VerificationType.PHONE_NUMBER,
+                phone_number="9999999999",
+                phone_isd_code="+1",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_determine_user_context_verification_method_auth(service, monkeypatch):
+    """Explicit verification_method uses authenticated validation path."""
+    svc, _, _ = service
+    monkeypatch.setattr(
+        svc,
+        "_validate_authenticated_user_input",
+        AsyncMock(return_value=("u1", "EMAIL_UPDATE")),
+    )
+    user_id, triggered = await svc._determine_user_context(
+        SendVerificationCodeRequest(
+            type=VerificationType.EMAIL,
+            email="new@example.com",
+            verification_method="CUSTOM_METHOD",
+        ),
+        {"sub": "u1"},
+    )
+    assert user_id == "u1"
+    assert triggered == "CUSTOM_METHOD"

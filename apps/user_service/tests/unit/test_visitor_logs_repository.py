@@ -111,8 +111,28 @@ async def test_list_logs_search_filter():
 
 
 @pytest.mark.asyncio
+async def test_list_logs_private_pass_visibility_filter():
+    """Resident feed hides other household members' private passes."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.list_logs(
+        organization_id="org-1",
+        unit_id="unit-1",
+        visible_to_contact_id="contact-1",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        page=1,
+        page_size=20,
+    )
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "NOT COALESCE(p.is_private, false) OR p.created_by_contact_id = $4::uuid" in count_query
+    assert "daily_help_household_links" in count_query
+    assert "contact-1" in count_args
+
+
+@pytest.mark.asyncio
 async def test_list_logs_pass_type_filter():
-    """Pass type filter casts to pass_type enum."""
+    """Pass type filter applies to both pass and walk-in branches."""
     conn = _FakeConn(rows=[], val=0)
     repo = VisitorLogsRepository(db_connection=conn)
     await repo.list_logs(
@@ -125,7 +145,8 @@ async def test_list_logs_pass_type_filter():
     )
     count_query, count_args = conn.fetchval_calls[0]
     assert "p.pass_type = $4::pass_type" in count_query
-    assert "walk_in_entries" not in count_query
+    assert "walk_in_entries" in count_query
+    assert "w.type = $5::pass_type" in count_query
     assert PassType.DELIVERY.value in count_args
 
 
@@ -413,3 +434,37 @@ async def test_list_logs_pass_resident_uses_creator_name():
     count_query, _ = conn.fetchval_calls[0]
     assert "p.created_by_contact_id::text AS resident_contact_id" in count_query
     assert "WHEN 'Owner' THEN 1" not in count_query
+
+
+@pytest.mark.asyncio
+async def test_list_logs_includes_daily_check_in_count_for_daily_help():
+    """Daily help rows expose same-day check-in counts for recurring passes."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.list_logs(
+        organization_id="org-1",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        page=1,
+        page_size=20,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "daily_check_in_count" in count_query
+    assert PassEventType.CHECKED_IN.value in count_query
+
+
+@pytest.mark.asyncio
+async def test_list_logs_walk_in_resident_scoped_to_unit_filter():
+    """Walk-in allowed-by columns respect the unit filter when present."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = VisitorLogsRepository(db_connection=conn)
+    await repo.list_logs(
+        organization_id="org-1",
+        unit_id="unit-1",
+        start_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        page=1,
+        page_size=20,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "AND vu.unit_id = $5::uuid" in count_query

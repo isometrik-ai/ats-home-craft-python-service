@@ -9,19 +9,9 @@ from fastapi import HTTPException, Request
 
 from apps.user_service.app.schemas.common import Phone
 from apps.user_service.app.schemas.contacts import CreateContactRequest
-from apps.user_service.app.schemas.enums import (
-    BillingFrequency,
-    ContactType,
-    MeasurementUnit,
-)
+from apps.user_service.app.schemas.enums import ContactType
 from apps.user_service.app.services.contacts_service import ContactsService
 from apps.user_service.app.services.event_service import EventService
-from apps.user_service.app.services.fee_calculation_service import (
-    compute_period_fee_minor,
-    convert_area_sqft_to_unit,
-    convert_unit_area_to_sqft,
-    fee_rate_input_from_row,
-)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
 from libs.shared_middleware.jwt_auth import check_user_access_async, get_user_from_auth
@@ -34,37 +24,6 @@ from libs.shared_utils.translations import Translator
 
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
 CONTACT_ID = "660e8400-e29b-41d4-a716-446655440001"
-
-
-# --- fee_calculation_service ---
-
-
-def test_convert_unit_area_gaj_and_unknown() -> None:
-    """Area conversion handles gaj and unknown units."""
-    assert convert_unit_area_to_sqft(10, MeasurementUnit.GAJ) == 90.0
-    assert convert_unit_area_to_sqft(10, "unknown") == 10
-
-
-def test_convert_area_sqft_to_unit_branches() -> None:
-    """Sqft converts to sqm and gaj."""
-    assert convert_area_sqft_to_unit(107.639, MeasurementUnit.SQ_M) == pytest.approx(10.0, rel=0.01)
-    assert convert_area_sqft_to_unit(90.0, MeasurementUnit.GAJ) == 10.0
-    assert convert_area_sqft_to_unit(100.0, MeasurementUnit.SQ_FT) == 100.0
-
-
-def test_compute_period_fee_applies_minimum() -> None:
-    """compute_period_fee_minor applies minimum fee when computed amount is lower."""
-    rate = fee_rate_input_from_row(
-        {
-            "rate_amount_minor_per_unit": 10,
-            "measurement_unit": "sq_ft",
-            "billing_frequency": BillingFrequency.MONTHLY.value,
-            "minimum_fee_minor": 5000,
-        }
-    )
-    result = compute_period_fee_minor(area_sqft=1.0, rate=rate)
-    assert result.minimum_applied is True
-    assert result.period_amount_minor == 5000
 
 
 # --- asyncpg_uow ---

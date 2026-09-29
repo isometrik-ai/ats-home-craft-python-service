@@ -34,3 +34,18 @@ def test_send_invitation_sms_returns_true() -> None:
         )
     assert ok is True
     mock_logger.info.assert_called_once()
+
+
+def test_send_invitation_sms_returns_false_on_logger_failure() -> None:
+    """SMS helper should swallow logging failures and return False."""
+    with patch("apps.user_service.app.utils.household_invitation_sms.logger") as mock_logger:
+        mock_logger.info.side_effect = RuntimeError("log sink unavailable")
+        ok = send_household_invitation_sms(
+            phone_isd_code="+91",
+            phone_number="9876543210",
+            inviter_name="Admin",
+            invitee_name="Resident",
+            invite_url="https://example.com/invite",
+        )
+    assert ok is False
+    mock_logger.error.assert_called_once()

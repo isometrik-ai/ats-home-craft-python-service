@@ -32,6 +32,7 @@ class _FakeConn:
         self.fetch_calls: list[tuple[str, tuple]] = []
         self.fetchrow_calls: list[tuple[str, tuple]] = []
         self.fetchval_calls: list[tuple[str, tuple]] = []
+        self.execute_calls: list[tuple[str, tuple]] = []
 
     async def fetch(self, query, *args):
         self.fetch_calls.append((query.strip(), args))
@@ -44,6 +45,10 @@ class _FakeConn:
     async def fetchval(self, query, *args):
         self.fetchval_calls.append((query.strip(), args))
         return self.val
+
+    async def execute(self, query, *args):
+        self.execute_calls.append((query.strip(), args))
+        return "UPDATE 1"
 
 
 @pytest.mark.asyncio
@@ -389,3 +394,233 @@ async def test_find_active_approved_for_unit():
         unit_id=UNIT_ID,
     )
     assert missing is None
+
+
+@pytest.mark.asyncio
+async def test_update_move_out_fields_with_rejection_and_clear():
+    conn = _FakeConn()
+    repo = TenantRequestsRepository(db_connection=conn)
+    requested_at = datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+
+    await repo.update_move_out_fields(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+        move_out_status="pending_review",
+        move_out_date=date(2026, 4, 1),
+        owner_reason="relocating",
+        move_out_requested_at=requested_at,
+        rejection_reason="incomplete paperwork",
+    )
+    query, args = conn.execute_calls[0]
+    assert "move_out_status = $3::tenant_move_out_status" in query
+    assert "rejection_reason = $7" in query
+    assert "incomplete paperwork" in args
+
+    conn.execute_calls.clear()
+    await repo.update_move_out_fields(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+        move_out_status="approved",
+        move_out_date=date(2026, 4, 1),
+        owner_reason=None,
+        move_out_requested_at=requested_at,
+        clear_rejection_reason=True,
+    )
+    clear_query, _ = conn.execute_calls[0]
+    assert "rejection_reason = NULL" in clear_query
+
+
+@pytest.mark.asyncio
+async def test_update_tenancy_fields_serializes_json_and_skips_empty():
+    phones = [{"type": "mobile", "number": "+15551234567"}]
+    conn = _FakeConn()
+    repo = TenantRequestsRepository(db_connection=conn)
+
+    await repo.update_tenancy_fields(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+        updates={
+            "tenant_first_name": "Bob",
+            "tenant_phones": phones,
+            "portal_access": True,
+            "move_in_date": None,
+        },
+    )
+    query, args = conn.execute_calls[0]
+    assert "tenant_first_name = $3::text" in query
+    assert "tenant_phones = $4::jsonb" in query
+    assert "move_in_date = NULL" in query
+    assert phones in args or json.dumps(phones) in args
+
+    conn.execute_calls.clear()
+    await repo.update_tenancy_fields(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+        updates={},
+    )
+    assert conn.execute_calls == []
+
+
+@pytest.mark.asyncio
+async def test_update_document_by_type_and_reset_all_documents():
+    conn = _FakeConn(row={"id": DOCUMENT_ID, "document_type": "id_proof", "status": "pending"})
+    repo = TenantRequestsRepository(db_connection=conn)
+
+    updated = await repo.update_document_by_type(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+        document_type="id_proof",
+        file_path="/files/new-id.pdf",
+        file_name="new-id.pdf",
+    )
+    assert updated["status"] == "pending"
+    doc_query, _ = conn.fetchrow_calls[0]
+    assert "document_type = $3::tenant_request_document_type" in doc_query
+
+    conn.row = None
+    missing = await repo.update_document_by_type(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+        document_type="lease_agreement",
+        file_path="/files/x.pdf",
+        file_name="x.pdf",
+    )
+    assert missing is None
+
+    conn.fetchrow_calls.clear()
+    await repo.reset_all_documents_to_pending(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+    )
+    reset_query, reset_args = conn.execute_calls[0]
+    assert "status = 'pending'::tenant_request_document_status" in reset_query
+    assert reset_args == (ORG_ID, REQUEST_ID)
+
+
+@pytest.mark.asyncio
+async def test_list_inflight_ids_for_submitter():
+    conn = _FakeConn(rows=[{"id": REQUEST_ID}, {"id": "req-2"}])
+    repo = TenantRequestsRepository(db_connection=conn)
+
+    ids = await repo.list_inflight_ids_for_submitter(
+        organization_id=ORG_ID,
+        submitted_by_contact_id=CONTACT_ID,
+    )
+    assert ids == [REQUEST_ID, "req-2"]
+    query, args = conn.fetch_calls[0]
+    assert "status = ANY($3::tenant_request_status[])" in query
+    assert args[0] == ORG_ID
+    assert args[1] == CONTACT_ID
+
+
+@pytest.mark.asyncio
+async def test_list_for_owner_move_out_and_request_type_filters():
+    conn = _FakeConn(val=1, rows=[{"id": REQUEST_ID}])
+    repo = TenantRequestsRepository(db_connection=conn)
+
+    _, total = await repo.list_for_owner(
+        organization_id=ORG_ID,
+        owner_contact_id=CONTACT_ID,
+        unit_id=None,
+        move_out_statuses=["pending_review", "approved"],
+        limit=10,
+        offset=0,
+    )
+    assert total == 1
+    count_query, _ = conn.fetchval_calls[0]
+    assert "move_out_status = ANY" in count_query
+
+    conn.fetchval_calls.clear()
+    conn.fetch_calls.clear()
+    conn.val = 1
+    _, total = await repo.list_for_owner(
+        organization_id=ORG_ID,
+        owner_contact_id=CONTACT_ID,
+        unit_id=UNIT_ID,
+        request_type="move_out",
+        limit=5,
+        offset=0,
+    )
+    assert total == 1
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "request_type = $4::tenant_request_type" in count_query
+    assert count_args[3] == "move_out"
+
+
+@pytest.mark.asyncio
+async def test_list_for_admin_move_out_filters():
+    conn = _FakeConn(val=1, rows=[{"id": REQUEST_ID, "documents_total_count": 0}])
+    repo = TenantRequestsRepository(db_connection=conn)
+
+    rows, total = await repo.list_for_admin(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        statuses=None,
+        search=None,
+        unit_id=None,
+        move_out_status="pending_review",
+        limit=10,
+        offset=0,
+    )
+    assert total == 1
+    assert len(rows) == 1
+    count_query, _ = conn.fetchval_calls[0]
+    assert "move_out_status = $3::tenant_move_out_status" in count_query
+    assert "request_type = 'move_in'" in count_query
+
+    conn.fetchval_calls.clear()
+    conn.fetch_calls.clear()
+    conn.val = 0
+    conn.rows = []
+    _, total = await repo.list_for_admin(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        statuses=[TenantRequestStatus.SUBMITTED.value],
+        search="Alice",
+        unit_id=UNIT_ID,
+        request_type="move_in",
+        limit=10,
+        offset=0,
+    )
+    assert total == 0
+    count_query, _ = conn.fetchval_calls[0]
+    assert "tr.status = ANY" in count_query
+    assert "request_type = $" in count_query
+
+
+@pytest.mark.asyncio
+async def test_find_latest_open_request_and_active_by_tenant():
+    conn = _FakeConn(row={"id": REQUEST_ID, "submitted_by_contact_id": CONTACT_ID})
+    repo = TenantRequestsRepository(db_connection=conn)
+
+    found = await repo.find_latest_open_request_for_unit(
+        organization_id=ORG_ID,
+        unit_id=UNIT_ID,
+    )
+    assert found["id"] == REQUEST_ID
+    query, _ = conn.fetchrow_calls[0]
+    assert "status = ANY($3::tenant_request_status[])" in query
+
+    conn.row = {
+        "id": REQUEST_ID,
+        "tenant_contact_id": CONTACT_ID,
+        "contact_unit_id": "cc0e8400-e29b-41d4-a716-446655440007",
+        "unit_id": UNIT_ID,
+    }
+    by_tenant = await repo.find_active_approved_for_unit_by_tenant(
+        organization_id=ORG_ID,
+        tenant_contact_id=CONTACT_ID,
+    )
+    assert by_tenant["unit_id"] == UNIT_ID
+    tenant_query, tenant_args = conn.fetchrow_calls[1]
+    assert "tenant_contact_id = $2::uuid" in tenant_query
+    assert tenant_args[2] == TenantRequestStatus.APPROVED.value
+
+    conn.row = None
+    assert (
+        await repo.find_active_approved_for_unit_by_tenant(
+            organization_id=ORG_ID,
+            tenant_contact_id=CONTACT_ID,
+        )
+        is None
+    )

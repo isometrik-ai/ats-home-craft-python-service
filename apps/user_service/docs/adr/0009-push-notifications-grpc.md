@@ -15,21 +15,20 @@ ______________________________________________________________________
 
 Several Home Craft features need **mobile push** and an **in-app notification feed**:
 
-| Feature area    | Example event                                 | ADR / flow reference                            |
-| --------------- | --------------------------------------------- | ----------------------------------------------- |
-| Walk-in visits  | Resident must approve a flat on a new walk-in | [ADR 0008](./0008-walk-in-entries.md)           |
-| Visitor passes  | Household member checked in at gate           | [ADR 0004](./0004-pass-validation-gate.md)      |
-| Daily help      | Helper checked in/out at gate                 | [ADR 0013](./0013-daily-help.md)                |
-| Tenant requests | Document verified/rejected; request approved  | [ADR 0007](./0007-tenant-requests.md)           |
-| Move events     | Move-in / move-out recorded                   | [ADR 0005](./0005-move-events.md)               |
-| Fee billing     | Invoice issued, payment overdue               | [ADR 0006](./0006-project-fee-configuration.md) |
-| Vehicles        | Vehicle submitted / approved / rejected       | Contact onboarding / vehicles flow              |
-| Notices         | Community notice published                    | Notices module                                  |
+| Feature area    | Example event                                 | ADR / flow reference                       |
+| --------------- | --------------------------------------------- | ------------------------------------------ |
+| Walk-in visits  | Resident must approve a flat on a new walk-in | [ADR 0008](./0008-walk-in-entries.md)      |
+| Visitor passes  | Household member checked in at gate           | [ADR 0004](./0004-pass-validation-gate.md) |
+| Daily help      | Helper checked in/out at gate                 | [ADR 0013](./0013-daily-help.md)           |
+| Tenant requests | Document verified/rejected; request approved  | [ADR 0007](./0007-tenant-requests.md)      |
+| Move events     | Move-in / move-out recorded                   | [ADR 0005](./0005-move-events.md)          |
+| Vehicles        | Vehicle submitted / approved / rejected       | Contact onboarding / vehicles flow         |
+| Notices         | Community notice published                    | Notices module                             |
 
 Today:
 
 - **Device registration** is implemented in `user_service` (`POST /users/me/push-devices`) and persisted in `public.user_push_tokens` (Supabase migration `20260728153000_user_push_tokens.sql`).
-- **Outbound push sender** is implemented: `PushNotificationService`, `PushNotificationDispatcher`, `NotificationGrpcClient`, and domain wiring for walk-in, passes, daily help, tenant requests, fees, move events, vehicles, and notices (see [push-notifications-flow.md](../push-notifications-flow.md) §6).
+- **Outbound push sender** is implemented: `PushNotificationService`, `PushNotificationDispatcher`, `NotificationGrpcClient`, and domain wiring for walk-in, passes, daily help, tenant requests, move events, vehicles, and notices (see [push-notifications-flow.md](../push-notifications-flow.md) §6).
 
 ### Constraints
 
@@ -218,7 +217,6 @@ Feed rows are keyed by the same `tenant_id`, `project_id`, and `user_id` we send
 | `NOTIFICATION_TYPE_PASS`    | `pass`             | `checked_in`, `checked_out`                                                                                              |
 | `NOTIFICATION_TYPE_PASS`    | `daily_help`       | `checked_in`, `checked_out` (daily help pass)                                                                            |
 | `NOTIFICATION_TYPE_TENANT`  | `tenant`           | `submitted`, `document_verified`, `document_rejected`, `approved`                                                        |
-| `NOTIFICATION_TYPE_FEE`     | `fee`              | `invoice_issued`, `payment_reminder`                                                                                     |
 | `NOTIFICATION_TYPE_MOVE`    | `move`             | `recorded`                                                                                                               |
 | `NOTIFICATION_TYPE_VEHICLE` | `vehicle`          | `submitted`, `approved`, `rejected`                                                                                      |
 | `notice_published`          | `notices`          | `published`                                                                                                              |

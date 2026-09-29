@@ -137,6 +137,8 @@ async def test_insert_entry():
         visitor_photo_paths=["photo.jpg"],
         vehicle_photo_paths=[],
         notes="Delivery",
+        visit_type="delivery",
+        sub_type="Swiggy",
         flats_count=1,
         requested_by_user_id=CONTACT_ID,
         gate_id=None,

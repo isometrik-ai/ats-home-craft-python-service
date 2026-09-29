@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from apps.user_service.app.schemas.enums import VehicleStatus
+from apps.user_service.app.schemas.enums import VehicleStatus, VehicleType
 from apps.user_service.app.services.vehicles_service import VehiclesService
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -2073,3 +2073,152 @@ async def test_export_project_vehicles_csv_rejected_includes_reason():
     assert "MH02CD5678" in csv_text
     assert "Rejected" in csv_text
     assert "Invalid registration documents" in csv_text
+
+
+def test_push_dispatcher_lazy_init():
+    """Push dispatcher is created lazily on first access."""
+    svc = VehiclesService(db_connection=MagicMock(), user_context=MagicMock())
+    assert svc._push_dispatcher is None
+    with patch(
+        "apps.user_service.app.services.vehicles_service.PushNotificationDispatcher",
+        return_value=MagicMock(),
+    ) as dispatcher_cls:
+        first = svc._push()
+        second = svc._push()
+    assert first is second
+    dispatcher_cls.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_assert_primary_occupant_requires_active_unit():
+    """Primary occupant validation rejects contacts without active unit assignment."""
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=False)
+    with pytest.raises(ValidationException) as exc_info:
+        await svc._assert_primary_occupant_for_unit(contact_id="c1", unit_id="u1")
+    assert exc_info.value.message_key == "contact_onboarding.errors.unit_not_assigned"
+
+
+@pytest.mark.asyncio
+async def test_assert_primary_occupant_requires_owner_relationship():
+    """Primary occupant validation rejects non-owner relationships."""
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
+    svc.contact_units_repo.owner_has_active_unit = AsyncMock(return_value=False)
+    with pytest.raises(ValidationException) as exc_info:
+        await svc._assert_primary_occupant_for_unit(contact_id="c1", unit_id="u1")
+    assert exc_info.value.message_key == "contact_onboarding.errors.primary_occupant_required"
+
+
+@pytest.mark.asyncio
+async def test_validate_vehicle_type_entitlement_unknown_type():
+    """Vehicle entitlement validation rejects unsupported vehicle types."""
+    svc = _service()
+    svc.parking_allotment_repo.get_unit_allotment_context = AsyncMock(
+        return_value={"two_wheeler_parking_entitlement": 1, "four_wheeler_parking_entitlement": 1}
+    )
+    with pytest.raises(ValidationException) as exc_info:
+        await svc._validate_vehicle_type_entitlement(
+            project_id="p1",
+            unit_id="u1",
+            vehicle_type="invalid",
+        )
+    assert exc_info.value.message_key == "contact_onboarding.errors.invalid_vehicle_type"
+
+
+@pytest.mark.asyncio
+async def test_validate_vehicle_type_entitlement_unit_missing():
+    """Vehicle entitlement validation rejects missing unit allotment context."""
+    svc = _service()
+    svc.parking_allotment_repo.get_unit_allotment_context = AsyncMock(return_value=None)
+    with pytest.raises(ValidationException) as exc_info:
+        await svc._validate_vehicle_type_entitlement(
+            project_id="p1",
+            unit_id="u1",
+            vehicle_type=VehicleType.FOUR_WHEELER.value,
+        )
+    assert exc_info.value.message_key == "contact_onboarding.errors.unit_not_found"
+
+
+def test_validate_vehicle_slot_category_mismatch():
+    """Parking slot category must match vehicle type."""
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    with pytest.raises(ValidationException):
+        VehiclesService._validate_vehicle_slot_category_match(
+            vehicle_type=VehicleType.TWO_WHEELER.value,
+            slot_row={"parking_vehicle_category": "four_wheeler"},
+        )
+    with pytest.raises(ValidationException):
+        VehiclesService._validate_vehicle_slot_category_match(
+            vehicle_type=VehicleType.FOUR_WHEELER.value,
+            slot_row={"parking_vehicle_category": "two_wheeler"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_release_for_move_out_no_filters_is_noop():
+    """Release helper no-ops when neither contact nor unit is provided."""
+    svc = _service()
+    svc.repo.list_by_contact = AsyncMock()
+    await svc.release_for_move_out()
+    svc.repo.list_by_contact.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_release_for_move_out_by_unit_only():
+    """Release can target all vehicles on a unit."""
+    svc = _service()
+    svc.repo.list_by_unit = AsyncMock(return_value=[])
+    await svc.release_for_move_out(unit_id="u1")
+    svc.repo.list_by_unit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_release_for_move_out_skips_non_approved_status():
+    """Release ignores vehicles that are neither pending nor approved."""
+    svc = _service()
+    svc.repo.list_by_contact = AsyncMock(
+        return_value=[{"id": "v1", "contact_id": "c1", "status": VehicleStatus.REJECTED.value}]
+    )
+    svc.repo.delete = AsyncMock()
+    svc.repo.soft_remove = AsyncMock()
+    await svc.release_for_move_out(contact_id="c1", unit_id="u1")
+    svc.repo.delete.assert_not_called()
+    svc.repo.soft_remove.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ensure_parking_slot_maps_not_found_to_validation():
+    """Allotment NotFound during review maps to parking slot unavailable."""
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    svc = _service()
+    svc.parking_slots_repo.get_slot = AsyncMock(return_value={"id": "slot-1"})
+    svc.parking_allotment_repo.get_active_allotment_by_slot = AsyncMock(return_value=None)
+    svc.parking_allotment_repo.get_unit_allotment_context = AsyncMock(
+        return_value={"four_wheeler_parking_entitlement": 2}
+    )
+    svc.parking_allotment_repo.get_slot_row = AsyncMock(
+        return_value={"parking_vehicle_category": "four_wheeler"}
+    )
+    svc.repo.count_entitlement_consuming_by_unit_and_type = AsyncMock(return_value=0)
+
+    with patch(
+        "apps.user_service.app.services.vehicles_service.ParkingAllotmentService"
+    ) as allotment_cls:
+        allotment_cls.return_value.allot_slot_for_vehicle_review = AsyncMock(
+            side_effect=NotFoundException(
+                message_key="x",
+                custom_code=1,
+            )
+        )
+        with pytest.raises(ValidationException) as exc_info:
+            await svc._ensure_parking_slot_for_vehicle_review(
+                project_id="p1",
+                unit_id="u1",
+                _vehicle_id="v1",
+                vehicle_type=VehicleType.FOUR_WHEELER.value,
+                parking_slot_id="slot-1",
+            )
+    assert exc_info.value.message_key == "contact_onboarding.errors.parking_slot_unavailable"

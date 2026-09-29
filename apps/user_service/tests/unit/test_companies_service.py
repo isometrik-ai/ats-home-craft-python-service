@@ -1552,3 +1552,112 @@ def test_schedule_company_enrichment_task(monkeypatch: pytest.MonkeyPatch):
         body=body,
     )
     tasks.add_task.assert_called_once()
+
+
+def test_normalize_company_detail_null_and_invalid_branches():
+    """Normalizers handle null billing prefs and invalid nested contact rows."""
+    from apps.user_service.app.services.companies_service import (
+        _normalize_company_additional_data,
+        _normalize_company_billing_preferences,
+        _normalize_company_detail_contacts,
+        _normalize_company_sales_intelligence,
+        _stringify_company_detail_uuids,
+    )
+
+    details: dict[str, Any] = {
+        "id": CONTACT_ID,
+        "primary_contact_id": CONTACT_ID,
+        "billing_preferences": None,
+        "additional_data": None,
+        "sales_intelligence": 123,
+        "contacts": ["bad", {"id": CONTACT_ID, "phones": "[]"}],
+    }
+    _stringify_company_detail_uuids(details)
+    _normalize_company_billing_preferences(details)
+    _normalize_company_additional_data(details)
+    _normalize_company_sales_intelligence(details)
+    _normalize_company_detail_contacts(details)
+    assert details["billing_preferences"] == {}
+    assert details["additional_data"] == {}
+    assert details["sales_intelligence"] is None
+    assert details["contacts"][1]["phones"] == []
+
+
+def test_maybe_send_portal_welcome_email_logs_error(monkeypatch: pytest.MonkeyPatch):
+    """Email failures are logged without raising."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.companies_service.send_client_creation_email",
+        MagicMock(side_effect=RuntimeError("smtp down")),
+    )
+    svc = _service()
+    svc._maybe_send_portal_welcome_email(
+        portal_access=True,
+        created_contact_row={"email": "new@example.com"},
+        created_contact_password="secret",
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_company_project_scope_not_linked():
+    """Project-scoped company ops require a project_companies link."""
+    svc = _service()
+    svc.companies_repo = MagicMock()
+    svc.companies_repo.is_company_linked_to_project = AsyncMock(return_value=False)
+    with pytest.raises(ValidationException):
+        await svc._ensure_company_project_scope(
+            company_id=COMPANY_ID,
+            project_id="990e8400-e29b-41d4-a716-446655440099",
+        )
+
+
+@pytest.mark.asyncio
+async def test_ensure_project_exists_not_found(monkeypatch: pytest.MonkeyPatch):
+    """Missing projects raise NotFoundException during company project linking."""
+    projects_repo = MagicMock()
+    projects_repo.get_project = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository",
+        lambda _conn: projects_repo,
+    )
+    svc = _service()
+    with pytest.raises(NotFoundException):
+        await svc._ensure_project_exists(
+            project_id="990e8400-e29b-41d4-a716-446655440099",
+        )
+
+
+@pytest.mark.asyncio
+async def test_provision_contact_identity_skips_without_email():
+    """Contact identity provisioning is skipped when email is blank."""
+    svc = _service()
+    create_contact = MagicMock()
+    create_contact.email = "   "
+    assert await svc._provision_contact_identity(create_contact=create_contact) == (
+        None,
+        None,
+        None,
+        None,
+    )
+
+
+def test_company_detail_normalizers_cover_uuid_and_non_dict_extra():
+    """Company detail normalizers stringify UUIDs and coerce invalid JSON shapes."""
+    from uuid import UUID
+
+    from apps.user_service.app.services import companies_service as mod
+
+    details: dict[str, Any] = {
+        "id": UUID("550e8400-e29b-41d4-a716-446655440000"),
+        "primary_contact_id": UUID("660e8400-e29b-41d4-a716-446655440001"),
+        "billing_preferences": None,
+        "additional_data": ["not-a-dict"],
+        "sales_intelligence": 99,
+        "notes": [],
+    }
+    mod._stringify_company_detail_uuids(details)
+    mod._normalize_company_additional_data(details)
+    mod._normalize_company_sales_intelligence(details)
+    mod._coerce_company_detail_json_lists(details)
+    assert isinstance(details["id"], str)
+    assert details["additional_data"] == {}
+    assert details["sales_intelligence"] is None

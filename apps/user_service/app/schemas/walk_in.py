@@ -7,7 +7,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from apps.user_service.app.schemas.enums import WalkInStatus, WalkInVisitUnitStatus
+from apps.user_service.app.schemas.enums import (
+    WalkInStatus,
+    WalkInType,
+    WalkInVisitUnitStatus,
+)
 
 
 class WalkInFlatInput(BaseModel):
@@ -31,8 +35,19 @@ class CreateWalkInRequest(BaseModel):
     visitor_photo_paths: list[str] = Field(..., min_length=1, max_length=10)
     vehicle_photo_paths: list[str] = Field(default_factory=list, max_length=10)
     notes: str | None = Field(None, max_length=1000)
+    type: WalkInType = WalkInType.GUEST
+    sub_type: str | None = Field(None, max_length=200)
     gate_id: str | None = None
     flats: list[WalkInFlatInput] = Field(..., min_length=1, max_length=20)
+
+    @field_validator("sub_type")
+    @classmethod
+    def normalize_sub_type(cls, value: str | None) -> str | None:
+        """Trim sub_type; empty strings become null."""
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
 
     @field_validator("visitor_photo_paths")
     @classmethod
@@ -153,6 +168,8 @@ class WalkInSummaryResponse(BaseModel):
     approved_flats_count: int
     primary_unit_label: str | None = None
     notes: str | None = None
+    type: str
+    sub_type: str | None = None
     requested_at: str
     entered_at: str | None = None
     exited_at: str | None = None
@@ -188,5 +205,7 @@ class ResidentWalkInVisitUnitListItemResponse(BaseModel):
     visitor_phone_number: str
     visitor_photo_paths: list[str] = Field(default_factory=list)
     notes: str | None = None
+    type: str
+    sub_type: str | None = None
     requested_at: str
     flats_count: int

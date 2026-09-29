@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -549,4 +549,192 @@ async def test_check_in_skips_push_when_private():
         access_status=PassAccessStatus.APPROVED,
     )
     await svc.check_in(pass_id="pass-1", body=body)
+    assert push.send_to_user_calls == []
+
+
+def test_push_lazy_initializes_dispatcher(monkeypatch):
+    """First access to _push creates PushNotificationDispatcher."""
+    created: list[object] = []
+
+    class _FakeDispatcher:
+        def __init__(self, *, db_connection):
+            created.append(db_connection)
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pass_verification_service.PushNotificationDispatcher",
+        _FakeDispatcher,
+    )
+    svc = PassVerificationService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+    )
+    assert svc._push_dispatcher is None
+    svc._push()
+    assert len(created) == 1
+    assert svc._push_dispatcher is not None
+
+
+def test_parse_dt_and_format_helpers():
+    """Static helpers normalize datetimes and display strings."""
+    naive = datetime(2026, 1, 1, 12, 0, 0)
+    parsed = PassVerificationService._parse_dt(naive)
+    assert parsed is not None and parsed.tzinfo is not None
+    assert PassVerificationService._parse_dt(None) is None
+    assert PassVerificationService._format_contact_name(None, None) is None
+    assert PassVerificationService._format_guest_phone("+91", "9876543210") == "+91 9876543210"
+    assert PassVerificationService._format_guest_phone(None, None) is None
+
+
+@pytest.mark.asyncio
+async def test_verify_cancelled_pass():
+    """Cancelled passes are denied at the gate."""
+    passes_repo = _FakePassesRepo(row=_pass_row(status=PassStatus.CANCELLED.value))
+    svc = _service(passes_repo=passes_repo)
+    result = await svc.verify(code="4821")
+    assert result["access_status"] == PassAccessStatus.DENIED.value
+    assert result["can_check_in"] is False
+
+
+@pytest.mark.asyncio
+async def test_verify_includes_daily_help_profile(monkeypatch):
+    """Daily help passes attach verify profile summary."""
+    passes_repo = _FakePassesRepo(row=_pass_row(daily_help_id="dh-1", project_id="project-1"))
+
+    class _FakeDailyHelpService:
+        def __init__(self, *, db_connection, user_context):
+            del db_connection, user_context
+
+        async def get_verify_profile_summary(self, *, project_id, profile_id):
+            assert project_id == "project-1"
+            assert profile_id == "dh-1"
+            return {"name": "Maid"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pass_verification_service.DailyHelpService",
+        _FakeDailyHelpService,
+    )
+    svc = _service(passes_repo=passes_repo)
+    result = await svc.verify(code="4821")
+    assert result["daily_help_profile"]["name"] == "Maid"
+
+
+@pytest.mark.asyncio
+async def test_check_in_notifies_daily_help_linked_units(monkeypatch):
+    """Daily help check-in uses DailyHelpNotificationService."""
+    passes_repo = _FakePassesRepo(row=_pass_row(daily_help_id="dh-1", project_id="project-1"))
+    notify = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pass_verification_service.DailyHelpNotificationService",
+        lambda *, db_connection: MagicMock(notify_linked_unit_holders=notify),
+    )
+    svc = _service(passes_repo=passes_repo, events_repo=_FakeEventsRepo())
+    body = CheckInRequest(
+        entry_method=PassEntryMethod.QR,
+        access_status=PassAccessStatus.APPROVED,
+    )
+    await svc.check_in(pass_id="pass-1", body=body)
+    notify.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_check_out_notifies_daily_help_linked_units(monkeypatch):
+    """Daily help check-out uses DailyHelpNotificationService."""
+    passes_repo = _FakePassesRepo(row=_pass_row(daily_help_id="dh-1", project_id="project-1"))
+    notify = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pass_verification_service.DailyHelpNotificationService",
+        lambda *, db_connection: MagicMock(notify_linked_unit_holders=notify),
+    )
+    svc = _service(
+        passes_repo=passes_repo,
+        events_repo=_FakeEventsRepo(has_open_check_in=True),
+    )
+    await svc.check_out(pass_id="pass-1", body=CheckOutRequest())
+    notify.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_notify_skips_contacts_without_user_id():
+    """Household notify skips contacts that cannot receive push."""
+    contacts = {
+        "contact-1": {"user_id": None, "additional_data": {}},
+    }
+    push = _FakePushDispatcher(contacts_repo=_FakeContactsRepo(contacts))
+    svc = _service(push_dispatcher=push)
+    await svc._notify_household_pass_event(
+        pass_row=_pass_row(host_contact_id="contact-1"),
+        message_key="notifications.push.pass.checked_in",
+        idempotency_suffix="checked_in",
+    )
+    assert push.send_to_user_calls == []
+
+
+@pytest.mark.asyncio
+async def test_get_pass_or_404_raises():
+    """Missing pass id raises NotFoundException."""
+    passes_repo = _FakePassesRepo()
+    passes_repo.row = None
+
+    async def _missing(**_kwargs):
+        return None
+
+    passes_repo.get_by_id = _missing  # type: ignore[method-assign]
+    svc = _service(passes_repo=passes_repo)
+    with pytest.raises(NotFoundException):
+        await svc._get_pass_or_404(pass_id="missing")
+
+
+def test_compute_admissibility_max_entries_flag():
+    """Max entries reached sets max_entries_reached on decision."""
+    decision = PassVerificationService._compute_admissibility(
+        _pass_row(
+            validity_type=PassValidityType.RECURRING.value,
+            max_entries=1,
+            entry_count=1,
+        )
+    )
+    assert decision.max_entries_reached is True
+    assert decision.can_check_in is False
+
+
+@pytest.mark.asyncio
+async def test_check_in_max_entries_recurring_uses_specific_error():
+    """Recurring pass at max entries raises max_entries_reached."""
+    passes_repo = _FakePassesRepo(
+        row=_pass_row(
+            validity_type=PassValidityType.RECURRING.value,
+            max_entries=1,
+            entry_count=1,
+        )
+    )
+    svc = _service(passes_repo=passes_repo, events_repo=_FakeEventsRepo())
+    body = CheckInRequest(
+        entry_method=PassEntryMethod.QR,
+        access_status=PassAccessStatus.APPROVED,
+    )
+    with pytest.raises(ValidationException):
+        await svc.check_in(pass_id="pass-1", body=body)
+
+
+def test_parse_dt_preserves_aware_timezone():
+    """Aware datetimes are returned unchanged."""
+    aware = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    assert PassVerificationService._parse_dt(aware) is aware
+
+
+def test_format_guest_phone_number_only():
+    """Guest phone without ISD returns the raw number."""
+    assert PassVerificationService._format_guest_phone(None, "9876543210") == "9876543210"
+
+
+@pytest.mark.asyncio
+async def test_notify_returns_when_pass_id_missing():
+    """Notification helper no-ops when pass id is absent."""
+    push = _FakePushDispatcher()
+    svc = _service(push_dispatcher=push)
+    await svc._notify_household_pass_event(
+        pass_row={**_pass_row(), "id": ""},
+        message_key="notifications.push.pass.checked_in",
+        idempotency_suffix="checked_in",
+    )
     assert push.send_to_user_calls == []

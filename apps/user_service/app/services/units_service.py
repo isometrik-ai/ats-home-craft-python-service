@@ -7,9 +7,6 @@ from typing import Any
 import asyncpg
 from asyncpg import UniqueViolationError
 
-from apps.user_service.app.db.repositories.maintenance_fee_invoices_repository import (
-    MaintenanceFeeInvoicesRepository,
-)
 from apps.user_service.app.db.repositories.pets_repository import PetsRepository
 from apps.user_service.app.db.repositories.projects_repository import ProjectsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
@@ -18,6 +15,7 @@ from apps.user_service.app.schemas.enums import (
     ContactUnitRelationship,
     ProjectSetupStep,
     PropertyType,
+    UnitConfigKind,
     UnitStatus,
 )
 from apps.user_service.app.schemas.project_inventory import (
@@ -28,12 +26,6 @@ from apps.user_service.app.schemas.project_inventory import (
 )
 from apps.user_service.app.services.contact_unit_documents_service import (
     ContactUnitDocumentsService,
-)
-from apps.user_service.app.services.fee_calculation_service import (
-    convert_minor_to_major,
-)
-from apps.user_service.app.services.fee_property_types import (
-    property_type_for_unit_config_kind,
 )
 from apps.user_service.app.services.inventory_service import (
     is_sold_status,
@@ -158,6 +150,13 @@ def serialize_unit_list_item(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_UNIT_CONFIG_KIND_TO_PROPERTY_TYPE: dict[str, str] = {
+    UnitConfigKind.APARTMENT.value: PropertyType.RESIDENTIAL.value,
+    UnitConfigKind.COMMERCIAL.value: PropertyType.COMMERCIAL.value,
+    UnitConfigKind.PLOT.value: PropertyType.PLOTS.value,
+}
+
+
 def resolve_unit_property_type(row: dict[str, Any]) -> str | None:
     """Resolve property type for a unit: residential, commercial, or plots."""
     config_kind = row.get("config_kind")
@@ -166,7 +165,7 @@ def resolve_unit_property_type(row: dict[str, Any]) -> str | None:
         config_kind=str(config_kind) if config_kind is not None else None,
         tower_type=str(tower_type) if tower_type is not None else None,
     )
-    property_type = property_type_for_unit_config_kind(resolved_kind)
+    property_type = _UNIT_CONFIG_KIND_TO_PROPERTY_TYPE.get(resolved_kind) if resolved_kind else None
     if property_type:
         return property_type
     if row.get("plot_item_id"):
@@ -254,7 +253,6 @@ class UnitsService:
         self.user_context = user_context
         self.units_repo = UnitsRepository(db_connection)
         self.projects_repo = ProjectsRepository(db_connection)
-        self.invoices_repo = MaintenanceFeeInvoicesRepository(db_connection)
         self.setup_service = ProjectSetupService(
             db_connection=db_connection, user_context=user_context
         )
@@ -487,14 +485,6 @@ class UnitsService:
             }
 
         unit_id = str(row["id"])
-        outstanding_minor = await self.invoices_repo.sum_outstanding_by_unit(
-            organization_id=self._org_id,
-            unit_id=unit_id,
-        )
-        latest_fee_minor = await self.invoices_repo.latest_monthly_fee_by_unit(
-            organization_id=self._org_id,
-            unit_id=unit_id,
-        )
         return {
             "id": unit_id,
             "project_id": str(row["project_id"]),
@@ -532,16 +522,8 @@ class UnitsService:
             "pets_count": pets_count,
             "pets": pets,
             "financials": {
-                "base_fee_monthly": (
-                    convert_minor_to_major(latest_fee_minor)
-                    if latest_fee_minor is not None
-                    else None
-                ),
-                "outstanding_amount": (
-                    convert_minor_to_major(outstanding_minor)
-                    if outstanding_minor > 0
-                    else (0.0 if latest_fee_minor is not None else None)
-                ),
+                "base_fee_monthly": None,
+                "outstanding_amount": None,
                 "currency": "INR",
             },
             "created_at": serialize_row(row)["created_at"],

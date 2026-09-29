@@ -1,5 +1,6 @@
 """Tests for OpenTelemetry / SigNoz telemetry configuration."""
 
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -58,6 +59,13 @@ def test_setup_telemetry_missing_signoz_config():
     assert telemetry_config.tracer_provider is None
     assert telemetry_config.meter_provider is None
     assert telemetry_config._is_setup is True
+
+
+def test_setup_telemetry_logs_already_setup(telemetry_config, caplog):
+    """Redundant setup logs and returns early."""
+    telemetry_config._is_setup = True
+    telemetry_config.setup_telemetry()
+    assert any("already set up" in record.message for record in caplog.records)
 
 
 def test_setup_telemetry_skips_redundant_setup():
@@ -286,3 +294,154 @@ def test_otel_resolve_route_path_fallback(monkeypatch):
 
     scope = {"app": type("App", (), {"routes": [_BrokenRoute()]})(), "path": "/fallback"}
     assert tc._otel_resolve_route_path(scope) == "/fallback"
+
+
+def test_otel_resolve_route_path_matches_partial_route():
+    """Route resolution returns path for partial Starlette matches."""
+    from starlette.routing import Match, Route
+
+    from libs.shared_utils import telemetry_config as tc
+
+    class _PartialRoute(Route):
+        def matches(self, scope):
+            return Match.PARTIAL, {}
+
+    scope = {
+        "type": "http",
+        "app": type("App", (), {"routes": [_PartialRoute("/items/{id}", endpoint=lambda: None)]})(),
+        "path": "/items/1",
+        "method": "GET",
+    }
+    assert tc._otel_resolve_route_path(scope) in {"/items/{id}", "/items/1"}
+
+
+def test_setup_telemetry_setup_exception_is_logged(telemetry_config):
+    """Unhandled setup errors are logged without raising."""
+    with patch.object(telemetry_config, "_import_otlp_exporters", side_effect=RuntimeError("boom")):
+        telemetry_config.setup_telemetry()
+    assert telemetry_config._is_setup is False
+
+
+def test_setup_telemetry_full_path_with_fastapi_app(telemetry_config):
+    """Enabled setup with endpoint configures providers and instruments app."""
+    telemetry_config.signoz_cloud_url = "ingest.us.signoz.cloud"
+    telemetry_config.signoz_cloud_token = "token"
+    fake_app = MagicMock()
+    with (
+        patch.object(
+            telemetry_config, "_import_otlp_exporters", return_value=(MagicMock, MagicMock())
+        ),
+        patch.object(telemetry_config, "_setup_tracer_provider"),
+        patch.object(telemetry_config, "_setup_meter_provider"),
+        patch.object(telemetry_config, "_setup_instrumentations") as mock_inst,
+        patch.object(telemetry_config, "_re_instrument_mongodb"),
+        patch.object(telemetry_config, "_instrument_asyncpg"),
+    ):
+        telemetry_config.setup_telemetry(app=fake_app)
+    mock_inst.assert_called_once_with(app=fake_app)
+    assert telemetry_config._is_setup is True
+
+
+def test_re_instrument_mongodb_import_and_runtime_errors(telemetry_config):
+    """Mongo instrumentation logs import and runtime failures."""
+    with patch.dict(sys.modules, {"opentelemetry.instrumentation.pymongo": None}):
+        telemetry_config._re_instrument_mongodb()
+
+    fake_instrumentor = MagicMock()
+    fake_instrumentor.return_value.instrument.side_effect = RuntimeError("mongo failed")
+    with patch.dict(
+        sys.modules,
+        {"opentelemetry.instrumentation.pymongo": MagicMock(PymongoInstrumentor=fake_instrumentor)},
+    ):
+        telemetry_config._re_instrument_mongodb()
+
+
+def test_instrument_asyncpg_import_and_runtime_errors(telemetry_config):
+    """AsyncPG instrumentation logs import and runtime failures."""
+    with patch.dict(sys.modules, {"opentelemetry.instrumentation.asyncpg": None}):
+        telemetry_config._instrument_asyncpg()
+
+    fake_instrumentor = MagicMock()
+    fake_instrumentor.return_value.instrument.side_effect = RuntimeError("asyncpg failed")
+    with patch.dict(
+        sys.modules,
+        {"opentelemetry.instrumentation.asyncpg": MagicMock(AsyncPGInstrumentor=fake_instrumentor)},
+    ):
+        telemetry_config._instrument_asyncpg()
+
+
+def test_setup_tracer_provider_grpc_branch(telemetry_config):
+    """gRPC tracer setup strips path and uses insecure exporter."""
+    telemetry_config.signoz_endpoint = "http://signoz:4317"
+    trace_module = MagicMock()
+    telemetry_config._setup_tracer_provider(
+        resource=MagicMock(),
+        trace_module=trace_module,
+        tracer_provider_cls=MagicMock(return_value=MagicMock()),
+        batch_span_processor_cls=MagicMock(return_value=MagicMock()),
+        span_exporter_cls=MagicMock(return_value=MagicMock()),
+        use_grpc=True,
+    )
+    trace_module.set_tracer_provider.assert_called_once()
+
+
+def test_setup_meter_provider_grpc_branch(telemetry_config):
+    """gRPC meter setup configures OTLP metric exporter."""
+    telemetry_config.signoz_endpoint = "http://signoz:4317"
+    metrics_module = MagicMock()
+    telemetry_config._setup_meter_provider(
+        resource=MagicMock(),
+        metrics_module=metrics_module,
+        meter_provider_cls=MagicMock(return_value=MagicMock()),
+        metric_reader_cls=MagicMock(return_value=MagicMock()),
+        metric_exporter_cls=MagicMock(return_value=MagicMock()),
+        use_grpc=True,
+    )
+    metrics_module.set_meter_provider.assert_called_once()
+
+
+def test_get_endpoint_self_hosted_https_grpc_strips_scheme(telemetry_config):
+    """HTTPS self-hosted gRPC endpoint strips protocol prefix."""
+    telemetry_config.signoz_endpoint = "https://signoz:4317"
+    endpoint, _ = telemetry_config._get_endpoint_and_headers(use_grpc=True)
+    assert endpoint == "signoz:4317"
+
+
+def test_setup_instrumentations_failure(telemetry_config):
+    """Instrumentation setup errors are logged without raising."""
+    with patch(
+        "opentelemetry.instrumentation.fastapi.FastAPIInstrumentor",
+        side_effect=RuntimeError("instrument failed"),
+    ):
+        telemetry_config._setup_instrumentations(app=None)
+
+
+def test_instrument_httpx_runtime_error(telemetry_config):
+    """HTTPX instrumentation logs non-import failures."""
+    with patch(
+        "opentelemetry.instrumentation.httpx.HTTPXClientInstrumentor",
+        side_effect=RuntimeError("httpx failed"),
+    ):
+        telemetry_config._instrument_httpx()
+
+
+def test_make_fastapi_instrumentation_fail_safe_patches_otel():
+    """Fail-safe wrapper patches OpenTelemetry FastAPI hooks."""
+    from libs.shared_utils.telemetry_config import (
+        _make_fastapi_instrumentation_fail_safe,
+    )
+
+    _make_fastapi_instrumentation_fail_safe()
+    import opentelemetry.instrumentation.fastapi as otel_fastapi
+
+    name, _ = otel_fastapi._get_default_span_details({"method": "GET", "path": "/ok"})
+    assert "GET" in name
+
+
+def test_shutdown_meter_provider_error(telemetry_config):
+    """Meter shutdown errors are logged without raising."""
+    telemetry_config.tracer_provider = MagicMock()
+    telemetry_config.meter_provider = MagicMock()
+    telemetry_config.meter_provider.shutdown.side_effect = RuntimeError("meter failed")
+    telemetry_config._is_setup = True
+    telemetry_config.shutdown()

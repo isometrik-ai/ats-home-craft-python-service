@@ -237,6 +237,16 @@ DEFAULT_DAILY_HELP_CATEGORY_NAMES: tuple[str, ...] = (
 # ============================================================================
 
 
+class WalkInType(str, Enum):
+    """Allowed visit types for walk-in entries (subset of PassType)."""
+
+    GUEST = "guest"
+    DELIVERY = "delivery"
+    CAB = "cab"
+    SERVICE = "service"
+    OTHER = "other"
+
+
 class WalkInStatus(str, Enum):
     """Walk-in visit header status (Postgres walk_in_status enum)."""
 

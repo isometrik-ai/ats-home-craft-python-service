@@ -740,12 +740,16 @@ class CompaniesRepository(BaseRepository):
     ) -> tuple[list[dict[str, Any]], int]:
         """List companies with pagination and optional search by name."""
         offset = (page - 1) * page_size
-        args: list[Any] = [organization_id, ClientStatus.DELETED.value]
-        where = ["co.organization_id = $1::uuid", "co.status != $2"]
-        next_param_index = 3
+        args: list[Any] = [organization_id]
+        where = ["co.organization_id = $1::uuid"]
+        next_param_index = 2
         if status:
             where.append(f"co.status = ${next_param_index}")
             args.append(status)
+            next_param_index += 1
+        else:
+            where.append(f"co.status != ${next_param_index}")
+            args.append(ClientStatus.DELETED.value)
             next_param_index += 1
         if search:
             where.append(f"COALESCE(co.name,'') ILIKE ${next_param_index}")

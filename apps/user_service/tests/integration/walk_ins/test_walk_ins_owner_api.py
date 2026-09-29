@@ -55,6 +55,8 @@ def _fake_detail(**overrides) -> dict:
         "approved_flats_count": 0,
         "primary_unit_label": "A-2102",
         "notes": "Delivery",
+        "type": "guest",
+        "sub_type": None,
         "requested_at": now,
         "entered_at": None,
         "exited_at": None,

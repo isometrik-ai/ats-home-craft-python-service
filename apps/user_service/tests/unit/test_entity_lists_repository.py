@@ -135,3 +135,58 @@ async def test_get_list_details_not_found():
     repo = EntityListsRepository(db_connection=conn)
 
     assert await repo.get_list_details(organization_id="org-1", list_id="missing") is None
+
+
+@pytest.mark.asyncio
+async def test_list_lists_with_counts_for_company_type():
+    """Company lists should use the companies join configuration."""
+    conn = _FakeConn(rows=[{"id": "list-1", "total_count": 1, "total_items": 0}])
+    repo = EntityListsRepository(db_connection=conn)
+
+    items, total = await repo.list_lists_with_counts_for_entity_type(
+        organization_id="org-1",
+        entity_type=EntityType.COMPANY,
+        status=EntityListStatus.ACTIVE,
+        search=None,
+        limit=10,
+        offset=0,
+    )
+
+    assert total == 1
+    query, _ = conn.fetch_calls[0]
+    assert "companies" in query
+
+
+@pytest.mark.asyncio
+async def test_get_list_details_parses_items_json():
+    """get_list_details should coerce items JSON into Python lists."""
+    conn = _FakeConn(row={"id": "list-1", "items": '[{"entity_id": "c1"}]'})
+    repo = EntityListsRepository(db_connection=conn)
+
+    details = await repo.get_list_details(organization_id="org-1", list_id="list-1")
+
+    assert details["items"] == [{"entity_id": "c1"}]
+
+
+@pytest.mark.asyncio
+async def test_update_list_coerces_membership_results():
+    """update_list should parse add/remove membership JSON payloads."""
+    conn = _FakeConn(
+        row={
+            "id": "list-1",
+            "organization_id": "org-1",
+            "entity_type": EntityType.CONTACT.value,
+            "add_result": '{"requested": 1, "added": 1}',
+            "remove_result": '{"requested": 0, "removed": 0}',
+        }
+    )
+    repo = EntityListsRepository(db_connection=conn)
+
+    result = await repo.update_list(
+        organization_id="org-1",
+        list_id="list-1",
+        update_data={"name": "VIP"},
+    )
+
+    assert result["add_result"]["added"] == 1
+    assert "UPDATE entity_lists" in conn.fetchrow_calls[0][0]

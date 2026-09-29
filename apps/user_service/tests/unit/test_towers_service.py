@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from asyncpg import UniqueViolationError
@@ -27,6 +27,7 @@ from apps.user_service.app.schemas.project_setup import (
     CreateTowerWingRequest,
     UpdateFloorBulkItem,
     UpdateTowerGateBulkItem,
+    UpdateTowerLiftBulkItem,
     UpdateTowerRequest,
     UpdateTowerWingItem,
 )
@@ -34,6 +35,7 @@ from apps.user_service.app.services.towers_service import TowersService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
+    InternalServerErrorException,
     NotFoundException,
     ValidationException,
 )
@@ -763,3 +765,230 @@ async def test_delete_floor_not_found():
             tower_id=TOWER_ID,
             floor_id="missing-floor",
         )
+
+
+@pytest.mark.asyncio
+async def test_resolve_tower_code_exhausted():
+    """Auto tower code generation fails after max attempts."""
+    repo = _FakeTowersRepo(existing_codes={"tower", "tower-2"})
+    service = _service(repo)
+    with patch(
+        "apps.user_service.app.services.towers_service._TOWER_CODE_MAX_ATTEMPTS",
+        2,
+    ):
+        with pytest.raises(InternalServerErrorException):
+            await service._resolve_tower_code(  # pylint: disable=protected-access
+                project_id=PROJECT_ID,
+                name="Tower",
+                code=None,
+            )
+
+
+@pytest.mark.asyncio
+async def test_update_tower_nested_lifts_create_and_update():
+    """Tower patch upserts nested lifts."""
+    repo = _FakeTowersRepo(
+        tower={
+            "id": TOWER_ID,
+            "numbering_pattern": UnitNumberingPattern.FLOOR_UNIT.value,
+            "custom_prefix": None,
+        },
+        lifts=[{"id": "lift-1", "name": "Lift 1", "lift_type": LiftType.PASSENGER.value}],
+    )
+    service = _service(repo)
+    body = UpdateTowerRequest(
+        lifts=[
+            UpdateTowerLiftBulkItem(id="lift-1", status=LiftStatus.MAINTENANCE),
+            UpdateTowerLiftBulkItem(name="Lift 2", lift_type=LiftType.SERVICE),
+        ]
+    )
+
+    updated = await service.update_tower(project_id=PROJECT_ID, tower_id=TOWER_ID, body=body)
+
+    assert len(updated["lifts"]) == 2
+    assert updated["lifts"][0]["status"] == LiftStatus.MAINTENANCE.value
+
+
+@pytest.mark.asyncio
+async def test_update_gate_not_found():
+    """Updating a missing gate raises NotFoundException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, gates=[])
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.update_gate(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            gate_id="missing-gate",
+            patch={"name": "Gate"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_lift_not_found():
+    """Updating a missing lift raises NotFoundException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, lifts=[])
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.update_lift(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            lift_id="missing-lift",
+            patch={"name": "Lift"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_floor_not_found():
+    """Updating a missing floor raises NotFoundException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, floors=[])
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.update_floor(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            floor_id="missing-floor",
+            patch={"display_name": "Ground"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_floor_duplicate_code():
+    """Floor update unique violation becomes ConflictException."""
+    repo = _FakeTowersRepo(
+        tower={"id": TOWER_ID},
+        floors=[{"id": "floor-1", "display_name": "Ground"}],
+    )
+
+    async def _raise_unique(**kwargs):
+        del kwargs
+        raise UniqueViolationError("duplicate")
+
+    repo.update_floor = _raise_unique
+    service = _service(repo)
+
+    with pytest.raises(ConflictException):
+        await service.update_floor(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            floor_id="floor-1",
+            patch={"display_name": "Level 0"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_wing_missing_body():
+    """Wing update requires body or patch payload."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID})
+    service = _service(repo)
+
+    with pytest.raises(ValidationException):
+        await service.update_wing(project_id=PROJECT_ID, tower_id=TOWER_ID, wing_id=WING_ID)
+
+
+@pytest.mark.asyncio
+async def test_update_wing_not_found():
+    """Updating a missing wing raises NotFoundException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, wings=[])
+    service = _service(repo)
+
+    with pytest.raises(NotFoundException):
+        await service.update_wing(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            wing_id=WING_ID,
+            body=UpdateTowerWingItem(name="East"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_tower_patches_tower_type_and_numbering():
+    """Tower patch converts enum fields before repository update."""
+    repo = _FakeTowersRepo(
+        tower={
+            "id": TOWER_ID,
+            "tower_type": TowerType.RESIDENTIAL.value,
+            "numbering_pattern": UnitNumberingPattern.FLOOR_UNIT.value,
+            "custom_prefix": None,
+        }
+    )
+    service = _service(repo)
+    body = UpdateTowerRequest(
+        tower_type=TowerType.COMMERCIAL,
+        numbering_pattern=UnitNumberingPattern.FLOOR_UNIT,
+    )
+
+    updated = await service.update_tower(project_id=PROJECT_ID, tower_id=TOWER_ID, body=body)
+
+    assert updated["tower_type"] == TowerType.COMMERCIAL.value
+
+
+@pytest.mark.asyncio
+async def test_update_tower_nested_floors_create_branch():
+    """Tower patch creates floors when nested floor items omit ids."""
+    repo = _FakeTowersRepo(
+        tower={
+            "id": TOWER_ID,
+            "numbering_pattern": UnitNumberingPattern.FLOOR_UNIT.value,
+            "custom_prefix": None,
+        },
+        wings=[{"id": WING_ID, "code": "EAST", "name": "East Wing"}],
+    )
+    service = _service(repo)
+    body = UpdateTowerRequest(
+        floors=[UpdateFloorBulkItem(level_number=2, display_name="Second", wing_client_key="EAST")]
+    )
+
+    updated = await service.update_tower(project_id=PROJECT_ID, tower_id=TOWER_ID, body=body)
+
+    assert updated["floors"][0]["display_name"] == "Second"
+    assert updated["floors"][0]["wing_id"] == WING_ID
+
+
+@pytest.mark.asyncio
+async def test_update_wing_duplicate_code():
+    """Wing update unique violation becomes ConflictException."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, wings=[{"id": WING_ID, "name": "East"}])
+
+    async def _raise_unique(**kwargs):
+        del kwargs
+        raise UniqueViolationError("duplicate")
+
+    repo.update_wing = _raise_unique
+    service = _service(repo)
+
+    with pytest.raises(ConflictException):
+        await service.update_wing(
+            project_id=PROJECT_ID,
+            tower_id=TOWER_ID,
+            wing_id=WING_ID,
+            body=UpdateTowerWingItem(name="East Updated"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_delete_gate_success():
+    """Deleting an existing gate returns old_data snapshot."""
+    repo = _FakeTowersRepo(tower={"id": TOWER_ID}, delete_result=True)
+    service = _service(repo)
+
+    result = await service.delete_gate(
+        project_id=PROJECT_ID,
+        tower_id=TOWER_ID,
+        gate_id="gate-1",
+    )
+
+    assert result["old_data"]["id"] == "gate-1"
+
+
+def test_register_wing_row_keys_indexes_code_and_name():
+    """Wing key map resolves nested references by id, code, and name."""
+    key_map: dict[str, str] = {}
+    TowersService._register_wing_row_keys(  # pylint: disable=protected-access
+        wing_row={"id": WING_ID, "code": "EAST", "name": "East Wing"},
+        key_map=key_map,
+    )
+    assert key_map["EAST"] == WING_ID
+    assert key_map["East Wing"] == WING_ID
