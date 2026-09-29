@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.facility_booking_inventory import (
     SchedulePeriodResponse,
     SlotBlockResponse,
 )
+from apps.user_service.app.utils.project_serialization import serialize_row
 
 _SCHEDULE_JSONB: frozenset[str] = frozenset({"hours"})
 _INVENTORY_UUID_COLUMNS: frozenset[str] = frozenset(
@@ -89,7 +90,7 @@ class FacilityBookingInventoryRepository(BaseRepository):
 
     def _serialize_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
         """Normalize DB row types to the API response shape."""
-        decoded = self._decode(table, dict(row))
+        decoded = serialize_row(self._decode(table, dict(row)))
         model = _RESPONSE_MODELS.get(table)
         if model is None:
             return decoded

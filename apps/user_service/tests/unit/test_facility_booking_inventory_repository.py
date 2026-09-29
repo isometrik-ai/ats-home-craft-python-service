@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from uuid import UUID
 
 import pytest
 
@@ -132,6 +133,40 @@ async def test_insert_schedule_uses_jsonb_cast() -> None:
     assert "::jsonb" in query
     assert "::date" in query
     assert "::uuid" in query
+
+
+@pytest.mark.asyncio
+async def test_insert_unit_coerces_uuid_fields_to_strings() -> None:
+    """asyncpg UUID columns are serialized before response-model validation."""
+    unit_id = UUID("77777777-7777-7777-7777-777777777777")
+    conn = _FakeConn(
+        row={
+            "id": unit_id,
+            "facility_id": UUID(FACILITY_ID),
+            "name": "Main space",
+            "tower_id": None,
+            "floor_id": None,
+            "room_type": None,
+            "features": [],
+            "sort_order": 0,
+            "active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+    )
+    repo = FacilityBookingInventoryRepository(db_connection=conn)
+
+    row = await repo.insert(
+        "facility_booking_units",
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        data={"name": "Main space"},
+    )
+
+    assert row["id"] == str(unit_id)
+    assert row["facility_id"] == FACILITY_ID
+    assert isinstance(row["id"], str)
 
 
 @pytest.mark.asyncio
