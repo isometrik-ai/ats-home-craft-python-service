@@ -11,6 +11,7 @@ import pytest
 from apps.user_service.app.schemas.enums import (
     WalkInEventType,
     WalkInStatus,
+    WalkInType,
     WalkInVisitUnitStatus,
 )
 from apps.user_service.app.schemas.walk_in import (
@@ -47,6 +48,8 @@ def _entry_row(**overrides: Any) -> dict[str, Any]:
         "visitor_photo_paths": ["org/photo.jpg"],
         "vehicle_photo_paths": [],
         "notes": "Delivery",
+        "type": WalkInType.GUEST.value,
+        "sub_type": None,
         "status": WalkInStatus.AWAITING.value,
         "flats_count": 1,
         "approved_flats_count": 0,
@@ -102,6 +105,8 @@ class _FakeWalkInRepo:
             visitor_photo_paths=kwargs.get("visitor_photo_paths", []),
             vehicle_photo_paths=kwargs.get("vehicle_photo_paths", []),
             notes=kwargs.get("notes"),
+            type=kwargs.get("visit_type", WalkInType.GUEST.value),
+            sub_type=kwargs.get("sub_type"),
             flats_count=kwargs.get("flats_count", 1),
         )
         return self.entry
@@ -197,6 +202,8 @@ class _FakeWalkInRepo:
                 "visitor_phone_number": "9876543210",
                 "visitor_photo_paths": ["org/photo.jpg"],
                 "notes": "Delivery",
+                "type": WalkInType.GUEST.value,
+                "sub_type": None,
                 "requested_at": datetime.now(timezone.utc),
                 "flats_count": 1,
             }
@@ -253,12 +260,16 @@ async def test_create_walk_in_inserts_entry_and_visit_units():
         visitor_phone_isd_code="+91",
         visitor_phone_number="9876543210",
         visitor_photo_paths=["org/photo.jpg"],
+        type=WalkInType.DELIVERY,
+        sub_type="Amazon",
         flats=[WalkInFlatInput(tower_id=TOWER_ID, unit_id=UNIT_ID)],
     )
 
     result = await service.create_walk_in(project_id=PROJECT_ID, body=body)
 
     assert result["visitor_first_name"] == "Sushil"
+    assert result["type"] == WalkInType.DELIVERY.value
+    assert result["sub_type"] == "Amazon"
     assert len(result["visit_units"]) == 1
     assert repo.events[0]["event_type"] == WalkInEventType.REQUESTED.value
     service.setup_service.ensure_project.assert_awaited_once()

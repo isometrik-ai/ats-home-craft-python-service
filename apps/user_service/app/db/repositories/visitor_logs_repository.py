@@ -70,6 +70,7 @@ _UNION_OUTPUT_COLUMNS = """
   daily_help_category_name,
   visitor_photo_paths,
   vehicle_photo_paths,
+  daily_check_in_count,
   sort_time,
   tie_breaker
 """
@@ -128,8 +129,6 @@ class VisitorLogsRepository(BaseRepository):
 
         if pass_type == WALK_IN_LOG_TYPE:
             include_passes = False
-        elif pass_type is not None:
-            include_walk_ins = False
 
         if entry_method is not None and entry_method != PassEntryMethod.MANUAL.value:
             include_walk_ins = False
@@ -149,12 +148,20 @@ class VisitorLogsRepository(BaseRepository):
         tower_id: str | None,
         project_id: str | None,
         unit_id: str | None,
+        visible_to_contact_id: str | None,
         param_index: int,
     ) -> tuple[str, list[Any], int]:
         """Build dynamic WHERE fragments for the pass branch."""
         clauses: list[str] = []
         args: list[Any] = []
         idx = param_index
+
+        if visible_to_contact_id:
+            clauses.append(
+                f"(NOT COALESCE(p.is_private, false) OR p.created_by_contact_id = ${idx}::uuid)"
+            )
+            args.append(visible_to_contact_id)
+            idx += 1
 
         if search:
             clauses.append(
@@ -198,7 +205,7 @@ class VisitorLogsRepository(BaseRepository):
             idx += 1
 
         if unit_id:
-            clauses.append(f"p.unit_id = ${idx}::uuid")
+            clauses.append(self._pass_unit_scope_sql(param=f"${idx}"))
             args.append(unit_id)
             idx += 1
 
@@ -206,19 +213,44 @@ class VisitorLogsRepository(BaseRepository):
             return "", args, idx
         return " AND " + " AND ".join(clauses), args, idx
 
+    @staticmethod
+    def _pass_unit_scope_sql(*, param: str) -> str:
+        """Match resident passes by unit_id or daily help via household links."""
+        return f"""(
+              p.unit_id = {param}::uuid
+              OR (
+                p.daily_help_id IS NOT NULL
+                AND EXISTS (
+                  SELECT 1
+                  FROM daily_help_household_links dhl
+                  WHERE dhl.organization_id = p.organization_id
+                    AND dhl.daily_help_profile_id = p.daily_help_id
+                    AND dhl.unit_id = {param}::uuid
+                    AND dhl.status = 'active'::daily_help_household_link_status
+                )
+              )
+            )"""
+
     def _build_walk_in_filters(
         self,
         *,
         search: str | None,
+        pass_type: str | None,
         tower_id: str | None,
         project_id: str | None,
         unit_id: str | None,
         param_index: int,
-    ) -> tuple[str, list[Any], int]:
+    ) -> tuple[str, list[Any], int, str | None]:
         """Build dynamic WHERE fragments for the walk-in branch."""
         clauses: list[str] = []
         args: list[Any] = []
         idx = param_index
+        unit_param: str | None = None
+
+        if pass_type and pass_type != WALK_IN_LOG_TYPE:
+            clauses.append(f"w.type = ${idx}::pass_type")
+            args.append(pass_type)
+            idx += 1
 
         if search:
             clauses.append(
@@ -255,19 +287,20 @@ class VisitorLogsRepository(BaseRepository):
             idx += 1
 
         if unit_id:
+            unit_param = f"${idx}"
             clauses.append(
                 f"EXISTS ("
                 f"  SELECT 1 FROM walk_in_visit_units vu"
                 f"  WHERE vu.walk_in_entry_id = w.id"
-                f"    AND vu.unit_id = ${idx}::uuid"
+                f"    AND vu.unit_id = {unit_param}::uuid"
                 f")"
             )
             args.append(unit_id)
             idx += 1
 
         if not clauses:
-            return "", args, idx
-        return " AND " + " AND ".join(clauses), args, idx
+            return "", args, idx, unit_param
+        return " AND " + " AND ".join(clauses), args, idx, unit_param
 
     @staticmethod
     def _build_outer_filters(
@@ -368,14 +401,15 @@ TRIM(
         """
 
     @classmethod
-    def _walk_in_resident_select_columns(cls) -> str:
-        """SQL columns for the walk-in approver on the primary visited flat."""
+    def _walk_in_resident_select_columns(cls, *, unit_scope_sql: str = "") -> str:
+        """SQL columns for the walk-in approver on the visited flat."""
         return f"""
               (
                 SELECT vu.approved_by_contact_id::text
                 FROM walk_in_visit_units vu
                 WHERE vu.walk_in_entry_id = w.id
                   AND vu.approved_by_contact_id IS NOT NULL
+                  {unit_scope_sql}
                 ORDER BY vu.sort_order, vu.created_at
                 LIMIT 1
               ) AS resident_contact_id,
@@ -391,6 +425,7 @@ TRIM(
                  AND c.organization_id = vu.organization_id
                 WHERE vu.walk_in_entry_id = w.id
                   AND vu.approved_by_contact_id IS NOT NULL
+                  {unit_scope_sql}
                 ORDER BY vu.sort_order, vu.created_at
                 LIMIT 1
               ) AS resident_person_name,
@@ -406,6 +441,7 @@ TRIM(
                  AND cr.role_type IN ({_RESIDENT_ROLE_TYPES_SQL})
                 WHERE vu.walk_in_entry_id = w.id
                   AND vu.approved_by_contact_id IS NOT NULL
+                  {unit_scope_sql}
                 ORDER BY vu.sort_order, vu.created_at, cr.started_at DESC
                 LIMIT 1
               ) AS resident_role,
@@ -428,6 +464,7 @@ TRIM(
               'pass'::text AS source,
               p.id::text AS pass_id,
               p.pass_type::text AS pass_type,
+              NULL::text AS sub_type,
               p.guest_name,
               p.guest_phone_isd_code AS visitor_phone_isd_code,
               p.guest_phone_number AS visitor_phone_number,
@@ -467,6 +504,18 @@ TRIM(
               COALESCE(p.pass_image_path, dh.photo_path) AS pass_image_path,
               NULL::text[] AS visitor_photo_paths,
               NULL::text[] AS vehicle_photo_paths,
+              CASE
+                WHEN p.daily_help_id IS NOT NULL AND ci.occurred_at IS NOT NULL THEN (
+                  SELECT COUNT(*)::integer
+                  FROM pass_events pe
+                  WHERE pe.organization_id = p.organization_id
+                    AND pe.pass_id = p.id
+                    AND pe.event_type = '{PassEventType.CHECKED_IN.value}'::pass_event_type
+                    AND pe.occurred_at >= date_trunc('day', ci.occurred_at)
+                    AND pe.occurred_at < date_trunc('day', ci.occurred_at) + interval '1 day'
+                )
+                ELSE NULL
+              END AS daily_check_in_count,
               COALESCE(ci.occurred_at, p.valid_from) AS sort_time,
               p.created_at AS tie_breaker,
               dhc.name AS daily_help_category_name
@@ -513,10 +562,12 @@ TRIM(
         """
 
     @staticmethod
-    def _walk_in_branch_sql(*, filter_sql: str) -> str:
+    def _walk_in_branch_sql(*, filter_sql: str, unit_scope_sql: str = "") -> str:
         """SQL selecting normalized walk-in rows (with or without gate entry)."""
         entered_event = WalkInEventType.ENTERED.value
-        resident_columns = VisitorLogsRepository._walk_in_resident_select_columns()
+        resident_columns = VisitorLogsRepository._walk_in_resident_select_columns(
+            unit_scope_sql=unit_scope_sql,
+        )
         awaiting = VisitorLogVisitStatus.AWAITING_APPROVAL.value
         approved = VisitorLogVisitStatus.APPROVED.value
         inside = VisitorLogVisitStatus.INSIDE.value
@@ -531,7 +582,8 @@ TRIM(
             SELECT
               'walk_in'::text AS source,
               w.id::text AS pass_id,
-              '{WALK_IN_LOG_TYPE}'::text AS pass_type,
+              w.type::text AS pass_type,
+              w.sub_type,
               TRIM(
                 COALESCE(w.visitor_first_name, '')
                 || ' ' || COALESCE(w.visitor_last_name, '')
@@ -590,6 +642,7 @@ TRIM(
               NULL::text AS pass_image_path,
               w.visitor_photo_paths,
               w.vehicle_photo_paths,
+              NULL::integer AS daily_check_in_count,
               COALESCE(w.entered_at, w.requested_at) AS sort_time,
               w.created_at AS tie_breaker,
               NULL::text AS daily_help_category_name
@@ -625,13 +678,19 @@ TRIM(
         include_walk_ins: bool,
         pass_filter_sql: str,
         walk_in_filter_sql: str,
+        walk_in_unit_scope_sql: str = "",
     ) -> str:
         """Combine enabled branches into a UNION ALL subquery."""
         branches: list[str] = []
         if include_passes:
             branches.append(self._pass_branch_sql(filter_sql=pass_filter_sql))
         if include_walk_ins:
-            branches.append(self._walk_in_branch_sql(filter_sql=walk_in_filter_sql))
+            branches.append(
+                self._walk_in_branch_sql(
+                    filter_sql=walk_in_filter_sql,
+                    unit_scope_sql=walk_in_unit_scope_sql,
+                )
+            )
         if not branches:
             return ""
         return " UNION ALL ".join(branches)
@@ -649,6 +708,7 @@ TRIM(
         tower_id: str | None = None,
         project_id: str | None = None,
         unit_id: str | None = None,
+        visible_to_contact_id: str | None = None,
     ) -> tuple[str, list[Any]]:
         """Build union SQL and bound args for list/overview queries."""
         include_passes, include_walk_ins = self._branch_inclusion(
@@ -670,26 +730,37 @@ TRIM(
                 tower_id=tower_id,
                 project_id=project_id,
                 unit_id=unit_id,
+                visible_to_contact_id=visible_to_contact_id,
                 param_index=next_idx,
             )
             args.extend(pass_filter_args)
 
         walk_in_filter_sql = ""
+        walk_in_unit_scope_sql = ""
         if include_walk_ins:
-            walk_in_filter_sql, walk_in_filter_args, next_idx = self._build_walk_in_filters(
+            (
+                walk_in_filter_sql,
+                walk_in_filter_args,
+                next_idx,
+                walk_in_unit_param,
+            ) = self._build_walk_in_filters(
                 search=search,
+                pass_type=pass_type,
                 tower_id=tower_id,
                 project_id=project_id,
                 unit_id=unit_id,
                 param_index=next_idx,
             )
             args.extend(walk_in_filter_args)
+            if walk_in_unit_param:
+                walk_in_unit_scope_sql = f"AND vu.unit_id = {walk_in_unit_param}::uuid"
 
         union_sql = self._build_union_query(
             include_passes=include_passes,
             include_walk_ins=include_walk_ins,
             pass_filter_sql=pass_filter_sql,
             walk_in_filter_sql=walk_in_filter_sql,
+            walk_in_unit_scope_sql=walk_in_unit_scope_sql,
         )
         return union_sql, args
 
@@ -709,6 +780,7 @@ TRIM(
         guard_user_id: str | None = None,
         project_id: str | None = None,
         unit_id: str | None = None,
+        visible_to_contact_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -725,6 +797,7 @@ TRIM(
             tower_id=tower_id,
             project_id=project_id,
             unit_id=unit_id,
+            visible_to_contact_id=visible_to_contact_id,
         )
         if not union_sql:
             return [], 0

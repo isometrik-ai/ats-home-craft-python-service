@@ -63,6 +63,8 @@ class WalkInRepository(BaseRepository):
         visitor_photo_paths: list[str],
         vehicle_photo_paths: list[str],
         notes: str | None,
+        visit_type: str,
+        sub_type: str | None,
         flats_count: int,
         requested_by_user_id: str,
         gate_id: str | None,
@@ -80,12 +82,15 @@ class WalkInRepository(BaseRepository):
                 visitor_photo_paths,
                 vehicle_photo_paths,
                 notes,
+                type,
+                sub_type,
                 flats_count,
                 requested_by_user_id,
                 gate_id
             )
             VALUES (
-                $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid, $12::uuid
+                $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::pass_type,
+                $11, $12, $13::uuid, $14::uuid
             )
             RETURNING *
             """,
@@ -98,6 +103,8 @@ class WalkInRepository(BaseRepository):
             visitor_photo_paths,
             vehicle_photo_paths,
             notes,
+            visit_type,
+            sub_type,
             flats_count,
             requested_by_user_id,
             gate_id,
@@ -674,6 +681,8 @@ class WalkInRepository(BaseRepository):
               e.visitor_phone_number,
               e.visitor_photo_paths,
               e.notes,
+              e.type::text AS type,
+              e.sub_type,
               e.requested_at,
               e.flats_count
             FROM walk_in_visit_units vu

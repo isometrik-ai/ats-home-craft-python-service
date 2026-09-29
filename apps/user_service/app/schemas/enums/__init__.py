@@ -221,6 +221,7 @@ __all__ = [
     "DailyHelpRatingTrait",
     "DailyHelpReviewSort",
     "DEFAULT_DAILY_HELP_CATEGORY_NAMES",
+    "WalkInType",
     "WalkInStatus",
     "WalkInVisitUnitStatus",
     "WalkInEventType",

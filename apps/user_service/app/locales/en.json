@@ -903,6 +903,12 @@
       "visit_unit_rejected": "Walk-in rejected for your flat."
     }
   },
+  "visitor_activities": {
+    "success": {
+      "list_retrieved": "Visitor activities retrieved successfully.",
+      "detail_retrieved": "Visitor activity detail retrieved successfully."
+    }
+  },
   "notifications": {
     "push": {
       "walk_in": {

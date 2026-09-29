@@ -648,6 +648,7 @@ class VisitorLogsService:
             "visit_status": str(row.get("visit_status") or ""),
             "visitor_type": self._visitor_type_from_row(row),
             "daily_help_category_name": row.get("daily_help_category_name"),
+            "daily_check_in_count": row.get("daily_check_in_count"),
             "pass_code": row.get("pass_code"),
             "is_private": bool(row.get("is_private")),
             "in_time": format_iso_datetime(in_time),
@@ -671,6 +672,7 @@ class VisitorLogsService:
         guard_user_id: str | None = None,
         project_id: str | None = None,
         unit_id: str | None = None,
+        visible_to_contact_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -691,6 +693,7 @@ class VisitorLogsService:
             guard_user_id=guard_user_id,
             project_id=project_id,
             unit_id=unit_id,
+            visible_to_contact_id=visible_to_contact_id,
             page=page,
             page_size=page_size,
         )

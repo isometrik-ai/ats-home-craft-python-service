@@ -80,6 +80,9 @@ from apps.user_service.app.api.users import router as users_router
 from apps.user_service.app.api.verification_codes import (
     router as verification_codes_router,
 )
+from apps.user_service.app.api.visitor_activities_resident import (
+    router as visitor_activities_resident_router,
+)
 from apps.user_service.app.api.visitor_logs import router as visitor_logs_router
 from apps.user_service.app.api.walk_ins import router as walk_ins_router
 from apps.user_service.app.api.walk_ins_owner import router as walk_ins_owner_router
@@ -119,6 +122,7 @@ router.include_router(facility_booking_admin_router)
 router.include_router(facility_booking_resident_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
+router.include_router(visitor_activities_resident_router)
 router.include_router(walk_ins_router)
 router.include_router(walk_ins_owner_router)
 router.include_router(visitor_logs_router)
