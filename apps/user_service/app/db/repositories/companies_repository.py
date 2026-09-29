@@ -709,11 +709,9 @@ class CompaniesRepository(BaseRepository):
             ) addresses ON TRUE
             WHERE co.id = $1::uuid
               AND co.organization_id = $2::uuid
-              AND co.status != $3
             """,
             company_id,
             organization_id,
-            ClientStatus.DELETED.value,
         )
         if not fetched_row:
             return None
