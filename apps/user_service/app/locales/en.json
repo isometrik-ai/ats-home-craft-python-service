@@ -1192,6 +1192,40 @@
       "removed": "Pet profile removed successfully."
     }
   },
+  "fee_configuration": {
+    "errors": {
+      "not_found": "The fee head could not be found.",
+      "settings_not_found": "Finance settings could not be found for this project.",
+      "name_required": "Enter a name for this fee head.",
+      "invalid_line_description": "The line description is too long.",
+      "no_property_type": "Tick at least one property type.",
+      "invalid_rate": "Enter a valid amount.",
+      "frequency_locked": "Metered fees are always billed monthly, in arrears.",
+      "billing_cycle_required": "Choose a billing cycle for this fee.",
+      "anchor_month_required": "Choose the month this fee starts in.",
+      "invalid_day": "Choose a day from the 1st to the 28th.",
+      "invalid_due_days": "Due within must be between 0 and 365 days.",
+      "invalid_fee_start": "This fee start is not available.",
+      "invalid_tax_rate": "Enter a tax rate between 0 and 100.",
+      "late_fee_steps": "Add between one and four late fee steps, each with a different number of days.",
+      "invalid_interest_rate": "Enter an interest rate greater than 0 and at most 100.",
+      "invalid_dunning": "Check the retry and reminder numbers.",
+      "version_conflict": "Someone else changed this fee head. Reload and try again.",
+      "settings_version_conflict": "Someone else changed these settings. Reload and try again.",
+      "already_exists": "This fee head already exists for the project.",
+      "settings_already_exist": "Finance settings already exist for this project."
+    },
+    "success": {
+      "list_retrieved": "Fee heads retrieved successfully.",
+      "detail_retrieved": "Fee head retrieved successfully.",
+      "created": "Fee head created successfully.",
+      "updated": "Fee head saved successfully.",
+      "status_updated": "Fee head status updated successfully.",
+      "settings_retrieved": "Finance settings retrieved successfully.",
+      "settings_created": "Finance settings created successfully.",
+      "settings_updated": "Finance settings saved successfully."
+    }
+  },
   "parking_allotment": {
     "errors": {
       "slot_not_found": "The parking slot could not be found.",

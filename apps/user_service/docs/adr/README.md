@@ -21,8 +21,10 @@ ADRs capture significant design choices, the context behind them, and their cons
 | [0014](./0014-community-events.md)                   | Community events — admin create, resident book        | Accepted           |
 | [0015](./0015-project-level-rbac.md)                 | Project-level RBAC — per-project roles                | Proposed           |
 | [0016](./0016-pets.md)                               | Household pets — unit profiles, static catalog        | Accepted           |
+| [0017](./0017-facility-booking.md)                   | Facility booking — configs, ledger, wallets, invoices | Accepted           |
+| [0018](./0018-fee-configuration.md)                  | Fee configuration — three seeded fee heads, dunning   | Proposed           |
 
-See also: [membership-architecture.md](../membership-architecture.md) (full guide) and [membership-schema.md](../../../../../ats-home-craft-supabase/docs/membership-schema.md) (DB reference). Notice board: [notice-board-flow.md](../notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md). Daily help: [daily-help-flow.md](../daily-help-flow.md). Community events: [events-flow.md](../events-flow.md), [community-events-schema.md](../../../../../ats-home-craft-supabase/docs/community-events-schema.md). Pets: [pets-flow.md](../pets-flow.md).
+See also: [membership-architecture.md](../membership-architecture.md) (full guide) and [membership-schema.md](../../../../../ats-home-craft-supabase/docs/membership-schema.md) (DB reference). Notice board: [notice-board-flow.md](../notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md). Daily help: [daily-help-flow.md](../daily-help-flow.md). Community events: [events-flow.md](../events-flow.md), [community-events-schema.md](../../../../../ats-home-craft-supabase/docs/community-events-schema.md). Pets: [pets-flow.md](../pets-flow.md). Facility booking: [facility-booking-flow.md](../facility-booking-flow.md). Fee configuration: [fee-configuration-flow.md](../fee-configuration-flow.md).
 
 ## Format
 
@@ -35,6 +37,6 @@ Each ADR follows:
 
 ## Adding a new ADR
 
-1. Copy the next number (`0007`, `0008`, …).
+1. Copy the next number (`0019`, …).
 1. Add a row to the table above.
 1. Link related migrations and schema docs.

@@ -39,6 +39,9 @@ from apps.user_service.app.api.facility_booking_admin import (
 from apps.user_service.app.api.facility_booking_resident import (
     router as facility_booking_resident_router,
 )
+from apps.user_service.app.api.fee_configuration import (
+    router as fee_configuration_router,
+)
 from apps.user_service.app.api.gate_passes import router as gate_passes_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
@@ -115,6 +118,7 @@ router.include_router(community_events_resident_router)
 router.include_router(community_events_internal_router)
 router.include_router(facility_booking_admin_router)
 router.include_router(facility_booking_resident_router)
+router.include_router(fee_configuration_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
 router.include_router(visitor_activities_resident_router)
