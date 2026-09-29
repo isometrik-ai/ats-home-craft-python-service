@@ -60,6 +60,7 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_utils.common_query import (
     CONTACTS_MANAGEMENT_VIEW,
+    DAILY_HELP_MANAGEMENT_CREATE,
     PROJECT_MEMBERS_MANAGE_ASSIGNED,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_VIEW,
@@ -952,7 +953,7 @@ async def test_ensure_security_project_member_access_requires_security_role():
     """Security routes reject members without the security role."""
     current_user = {"sub": "user-1", "email": "u@example.com"}
     staff_ctx = UserContext(user_id="user-1", email="u@example.com", organization_id="org-1")
-    # Development branch tries daily-help create bypass first; must fail so role check runs.
+    member_lookup = AsyncMock(return_value={"role_slug": ProjectMemberRole.COMMUNITY_ADMIN.value})
     for_context_mock = AsyncMock(
         side_effect=[
             ForbiddenException(message_key="errors.forbidden"),
@@ -960,11 +961,6 @@ async def test_ensure_security_project_member_access_requires_security_role():
         ]
     )
     with (
-        patch.object(
-            common_utils_module,
-            "ensure_staff_project_access",
-            AsyncMock(return_value=staff_ctx),
-        ),
         patch.object(
             common_utils_module,
             "ensure_staff_project_access_for_context",
@@ -979,9 +975,7 @@ async def test_ensure_security_project_member_access_requires_security_role():
             "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository"
         ) as mock_projects_cls,
     ):
-        mock_projects_cls.return_value.get_active_member_with_role = AsyncMock(
-            return_value={"role_slug": ProjectMemberRole.COMMUNITY_ADMIN.value}
-        )
+        mock_projects_cls.return_value.get_active_member_with_role = member_lookup
         with pytest.raises(ForbiddenException):
             await ensure_security_project_member_access(
                 current_user,
@@ -989,6 +983,14 @@ async def test_ensure_security_project_member_access_requires_security_role():
                 project_id="project-1",
                 permission_codes=RESIDENT_MANAGEMENT_VIEW,
             )
+
+    assert for_context_mock.await_count == 2
+    bypass_call = for_context_mock.await_args_list[0].kwargs
+    assert bypass_call["permission_codes"] == DAILY_HELP_MANAGEMENT_CREATE
+    assert bypass_call["require_action_permission"] is True
+    fallback_call = for_context_mock.await_args_list[1].kwargs
+    assert fallback_call["permission_codes"] == RESIDENT_MANAGEMENT_VIEW
+    member_lookup.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -1165,16 +1167,18 @@ async def test_ensure_security_project_member_access_success():
     """Security project access passes for active security assignments."""
     current_user = {"sub": "user-1", "email": "u@example.com"}
     staff_ctx = UserContext(user_id="user-1", email="u@example.com", organization_id="org-1")
+    member_lookup = AsyncMock(return_value={"role_slug": ProjectMemberRole.SECURITY.value})
+    for_context_mock = AsyncMock(
+        side_effect=[
+            ForbiddenException(message_key="errors.forbidden"),
+            staff_ctx,
+        ]
+    )
     with (
         patch.object(
             common_utils_module,
-            "ensure_staff_project_access",
-            AsyncMock(return_value=staff_ctx),
-        ),
-        patch.object(
-            common_utils_module,
             "ensure_staff_project_access_for_context",
-            AsyncMock(return_value=staff_ctx),
+            for_context_mock,
         ),
         patch.object(
             common_utils_module,
@@ -1185,9 +1189,7 @@ async def test_ensure_security_project_member_access_success():
             "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository"
         ) as mock_projects_cls,
     ):
-        mock_projects_cls.return_value.get_active_member_with_role = AsyncMock(
-            return_value={"role_slug": ProjectMemberRole.SECURITY.value}
-        )
+        mock_projects_cls.return_value.get_active_member_with_role = member_lookup
         ctx = await ensure_security_project_member_access(
             current_user,
             MagicMock(),
@@ -1195,6 +1197,41 @@ async def test_ensure_security_project_member_access_success():
             permission_codes=RESIDENT_MANAGEMENT_VIEW,
         )
     assert ctx.user_id == "user-1"
+    assert for_context_mock.await_count == 2
+    member_lookup.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_security_project_member_access_daily_help_create_bypass():
+    """Staff with daily-help create permission skip the security role assignment check."""
+    current_user = {"sub": "user-1", "email": "u@example.com"}
+    staff_ctx = UserContext(user_id="user-1", email="u@example.com", organization_id="org-1")
+    for_context_mock = AsyncMock(return_value=staff_ctx)
+    with (
+        patch.object(
+            common_utils_module,
+            "ensure_staff_project_access_for_context",
+            for_context_mock,
+        ),
+        patch.object(
+            common_utils_module,
+            "extract_user_context",
+            AsyncMock(return_value=staff_ctx),
+        ),
+        patch(
+            "apps.user_service.app.db.repositories.projects_repository.ProjectsRepository"
+        ) as mock_projects_cls,
+    ):
+        ctx = await ensure_security_project_member_access(
+            current_user,
+            MagicMock(),
+            project_id="project-1",
+            permission_codes=RESIDENT_MANAGEMENT_VIEW,
+        )
+    assert ctx.user_id == "user-1"
+    for_context_mock.assert_awaited_once()
+    assert for_context_mock.await_args.kwargs["permission_codes"] == DAILY_HELP_MANAGEMENT_CREATE
+    mock_projects_cls.assert_not_called()
 
 
 def test_parse_flexible_date_strptime_fallback():
