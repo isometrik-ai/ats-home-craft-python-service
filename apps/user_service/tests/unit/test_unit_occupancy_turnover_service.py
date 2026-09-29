@@ -308,3 +308,169 @@ async def test_release_single_occupant_scopes_to_one_contact(
         host_contact_id="family-1",
     )
     svc.daily_help_repo.remove_all_active_links_for_unit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
+async def test_release_outgoing_tenant_household_noops_when_empty(
+    mock_vehicles_cls: MagicMock,
+    mock_walk_in_cls: MagicMock,
+    mock_pets_cls: MagicMock,
+) -> None:
+    """When no occupant links remain, turnover should reconcile inventory and exit."""
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    mock_pets_cls.return_value.release_for_move_out = AsyncMock()
+    svc = _service()
+    svc.contact_units_repo.release_occupant_links_excluding_contacts = AsyncMock(return_value=[])
+
+    released = await svc.release_outgoing_tenant_household(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        reason="Already empty",
+    )
+
+    assert released == []
+    svc.units_repo.reconcile_unit_inventory_status.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+async def test_supersede_approved_tenant_syncs_move_out(_mock_revoke: AsyncMock) -> None:
+    """Superseding an approved tenant request should sync contact-unit move-out."""
+    svc = _service()
+    svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(
+        return_value={"id": "req-1", "contact_unit_id": "cu-tenant"}
+    )
+    svc.contact_units_repo.sync_move_out = AsyncMock()
+
+    await svc._supersede_approved_tenant_for_unit(
+        organization_id="org-1",
+        unit_id="unit-1",
+        reason="Owner changed",
+    )
+
+    svc.contact_units_repo.sync_move_out.assert_awaited_once()
+    svc.tenant_requests_repo.update_request_status.assert_awaited_once()
+    svc.tenant_requests_repo.insert_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+async def test_revoke_sessions_without_remaining_links_skips_when_links_remain(
+    _mock_revoke: AsyncMock,
+) -> None:
+    """Contacts with other open links should keep portal sessions."""
+    svc = _service()
+    svc.contact_units_repo.list_open_links_for_contact = AsyncMock(return_value=[{"id": "cu-2"}])
+
+    await svc._revoke_sessions_without_remaining_links(
+        organization_id="org-1",
+        contact_ids={"contact-1"},
+    )
+
+    _mock_revoke.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+async def test_revoke_portal_sessions_revokes_active_users(_mock_revoke: AsyncMock) -> None:
+    """Portal sessions should be revoked for contacts with linked users."""
+    svc = _service()
+    svc.contacts_repo.get_contact_for_update = AsyncMock(
+        return_value={"user_id": "user-1", "status": "active"}
+    )
+
+    await svc._revoke_portal_sessions(
+        organization_id="org-1",
+        contact_ids={"contact-1"},
+    )
+
+    _mock_revoke.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
+    new_callable=AsyncMock,
+)
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+async def test_soft_delete_skips_contacts_already_deleted(
+    _mock_revoke: AsyncMock,
+    _mock_purge: AsyncMock,
+) -> None:
+    """Already deleted household contacts should not be soft-deleted again."""
+    from apps.user_service.app.schemas.enums import ClientStatus
+
+    svc = _service()
+    svc.contacts_repo.get_contact_for_update = AsyncMock(
+        return_value={"status": ClientStatus.DELETED.value, "user_id": "user-1"}
+    )
+
+    await svc._soft_delete_orphaned_household_contacts(
+        organization_id="org-1",
+        contact_ids={"family-1"},
+    )
+
+    svc.contacts_repo.soft_delete_contact.assert_not_awaited()
+    _mock_purge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
+    new_callable=AsyncMock,
+)
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.VehiclesService")
+@patch(
+    "apps.user_service.app.services.unit_occupancy_turnover_service.revoke_contact_portal_sessions",
+    new_callable=AsyncMock,
+)
+async def test_vacate_infers_previous_contact_from_released_owner_row(
+    mock_revoke: AsyncMock,
+    mock_vehicles_cls: MagicMock,
+    mock_walk_in_cls: MagicMock,
+    mock_pets_cls: MagicMock,
+    _mock_purge: AsyncMock,
+) -> None:
+    """When owner lookup is empty, infer previous contact id from released self row."""
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
+    mock_pets_cls.return_value.release_for_move_out = AsyncMock()
+    svc = _service()
+    svc.units_repo.get_unit_owner_contact = AsyncMock(return_value=None)
+    svc.tenant_requests_repo.find_active_approved_for_unit = AsyncMock(return_value=None)
+    svc.contact_units_repo.release_all_open_links_for_unit = AsyncMock(
+        return_value=[{"id": "cu-owner", "contact_id": "owner-9", "relationship": "self"}]
+    )
+    svc.contact_units_repo.list_open_links_for_contact = AsyncMock(return_value=[])
+    svc.contacts_repo.get_contact_for_update = AsyncMock(return_value={"user_id": "user-9"})
+    svc.units_repo.reconcile_unit_inventory_status = AsyncMock(return_value="vacant")
+
+    result = await svc.vacate_unit_completely(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        reason="Owner cleared",
+        supersede_reason="owner_unassigned",
+    )
+
+    assert result["previous_contact_id"] == "owner-9"
+    mock_revoke.assert_awaited()

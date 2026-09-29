@@ -402,3 +402,117 @@ async def test_exit_impersonation_success():
 
     assert result["id"] == "s1"
     mock_invalidate.assert_awaited_once_with("s1")
+
+
+@pytest.mark.asyncio
+async def test_reactivate_organization_update_missing_id():
+    """Update without id after reactivate raises NotFoundException."""
+    repo = _FakeOrgRepo(
+        organization={"id": ORG_ID, "status": OrganizationStatus.SUSPENDED.value},
+        update_result={},
+    )
+    svc = _service(repo=repo)
+    with pytest.raises(NotFoundException):
+        await svc.reactivate_organization(ORG_ID)
+
+
+@pytest.mark.asyncio
+async def test_permanently_delete_organization_delegates():
+    """Permanent delete delegates to OrganizationService."""
+    repo = _FakeOrgRepo()
+    svc = _service(repo=repo)
+    mock_org_svc = MagicMock()
+    mock_org_svc.permanently_delete_organization = AsyncMock(return_value={"deleted": True})
+    with patch(
+        "apps.user_service.app.services.superadmin_organization_service.OrganizationService",
+        return_value=mock_org_svc,
+    ):
+        result = await svc.permanently_delete_organization(
+            ORG_ID, actor_user_id=OWNER_ID, actor_email="owner@example.com"
+        )
+    assert result["deleted"] is True
+
+
+@pytest.mark.asyncio
+async def test_impersonate_org_not_found():
+    """Missing impersonation row raises NotFoundException."""
+    svc = _service(repo=_FakeOrgRepo(impersonation_row=None))
+    with pytest.raises(NotFoundException):
+        await svc.impersonate_organization_owner(
+            organization_id=ORG_ID,
+            supabase_admin_client=MagicMock(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_impersonate_magic_link_without_session():
+    """Failed magic link exchange raises BadRequestException."""
+    repo = _FakeOrgRepo(
+        impersonation_row={
+            "id": ORG_ID,
+            "owner_user_id": OWNER_ID,
+            "owner_email": "owner@example.com",
+        }
+    )
+    svc = _service(repo=repo)
+    with patch(
+        "apps.user_service.app.services.superadmin_organization_service.generate_magiclink_and_exchange_for_session",
+        new=AsyncMock(return_value=MagicMock(session=None, user=None)),
+    ):
+        with pytest.raises(BadRequestException):
+            await svc.impersonate_organization_owner(
+                organization_id=ORG_ID,
+                supabase_admin_client=MagicMock(),
+            )
+
+
+@pytest.mark.asyncio
+async def test_build_select_organization_response_returns_none_on_error():
+    """Select-org payload failures are logged and swallowed."""
+    repo = _FakeOrgRepo()
+    svc = _service(repo=repo)
+    with patch(
+        "apps.user_service.app.services.superadmin_organization_service.OrganizationMemberRepository"
+    ) as om_cls:
+        om_cls.return_value.get_active_membership_isometrik_user_id = AsyncMock(
+            side_effect=RuntimeError("db down")
+        )
+        result = await svc._build_select_organization_response(
+            user_id=OWNER_ID,
+            organization_id=ORG_ID,
+        )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_exit_impersonation_invalid_token_payload():
+    """Missing sub/session_id on token raises BadRequestException."""
+    svc = _service()
+    with patch(
+        "apps.user_service.app.services.superadmin_organization_service.is_system_super_admin",
+        new=AsyncMock(return_value=False),
+    ):
+        with pytest.raises(BadRequestException):
+            await svc.exit_impersonation_session(current_user={"sub": OWNER_ID})
+
+
+@pytest.mark.asyncio
+async def test_exit_impersonation_session_not_found():
+    """Missing auth session row raises NotFoundException."""
+    svc = _service()
+    mock_session_repo = MagicMock()
+    mock_session_repo.delete_auth_session = AsyncMock(return_value=None)
+    with (
+        patch(
+            "apps.user_service.app.services.superadmin_organization_service.is_system_super_admin",
+            new=AsyncMock(return_value=False),
+        ),
+        patch(
+            "apps.user_service.app.services.superadmin_organization_service.SessionRepository",
+            return_value=mock_session_repo,
+        ),
+    ):
+        with pytest.raises(NotFoundException):
+            await svc.exit_impersonation_session(
+                current_user={"sub": OWNER_ID, "session_id": "missing"}
+            )

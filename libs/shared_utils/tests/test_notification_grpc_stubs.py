@@ -63,6 +63,16 @@ def test_pb2_module_has_descriptor():
     assert pb2.NotificationRequest is not None
 
 
+def test_pb2_module_import_executes_generated_bindings():
+    """Importing pb2 should expose generated message classes."""
+    import importlib
+
+    reloaded = importlib.reload(pb2)
+    request = reloaded.NotificationRequest(body_data="ping")
+    assert request.body_data == "ping"
+    assert reloaded.NotificationReply(message="pong").message == "pong"
+
+
 def test_grpc_stub_import_error_branch():
     """Cover ImportError fallback when grpc._utilities is unavailable."""
     import importlib

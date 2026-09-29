@@ -369,3 +369,102 @@ async def test_delete_facility_blocked_when_upcoming_reservations_exist():
         await svc.delete_facility(project_id=PROJECT_ID, facility_id=FACILITY_ID)
 
     svc.facilities_repo.delete_facility.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_facility_tower_not_found():
+    """In-tower create fails when tower id does not exist."""
+    svc = _service()
+    svc.towers_repo.get_tower = AsyncMock(return_value=None)
+    body = CreateFacilityRequest(
+        name="Gym",
+        facility_type=FacilityType.RECREATION,
+        location_type=FacilityLocationType.IN_TOWER,
+        tower_id=TOWER_ID,
+        wing="A",
+        floor_level="1",
+    )
+    with pytest.raises(NotFoundException):
+        await svc.create_facility(project_id=PROJECT_ID, body=body)
+
+
+@pytest.mark.asyncio
+async def test_update_facility_provisions_booking_config_when_newly_bookable():
+    """Enabling booking on update inserts default config when missing."""
+    svc = _service()
+    svc.facilities_repo.get_facility = AsyncMock(
+        return_value={
+            "id": FACILITY_ID,
+            "name": "Court",
+            "facility_type": "sports",
+            "is_bookable": False,
+        }
+    )
+    svc.facilities_repo.update_facility = AsyncMock(
+        return_value={
+            "id": FACILITY_ID,
+            "name": "Court",
+            "facility_type": "sports",
+            "is_bookable": True,
+            "booking_archetype": "slot",
+        }
+    )
+    await svc.update_facility(
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        body=UpdateFacilityRequest(
+            is_bookable=True, booking_archetype=FacilityBookingArchetype.SLOT
+        ),
+    )
+    svc.booking_config_repo.insert_config.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_facility_resets_config_when_archetype_changes():
+    """Archetype changes reset existing booking config."""
+    svc = _service()
+    svc.facilities_repo.get_facility = AsyncMock(
+        return_value={
+            "id": FACILITY_ID,
+            "name": "Court",
+            "facility_type": "sports",
+            "is_bookable": True,
+            "booking_archetype": "slot",
+        }
+    )
+    svc.booking_config_repo.get_config = AsyncMock(return_value={"id": "cfg-1", "version": 2})
+    svc.facilities_repo.update_facility = AsyncMock(
+        return_value={
+            "id": FACILITY_ID,
+            "name": "Court",
+            "facility_type": "sports",
+            "is_bookable": True,
+            "booking_archetype": "room",
+        }
+    )
+    svc._reset_booking_config = AsyncMock()
+    await svc.update_facility(
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        body=UpdateFacilityRequest(booking_archetype=FacilityBookingArchetype.ROOM),
+    )
+    svc._reset_booking_config.assert_awaited_once()
+
+
+def test_serialize_update_facility_maps_enum_fields():
+    """Update serializer converts enum fields to DB string values."""
+    svc = _service()
+    data = svc._serialize_update_facility(
+        UpdateFacilityRequest(
+            status=FacilityStatus.INACTIVE,
+            facility_type=FacilityType.SPORTS,
+            location_type=FacilityLocationType.OUTDOOR_STANDALONE,
+            parking_user_type=ParkingUserType.RESIDENT,
+            parking_vehicle_category=ParkingVehicleCategory.TWO_WHEELER,
+            numbering_pattern=UnitNumberingPattern.SEQUENTIAL,
+            booking_archetype=FacilityBookingArchetype.SLOT,
+        )
+    )
+    assert data["status"] == FacilityStatus.INACTIVE.value
+    assert data["facility_type"] == FacilityType.SPORTS.value
+    assert data["booking_archetype"] == FacilityBookingArchetype.SLOT.value

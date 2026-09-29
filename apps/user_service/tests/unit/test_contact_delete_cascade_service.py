@@ -629,3 +629,22 @@ async def test_household_delete_executes_real_turnover_single_occupant_cleanup(
         project_id="project-1",
         unit_id="unit-1",
     )
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_contact_without_open_links_releases_scoped_assets(mock_vehicles_cls):
+    """Contacts without unit links should still release vehicles and passes."""
+    mock_vehicles = MagicMock()
+    mock_vehicles.release_for_move_out = AsyncMock()
+    mock_vehicles_cls.return_value = mock_vehicles
+    svc = _service()
+    svc.contact_units_repo.list_open_links_for_contact = AsyncMock(return_value=[])
+    svc.passes_repo.list_active_ids_for_host = AsyncMock(return_value=["pass-1"])
+    svc.passes_repo.cancel = AsyncMock(return_value=None)
+
+    await svc.cascade_before_soft_delete(contact_id="lonely-1", contact={})
+
+    mock_vehicles.release_for_move_out.assert_awaited_once_with(contact_id="lonely-1")
+    svc.passes_repo.cancel.assert_awaited_once()
+    svc.pass_events_repo.insert_event.assert_not_awaited()

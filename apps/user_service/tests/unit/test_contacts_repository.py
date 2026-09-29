@@ -11,6 +11,7 @@ from apps.user_service.app.schemas.enums import ClientStatus, ContactType
 from libs.shared_utils.http_exceptions import NotFoundException
 
 ORG_ID = "550e8400-e29b-41d4-a716-446655440000"
+PROJECT_ID = "660e8400-e29b-41d4-a716-446655440001"
 
 
 def _async_mock_conn(*, rows=None, row=None, val=None, execute_result=None):
@@ -725,3 +726,262 @@ async def test_filter_contact_ids_empty():
 
     assert result == set()
     conn.fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_display_names_by_user_ids():
+    """Display name lookup builds full names from name parts."""
+    conn = _FakeConn(
+        rows=[
+            {
+                "user_id": "u1",
+                "prefix": "Mr.",
+                "first_name": "Jane",
+                "middle_name": "Q",
+                "last_name": "Public",
+            }
+        ]
+    )
+    repo = ContactsRepository(db_connection=conn)
+
+    names = await repo.fetch_display_names_by_user_ids(
+        organization_id=ORG_ID,
+        user_ids=["u1"],
+    )
+
+    assert names == {"u1": "Mr. Jane Q Public"}
+    query, _ = conn.fetch_calls[0]
+    assert "user_id = ANY($3::uuid[])" in query
+
+
+@pytest.mark.asyncio
+async def test_fetch_display_names_by_user_ids_empty():
+    """Empty user id lists skip the database."""
+    conn = _async_mock_conn()
+    repo = ContactsRepository(db_connection=conn)
+
+    assert await repo.fetch_display_names_by_user_ids(organization_id=ORG_ID, user_ids=[]) == {}
+    conn.fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_is_active_contact_user_without_isometrik_id():
+    """Active contact lookup returns None isometrik id when absent."""
+    conn = _FakeConn(row={"id": "c1", "isometrik_user_id": None})
+    repo = ContactsRepository(db_connection=conn)
+
+    contact_id, isometrik_user_id = await repo.is_active_contact_user_for_organization(
+        user_id="u1",
+        organization_id=ORG_ID,
+    )
+
+    assert contact_id == "c1"
+    assert isometrik_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_get_contact_for_update_not_found():
+    """Missing contacts return None from for-update loader."""
+    conn = _async_mock_conn(row=None)
+    repo = ContactsRepository(db_connection=conn)
+
+    assert await repo.get_contact_for_update(contact_id="missing", organization_id=ORG_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_get_contact_details_not_found():
+    """Missing contacts return None from detail loader."""
+    conn = _async_mock_conn(row=None)
+    repo = ContactsRepository(db_connection=conn)
+
+    assert await repo.get_contact_details(contact_id="missing", organization_id=ORG_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_get_contact_details_by_phone_blank():
+    """Blank phone numbers skip lookup."""
+    conn = _async_mock_conn()
+    repo = ContactsRepository(db_connection=conn)
+
+    assert (
+        await repo.get_contact_details_by_phone(organization_id=ORG_ID, phone_number="  ") is None
+    )
+    conn.fetchrow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_contact_address_empty_update():
+    """Empty address patch payloads are ignored."""
+    conn = _async_mock_conn()
+    repo = ContactsRepository(db_connection=conn)
+
+    assert (
+        await repo.update_contact_address(contact_id="c1", address_id="a1", update_data={}) is None
+    )
+    conn.fetchrow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_contact_addresses_empty():
+    """Empty address id lists skip delete."""
+    conn = _async_mock_conn()
+    repo = ContactsRepository(db_connection=conn)
+
+    await repo.delete_contact_addresses(contact_id="c1", address_ids=[])
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_contact_project_ids():
+    """Project id listing returns distinct active/pending unit projects."""
+    conn = _FakeConn(
+        rows=[{"project_id": PROJECT_ID}, {"project_id": "660e8400-e29b-41d4-a716-446655440002"}]
+    )
+    repo = ContactsRepository(db_connection=conn)
+
+    project_ids = await repo.list_contact_project_ids(contact_id="c1", organization_id=ORG_ID)
+
+    assert len(project_ids) == 2
+    query, _ = conn.fetch_calls[0]
+    assert "contact_units cu" in query
+
+
+@pytest.mark.asyncio
+async def test_list_unit_resident_recipients():
+    """Unit resident recipients require organization and unit ids."""
+    conn = _FakeConn(rows=[{"user_id": "u1", "contact_id": "c1", "first_name": "Jane"}])
+    repo = ContactsRepository(db_connection=conn)
+    unit_id = "770e8400-e29b-41d4-a716-446655440003"
+
+    recipients = await repo.list_unit_resident_recipients(organization_id=ORG_ID, unit_id=unit_id)
+
+    assert recipients[0]["contact_id"] == "c1"
+    query, _ = conn.fetch_calls[0]
+    assert "contact_units cu" in query
+
+
+@pytest.mark.asyncio
+async def test_list_unit_resident_recipients_empty():
+    """Missing ids return empty recipient lists."""
+    conn = _async_mock_conn()
+    repo = ContactsRepository(db_connection=conn)
+
+    assert await repo.list_unit_resident_recipients(organization_id="", unit_id="unit-1") == []
+    conn.fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_push_recipient_for_contact_unit():
+    """Push recipient lookup joins contact_units to contacts."""
+    conn = _async_mock_conn(row={"user_id": "u1", "contact_id": "c1", "first_name": "Jane"})
+    repo = ContactsRepository(db_connection=conn)
+    contact_unit_id = "880e8400-e29b-41d4-a716-446655440004"
+
+    recipient = await repo.get_push_recipient_for_contact_unit(
+        organization_id=ORG_ID,
+        contact_unit_id=contact_unit_id,
+    )
+
+    assert recipient["user_id"] == "u1"
+    query, _ = _sql_args(conn.fetchrow)
+    assert "contact_units cu" in query
+
+
+@pytest.mark.asyncio
+async def test_get_contacts_by_ids_empty():
+    """Empty id lists return no contact rows."""
+    conn = _async_mock_conn()
+    repo = ContactsRepository(db_connection=conn)
+
+    assert await repo.get_contacts_by_ids(organization_id=ORG_ID, contact_ids=[]) == []
+    conn.fetch.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_contact_overview_no_row():
+    """Overview returns zero counts when aggregate row is missing."""
+    conn = _async_mock_conn(row=None)
+    repo = ContactsRepository(db_connection=conn)
+
+    overview = await repo.get_contact_overview(
+        organization_id=ORG_ID,
+        status=ClientStatus.ACTIVE.value,
+    )
+
+    assert overview == {"total": 0, "owners": 0, "tenants": 0, "vendors": 0}
+
+
+@pytest.mark.asyncio
+async def test_create_contact_with_optional_company_link_no_row():
+    """Complex insert returns empty payload when SQL yields no row."""
+    conn = _async_mock_conn(row=None)
+    repo = ContactsRepository(db_connection=conn)
+
+    result = await repo.create_contact_with_optional_company_link(
+        organization_id=ORG_ID,
+        contact_data={"first_name": "Jane", "phones": []},
+        company_id=None,
+        company_data=None,
+        company_addresses=None,
+        make_primary=False,
+    )
+
+    assert result == {"contact_id": None, "company_id": None, "contact": None}
+
+
+@pytest.mark.asyncio
+async def test_get_contact_phones_for_update_not_found():
+    """Missing contacts return None from phones for-update loader."""
+    conn = _async_mock_conn(row=None)
+    repo = ContactsRepository(db_connection=conn)
+
+    assert (
+        await repo.get_contact_phones_for_update(contact_id="missing", organization_id=ORG_ID)
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_active_contact_by_user_id_not_found():
+    """Active contact lookup returns None when row is missing."""
+    conn = _async_mock_conn(row=None)
+    repo = ContactsRepository(db_connection=conn)
+
+    assert await repo.get_active_contact_by_user_id(user_id="u1", organization_id=ORG_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_get_push_recipient_for_contact_unit_empty_ids():
+    """Push recipient lookup requires organization and contact_unit ids."""
+    conn = _async_mock_conn()
+    repo = ContactsRepository(db_connection=conn)
+
+    assert (
+        await repo.get_push_recipient_for_contact_unit(
+            organization_id="",
+            contact_unit_id="cu-1",
+        )
+        is None
+    )
+    conn.fetchrow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_list_contacts_with_dropdown_filters():
+    """Contact list applies dropdown custom-field filters."""
+    conn = _FakeConn(rows=[{"id": "c1"}], val=1)
+    repo = ContactsRepository(db_connection=conn)
+
+    rows, total = await repo.list_contacts(
+        organization_id=ORG_ID,
+        search=None,
+        status=ClientStatus.ACTIVE.value,
+        dropdown_filters={"department": ["Sales"]},
+        page=1,
+        page_size=10,
+    )
+
+    assert total == 1
+    assert rows[0]["id"] == "c1"
+    count_query, _ = conn.fetchval_calls[0]
+    assert "custom_fields" in count_query

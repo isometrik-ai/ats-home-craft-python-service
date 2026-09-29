@@ -49,6 +49,13 @@ class _FakeOrgRepo:
         return self.organizations
 
 
+def test_auth_service_init_without_database():
+    """AuthService can be constructed without a DB connection."""
+    svc = AuthService(db_connection=None, sb_client=MagicMock())
+    assert svc.user_repository is None
+    assert svc.organization_repository is None
+
+
 def _service(
     *,
     user_repo: _FakeUserRepo | None = None,
@@ -63,7 +70,7 @@ def _service(
     return svc
 
 
-def _login_result(*, with_token: bool = True):
+def _login_result(*, with_token: bool = True, with_phone: bool = False):
     """Build a minimal Supabase login result."""
     session = SimpleNamespace(
         access_token="access-token" if with_token else None,
@@ -71,10 +78,13 @@ def _login_result(*, with_token: bool = True):
         expires_in=3600,
         expires_at=0,
     )
+    metadata = {"first_name": "Test", "last_name": "User"}
+    if with_phone:
+        metadata.update({"phone_number": "5551234567", "phone_isd_code": "+1"})
     user = SimpleNamespace(
         id="user-1",
         email="user@example.com",
-        user_metadata={"first_name": "Test", "last_name": "User"},
+        user_metadata=metadata,
     )
     return SimpleNamespace(session=session, user=user)
 
@@ -207,6 +217,77 @@ async def test_login_success(monkeypatch):
     assert result.user.email == "user@example.com"
     assert len(result.organizations) == 1
     assert result.user.org_setup_status_completed is True
+
+
+@pytest.mark.asyncio
+async def test_login_builds_user_phone_for_2fa(monkeypatch):
+    """Login combines phone metadata before optional 2FA verification."""
+    svc = _service(
+        org_repo=_FakeOrgRepo(
+            organizations=[
+                {
+                    "id": "org-1",
+                    "name": "Acme",
+                    "domain": "acme.example.com",
+                    "logo_url": None,
+                    "description": None,
+                }
+            ]
+        )
+    )
+    verify_2fa = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.login_user",
+        AsyncMock(return_value=_login_result(with_phone=True)),
+    )
+    monkeypatch.setattr(AuthService, "_check_and_verify_2fa", verify_2fa)
+    monkeypatch.setattr(AuthService, "_warm_session_context_from_session", AsyncMock())
+
+    await svc.login(
+        AuthLogin(
+            email="admin@example.com",
+            password="Strong1!",
+            user_type=SelectOrganizationType.ORGANIZATION_MEMBER,
+        )
+    )
+
+    assert verify_2fa.await_args.kwargs["user_phone"] == "+15551234567"
+
+
+@pytest.mark.asyncio
+async def test_login_auth_api_error_non_400(monkeypatch):
+    """Non-400 Supabase auth errors map to authentication_failed."""
+    svc = _service()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.login_user",
+        AsyncMock(side_effect=AuthApiError("server", 500, "server")),
+    )
+    with pytest.raises(BadRequestException):
+        await svc.login(
+            AuthLogin(
+                email="user@example.com",
+                password="Strong1!",
+                user_type=SelectOrganizationType.ORGANIZATION_MEMBER,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_login_unexpected_error(monkeypatch):
+    """Unexpected login exceptions map to authentication_failed."""
+    svc = _service()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.login_user",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    with pytest.raises(BadRequestException):
+        await svc.login(
+            AuthLogin(
+                email="user@example.com",
+                password="Strong1!",
+                user_type=SelectOrganizationType.ORGANIZATION_MEMBER,
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -1121,3 +1202,138 @@ def test_extract_session_and_get_session_after_signup():
     svc = _service()
     assert svc._get_session_after_signup(SimpleNamespace(session=session)) is session
     assert svc._get_session_after_signup(SimpleNamespace(session=None)) is None
+
+
+def test_send_welcome_email_safely_swallows_errors(monkeypatch):
+    """Welcome email failures are logged without raising."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.send_welcome_email",
+        MagicMock(side_effect=RuntimeError("smtp down")),
+    )
+    AuthService._send_welcome_email_safely("user@example.com", "Test")
+
+
+@pytest.mark.asyncio
+async def test_get_and_validate_verification_record_not_found(monkeypatch):
+    """Missing verification record raises NotFoundException."""
+    svc = _service()
+
+    class _FakeVerificationRepo:
+        async def get_verification_code_by_id(self, verification_id):
+            del verification_id
+            return None
+
+    class _FakeVerificationService:
+        def __init__(self, db_connection):
+            del db_connection
+            self.verification_code_repository = _FakeVerificationRepo()
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.VerificationCodeService",
+        _FakeVerificationService,
+    )
+    with pytest.raises(NotFoundException):
+        await svc._get_and_validate_verification_record("ver-missing")
+
+
+@pytest.mark.asyncio
+async def test_get_and_validate_verification_record_missing_given_input(monkeypatch):
+    """Verification record without given_input is rejected."""
+    svc = _service()
+
+    class _FakeVerificationRepo:
+        async def get_verification_code_by_id(self, verification_id):
+            del verification_id
+            return {"id": "ver-1", "given_input": None}
+
+    class _FakeVerificationService:
+        def __init__(self, db_connection):
+            del db_connection
+            self.verification_code_repository = _FakeVerificationRepo()
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.VerificationCodeService",
+        _FakeVerificationService,
+    )
+    with pytest.raises(BadRequestException):
+        await svc._get_and_validate_verification_record("ver-1")
+
+
+@pytest.mark.asyncio
+async def test_check_and_verify_2fa_phone_flow(monkeypatch):
+    """PHONE 2FA validates phone match and verifies code via service."""
+    svc = _service()
+    metadata = {"verification_preference": {"enabled": True, "type": "PHONE"}}
+    record = {"id": "ver-1", "given_input": "+15551234567"}
+
+    async def _fake_get_record(verification_id):
+        del verification_id
+        return record
+
+    monkeypatch.setattr(svc, "_get_and_validate_verification_record", _fake_get_record)
+    monkeypatch.setattr(svc, "_verify_2fa_code", AsyncMock())
+
+    await svc._check_and_verify_2fa(
+        metadata,
+        "ver-1",
+        "123456",
+        "user@example.com",
+        user_phone="+15551234567",
+        phone_number="5551234567",
+        phone_isd_code="+1",
+    )
+    svc._verify_2fa_code.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_verify_2fa_code_delegates_to_verification_service(monkeypatch):
+    """_verify_2fa_code uses VerificationCodeService validation helpers."""
+    svc = _service()
+    record = {"id": "ver-1", "given_input": "user@example.com", "verification_code": "123456"}
+    from apps.user_service.app.schemas.verification_codes import (
+        VerificationType,
+        VerifyVerificationCodeRequest,
+    )
+
+    verify_data = VerifyVerificationCodeRequest(
+        type=VerificationType.EMAIL,
+        verification_id="ver-1",
+        verification_code="123456",
+        email="user@example.com",
+    )
+
+    class _FakeVerificationService:
+        def __init__(self, db_connection):
+            del db_connection
+
+        def _validate_verification_record(self, verification_record, data):
+            assert verification_record is record
+            assert data is verify_data
+
+        async def _verify_code_and_update_record(self, verification_record, code, verification_id):
+            assert verification_record is record
+            assert code == "123456"
+            assert verification_id == "ver-1"
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.auth_service.VerificationCodeService",
+        _FakeVerificationService,
+    )
+    await svc._verify_2fa_code(record, verify_data, "123456", "ver-1")
+
+
+def test_create_verification_request_phone_success():
+    """Phone 2FA builds VerifyVerificationCodeRequest with metadata phone."""
+    from apps.user_service.app.schemas.verification_codes import VerificationType
+
+    req = AuthService._create_verification_request(
+        {"type": "PHONE"},
+        "ver-1",
+        "123456",
+        "+15551234567",
+        "user@example.com",
+        phone_number="5551234567",
+        phone_isd_code="+1",
+    )
+    assert req.type == VerificationType.PHONE_NUMBER
+    assert req.phone_number == "5551234567"

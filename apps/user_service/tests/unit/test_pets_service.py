@@ -511,3 +511,61 @@ async def test_list_pets_for_project_status_removed():
     assert total == 1
     assert items[0]["status"] == "removed"
     assert svc.repo.list_for_project.await_args.kwargs["status"] == "removed"
+
+
+@pytest.mark.asyncio
+async def test_update_pet_noop_returns_existing_serialization():
+    """Empty patch bodies should return the existing pet without DB update."""
+    svc = _service()
+    existing = _pet_row()
+    svc.repo.get_by_id.return_value = existing
+
+    result = await svc.update_pet(
+        contact_id="contact-1",
+        pet_id="pet-1",
+        unit_id="unit-1",
+        body=UpdatePetRequest(),
+    )
+
+    assert result["name"] == "Romeo"
+    svc.repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_pet_admin_noop_returns_existing_serialization():
+    svc = _service()
+    existing = _pet_row()
+    svc.repo.get_by_id.return_value = existing
+
+    result = await svc.update_pet_admin(
+        project_id="project-1",
+        pet_id="pet-1",
+        body=UpdatePetRequest(),
+    )
+
+    assert result["name"] == "Romeo"
+    svc.repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_validate_unit_for_contact_not_found():
+    svc = _service()
+    svc.contact_units_repo.contact_has_active_unit.return_value = True
+    svc.contact_units_repo.get_unit_project.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await svc._validate_unit_for_contact(contact_id="contact-1", unit_id="unit-1")
+
+
+@pytest.mark.asyncio
+async def test_update_pet_rejects_removed_profile():
+    svc = _service()
+    svc.repo.get_by_id.return_value = _pet_row(status="removed", deleted_at="2026-09-15T10:00:00Z")
+
+    with pytest.raises(ConflictException):
+        await svc.update_pet(
+            contact_id="contact-1",
+            pet_id="pet-1",
+            unit_id="unit-1",
+            body=UpdatePetRequest(name="Luna"),
+        )

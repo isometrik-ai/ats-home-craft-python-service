@@ -17,6 +17,8 @@ from apps.user_service.app.schemas.common import (
     AddressUpdateItem,
     Email,
     Phone,
+    PhonesUpdate,
+    PhoneUpdateItem,
     SocialPageInput,
     SocialPagesUpdate,
     SocialPageUpdateItem,
@@ -3046,3 +3048,185 @@ async def test_validate_contact_auth_identity_update_email_conflict(mock_user_re
         )
 
     assert exc_info.value.message_key == "clients.errors.email_already_exists"
+
+
+def test_normalize_email_item_and_primary_identity():
+    """Email helpers normalize pydantic models and pick primary addresses."""
+    from apps.user_service.app.services import contacts_service as cs
+
+    assert cs._normalize_email_item({"email": "a@b.com"})["email"] == "a@b.com"
+    assert cs._normalize_email_item(Email(email="x@y.com", is_primary=True))["is_primary"] is True
+    assert cs._normalize_email_item("not-an-email") == {}
+    assert (
+        cs._get_primary_email_identity(
+            [{"email": "other@example.com"}, Email(email="Primary@Example.com", is_primary=True)],
+        )
+        == "primary@example.com"
+    )
+
+
+def test_merge_reused_auth_user_contact_payloads_merges_login_identity():
+    """Reused auth users force primary login email/phone onto contact payloads."""
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    email_norm, emails, phones = svc._merge_reused_auth_user_contact_payloads(
+        reused_auth_user={"email": "Auth@Example.com", "phone": "+919876543210"},
+        email_norm="",
+        emails_payload=[
+            {"email": "auth@example.com", "label": "Work", "is_primary": False},
+            {"email": "alt@example.com", "is_primary": False},
+        ],
+        phones_payload=[
+            {
+                "phone_number": "9876543210",
+                "phone_isd_code": "+91",
+                "is_primary": False,
+            },
+            {
+                "phone_number": "1111111111",
+                "phone_isd_code": "+91",
+                "is_primary": False,
+            },
+        ],
+    )
+    assert email_norm == "auth@example.com"
+    assert emails[0]["is_primary"] is True
+    assert emails[0].get("label") == "Work"
+    assert any(item["email"] == "alt@example.com" for item in emails)
+    assert phones[0]["is_primary"] is True
+
+
+def test_infer_company_name_invalid_registrable_domain(monkeypatch):
+    """Company inference returns None when registrable domain is not usable."""
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_sld",
+        lambda _domain: "localhost",
+    )
+    assert ContactsService._infer_company_name_from_email("user@localhost") is None
+
+
+@pytest.mark.asyncio
+async def test_sync_contact_auth_email_requires_supabase_client():
+    """Auth email sync fails when Supabase client is not configured."""
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=None,
+    )
+    with pytest.raises(ServiceUnavailableException):
+        await svc._sync_contact_auth_email(user_id=USER_ID, email="user@example.com")
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contacts_service.update_email", new_callable=AsyncMock)
+@patch("apps.user_service.app.services.contacts_service.UserRepository")
+async def test_sync_contact_auth_email_update_failed(
+    mock_user_repo_cls: MagicMock,
+    mock_update_email: AsyncMock,
+):
+    """Auth email sync surfaces failure when Supabase update returns false."""
+    mock_user_repo_cls.return_value.get_auth_user_by_email = AsyncMock(return_value=None)
+    mock_update_email.return_value = False
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    with pytest.raises(ServiceUnavailableException):
+        await svc._sync_contact_auth_email(user_id=USER_ID, email="user@example.com")
+
+
+@pytest.mark.asyncio
+async def test_validate_contact_auth_identity_update_noop():
+    """Auth identity validation no-ops when neither phone nor email is provided."""
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    await svc._validate_contact_auth_identity_update(user_id=USER_ID)
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contacts_service.UserRepository")
+async def test_validate_contact_auth_identity_update_phone_conflict(mock_user_repo_cls):
+    """Phone updates reject numbers owned by another auth user."""
+    mock_user_repo_cls.return_value.get_auth_user_by_phone = AsyncMock(
+        return_value={"id": "other-user"},
+    )
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    with pytest.raises(ConflictException) as exc_info:
+        await svc._validate_contact_auth_identity_update(
+            user_id=USER_ID,
+            phone="+19998887777",
+        )
+    assert exc_info.value.message_key == "clients.errors.phone_number_already_exists"
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contacts_service.UserRepository")
+async def test_validate_contact_auth_identity_update_email_phone_mismatch(
+    mock_user_repo_cls: MagicMock,
+):
+    """Conflicting auth matches for combined phone/email updates are rejected."""
+    mock_user_repo_cls.return_value.get_auth_users_by_phone_or_email = AsyncMock(
+        return_value=[{"id": "user-a"}, {"id": "user-b"}],
+    )
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    with pytest.raises(ConflictException) as exc_info:
+        await svc._validate_contact_auth_identity_update(
+            user_id=USER_ID,
+            phone="+19998887777",
+            email="user@example.com",
+        )
+    assert exc_info.value.message_key == "contacts.errors.primary_email_phone_auth_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_apply_jsonb_list_changes_update_missing_item_raises():
+    """JSONB list updates fail when the target item id does not exist."""
+    svc = _service()
+    payload: dict[str, Any] = {}
+    current = {"phones": [{"id": "phone-1", "phone_number": "111", "phone_isd_code": "+1"}]}
+    phones_update = PhonesUpdate(
+        update=[PhoneUpdateItem(id="missing-id", phone_number="222", phone_isd_code="+1")]
+    )
+    with pytest.raises(NotFoundException):
+        await svc._apply_jsonb_list_changes(
+            phones_update,
+            current=current,
+            payload=payload,
+            field_name="phones",
+            not_found_message_key="contacts.errors.phone_not_found",
+        )
+
+
+@pytest.mark.asyncio
+async def test_create_contact_vendor_inserts_role(monkeypatch):
+    """Vendor contacts receive a role row on create."""
+    repo = _FakeContactsRepo()
+    svc = _service(contacts_repo=repo)
+    _patch_create_identity(svc)
+    svc.contact_roles_repo = MagicMock()
+    svc.contact_roles_repo.insert_role = AsyncMock()
+    svc._create_addresses_if_any = AsyncMock()
+
+    await svc.create_contact(
+        CreateContactRequest(
+            email="vendor@example.com",
+            contact_type=ContactType.VENDOR,
+        )
+    )
+
+    svc.contact_roles_repo.insert_role.assert_awaited_once()

@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from apps.user_service.app.schemas.enums import FacilityLocationType
+from apps.user_service.app.schemas.enums import (
+    FacilityBookingArchetype,
+    FacilityLocationType,
+    FacilityType,
+)
 from apps.user_service.app.services.project_setup_validation import (
+    normalize_facility_type,
+    normalize_parking_facility_subtype,
+    validate_booking_flags,
     validate_facility_payload,
     validate_tower_numbering,
 )
@@ -176,3 +183,80 @@ def test_validate_facility_bookable_defaults_archetype():
     }
     validate_facility_payload(data)
     assert data["booking_archetype"] == "slot"
+
+
+def test_normalize_facility_type_accepts_enum():
+    """FacilityType enum values normalize to their string value."""
+    assert normalize_facility_type(FacilityType.SPORTS) == "sports"
+
+
+def test_normalize_parking_subtype_invalid_raises():
+    """Unknown parking subtype labels are rejected."""
+    with pytest.raises(ValidationException):
+        normalize_parking_facility_subtype("not-a-real-subtype", required=True)
+
+
+def test_validate_events_capacity_must_be_positive():
+    """Event facilities reject zero capacity."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "events",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "capacity_persons": 0,
+            }
+        )
+
+
+def test_validate_parking_slots_must_be_positive():
+    """Parking facilities reject zero slots."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "parking",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "parking_slots": 0,
+                "parking_user_type": "visitors",
+                "parking_vehicle_category": "four_wheeler",
+                "facility_subtype": "open",
+            }
+        )
+
+
+def test_validate_parking_starting_slot_invalid():
+    """Starting slot number must be at least 1 when provided."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "parking",
+                "location_type": FacilityLocationType.OUTDOOR_STANDALONE.value,
+                "parking_slots": 5,
+                "parking_user_type": "visitors",
+                "parking_vehicle_category": "four_wheeler",
+                "facility_subtype": "open",
+                "starting_slots_number": 0,
+            }
+        )
+
+
+def test_validate_booking_flags_coerces_archetype_enum():
+    """Bookable payload stores archetype enum as string."""
+    data = {
+        "facility_type": "sports",
+        "is_bookable": True,
+        "booking_archetype": FacilityBookingArchetype.ROOM,
+    }
+    validate_booking_flags(data)
+    assert data["booking_archetype"] == "room"
+
+
+def test_validate_facility_location_type_enum_wing_check():
+    """FacilityLocationType enum is accepted for in_tower wing validation."""
+    with pytest.raises(ValidationException):
+        validate_facility_payload(
+            {
+                "facility_type": "sports",
+                "location_type": FacilityLocationType.IN_TOWER,
+            },
+            tower_has_wings=True,
+        )

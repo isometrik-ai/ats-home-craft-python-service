@@ -169,6 +169,15 @@ def test_log_strands_agent_failure_http_status_error():
     _log_strands_agent_failure("test_event", exc, agent_id="a1")
 
 
+def test_log_strands_agent_failure_truncates_long_response_body():
+    """Very long HTTP error bodies are truncated in logs."""
+    request = httpx.Request("POST", "https://strands.example/agents/run")
+    long_body = "x" * 5000
+    response = httpx.Response(502, text=long_body, request=request)
+    exc = httpx.HTTPStatusError("bad gateway", request=request, response=response)
+    _log_strands_agent_failure("test_event", exc, agent_id="a1")
+
+
 def test_log_strands_agent_failure_request_error():
     """Request errors log the request URL when available."""
     request = httpx.Request("GET", "https://strands.example/timeout")

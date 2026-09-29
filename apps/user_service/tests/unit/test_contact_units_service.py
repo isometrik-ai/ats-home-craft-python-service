@@ -51,6 +51,17 @@ def _completed_profile_steps() -> list[dict[str, str]]:
     ]
 
 
+def test_format_assign_date_handles_datetime_date_and_string():
+    """Assign date formatting should accept common API/storage shapes."""
+    assert ContactUnitsService._format_assign_date(None) is None
+    assert (
+        ContactUnitsService._format_assign_date(datetime(2026, 7, 15, 12, 30, tzinfo=timezone.utc))
+        == "2026-07-15"
+    )
+    assert ContactUnitsService._format_assign_date(ASSIGN_DATE) == "2026-07-15"
+    assert ContactUnitsService._format_assign_date("2026-07-15T10:00:00Z") == "2026-07-15"
+
+
 def _service(*, onboarding_repo: AsyncMock | None = None) -> ContactUnitsService:
     """Build ContactUnitsService with mocked repositories."""
     svc = ContactUnitsService(db_connection=MagicMock(), user_context=_user_context())
@@ -387,6 +398,37 @@ async def test_admin_assign_unit_creates_pending_allotment():
 
 
 @pytest.mark.asyncio
+async def test_admin_assign_reactivates_moved_out_allotment():
+    """Admin assign should reactivate a moved-out row instead of inserting duplicate."""
+    svc = _service()
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.contact_exists = AsyncMock(return_value=True)
+    svc.repo.get_by_unit_and_contact = AsyncMock(
+        return_value={"id": "cu-old", "status": "moved_out"}
+    )
+    svc.repo.unit_has_primary_occupant = AsyncMock(return_value=False)
+    svc.repo.reactivate_allotment = AsyncMock(return_value={"id": "cu-old", "status": "pending"})
+    svc.repo.get_by_id = AsyncMock(
+        return_value={
+            "id": "cu-old",
+            "unit_id": "unit-1",
+            "project_id": "proj-1",
+            "contact_id": "contact-1",
+            "status": "pending",
+            "assigned_at": ASSIGNED_AT,
+            "created_at": ASSIGNED_AT,
+        }
+    )
+    svc._maybe_send_unit_allotment_welcome_email = AsyncMock()
+    body = AdminAssignUnitRequest(unit_id="unit-1", assign_date=ASSIGN_DATE, is_primary=True)
+
+    await svc.admin_assign_unit(contact_id="contact-1", body=body)
+
+    svc.repo.reactivate_allotment.assert_awaited_once()
+    svc.repo.insert_allotment.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @patch("apps.user_service.app.services.move_events_service.MoveEventsService")
 @patch("apps.user_service.app.services.contact_units_service.UnitOccupancyTurnoverService")
 async def test_unassign_unit_owner_marks_vacant(mock_turnover_cls, mock_move_events_cls):
@@ -606,6 +648,57 @@ async def test_confirm_rejects_invalid_contact_unit_id():
         )
 
     svc.repo.find_active_primary_conflicts.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_confirm_maps_unique_violation_to_primary_conflict():
+    """Primary uniqueness violations should surface as validation errors."""
+    import asyncpg
+
+    svc = _service()
+    svc.repo.find_active_primary_conflicts = AsyncMock(return_value=[])
+    unique_error = asyncpg.UniqueViolationError("duplicate primary")
+    unique_error.constraint_name = "uq_contact_units_primary_per_unit"
+    svc.repo.confirm_selection = AsyncMock(side_effect=unique_error)
+
+    with pytest.raises(ValidationException):
+        await svc.confirm_properties(contact_id="contact-1", contact_unit_ids=[CONTACT_UNIT_ID])
+
+
+@pytest.mark.asyncio
+async def test_accept_pending_units_rejects_unknown_default_unit():
+    """Default unit selection must reference one of the confirmed properties."""
+    svc = _service()
+    svc.repo.confirm_selection = AsyncMock(
+        return_value=[
+            {"id": CONTACT_UNIT_ID, "status": "active"},
+            {"id": CONTACT_UNIT_ID_2, "status": "active"},
+        ]
+    )
+    svc.repo.activate_units_by_ids = AsyncMock()
+    svc.repo.count_active_units = AsyncMock(return_value=2)
+    svc.repo.has_default_login = AsyncMock(return_value=False)
+
+    with pytest.raises(ValidationException):
+        await svc._accept_pending_units(
+            contact_id="contact-1",
+            contact_unit_ids=[CONTACT_UNIT_ID, CONTACT_UNIT_ID_2],
+            default_contact_unit_id="00000000-0000-0000-0000-000000000099",
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_assign_rejects_unit_with_other_primary_occupant():
+    """Admin assign should fail when another contact already occupies the unit."""
+    svc = _service()
+    svc.repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})
+    svc.repo.contact_exists = AsyncMock(return_value=True)
+    svc.repo.get_by_unit_and_contact = AsyncMock(return_value=None)
+    svc.repo.unit_has_primary_occupant = AsyncMock(return_value=True)
+    body = AdminAssignUnitRequest(unit_id="unit-1", assign_date=ASSIGN_DATE, is_primary=True)
+
+    with pytest.raises(ValidationException):
+        await svc.admin_assign_unit(contact_id="contact-1", body=body)
 
 
 @pytest.mark.asyncio

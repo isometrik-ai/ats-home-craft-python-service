@@ -4437,3 +4437,368 @@ def test_entity_type_asset_registered():
     """EntityType.ASSET is available for facility-management custom fields."""
     assert EntityType.ASSET.value == "asset"
     assert EntityType.ASSET in EntityType
+
+
+def test_field_cell_resolve_identity_wrong_field_id_raises():
+    """Mismatched field_id on a required root cell raises validation error."""
+    field_def = _custom_field_response("f1", "name", "text")
+    service = CustomFieldService(db_connection=None)
+    with pytest.raises(ValidationException):
+        service._field_cell_resolve_identity(
+            field_def,
+            {"field_id": "other", "instance_id": "i1"},
+            "name",
+            False,
+            "root",
+        )
+
+
+def test_reconcile_or_raise_discriminator_nulls_optional():
+    """Optional reconcile nulls cells with invalid discriminators."""
+    field_def = _custom_field_response("f1", "name", "text", is_required=False)
+    service = CustomFieldService(db_connection=None)
+    result = service._reconcile_or_raise_discriminator(
+        "name",
+        field_def,
+        {"field_id": "f1", "instance_id": "i1", "type": "text", "value": "x", "extra": 1},
+        True,
+    )
+    assert result["value"] is None
+
+
+def test_validate_field_cell_scalar_reconcile_coerces_invalid_to_null():
+    """Optional reconcile turns invalid scalar values into null."""
+    field_def = _custom_field_response("f1", "age", "number", is_required=False)
+    service = CustomFieldService(db_connection=None)
+    result = service._validate_field_cell_scalar_part(
+        field_def,
+        {"field_id": "f1", "instance_id": "i1", "type": "number", "value": "not-a-number"},
+        "age",
+        True,
+        which="value",
+        instance_id="i1",
+        out_fid="f1",
+        type_snap="number",
+    )
+    assert result["value"] is None
+
+
+# ============================================================================
+# COVERAGE: remaining merge/validate/reconcile branches
+# ============================================================================
+
+
+def test_apply_shortcut_patch_object_branch():
+    """Shortcut patch updates object-type cells via sub_fields merge."""
+    service = CustomFieldService(db_connection=None)
+    child = _sub_field_response("child", "city", "text", parent_id="obj1")
+    obj_def = _custom_field_response("obj1", "addr", "object", sub_fields=[child])
+    flat_defs = {"obj1": obj_def, "child": child}
+    roots = [
+        {
+            "field_id": "obj1",
+            "instance_id": "i-obj",
+            "type": "object",
+            "sub_fields": [
+                {
+                    "field_id": "child",
+                    "instance_id": "i-child",
+                    "type": "text",
+                    "value": "old",
+                }
+            ],
+        }
+    ]
+    service._apply_instance_id_shortcut_patch(
+        roots,
+        {
+            "instance_id": "i-obj",
+            "sub_fields": [{"field_id": "child", "instance_id": "i-child", "value": "new"}],
+        },
+        flat_defs,
+    )
+    assert roots[0]["sub_fields"][0]["value"] == "new"
+
+
+def test_enforce_create_recurses_list_items():
+    """Create enforcement walks nested list item cells."""
+    service = CustomFieldService(db_connection=None)
+    service._enforce_create_no_server_keys({"items": [{"value": "row"}]}, "rows")
+
+
+def test_parse_roots_storage_null_parsed_json(monkeypatch):
+    """JSON string that parses to null yields empty roots list."""
+
+    def _null_parse(_raw):
+        return None
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.custom_field_service.parse_json_field",
+        _null_parse,
+    )
+    assert CustomFieldService._parse_roots_storage('"null"') == []
+
+
+def test_merge_object_sub_fields_unknown_patch_raises():
+    """Object merge rejects patch sub_fields with unknown field ids."""
+    service = CustomFieldService(db_connection=None)
+    child = _defn("c1", "city", "text")
+    obj = _defn("o1", "addr", "object", sub_fields=[child])
+    with pytest.raises(ValidationException):
+        service._merge_object_sub_fields(
+            obj,
+            [],
+            [{"field_id": "unknown", "value": "x"}],
+            "addr",
+        )
+
+
+def test_merge_object_sub_fields_optional_explicit_null_skipped():
+    """Optional scalar explicit null in object patch is omitted from merge."""
+    service = CustomFieldService(db_connection=None)
+    opt = _defn("c1", "note", "text", is_required=False)
+    req = _defn("c2", "city", "text", is_required=True)
+    obj = _defn("o1", "addr", "object", sub_fields=[opt, req], sort_order=0)
+    opt.sort_order = 1
+    req.sort_order = 2
+    merged = service._merge_object_sub_fields(
+        obj,
+        [{"field_id": "c2", "instance_id": "i2", "value": "NYC"}],
+        [{"field_id": "c1", "value": None}],
+        "addr",
+    )
+    assert len(merged) == 1
+    assert merged[0]["value"] == "NYC"
+
+
+def test_merge_object_sub_fields_keeps_stored_without_patch():
+    """Stored object children are preserved when patch omits them."""
+    service = CustomFieldService(db_connection=None)
+    child = _defn("c1", "city", "text")
+    obj = _defn("o1", "addr", "object", sub_fields=[child])
+    stored = [{"field_id": "c1", "instance_id": "i1", "value": "stored"}]
+    merged = service._merge_object_sub_fields(obj, stored, [], "addr")
+    assert merged[0]["value"] == "stored"
+
+
+def test_merge_list_items_without_schema_returns_patch():
+    """List fields without row schema return patch items verbatim."""
+    service = CustomFieldService(db_connection=None)
+    list_def = _defn("l1", "tags", "list", sub_fields=[])
+    out = service._merge_list_items(list_def, [], [{"value": "a"}], "tags")
+    assert out == [{"value": "a"}]
+
+
+def test_merge_list_items_rejects_non_object_row():
+    """List merge rejects non-object patch rows."""
+    service = CustomFieldService(db_connection=None)
+    row_def = _defn("r1", "row", "text")
+    list_def = _defn("l1", "rows", "list", sub_fields=[row_def])
+    with pytest.raises(ValidationException):
+        service._merge_list_items(list_def, [], ["bad"], "rows")
+
+
+def test_merge_child_cell_scalar_rejects_wrong_discriminator():
+    """Scalar child merge rejects non-value discriminators."""
+    service = CustomFieldService(db_connection=None)
+    _defn("t1", "name", "text")
+    with pytest.raises(ValidationException):
+        service._merge_child_cell_scalar(
+            None,
+            {"sub_fields": []},
+            "name",
+            "t1",
+            "i1",
+            "sub_fields",
+        )
+
+
+def test_merge_child_cell_list_rejects_wrong_discriminator():
+    """List child merge requires items discriminator."""
+    service = CustomFieldService(db_connection=None)
+    list_def = _defn("l1", "rows", "list")
+    with pytest.raises(ValidationException):
+        service._merge_child_cell_list(
+            list_def,
+            None,
+            {"value": "x"},
+            "rows",
+            "l1",
+            "i1",
+            "value",
+        )
+
+
+def test_merge_root_cell_object_rejects_scalar_discriminator():
+    """Root object merge rejects value/items discriminators."""
+    service = CustomFieldService(db_connection=None)
+    obj = _custom_field_response("o1", "addr", "object")
+    stored = {"field_id": "o1", "instance_id": "i1", "sub_fields": []}
+    with pytest.raises(ValidationException):
+        service._merge_root_cell_object(obj, stored, {"value": "x"}, {}, "value")
+
+
+def test_merge_root_cell_list_rejects_object_discriminator():
+    """Root list merge requires items discriminator."""
+    service = CustomFieldService(db_connection=None)
+    list_def = _custom_field_response("l1", "rows", "list")
+    stored = {"field_id": "l1", "instance_id": "i1", "items": []}
+    with pytest.raises(ValidationException):
+        service._merge_root_cell_list(list_def, stored, {"sub_fields": []}, {}, "sub_fields")
+
+
+def test_object_sub_field_present_cell_required_missing_raises():
+    """Required object child must be present in work map."""
+    service = CustomFieldService(db_connection=None)
+    sub = _defn("c1", "city", "text", is_required=True)
+    with pytest.raises(ValidationException):
+        service._object_sub_field_present_cell({}, "c1", sub)
+
+
+def test_object_sub_fields_work_map_invalid_sub_fields_type():
+    """Invalid sub_fields type reconciles to nulled optional object."""
+    service = CustomFieldService(db_connection=None)
+    obj = _defn("o1", "addr", "object", is_required=False)
+    result = service._object_sub_fields_work_map(
+        obj,
+        {"sub_fields": "bad"},
+        "addr",
+        effective_reconcile=True,
+    )
+    assert isinstance(result, dict)
+    assert result["sub_fields"] == []
+
+
+def test_validate_field_cell_object_part_wrong_discriminator():
+    """Object validate rejects scalar discriminator."""
+    service = CustomFieldService(db_connection=None)
+    obj = _defn("o1", "addr", "object", is_required=False)
+    result = service._validate_field_cell_object_part(
+        obj,
+        {"field_id": "o1", "instance_id": "i1", "value": "x"},
+        "addr",
+        True,
+        which="value",
+        instance_id="i1",
+        out_fid="o1",
+        type_snap="object",
+        for_reconcile=True,
+        explicit_instance_ids=None,
+    )
+    assert result["sub_fields"] == []
+
+
+def test_validate_field_cell_list_part_invalid_items_reconcile():
+    """Invalid items array reconciles optional list to empty items."""
+    service = CustomFieldService(db_connection=None)
+    list_def = _defn("l1", "rows", "list", is_required=False)
+    result = service._validate_field_cell_list_part(
+        list_def,
+        {"field_id": "l1", "instance_id": "i1", "items": "bad"},
+        "rows",
+        True,
+        which="items",
+        instance_id="i1",
+        out_fid="l1",
+        type_snap="list",
+        for_reconcile=True,
+        explicit_instance_ids=None,
+    )
+    assert result["items"] == []
+
+
+def test_typesense_facet_walk_skips_non_dict_cells():
+    """Typesense facet walk ignores malformed nested cells."""
+    child = _sub_field_response("t1", "label", "text", parent_id="o1")
+    obj_def = _custom_field_response("o1", "addr", "object", sub_fields=[child])
+    roots = [
+        {
+            "field_id": "o1",
+            "instance_id": "i1",
+            "type": "object",
+            "sub_fields": ["skip", {"field_id": "t1", "instance_id": "i2", "value": "x"}],
+        }
+    ]
+    id_to_def = {"o1": obj_def, "t1": child}
+    keys, vals = CustomFieldService.field_cells_typesense_facets(roots, id_to_def)
+    assert "label" in keys
+    assert "x" in vals
+
+
+@pytest.mark.asyncio
+async def test_validate_for_create_required_field_missing(monkeypatch):
+    """Create validation requires all mandatory root fields."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        _field_row("f1", "Name", "name", "text", is_required=True),
+    ]
+    _patch_repo(monkeypatch, fake_repo)
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException):
+        await service.validate_for_create([], EntityType.CONTACT)
+
+
+@pytest.mark.asyncio
+async def test_validate_for_create_explicit_null_required_raises(monkeypatch):
+    """Explicit null on required field is rejected on create."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        _field_row("f1", "Name", "name", "text", is_required=True),
+    ]
+    _patch_repo(monkeypatch, fake_repo)
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    with pytest.raises(ValidationException):
+        await service.validate_for_create(
+            [{"field_id": "f1", "value": None}],
+            EntityType.CONTACT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_merge_for_update_optional_explicit_null_skipped(monkeypatch):
+    """Optional root explicit null in patch omits field from merged output."""
+    fake_repo = _FakeCustomFieldRepo()
+    fake_repo.get_fields_result = [
+        _field_row("f1", "Nick", "nick", "text", is_required=False),
+    ]
+    _patch_repo(monkeypatch, fake_repo)
+    service = CustomFieldService(user_context=_ctx(), db_connection=None)
+    result = await service.merge_for_update(
+        [{"field_id": "f1", "value": None}],
+        [],
+        EntityType.CONTACT,
+    )
+    assert result == []
+
+
+def test_merge_for_update_append_stored_stale_optional_nulled():
+    """Append-only merge nulls optional stored cells with stale scalar values."""
+    service = CustomFieldService(db_connection=None)
+    dd = _custom_field_response(
+        "d1",
+        "status",
+        "dropdown",
+        is_required=False,
+        type_config={"options": ["open"]},
+    )
+    stored = _root_cell("d1", "closed", field_type="dropdown")
+    out: list[dict[str, Any]] = []
+    service._merge_for_update_append_stored_only(dd, stored, out)
+    assert out[0]["value"] is None
+
+
+def test_resolve_object_children_non_list_returns_empty():
+    """Read resolver returns empty sub_fields when storage is malformed."""
+    service = CustomFieldService(db_connection=None)
+    obj = _custom_field_response("o1", "addr", "object")
+    base = {"field_id": "o1", "instance_id": "i1", "type": "object", "field_key": "addr"}
+    out = service._resolve_node_read_object_children(obj, {"sub_fields": "bad"}, base)
+    assert out["sub_fields"] == []
+
+
+def test_validate_file_single_list_too_many_raises():
+    """Single-file image fields reject multi-item lists."""
+    service = CustomFieldService(db_connection=None)
+    img = _defn("i1", "photo", "image", type_config={"allow_multiple": False})
+    with pytest.raises(ValidationException):
+        service._validate_file_or_image_field("photo", [{"url": "a"}, {"url": "b"}], img)

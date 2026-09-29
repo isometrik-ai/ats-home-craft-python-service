@@ -485,3 +485,177 @@ async def test_delete_user_from_all_teams():
     query, args = _sql_args(conn.execute)
     assert "DELETE FROM team_members tm" in query
     assert args == ("u1", "org1")
+
+
+@pytest.mark.asyncio
+async def test_update_team_member_roles_noop_on_empty():
+    """Role batch update skips execute when member list empty."""
+    conn = _FakeConn()
+    repo = TeamRepository(db_connection=conn)
+    await repo._update_team_member_roles(team_id="t1", member_data=[])  # pylint: disable=protected-access
+    assert not conn.execute_calls
+
+
+@pytest.mark.asyncio
+async def test_touch_team_updated_at_not_found():
+    """Missing team during touch raises NotFoundException."""
+    conn = _FakeConn(row=None)
+    repo = TeamRepository(db_connection=conn)
+    with pytest.raises(NotFoundException):
+        await repo._touch_team_updated_at("t1", "org1")  # pylint: disable=protected-access
+
+
+@pytest.mark.asyncio
+async def test_update_team_description_only():
+    """update_team persists description field changes."""
+    conn = _async_mock_conn(row={"id": "t1"})
+    repo = TeamRepository(db_connection=conn)
+    await repo.update_team(
+        TeamDbUpdate(
+            team_id="t1",
+            organization_id="org1",
+            added_by="u1",
+            description="Updated description",
+        )
+    )
+    query, args = _sql_args(conn.fetchrow)
+    assert "description = $1" in query
+    assert args[0] == "Updated description"
+
+
+@pytest.mark.asyncio
+async def test_update_team_member_role_changes_execute():
+    """update_team applies members_to_update role batch."""
+    conn = _async_mock_conn(row={"id": "t1"})
+    repo = TeamRepository(db_connection=conn)
+    await repo.update_team(
+        TeamDbUpdate(
+            team_id="t1",
+            organization_id="org1",
+            added_by="u1",
+            members_to_update=[
+                MemberData(member_id="550e8400-e29b-41d4-a716-446655440000", role=TeamRoles.LEAD)
+            ],
+        )
+    )
+    assert conn.fetchrow.await_count >= 1
+    assert conn.execute.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_check_team_name_unique_with_project_scope():
+    """Uniqueness check scopes to project_id when provided."""
+    conn = _async_mock_conn(val=False)
+    repo = TeamRepository(db_connection=conn)
+    project_id = "550e8400-e29b-41d4-a716-446655440099"
+    assert await repo.check_team_name_unique("Legal", "org1", project_id=project_id) is True
+    query, args = _sql_args(conn.fetchval)
+    assert "project_id = $3::uuid" in query
+    assert args[2] == project_id
+
+
+@pytest.mark.asyncio
+async def test_update_team_members_additional_data_skips_blank_user():
+    """Additional data update ignores rows without user_id."""
+    conn = _async_mock_conn()
+    repo = TeamRepository(db_connection=conn)
+    await repo.update_team_members_additional_data(
+        team_id="t1",
+        organization_id="org1",
+        updates=[{"role": "lead"}],
+    )
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_team_members_additional_data_merges_fields():
+    """Additional data update merges jsonb and optional role."""
+    conn = _async_mock_conn()
+    repo = TeamRepository(db_connection=conn)
+    await repo.update_team_members_additional_data(
+        team_id="t1",
+        organization_id="org1",
+        updates=[
+            {
+                "user_id": "u1",
+                "role": "lead",
+                "allocation_percentage": 50,
+                "hourly_rate": 75,
+                "role_description": "Lead counsel",
+            }
+        ],
+    )
+    query, args = _sql_args(conn.execute)
+    assert "additional_data" in query
+    assert args[1] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_delete_team_and_members_not_found():
+    """Soft delete raises when team missing."""
+    conn = _async_mock_conn(row=None)
+    repo = TeamRepository(db_connection=conn)
+    with pytest.raises(NotFoundException):
+        await repo.delete_team_and_members(TeamDbDelete(team_id="t1", organization_id="org1"))
+
+
+@pytest.mark.asyncio
+async def test_validate_organization_members_mismatch():
+    """Partial membership match returns False."""
+    conn = _async_mock_conn(val=1)
+    repo = TeamRepository(db_connection=conn)
+    assert await repo.validate_organization_members(["u1", "u2"], "org1") is False
+
+
+@pytest.mark.asyncio
+async def test_delete_team_members_by_user_ids_executes():
+    """delete_team_members_by_user_ids issues scoped DELETE."""
+    conn = _async_mock_conn()
+    repo = TeamRepository(db_connection=conn)
+    await repo.delete_team_members_by_user_ids("t1", ["u1", "u2"])
+    query, args = _sql_args(conn.execute)
+    assert "DELETE FROM team_members" in query
+    assert args[0] == "t1"
+
+
+@pytest.mark.asyncio
+async def test_update_team_members_additional_data_noop_on_empty_updates():
+    """Empty updates list skips execute entirely."""
+    conn = _async_mock_conn()
+    repo = TeamRepository(db_connection=conn)
+    await repo.update_team_members_additional_data("t1", "org1", updates=[])
+    conn.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_team_members_additional_data_allocation_only():
+    """Partial additional_data updates merge allocation and role description."""
+    conn = _async_mock_conn()
+    repo = TeamRepository(db_connection=conn)
+    await repo.update_team_members_additional_data(
+        team_id="t1",
+        organization_id="org1",
+        updates=[
+            {
+                "user_id": "u1",
+                "allocation_percentage": 25,
+                "role_description": "Support",
+            }
+        ],
+    )
+    query, args = _sql_args(conn.execute)
+    assert "additional_data" in query
+    assert args[1] == "u1"
+
+
+@pytest.mark.asyncio
+async def test_update_team_members_additional_data_skips_empty_payload():
+    """Updates with only user_id do not execute SQL."""
+    conn = _async_mock_conn()
+    repo = TeamRepository(db_connection=conn)
+    await repo.update_team_members_additional_data(
+        team_id="t1",
+        organization_id="org1",
+        updates=[{"user_id": "u1"}],
+    )
+    conn.execute.assert_not_called()

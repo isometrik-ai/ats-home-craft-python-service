@@ -364,3 +364,117 @@ async def test_list_companies_dropdown_filters():
 
     count_query, _ = conn.fetchval_calls[0]
     assert "co.custom_fields" in count_query
+
+
+@pytest.mark.asyncio
+async def test_create_company_addresses_bulk_insert():
+    """Address bulk insert uses company_addresses table."""
+    conn = _FakeConn(rows=[{"id": "addr-1", "company_id": COMPANY_ID}])
+    repo = CompaniesRepository(db_connection=conn)
+
+    rows = await repo.create_company_addresses(
+        [{"company_id": COMPANY_ID, "address_line1": "Line 1", "is_primary": True}]
+    )
+
+    assert rows[0]["company_id"] == COMPANY_ID
+    assert "INSERT INTO company_addresses" in conn.fetch_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_get_company_details_not_found():
+    """Missing company returns None."""
+    conn = _FakeConn(row=None)
+    repo = CompaniesRepository(db_connection=conn)
+    assert await repo.get_company_details(company_id=COMPANY_ID, organization_id=ORG_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_get_company_details_parses_invalid_json_fields():
+    """Malformed JSON aggregates fall back to empty lists."""
+    conn = _FakeConn(
+        row={
+            "id": COMPANY_ID,
+            "name": "Acme",
+            "contacts": "[]",
+            "leads": "{not-json",
+            "addresses": "[]",
+        }
+    )
+    repo = CompaniesRepository(db_connection=conn)
+
+    details = await repo.get_company_details(company_id=COMPANY_ID, organization_id=ORG_ID)
+
+    assert details["leads"] == []
+
+
+@pytest.mark.asyncio
+async def test_update_company_address_with_data():
+    """Non-empty address patch issues update_returning."""
+    conn = _FakeConn(row={"id": "addr-1", "city": "NYC"})
+    repo = CompaniesRepository(db_connection=conn)
+
+    updated = await repo.update_company_address(
+        company_id=COMPANY_ID,
+        address_id="addr-1",
+        update_data={"city": "NYC"},
+    )
+
+    assert updated["city"] == "NYC"
+
+
+@pytest.mark.asyncio
+async def test_create_company_with_optional_contact_link_no_row():
+    """CTE returning no row yields empty linkage payload."""
+    conn = _FakeConn(row=None)
+    repo = CompaniesRepository(db_connection=conn)
+
+    result = await repo.create_company_with_optional_contact_link(
+        organization_id=ORG_ID,
+        company_data={"name": "Acme", "status": ClientStatus.ACTIVE.value},
+        addresses=[],
+        contact_id=None,
+        contact_data=None,
+        set_primary=False,
+    )
+
+    assert result["company_id"] is None
+    assert result["contact_found"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_company_for_update_not_found():
+    """Missing company for update returns None."""
+    conn = _FakeConn(row=None)
+    repo = CompaniesRepository(db_connection=conn)
+    assert await repo.get_company_for_update(company_id=COMPANY_ID, organization_id=ORG_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_list_company_project_ids_and_link_helpers():
+    """Project linkage helpers query and insert project_companies."""
+    project_id = "770e8400-e29b-41d4-a716-446655440002"
+    conn = _FakeConn(rows=[{"project_id": project_id}], val=1)
+    repo = CompaniesRepository(db_connection=conn)
+
+    project_ids = await repo.list_company_project_ids(
+        company_id=COMPANY_ID,
+        organization_id=ORG_ID,
+    )
+    assert project_ids == [project_id]
+
+    assert (
+        await repo.is_company_linked_to_project(
+            organization_id=ORG_ID,
+            company_id=COMPANY_ID,
+            project_id=project_id,
+        )
+        is True
+    )
+
+    await repo.link_company_to_project(
+        organization_id=ORG_ID,
+        project_id=project_id,
+        company_id=COMPANY_ID,
+        label="Vendor",
+    )
+    assert "INSERT INTO project_companies" in conn.execute_calls[0][0]

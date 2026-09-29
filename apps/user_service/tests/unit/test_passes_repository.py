@@ -362,3 +362,160 @@ async def test_get_visible_to_contact_uses_visibility_predicate():
     assert "p.id = $3::uuid" in query
     assert "COALESCE(p.is_private, false) = false" in query
     assert "FROM contact_units cu" in query
+
+
+@pytest.mark.asyncio
+async def test_display_status_predicate_unknown_returns_empty():
+    """Unknown display_status adds no SQL fragment."""
+    sql, args = PassesRepository._display_status_predicate("unknown", param_index=3)
+    assert sql == ""
+    assert args == []
+
+
+@pytest.mark.asyncio
+async def test_insert_daily_help_pass():
+    """Daily help insert uses NULL unit/host columns."""
+    conn = _FakeConn(row={"id": "pass-dh-1"})
+    repo = PassesRepository(db_connection=conn)
+    await repo.insert_daily_help(
+        {
+            "organization_id": "org-1",
+            "project_id": "project-1",
+            "daily_help_id": "dh-1",
+            "pass_type": "daily_help",
+            "guest_name": "Helper",
+            "valid_from": "2026-07-10T09:00:00Z",
+            "valid_until": "2026-12-31T21:00:00Z",
+            "validity_type": "recurring",
+            "code": "4821",
+            "created_by_user_id": "user-1",
+        }
+    )
+    query, _ = conn.fetchrow_calls[0]
+    assert "daily_help_id" in query
+    assert "NULL, NULL" in query.replace("\n", " ")
+
+
+@pytest.mark.asyncio
+async def test_update_daily_help_guest_snapshot_and_cancel_by_id():
+    """Daily help snapshot update and staff cancel paths."""
+    conn = _FakeConn(row={"id": "pass-1", "status": PassStatus.CANCELLED.value})
+    repo = PassesRepository(db_connection=conn)
+
+    updated = await repo.update_daily_help_guest_snapshot(
+        organization_id="org-1",
+        pass_id="pass-1",
+        guest_name="Renamed",
+        guest_phone_isd_code="+91",
+        guest_phone_number="9999999999",
+        pass_image_path=None,
+    )
+    assert updated["id"] == "pass-1"
+    assert "daily_help_id IS NOT NULL" in conn.fetchrow_calls[0][0]
+
+    cancelled = await repo.cancel_by_pass_id(organization_id="org-1", pass_id="pass-1")
+    assert cancelled["status"] == PassStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_update_active_pass_code():
+    """Active pass code rotation updates active rows only."""
+    conn = _FakeConn(row={"id": "pass-1"})
+    repo = PassesRepository(db_connection=conn)
+    row = await repo.update_active_pass_code(
+        organization_id="org-1",
+        pass_id="pass-1",
+        code="9999",
+    )
+    assert row["id"] == "pass-1"
+    assert "SET code = $3" in conn.fetchrow_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_list_visible_to_contact_bucket_and_filters():
+    """Visible list composes bucket, display, unit and pass_type filters."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+    await repo.list_visible_to_contact(
+        organization_id="org-1",
+        viewer_contact_id="contact-1",
+        bucket=PassListBucket.ACTIVE.value,
+        display_status=PassDisplayStatus.ACTIVE.value,
+        unit_id="unit-1",
+        pass_type="guest",
+        page=1,
+        page_size=10,
+    )
+    count_query, count_args = conn.fetchval_calls[0]
+    assert "p.valid_from <= now()" in count_query
+    assert "p.unit_id" in count_query
+    assert "p.pass_type" in count_query
+    assert "unit-1" in count_args
+
+
+@pytest.mark.asyncio
+async def test_list_by_unit_optional_filters():
+    """Unit admin list adds bucket, display and pass_type filters."""
+    conn = _FakeConn(rows=[], val=0)
+    repo = PassesRepository(db_connection=conn)
+    await repo.list_by_unit(
+        organization_id="org-1",
+        project_id="project-1",
+        unit_id="unit-1",
+        bucket=PassListBucket.EXPIRED.value,
+        display_status=PassDisplayStatus.USED.value,
+        pass_type="guest",
+        page=1,
+        page_size=10,
+    )
+    count_query, _ = conn.fetchval_calls[0]
+    assert "p.valid_until < now()" in count_query
+    assert "p.pass_type" in count_query
+
+
+@pytest.mark.asyncio
+async def test_update_empty_data_refetches_owned_pass():
+    """Empty update_data re-fetches owned pass without UPDATE."""
+    conn = _FakeConn(row={"id": "pass-1", "code": "4821"})
+    repo = PassesRepository(db_connection=conn)
+    row = await repo.update(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        pass_id="pass-1",
+        update_data={},
+    )
+    assert row["code"] == "4821"
+    assert len(conn.fetchrow_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_list_active_ids_and_active_for_unit():
+    """Active pass id helpers scope by host and unit."""
+    conn = _FakeConn(
+        rows=[
+            {"id": "pass-1", "host_contact_id": "contact-1"},
+            {"id": "pass-2", "host_contact_id": "contact-2"},
+        ]
+    )
+    repo = PassesRepository(db_connection=conn)
+    ids = await repo.list_active_ids_for_host(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+    )
+    assert ids == ["pass-1", "pass-2"]
+    active = await repo.list_active_for_unit(organization_id="org-1", unit_id="unit-1")
+    assert len(active) == 2
+
+
+@pytest.mark.asyncio
+async def test_update_returns_none_when_row_missing():
+    """Update returns None when pass row is not owned by host."""
+    conn = _FakeConn(row=None)
+    repo = PassesRepository(db_connection=conn)
+    result = await repo.update(
+        organization_id="org-1",
+        host_contact_id="contact-1",
+        pass_id="pass-1",
+        update_data={"guest_name": "Guest"},
+    )
+    assert result is None
