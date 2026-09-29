@@ -12,7 +12,8 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 from starlette.requests import Request
 
-from apps.user_service.app.schemas.enums import ClientStatus
+import apps.user_service.app.utils.common_utils as common_utils_module
+from apps.user_service.app.schemas.enums import ClientStatus, ProjectMemberRole
 from apps.user_service.app.utils.common_utils import (
     PerformanceTimer,
     UserContext,
@@ -952,8 +953,14 @@ async def test_ensure_security_project_member_access_requires_security_role():
     current_user = {"sub": "user-1", "email": "u@example.com"}
     staff_ctx = UserContext(user_id="user-1", email="u@example.com", organization_id="org-1")
     with (
-        patch(
-            "apps.user_service.app.utils.common_utils.ensure_staff_project_access",
+        patch.object(
+            common_utils_module,
+            "ensure_staff_project_access",
+            AsyncMock(return_value=staff_ctx),
+        ),
+        patch.object(
+            common_utils_module,
+            "extract_user_context",
             AsyncMock(return_value=staff_ctx),
         ),
         patch(
@@ -961,7 +968,7 @@ async def test_ensure_security_project_member_access_requires_security_role():
         ) as mock_projects_cls,
     ):
         mock_projects_cls.return_value.get_active_member_with_role = AsyncMock(
-            return_value={"role_slug": "community_admin"}
+            return_value={"role_slug": ProjectMemberRole.COMMUNITY_ADMIN.value}
         )
         with pytest.raises(ForbiddenException):
             await ensure_security_project_member_access(
@@ -1147,8 +1154,14 @@ async def test_ensure_security_project_member_access_success():
     current_user = {"sub": "user-1", "email": "u@example.com"}
     staff_ctx = UserContext(user_id="user-1", email="u@example.com", organization_id="org-1")
     with (
-        patch(
-            "apps.user_service.app.utils.common_utils.ensure_staff_project_access",
+        patch.object(
+            common_utils_module,
+            "ensure_staff_project_access",
+            AsyncMock(return_value=staff_ctx),
+        ),
+        patch.object(
+            common_utils_module,
+            "extract_user_context",
             AsyncMock(return_value=staff_ctx),
         ),
         patch(
@@ -1156,7 +1169,7 @@ async def test_ensure_security_project_member_access_success():
         ) as mock_projects_cls,
     ):
         mock_projects_cls.return_value.get_active_member_with_role = AsyncMock(
-            return_value={"role_slug": "security"}
+            return_value={"role_slug": ProjectMemberRole.SECURITY.value}
         )
         ctx = await ensure_security_project_member_access(
             current_user,
