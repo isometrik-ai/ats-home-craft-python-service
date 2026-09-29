@@ -294,7 +294,6 @@ ______________________________________________________________________
 | Visitor pass     | 2      | `NOTIFICATION_TYPE_PASS` / `pass`                                                       | `gate_passes.py`                                            |
 | Daily help       | 6      | `NOTIFICATION_TYPE_DAILY_HELP` / `daily_help` (review); `NOTIFICATION_TYPE_PASS` (gate) | `daily_help.py`, `gate_passes.py`                           |
 | Tenant request   | 4      | `NOTIFICATION_TYPE_TENANT` / `tenant`                                                   | `tenant_requests.py`, owner create API                      |
-| Fee invoice      | 2      | `NOTIFICATION_TYPE_FEE` / `fee`                                                         | `fee_invoices.py`, reminder job                             |
 | Move event       | 1      | `NOTIFICATION_TYPE_MOVE` / `move`                                                       | `move_events.py`                                            |
 | Vehicle          | 3      | `NOTIFICATION_TYPE_VEHICLE` / `vehicle`                                                 | contact onboarding / admin review APIs                      |
 | Community notice | 1      | `notice_published` / `notices`                                                          | `notices.py`, scheduled publish job                         |
@@ -302,15 +301,13 @@ ______________________________________________________________________
 
 ### 6.2 Dispatch helpers (`PushNotificationDispatcher`)
 
-| Method                         | Used for                                                                          | Preference check                       |
-| ------------------------------ | --------------------------------------------------------------------------------- | -------------------------------------- |
-| `send_to_unit_residents`       | Walk-in awaiting/entered; guest pass check-in/out                                 | Yes (`communication_preferences.push`) |
-| `send_to_user`                 | Walk-in approve/reject → security; notices                                        | Per call (security: **off**)           |
-| `send_to_contact`              | Tenant docs/approve; vehicle approve/reject; move event                           | Yes                                    |
-| `send_to_org_members`          | Tenant submitted; vehicle submitted/resubmitted; daily help submitted/resubmitted | **No** (staff/admin)                   |
-| `send_to_contact_unit_primary` | Fee invoice issued / payment reminder                                             | Yes                                    |
-
-`DailyHelpNotificationService` calls `send_to_user` directly for Owner/Tenant on linked household units.
+| Method                                                                                                   | Used for                                                                          | Preference check                       |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- | -------------------------------------- |
+| `send_to_unit_residents`                                                                                 | Walk-in awaiting/entered; guest pass check-in/out                                 | Yes (`communication_preferences.push`) |
+| `send_to_user`                                                                                           | Walk-in approve/reject → security; notices                                        | Per call (security: **off**)           |
+| `send_to_contact`                                                                                        | Tenant docs/approve; vehicle approve/reject; move event                           | Yes                                    |
+| `send_to_org_members`                                                                                    | Tenant submitted; vehicle submitted/resubmitted; daily help submitted/resubmitted | **No** (staff/admin)                   |
+| `DailyHelpNotificationService` calls `send_to_user` directly for Owner/Tenant on linked household units. |                                                                                   |                                        |
 
 ### 6.3 Walk-in (`WalkInService`)
 
@@ -384,18 +381,7 @@ When the pass row has `daily_help_id`, check-in/out uses daily-help recipients i
 
 **Click action:** `OPEN_TENANT_REQUEST`.
 
-### 6.7 Fee invoices (`FeeInvoiceService`)
-
-| Event            | Message key                               | Trigger                       | Recipient                            |
-| ---------------- | ----------------------------------------- | ----------------------------- | ------------------------------------ |
-| Invoice issued   | `notifications.push.fee.invoice_issued`   | Invoice generated for project | Primary contact on `contact_unit_id` |
-| Payment reminder | `notifications.push.fee.payment_reminder` | Overdue reminder batch        | Primary contact on `contact_unit_id` |
-
-**Params:** `{invoice_number}`, `{amount}`, `{due_date}` (issued); `{invoice_number}` (reminder).
-
-**Click action:** `OPEN_FEE`.
-
-### 6.8 Move events (`MoveEventsService`)
+### 6.7 Move events (`MoveEventsService`)
 
 | Event         | Message key                        | Trigger                      | Recipient                                     | API                 |
 | ------------- | ---------------------------------- | ---------------------------- | --------------------------------------------- | ------------------- |
@@ -441,7 +427,6 @@ walk_in.awaiting | approved | rejected | entered
 pass.checked_in | checked_out
 daily_help.submitted | resubmitted | approved | rejected | checked_in | checked_out
 tenant_request.submitted | document_verified | document_rejected | approved
-fee.invoice_issued | payment_reminder
 move.recorded
 vehicle.submitted | approved | rejected
 notices.published

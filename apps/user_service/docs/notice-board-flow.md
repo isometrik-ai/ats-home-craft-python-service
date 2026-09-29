@@ -845,7 +845,6 @@ ______________________________________________________________________
 | [ADR 0010 / contact-roles](./adr/0010-contact-roles.md)      | Owner/Tenant/Staff recipient resolution                          |
 | [push-notifications-flow.md](./push-notifications-flow.md)   | Phase 2 push on publish                                          |
 | [tenant-requests-flow.md](./tenant-requests-flow.md)         | Same admin project prefix pattern                                |
-| [fee-flow.md](./fee-flow.md)                                 | No direct coupling Phase 1                                       |
 
 ### Difference from CRM broadcasts (if added later)
 
