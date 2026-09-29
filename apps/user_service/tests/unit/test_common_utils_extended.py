@@ -960,6 +960,11 @@ async def test_ensure_security_project_member_access_requires_security_role():
         ),
         patch.object(
             common_utils_module,
+            "ensure_staff_project_access_for_context",
+            AsyncMock(return_value=staff_ctx),
+        ),
+        patch.object(
+            common_utils_module,
             "extract_user_context",
             AsyncMock(return_value=staff_ctx),
         ),
@@ -1157,6 +1162,11 @@ async def test_ensure_security_project_member_access_success():
         patch.object(
             common_utils_module,
             "ensure_staff_project_access",
+            AsyncMock(return_value=staff_ctx),
+        ),
+        patch.object(
+            common_utils_module,
+            "ensure_staff_project_access_for_context",
             AsyncMock(return_value=staff_ctx),
         ),
         patch.object(
