@@ -172,13 +172,13 @@ async def test_get_company_details_joins():
     assert "FROM companies co" in query
     assert "contact_companies cc" in query
     assert "company_addresses addr" in query
-    assert "co.status !=" not in query
-    assert args == (COMPANY_ID, ORG_ID)
+    assert "co.status !=" in query
+    assert args == (COMPANY_ID, ORG_ID, ClientStatus.DELETED.value)
 
 
 @pytest.mark.asyncio
 async def test_get_company_details_includes_deleted_status():
-    """Soft-deleted companies remain readable for detail views."""
+    """Soft-deleted companies remain readable when include_deleted is set."""
     conn = _FakeConn(
         row={
             "id": COMPANY_ID,
@@ -194,7 +194,12 @@ async def test_get_company_details_includes_deleted_status():
     details = await repo.get_company_details(
         company_id=COMPANY_ID,
         organization_id=ORG_ID,
+        include_deleted=True,
     )
+
+    query, args = conn.fetchrow_calls[0]
+    assert "co.status !=" not in query
+    assert args == (COMPANY_ID, ORG_ID)
 
     assert details is not None
     assert details["status"] == ClientStatus.DELETED.value

@@ -634,10 +634,21 @@ class CompaniesRepository(BaseRepository):
         *,
         company_id: str,
         organization_id: str,
+        include_deleted: bool = False,
     ) -> dict[str, Any] | None:
-        """Get a company + member contacts (same shape as list) + addresses in one round trip."""
+        """Get a company + member contacts (same shape as list) + addresses in one round trip.
+
+        By default soft-deleted companies are excluded (indexing and internal callers).
+        Pass ``include_deleted=True`` for user-facing detail views.
+        """
+        status_predicate = ""
+        query_args: list[Any] = [company_id, organization_id]
+        if not include_deleted:
+            status_predicate = "\n              AND co.status != $3"
+            query_args.append(ClientStatus.DELETED.value)
+
         fetched_row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT
               co.*,
               COALESCE(contacts.contacts, '[]'::jsonb) AS contacts,
@@ -708,10 +719,9 @@ class CompaniesRepository(BaseRepository):
               WHERE addr.company_id = co.id
             ) addresses ON TRUE
             WHERE co.id = $1::uuid
-              AND co.organization_id = $2::uuid
+              AND co.organization_id = $2::uuid{status_predicate}
             """,
-            company_id,
-            organization_id,
+            *query_args,
         )
         if not fetched_row:
             return None

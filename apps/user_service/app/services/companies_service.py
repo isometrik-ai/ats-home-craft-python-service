@@ -1214,6 +1214,7 @@ class CompaniesService:
         details = await self.companies_repo.get_company_details(
             company_id=company_id,
             organization_id=org_id,
+            include_deleted=True,
         )
         if not details:
             raise NotFoundException(

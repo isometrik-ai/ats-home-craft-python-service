@@ -72,9 +72,15 @@ class _FakeCompaniesRepo:
         self.last_list_kwargs = kwargs
         return self.companies, self.total
 
-    async def get_company_details(self, *, company_id: str, organization_id: str):
+    async def get_company_details(
+        self,
+        *,
+        company_id: str,
+        organization_id: str,
+        include_deleted: bool = False,
+    ):
         """Return company details row."""
-        del company_id, organization_id
+        del company_id, organization_id, include_deleted
         return self.details
 
     async def get_company_for_update(self, *, company_id: str, organization_id: str):
