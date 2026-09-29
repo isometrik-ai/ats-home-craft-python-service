@@ -1521,6 +1521,7 @@ async def test_create_contact_for_company_creation_failed(monkeypatch: pytest.Mo
 @pytest.mark.asyncio
 async def test_search_companies_with_embedding(monkeypatch: pytest.MonkeyPatch):
     """Search adds vector_query when embedding is available."""
+    _patch_custom_fields(monkeypatch)
     svc = _service()
     typesense = MagicMock()
     typesense.embed_query_text = AsyncMock(return_value=[0.1, 0.2])
@@ -1532,7 +1533,63 @@ async def test_search_companies_with_embedding(monkeypatch: pytest.MonkeyPatch):
     )
     result = await svc.search_companies(query="Acme", page=1, page_size=10, status=None)
     assert result["total"] == 0
-    assert "vector_query" in typesense.search.await_args.args[0]
+    assert typesense.search.await_count == 2
+    assert "vector_query" in typesense.search.await_args_list[0].args[0]
+    assert "vector_query" not in typesense.search.await_args_list[1].args[0]
+
+
+@pytest.mark.asyncio
+async def test_search_companies_short_query_skips_embedding():
+    """Short queries use keyword-only Typesense search (no hybrid vector)."""
+    svc = _service()
+    typesense = MagicMock()
+    typesense.embed_query_text = AsyncMock(return_value=[0.1, 0.2])
+    typesense.search = AsyncMock(
+        return_value={
+            "hits": [
+                {
+                    "document": {
+                        "id": COMPANY_ID,
+                        "organization_id": ORG_ID,
+                        "status": ClientStatus.ACTIVE.value,
+                        "name": "ATS Vendor",
+                        "created_at": 1735689600,
+                        "updated_at": 1735776000,
+                    }
+                }
+            ],
+            "found": 1,
+        }
+    )
+    svc._typesense = typesense
+
+    result = await svc.search_companies(query="ATS", page=1, page_size=10, status="active")
+
+    assert result["total"] == 1
+    typesense.embed_query_text.assert_not_awaited()
+    params = typesense.search.await_args.args[0]
+    assert "vector_query" not in params
+
+
+@pytest.mark.asyncio
+async def test_search_companies_falls_back_to_db_list(monkeypatch: pytest.MonkeyPatch):
+    """When Typesense has no hits, search uses the DB list path (ILIKE)."""
+    _patch_custom_fields(monkeypatch)
+    row = _company_row(name="ATS Plumbing")
+    repo = _FakeCompaniesRepo(companies=[row], total=1)
+    svc = _service(companies_repo=repo)
+    typesense = MagicMock()
+    typesense.embed_query_text = AsyncMock(return_value=None)
+    typesense.search = AsyncMock(return_value={"hits": [], "found": 0})
+    svc._typesense = typesense
+
+    result = await svc.search_companies(query="ATS", page=1, page_size=10, status="active")
+
+    assert result["total"] == 1
+    assert result["items"][0]["name"] == "ATS Plumbing"
+    assert repo.last_list_kwargs is not None
+    assert repo.last_list_kwargs["search"] == "ATS"
+    assert repo.last_list_kwargs["status"] == "active"
 
 
 def test_schedule_company_enrichment_task(monkeypatch: pytest.MonkeyPatch):

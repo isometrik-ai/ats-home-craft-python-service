@@ -1880,6 +1880,25 @@ class CompaniesService:
             )
         return rows
 
+    @staticmethod
+    def _min_query_length_for_company_vector_search() -> int:
+        """Minimum query length before hybrid vector search is used."""
+        return int(COMPANY_SEARCH_PARAMS.get("min_len_1typo", 4))
+
+    async def _typesense_search_companies_with_keyword_retry(
+        self,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run Typesense search; retry keyword-only when hybrid search returns no hits."""
+        search_response = await self.typesense.search(params)
+        if (search_response.get("found") or 0) > 0:
+            return search_response
+        if "vector_query" not in params:
+            return search_response
+        keyword_params = dict(params)
+        keyword_params.pop("vector_query", None)
+        return await self.typesense.search(keyword_params)
+
     async def search_companies(
         self,
         *,
@@ -1889,7 +1908,11 @@ class CompaniesService:
         status: str | None,
         project_id: str | None = None,
     ) -> dict[str, Any]:
-        """Search companies via Typesense (companies collection)."""
+        """Search companies via Typesense (companies collection).
+
+        Falls back to PostgreSQL list semantics when Typesense returns no matches so
+        vendor/company search stays aligned with ``POST /companies/list`` (ILIKE).
+        """
         org_id = self.user_context.organization_id
         filters = [f"organization_id:={org_id}"]
         if status:
@@ -1916,7 +1939,12 @@ class CompaniesService:
             params.update(COMPANY_SEARCH_PARAMS)
 
         embedding = None
-        if not is_email_query and not is_phone_query:
+        use_vector_search = (
+            not is_email_query
+            and not is_phone_query
+            and len(query_text) >= self._min_query_length_for_company_vector_search()
+        )
+        if use_vector_search:
             embedding = await self.typesense.embed_query_text(query_text)
         if embedding is not None:
             vector = ",".join(map(str, embedding))
@@ -1932,7 +1960,18 @@ class CompaniesService:
             else:
                 params["vector_query"] = f"embedding:([{vector}], alpha:0.7)"
 
-        search_response = await self.typesense.search(params)
+        search_response = await self._typesense_search_companies_with_keyword_retry(params)
+        total = search_response.get("found", 0) or 0
+        if total == 0:
+            return await self.list_companies(
+                search=query_text,
+                status=status,
+                dropdown_filters=[],
+                project_id=project_id,
+                page=page,
+                page_size=page_size,
+            )
+
         hits = search_response.get("hits") or []
         rows = self.typesense_hits_to_company_summary_rows(hits)
-        return {"items": rows, "total": search_response.get("found", 0)}
+        return {"items": rows, "total": total}
