@@ -24,6 +24,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingSlotEventType,
     ParkingUserType,
     ParkingVehicleCategory,
+    VehicleType,
 )
 from apps.user_service.app.schemas.parking_allotment import (
     AllotParkingSlotRequest,
@@ -206,11 +207,36 @@ class ParkingAllotmentService:
 
     @staticmethod
     def _slot_vehicle_category(slot_row: dict[str, Any]) -> str:
-        """Map a slot row to two_wheeler or four_wheeler entitlement bucket."""
-        category = slot_row.get("parking_vehicle_category")
-        if isinstance(category, str) and category.lower() == "two_wheeler":
-            return "two_wheeler"
-        return "four_wheeler"
+        """Map a slot row to a parking vehicle category value."""
+        return ParkingAllotmentService._normalize_parking_vehicle_category(
+            slot_row.get("parking_vehicle_category"),
+        )
+
+    @staticmethod
+    def _normalize_parking_vehicle_category(raw: Any) -> str:
+        """Normalize facility parking_vehicle_category to a lowercase enum value."""
+        if isinstance(raw, ParkingVehicleCategory):
+            return raw.value
+        normalized = str(raw or ParkingVehicleCategory.FOUR_WHEELER.value).strip().lower()
+        for category in ParkingVehicleCategory:
+            if category.value == normalized:
+                return category.value
+        return ParkingVehicleCategory.FOUR_WHEELER.value
+
+    @staticmethod
+    def _resolve_entitlement_bucket(
+        *,
+        slot_row: dict[str, Any],
+        vehicle_type: str | None = None,
+    ) -> str:
+        """Pick the unit entitlement bucket to consume for this slot allotment."""
+        slot_category = ParkingAllotmentService._slot_vehicle_category(slot_row)
+        if slot_category == ParkingVehicleCategory.BOTH.value and vehicle_type in {
+            VehicleType.TWO_WHEELER.value,
+            VehicleType.FOUR_WHEELER.value,
+        }:
+            return vehicle_type
+        return slot_category
 
     @staticmethod
     def _resolve_parking_vehicle_category(row: dict[str, Any]) -> ParkingVehicleCategory:
@@ -268,6 +294,7 @@ class ParkingAllotmentService:
         unit_id: str,
         allotment_basis: ParkingAllotmentBasis,
         slot_row: dict[str, Any] | None = None,
+        vehicle_type: str | None = None,
     ) -> dict[str, Any]:
         """Validate unit eligibility and entitlement for allotment."""
         # pylint: disable=too-complex
@@ -309,8 +336,20 @@ class ParkingAllotmentService:
                 )
             return unit
 
-        vehicle_category = self._slot_vehicle_category(slot_row)
-        if vehicle_category == "two_wheeler":
+        vehicle_category = self._resolve_entitlement_bucket(
+            slot_row=slot_row,
+            vehicle_type=vehicle_type,
+        )
+        if vehicle_category == ParkingVehicleCategory.BOTH.value:
+            has_two_room = two_entitlement > 0 and two_assigned < two_entitlement
+            has_four_room = four_entitlement > 0 and four_assigned < four_entitlement
+            if not (has_two_room or has_four_room):
+                raise ValidationException(
+                    message_key="parking_allotment.errors.entitlement_full",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            return unit
+        if vehicle_category == ParkingVehicleCategory.TWO_WHEELER.value:
             if two_entitlement <= 0:
                 raise ValidationException(
                     message_key="parking_allotment.errors.no_two_wheeler_entitlement",
@@ -674,6 +713,7 @@ class ParkingAllotmentService:
         allotment_basis: ParkingAllotmentBasis,
         event_type: ParkingSlotEventType = ParkingSlotEventType.ALLOTTED,
         payload: dict[str, Any] | None = None,
+        vehicle_type: str | None = None,
     ) -> ParkingAllotmentSlotDetailResponse:
         """Create allotment records and return updated slot detail."""
         slot_row = await self._validate_slot_for_allotment(
@@ -685,6 +725,7 @@ class ParkingAllotmentService:
             unit_id=unit_id,
             allotment_basis=allotment_basis,
             slot_row=slot_row,
+            vehicle_type=vehicle_type,
         )
 
         user_id = self.user_context.user_id
@@ -730,6 +771,7 @@ class ParkingAllotmentService:
         project_id: str,
         unit_id: str,
         slot_id: str,
+        vehicle_type: str,
     ) -> None:
         """Allot a free resident slot to a unit while approving a vehicle request."""
         await self._ensure_project(project_id=project_id)
@@ -739,7 +781,8 @@ class ParkingAllotmentService:
             unit_id=unit_id,
             effective_from=date.today(),
             allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
-            payload={"source": "vehicle_review"},
+            payload={"source": "vehicle_review", "vehicle_type": vehicle_type},
+            vehicle_type=vehicle_type,
         )
 
     async def allot_slot(

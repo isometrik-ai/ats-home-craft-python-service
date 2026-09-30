@@ -848,6 +848,7 @@ async def test_create_vehicle_admin_auto_allots_slot(mock_allotment_cls):
         project_id="p1",
         unit_id="u1",
         slot_id="slot-1",
+        vehicle_type=VehicleType.FOUR_WHEELER.value,
     )
     create_kwargs = svc.repo.create.await_args.kwargs
     assert create_kwargs["parking_slot_id"] == "slot-1"
@@ -1468,6 +1469,7 @@ async def test_review_vehicle_auto_allots_slot_when_not_allotted(mock_allotment_
         project_id="p1",
         unit_id="u1",
         slot_id="slot-1",
+        vehicle_type="four_wheeler",
     )
 
 
@@ -2154,6 +2156,21 @@ def test_validate_vehicle_slot_category_mismatch():
             vehicle_type=VehicleType.FOUR_WHEELER.value,
             slot_row={"parking_vehicle_category": "two_wheeler"},
         )
+
+
+def test_validate_vehicle_slot_category_accepts_both():
+    """Parking slots marked both accept two- and four-wheeler vehicles."""
+    from apps.user_service.app.schemas.enums import VehicleType
+
+    both_slot = {"parking_vehicle_category": "both"}
+    VehiclesService._validate_vehicle_slot_category_match(
+        vehicle_type=VehicleType.TWO_WHEELER.value,
+        slot_row=both_slot,
+    )
+    VehiclesService._validate_vehicle_slot_category_match(
+        vehicle_type=VehicleType.FOUR_WHEELER.value,
+        slot_row=both_slot,
+    )
 
 
 @pytest.mark.asyncio

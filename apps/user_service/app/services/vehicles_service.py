@@ -30,6 +30,7 @@ from apps.user_service.app.schemas.contact_onboarding import (
 )
 from apps.user_service.app.schemas.enums import (
     VEHICLE_REQUESTS_EXPORT_MAX_ROWS,
+    ParkingVehicleCategory,
     VehicleFuelType,
     VehicleStatus,
     VehicleType,
@@ -496,19 +497,40 @@ class VehiclesService:
             )
 
     @staticmethod
+    def _normalize_parking_vehicle_category(raw: Any) -> str:
+        """Normalize facility parking_vehicle_category to a lowercase enum value."""
+        if isinstance(raw, ParkingVehicleCategory):
+            return raw.value
+        normalized = str(raw or ParkingVehicleCategory.FOUR_WHEELER.value).strip().lower()
+        for category in ParkingVehicleCategory:
+            if category.value == normalized:
+                return category.value
+        return ParkingVehicleCategory.FOUR_WHEELER.value
+
+    @staticmethod
     def _validate_vehicle_slot_category_match(
         *,
         vehicle_type: str,
         slot_row: dict[str, Any],
     ) -> None:
         """Ensure the parking slot category matches the vehicle type."""
-        slot_category = str(slot_row.get("parking_vehicle_category") or "four_wheeler").lower()
-        if vehicle_type == VehicleType.TWO_WHEELER.value and slot_category != "two_wheeler":
+        slot_category = VehiclesService._normalize_parking_vehicle_category(
+            slot_row.get("parking_vehicle_category"),
+        )
+        if slot_category == ParkingVehicleCategory.BOTH.value:
+            return
+        if (
+            vehicle_type == VehicleType.TWO_WHEELER.value
+            and slot_category != ParkingVehicleCategory.TWO_WHEELER.value
+        ):
             raise ValidationException(
                 message_key="contact_onboarding.errors.vehicle_slot_category_mismatch",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        if vehicle_type == VehicleType.FOUR_WHEELER.value and slot_category == "two_wheeler":
+        if (
+            vehicle_type == VehicleType.FOUR_WHEELER.value
+            and slot_category == ParkingVehicleCategory.TWO_WHEELER.value
+        ):
             raise ValidationException(
                 message_key="contact_onboarding.errors.vehicle_slot_category_mismatch",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -581,6 +603,7 @@ class VehiclesService:
                 project_id=project_id,
                 unit_id=unit_id,
                 slot_id=parking_slot_id,
+                vehicle_type=vehicle_type,
             )
         except NotFoundException:
             raise ValidationException(
