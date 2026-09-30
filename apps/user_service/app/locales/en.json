@@ -1206,6 +1206,8 @@
       "invalid_day": "Choose a day from the 1st to the 28th.",
       "invalid_due_days": "Due within must be between 0 and 365 days.",
       "invalid_fee_start": "This fee start is not available.",
+      "fee_start_date_required": "Choose the date this fee starts.",
+      "fee_start_date_not_allowed": "A start date applies only when the fee starts on a specific date.",
       "invalid_tax_rate": "Enter a tax rate between 0 and 100.",
       "late_fee_steps": "Add between one and four late fee steps, each with a different number of days.",
       "invalid_interest_rate": "Enter an interest rate greater than 0 and at most 100.",

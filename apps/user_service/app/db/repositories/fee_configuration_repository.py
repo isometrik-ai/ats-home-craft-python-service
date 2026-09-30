@@ -24,6 +24,7 @@ _HEAD_SELECT = """
         billing_cycle::text AS billing_cycle,
         cycle_anchor_month,
         fee_start_rule::text AS fee_start_rule,
+        fee_start_date,
         due_within_days,
         invoice_day,
         meter_read_day,
@@ -134,6 +135,7 @@ class FeeConfigurationRepository(BaseRepository):
                 billing_cycle,
                 cycle_anchor_month,
                 fee_start_rule,
+                fee_start_date,
                 due_within_days,
                 invoice_day,
                 meter_read_day,
@@ -154,13 +156,14 @@ class FeeConfigurationRepository(BaseRepository):
                 $9::fee_billing_cycle,
                 $10,
                 $11::fee_start_rule,
-                $12,
+                $12::date,
                 $13,
                 $14,
-                $15::jsonb,
+                $15,
                 $16::jsonb,
                 $17::jsonb,
-                $18::uuid
+                $18::jsonb,
+                $19::uuid
             )
             RETURNING id
             """,
@@ -175,6 +178,7 @@ class FeeConfigurationRepository(BaseRepository):
             head["billing_cycle"],
             head["cycle_anchor_month"],
             head["fee_start_rule"],
+            head["fee_start_date"],
             head["due_within_days"],
             head["invoice_day"],
             head["meter_read_day"],
@@ -251,6 +255,7 @@ class FeeConfigurationRepository(BaseRepository):
             "frequency": "::fee_frequency",
             "billing_cycle": "::fee_billing_cycle",
             "fee_start_rule": "::fee_start_rule",
+            "fee_start_date": "::date",
         }
         for key, value in update_data.items():
             params.append(serialize_jsonb_param(key, value, _JSONB_COLUMNS))

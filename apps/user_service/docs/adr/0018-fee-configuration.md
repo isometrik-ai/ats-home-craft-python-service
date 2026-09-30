@@ -109,13 +109,13 @@ On `fee_heads`:
 | `frequency`          | `monthly`, `quarterly`, `half_yearly`, `annual`. Electricity check forces `monthly`                        |
 | `billing_cycle`      | Null when monthly. Otherwise `calendar_year`, `financial_year`, `custom`, `pro_rata`                       |
 | `cycle_anchor_month` | Server writes 1 for calendar, 4 for financial. Client sends 1–12 for custom. Null for monthly and pro-rata |
-| `fee_start_rule`     | `first_of_next_month` only, in this phase                                                                  |
+| `fee_start_rule`     | `first_of_next_month`, `unit_possession_date`, or `specific_date`                                          |
+| `fee_start_date`     | Required for `specific_date` (`YYYY-MM-DD`). Null for the other two rules                                  |
 | `due_within_days`    | 0–365. Due date is the invoice date plus this many days. Late fees start the following day                 |
 | `invoice_day`        | 1–28                                                                                                       |
 | `meter_read_day`     | 1–28 for electricity, otherwise null                                                                       |
 
-`fee_start_rule` is the "Fee starts from" control. With only one legal value it still matches
-the prototype dropdown. It is not an effective-date for the rate. A saved rate is what the
+`fee_start_rule` is the "Fee starts from" control: 1st of next month, the unit possession date, or a specific date. `fee_start_date` is that specific date. It is not an effective-date for the rate. A saved rate is what the
 next billing run reads. Issued invoices keep the snapshot they were generated with.
 
 Pro-rata may be stored. Generation of a pro-rata head waits until each unit has a possession
@@ -240,7 +240,9 @@ CREATE TYPE public.fee_billing_cycle AS ENUM (
 );
 
 CREATE TYPE public.fee_start_rule AS ENUM (
-  'first_of_next_month'
+  'first_of_next_month',
+  'unit_possession_date',
+  'specific_date'
 );
 ```
 

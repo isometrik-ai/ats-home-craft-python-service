@@ -571,6 +571,7 @@ The body must not include `kind` or `category`. Electricity must send `frequency
   "frequency": "monthly",
   "line_description": "Housekeeping, security, lifts, landscaping and common-area power.",
   "fee_start_rule": "first_of_next_month",
+  "fee_start_date": null,
   "due_within_days": 10,
   "invoice_day": 1,
   "billing_cycle": null,
@@ -623,28 +624,29 @@ ______________________________________________________________________
 
 ## 11. Validation
 
-| Field                                 | Rule                                                                                                      | Error key                                         |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `version`                             | Must match the row. Else **409**                                                                          | `fee_configuration.errors.version_conflict`       |
-| `name`                                | Required after trim, 1–80                                                                                 | `fee_configuration.errors.name_required`          |
-| `scopes`                              | Exactly the three property types, at least one `enabled`                                                  | `fee_configuration.errors.no_property_type`       |
-| Maintenance rates                     | On every scope, `rate_per_sqft` and `minimum_amount` present, ≥ 0, two decimal places, even when disabled | `fee_configuration.errors.invalid_rate`           |
-| Electricity `frequency`               | `monthly` only                                                                                            | `fee_configuration.errors.frequency_locked`       |
-| Electricity `charge`                  | All four amounts ≥ 0                                                                                      | `fee_configuration.errors.invalid_rate`           |
-| Club `amount`                         | ≥ 0                                                                                                       | `fee_configuration.errors.invalid_rate`           |
-| `frequency`                           | Enum. Non-monthly requires `billing_cycle`                                                                | `fee_configuration.errors.billing_cycle_required` |
-| `billing_cycle = custom`              | `cycle_anchor_month` 1–12                                                                                 | `fee_configuration.errors.anchor_month_required`  |
-| `billing_cycle` calendar or financial | Client anchor ignored; server writes 1 or 4                                                               | —                                                 |
-| Monthly                               | `billing_cycle` and `cycle_anchor_month` stored null                                                      | —                                                 |
-| `invoice_day`, `meter_read_day`       | Integer 1–28                                                                                              | `fee_configuration.errors.invalid_day`            |
-| `due_within_days`                     | Integer 0–365. 0 means due on the invoice date                                                            | `fee_configuration.errors.invalid_due_days`       |
-| `fee_start_rule`                      | `first_of_next_month` only, in this phase                                                                 | `fee_configuration.errors.invalid_fee_start`      |
-| Tax on                                | `rate_percent` present, 0–100, up to 2 decimals                                                           | `fee_configuration.errors.invalid_tax_rate`       |
-| Flat late fee                         | 1–4 steps, `days_overdue` ≥ 1, unique, amount ≥ 0                                                         | `fee_configuration.errors.late_fee_steps`         |
-| Interest                              | `annual_percent` > 0 and ≤ 100. Zero is not a substitute for mode `none`                                  | `fee_configuration.errors.invalid_interest_rate`  |
-| Settings counts                       | Integers 0–12                                                                                             | `fee_configuration.errors.invalid_dunning`        |
-| Settings intervals                    | Integers 1–30 when the matching count is > 0                                                              | `fee_configuration.errors.invalid_dunning`        |
-| `line_description`                    | Optional, trimmed, ≤ 240. Empty string stores null                                                        | —                                                 |
+| Field                                 | Rule                                                                                                      | Error key                                          |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `version`                             | Must match the row. Else **409**                                                                          | `fee_configuration.errors.version_conflict`        |
+| `name`                                | Required after trim, 1–80                                                                                 | `fee_configuration.errors.name_required`           |
+| `scopes`                              | Exactly the three property types, at least one `enabled`                                                  | `fee_configuration.errors.no_property_type`        |
+| Maintenance rates                     | On every scope, `rate_per_sqft` and `minimum_amount` present, ≥ 0, two decimal places, even when disabled | `fee_configuration.errors.invalid_rate`            |
+| Electricity `frequency`               | `monthly` only                                                                                            | `fee_configuration.errors.frequency_locked`        |
+| Electricity `charge`                  | All four amounts ≥ 0                                                                                      | `fee_configuration.errors.invalid_rate`            |
+| Club `amount`                         | ≥ 0                                                                                                       | `fee_configuration.errors.invalid_rate`            |
+| `frequency`                           | Enum. Non-monthly requires `billing_cycle`                                                                | `fee_configuration.errors.billing_cycle_required`  |
+| `billing_cycle = custom`              | `cycle_anchor_month` 1–12                                                                                 | `fee_configuration.errors.anchor_month_required`   |
+| `billing_cycle` calendar or financial | Client anchor ignored; server writes 1 or 4                                                               | —                                                  |
+| Monthly                               | `billing_cycle` and `cycle_anchor_month` stored null                                                      | —                                                  |
+| `invoice_day`, `meter_read_day`       | Integer 1–28                                                                                              | `fee_configuration.errors.invalid_day`             |
+| `due_within_days`                     | Integer 0–365. 0 means due on the invoice date                                                            | `fee_configuration.errors.invalid_due_days`        |
+| `fee_start_rule`                      | `first_of_next_month`, `unit_possession_date`, or `specific_date`                                         | `fee_configuration.errors.invalid_fee_start`       |
+| `fee_start_date`                      | Required as `YYYY-MM-DD` when the rule is `specific_date`. Omitted for the other two rules                | `fee_configuration.errors.fee_start_date_required` |
+| Tax on                                | `rate_percent` present, 0–100, up to 2 decimals                                                           | `fee_configuration.errors.invalid_tax_rate`        |
+| Flat late fee                         | 1–4 steps, `days_overdue` ≥ 1, unique, amount ≥ 0                                                         | `fee_configuration.errors.late_fee_steps`          |
+| Interest                              | `annual_percent` > 0 and ≤ 100. Zero is not a substitute for mode `none`                                  | `fee_configuration.errors.invalid_interest_rate`   |
+| Settings counts                       | Integers 0–12                                                                                             | `fee_configuration.errors.invalid_dunning`         |
+| Settings intervals                    | Integers 1–30 when the matching count is > 0                                                              | `fee_configuration.errors.invalid_dunning`         |
+| `line_description`                    | Optional, trimmed, ≤ 240. Empty string stores null                                                        | —                                                  |
 
 User-facing 409 copy: "Someone else changed this fee head. Reload and try again." Settings uses
 the same key with "settings" in the sentence.
