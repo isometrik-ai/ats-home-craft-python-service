@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock
 
@@ -328,6 +329,48 @@ async def test_electricity_frequency_is_locked_to_monthly():
     with pytest.raises(ValidationException) as exc:
         await service.update_fee_head(project_id=PROJECT_ID, fee_head_id=FEE_HEAD_ID, body=body)
     assert exc.value.message_key == "fee_configuration.errors.frequency_locked"
+
+
+def test_specific_fee_start_stores_the_date():
+    """A specific start date is kept only for that rule."""
+    service = _service()
+    prepared = service._prepare_update(
+        kind="maintenance",
+        body=_maintenance_body(
+            fee_start_rule=FeeStartRule.SPECIFIC_DATE,
+            fee_start_date=date(2026, 10, 1),
+        ),
+        current=_head(),
+    )
+    assert prepared["head"]["fee_start_rule"] == "specific_date"
+    assert prepared["head"]["fee_start_date"] == date(2026, 10, 1)
+
+
+def test_specific_fee_start_requires_a_date():
+    """A specific start date cannot be omitted."""
+    service = _service()
+    with pytest.raises(ValidationException) as exc:
+        service._prepare_update(
+            kind="maintenance",
+            body=_maintenance_body(fee_start_rule=FeeStartRule.SPECIFIC_DATE),
+            current=_head(),
+        )
+    assert exc.value.message_key == "fee_configuration.errors.fee_start_date_required"
+
+
+def test_possession_fee_start_rejects_a_date():
+    """Unit possession date does not take a fee-head date."""
+    service = _service()
+    with pytest.raises(ValidationException) as exc:
+        service._prepare_update(
+            kind="maintenance",
+            body=_maintenance_body(
+                fee_start_rule=FeeStartRule.UNIT_POSSESSION_DATE,
+                fee_start_date=date(2026, 10, 1),
+            ),
+            current=_head(),
+        )
+    assert exc.value.message_key == "fee_configuration.errors.fee_start_date_not_allowed"
 
 
 @pytest.mark.asyncio

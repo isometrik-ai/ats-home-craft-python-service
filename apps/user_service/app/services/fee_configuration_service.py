@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -15,6 +16,7 @@ from apps.user_service.app.schemas.enums.fee_configuration import (
     FeeFrequency,
     FeeHeadKind,
     FeeHeadStatus,
+    FeeStartRule,
 )
 from apps.user_service.app.schemas.fee_configuration import (
     CreateFeeHeadRequest,
@@ -283,8 +285,7 @@ class FeeConfigurationService:
             raise _validation("fee_configuration.errors.invalid_due_days")
         if body.invoice_day < 1 or body.invoice_day > 28:
             raise _validation("fee_configuration.errors.invalid_day")
-        if body.fee_start_rule.value != "first_of_next_month":
-            raise _validation("fee_configuration.errors.invalid_fee_start")
+        fee_start_date = self._fee_start_date(body)
 
         frequency = body.frequency.value
         if kind == FeeHeadKind.ELECTRICITY.value and frequency != FeeFrequency.MONTHLY.value:
@@ -306,6 +307,7 @@ class FeeConfigurationService:
                 "billing_cycle": billing_cycle,
                 "cycle_anchor_month": anchor,
                 "fee_start_rule": body.fee_start_rule.value,
+                "fee_start_date": fee_start_date,
                 "due_within_days": body.due_within_days,
                 "invoice_day": body.invoice_day,
                 "meter_read_day": meter_read_day,
@@ -315,6 +317,16 @@ class FeeConfigurationService:
             },
             "scopes": scopes,
         }
+
+    def _fee_start_date(self, body: FeeHeadWriteRequest) -> date | None:
+        """Return the specific start date, and only when that rule is selected."""
+        if body.fee_start_rule == FeeStartRule.SPECIFIC_DATE:
+            if body.fee_start_date is None:
+                raise _validation("fee_configuration.errors.fee_start_date_required")
+            return body.fee_start_date
+        if body.fee_start_date is not None:
+            raise _validation("fee_configuration.errors.fee_start_date_not_allowed")
+        return None
 
     def _schedule(
         self, *, frequency: str, body: FeeHeadWriteRequest
@@ -344,7 +356,7 @@ class FeeConfigurationService:
         """Return the kind-specific charge object stored on the fee head."""
         if kind == FeeHeadKind.MAINTENANCE.value:
             return {}
-        raw = body.charge or {}
+        raw = body.charge.model_dump(exclude_none=True) if body.charge is not None else {}
         if kind == FeeHeadKind.CLUB.value:
             if "amount" not in raw:
                 raise _validation("fee_configuration.errors.invalid_rate")
@@ -516,6 +528,7 @@ class FeeConfigurationService:
             {
                 "line_description": head.get("line_description"),
                 "fee_start_rule": head["fee_start_rule"],
+                "fee_start_date": _public_date(head.get("fee_start_date")),
                 "due_within_days": int(head["due_within_days"]),
                 "invoice_day": int(head["invoice_day"]),
                 "billing_cycle": head.get("billing_cycle"),
@@ -575,6 +588,15 @@ def _public_scope(kind: str, scope: dict[str, Any]) -> dict[str, Any]:
         payload["rate_per_sqft"] = money_str(scope["rate_per_sqft"])
         payload["minimum_amount"] = money_str(scope["minimum_amount"])
     return payload
+
+
+def _public_date(value: Any) -> str | None:
+    """Return a date as YYYY-MM-DD."""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
 
 
 def _public_tax(tax: dict[str, Any]) -> dict[str, Any]:

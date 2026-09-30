@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -56,6 +56,19 @@ class FeeHeadScopeInput(BaseModel):
     minimum_amount: Decimal | None = None
 
 
+class FeeHeadChargeInput(BaseModel):
+    """Charge amounts. Electricity sends the four rates.
+    Club sends amount. Maintenance omits this."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    grid_fixed_amount: Decimal | None = None
+    grid_unit_rate: Decimal | None = None
+    dg_fixed_amount: Decimal | None = None
+    dg_unit_rate: Decimal | None = None
+    amount: Decimal | None = None
+
+
 class FeeHeadWriteRequest(BaseModel):
     """Editable fee-head document. Category is derived from kind and is rejected."""
 
@@ -66,6 +79,13 @@ class FeeHeadWriteRequest(BaseModel):
     frequency: FeeFrequency
     line_description: str | None = None
     fee_start_rule: FeeStartRule
+    fee_start_date: date | None = Field(
+        default=None,
+        description=(
+            "Required when fee_start_rule is specific_date, as YYYY-MM-DD. "
+            "Omit for first_of_next_month and unit_possession_date."
+        ),
+    )
     due_within_days: int
     invoice_day: int
     billing_cycle: FeeBillingCycle | None = None
@@ -74,7 +94,13 @@ class FeeHeadWriteRequest(BaseModel):
     late_fee: LateFeeInput
     scopes: list[FeeHeadScopeInput]
     meter_read_day: int | None = None
-    charge: dict[str, Any] | None = None
+    charge: FeeHeadChargeInput | None = Field(
+        default=None,
+        description=(
+            "Electricity requires grid_fixed_amount, grid_unit_rate, "
+            "dg_fixed_amount, and dg_unit_rate. Club requires amount. Omit for maintenance."
+        ),
+    )
 
 
 class CreateFeeHeadRequest(FeeHeadWriteRequest):
@@ -182,6 +208,7 @@ class FeeHeadDetail(FeeHeadListItem):
 
     line_description: str | None = None
     fee_start_rule: FeeStartRule
+    fee_start_date: date | None = None
     due_within_days: int
     invoice_day: int
     billing_cycle: FeeBillingCycle | None = None
