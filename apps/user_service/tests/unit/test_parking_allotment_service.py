@@ -12,6 +12,7 @@ from apps.user_service.app.schemas.enums import (
     ParkingFacilitySubtype,
     ParkingSlotDisplayStatus,
     ParkingVehicleCategory,
+    VehicleType,
 )
 from apps.user_service.app.schemas.parking_allotment import AllotParkingSlotRequest
 from apps.user_service.app.services.parking_allotment_service import (
@@ -300,6 +301,66 @@ async def test_get_unit_not_found():
 
 
 @pytest.mark.asyncio
+async def test_validate_unit_allows_both_slot_for_two_wheeler_when_four_full():
+    """Both-category slots use the vehicle type bucket during vehicle review."""
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.repo = MagicMock()
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "code": "A-1804",
+            "is_parking": False,
+            "two_wheeler_parking_entitlement": 1,
+            "four_wheeler_parking_entitlement": 1,
+            "included_slots_assigned": 1,
+            "included_two_wheeler_slots_assigned": 0,
+            "included_four_wheeler_slots_assigned": 1,
+            "slots_assigned": 1,
+        }
+    )
+
+    unit = await svc._validate_unit_for_allotment(
+        project_id="project-1",
+        unit_id="unit-1",
+        allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+        slot_row=_slot_row(parking_vehicle_category="both"),
+        vehicle_type=VehicleType.TWO_WHEELER.value,
+    )
+
+    assert unit["id"] == "unit-1"
+
+
+@pytest.mark.asyncio
+async def test_validate_unit_rejects_both_slot_when_only_four_bucket_full_for_four_wheeler():
+    svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
+    svc.repo = MagicMock()
+    svc.repo.get_unit_allotment_context = AsyncMock(
+        return_value={
+            "id": "unit-1",
+            "code": "A-1804",
+            "is_parking": False,
+            "two_wheeler_parking_entitlement": 0,
+            "four_wheeler_parking_entitlement": 1,
+            "included_slots_assigned": 1,
+            "included_two_wheeler_slots_assigned": 0,
+            "included_four_wheeler_slots_assigned": 1,
+            "slots_assigned": 1,
+        }
+    )
+
+    from libs.shared_utils.http_exceptions import ValidationException
+
+    with pytest.raises(ValidationException):
+        await svc._validate_unit_for_allotment(
+            project_id="project-1",
+            unit_id="unit-1",
+            allotment_basis=ParkingAllotmentBasis.INCLUDED_WITH_UNIT,
+            slot_row=_slot_row(parking_vehicle_category="both"),
+            vehicle_type=VehicleType.FOUR_WHEELER.value,
+        )
+
+
+@pytest.mark.asyncio
 async def test_validate_unit_rejects_four_wheeler_entitlement_full():
     svc = ParkingAllotmentService(db_connection=MagicMock(), user_context=_user_context())
     svc.repo = MagicMock()
@@ -415,6 +476,17 @@ def test_slot_allowed_actions_and_vehicle_category():
     assert (
         ParkingAllotmentService._slot_vehicle_category({"parking_vehicle_category": "two_wheeler"})
         == "two_wheeler"
+    )
+    assert (
+        ParkingAllotmentService._slot_vehicle_category({"parking_vehicle_category": "both"})
+        == "both"
+    )
+    assert (
+        ParkingAllotmentService._resolve_entitlement_bucket(
+            slot_row={"parking_vehicle_category": "both"},
+            vehicle_type=VehicleType.TWO_WHEELER.value,
+        )
+        == VehicleType.TWO_WHEELER.value
     )
     assert (
         ParkingAllotmentService._resolve_parking_vehicle_category(
@@ -698,6 +770,7 @@ async def test_allot_slot_assign_conflict_and_vehicle_review():
         project_id="project-1",
         unit_id="unit-1",
         slot_id="slot-1",
+        vehicle_type=VehicleType.FOUR_WHEELER.value,
     )
     svc._create_allotment.assert_awaited_once()
 
