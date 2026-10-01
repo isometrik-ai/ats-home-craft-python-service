@@ -639,8 +639,8 @@ ______________________________________________________________________
 | Monthly                               | `billing_cycle` and `cycle_anchor_month` stored null                                                      | —                                                  |
 | `invoice_day`, `meter_read_day`       | Integer 1–28                                                                                              | `fee_configuration.errors.invalid_day`             |
 | `due_within_days`                     | Integer 0–365. 0 means due on the invoice date                                                            | `fee_configuration.errors.invalid_due_days`        |
-| `fee_start_rule`                      | `first_of_next_month`, `unit_possession_date`, or `specific_date`                                         | `fee_configuration.errors.invalid_fee_start`       |
-| `fee_start_date`                      | Required as `YYYY-MM-DD` when the rule is `specific_date`. Omitted for the other two rules                | `fee_configuration.errors.fee_start_date_required` |
+| `fee_start_rule`                      | `first_of_next_month` or `specific_date`                                                                  | `fee_configuration.errors.invalid_fee_start`       |
+| `fee_start_date`                      | Required as `YYYY-MM-DD` when the rule is `specific_date`. Omitted for `first_of_next_month`              | `fee_configuration.errors.fee_start_date_required` |
 | Tax on                                | `rate_percent` present, 0–100, up to 2 decimals                                                           | `fee_configuration.errors.invalid_tax_rate`        |
 | Flat late fee                         | 1–4 steps, `days_overdue` ≥ 1, unique, amount ≥ 0                                                         | `fee_configuration.errors.late_fee_steps`          |
 | Interest                              | `annual_percent` > 0 and ≤ 100. Zero is not a substitute for mode `none`                                  | `fee_configuration.errors.invalid_interest_rate`   |

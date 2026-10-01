@@ -83,7 +83,7 @@ class FeeHeadWriteRequest(BaseModel):
         default=None,
         description=(
             "Required when fee_start_rule is specific_date, as YYYY-MM-DD. "
-            "Omit for first_of_next_month and unit_possession_date."
+            "Omit for first_of_next_month."
         ),
     )
     due_within_days: int

@@ -48,7 +48,6 @@ class FeeStartRule(str, Enum):
     """When the fee starts being raised."""
 
     FIRST_OF_NEXT_MONTH = "first_of_next_month"
-    UNIT_POSSESSION_DATE = "unit_possession_date"
     SPECIFIC_DATE = "specific_date"
 
 
