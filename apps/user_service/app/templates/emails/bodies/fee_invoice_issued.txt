@@ -1,0 +1,11 @@
+Hello {{.first_name}},
+
+A new fee invoice has been issued for {{.unit_code}} at {{.project_name}}.
+
+Invoice : {{.invoice_number}}
+Amount  : {{.total_amount}}
+Due     : {{.due_date}}
+
+The invoice PDF is attached.
+
+{{.app_name}}

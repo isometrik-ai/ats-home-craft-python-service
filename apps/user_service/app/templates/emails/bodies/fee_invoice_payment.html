@@ -1,0 +1,15 @@
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Hello {{.first_name}},
+</p>
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  We have received a payment for <strong>{{.unit_code}}</strong>
+  at <strong>{{.project_name}}</strong>.
+</p>
+<p style="margin:0;font-size:15px;line-height:1.7;color:#374151;">
+  Invoice: {{.invoice_number}}<br />
+  Received: {{.received_amount}}<br />
+  Received on: {{.received_on}}<br />
+  Mode: {{.mode}}<br />
+  Reference: {{.reference}}<br />
+  Outstanding: {{.outstanding}}
+</p>

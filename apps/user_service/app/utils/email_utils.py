@@ -24,7 +24,12 @@ logger = get_logger(__name__)
 
 
 def send_email(
-    email: str, subject: str, message: str, html: str = None, from_name: str = None
+    email: str,
+    subject: str,
+    message: str,
+    html: str = None,
+    from_name: str = None,
+    attachments: list[dict[str, str]] | None = None,
 ) -> bool:
     """Send an email using Supabase Edge Function with Resend.
 
@@ -34,6 +39,7 @@ def send_email(
         message (str): Email message content (plain text)
         html (str, optional): HTML version of the email
         from_name (str, optional): Sender name to display in the email
+        attachments (list, optional): Files to attach, each with filename and content
 
     Returns:
         bool: True if email was sent successfully, False otherwise
@@ -46,6 +52,8 @@ def send_email(
 
         if from_name:
             payload["from_name"] = from_name
+        if attachments:
+            payload["attachments"] = attachments
         response = httpx.post(
             f"{SUPABASE_URL}/functions/v1/custom-email",
             headers={
@@ -1539,6 +1547,7 @@ def send_templated_email(
     layout_context: dict[str, str] | None = None,
     from_name: str | None = None,
     email_type: str | None = None,
+    attachments: list[dict[str, str]] | None = None,
 ) -> bool:
     """Send a multipart email rendered from file templates under templates/emails/.
 
@@ -1550,6 +1559,7 @@ def send_templated_email(
         layout_context: Optional layout placeholder overrides.
         from_name: Sender display name; defaults to app_name.
         email_type: Human-readable label for logs (defaults to template name).
+        attachments: Files to attach, each with filename and base64 content.
 
     Returns:
         bool: True when the email was sent successfully, False otherwise.
@@ -1563,12 +1573,16 @@ def send_templated_email(
             body_context=body_context,
             layout_context=layout_context,
         )
+        email_kwargs: dict[str, list[dict[str, str]]] = {}
+        if attachments:
+            email_kwargs["attachments"] = attachments
         email_sent = send_email(
             email,
             subject,
             plain_text,
             html_message,
             from_name=sender_name,
+            **email_kwargs,
         )
         if email_sent:
             logger.info("%s email sent successfully to %s", label, email)

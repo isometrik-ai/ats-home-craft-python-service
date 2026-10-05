@@ -86,7 +86,7 @@ ______________________________________________________________________
 | **Electricity has no billing-cycle section**  | Hidden in the UI and rejected by the server                                                                                   |
 | **Cycle section only for non-monthly fees**   | Hidden while frequency is `monthly`                                                                                           |
 | **Tax is one object**                         | `{ applicable, rate_percent }` on the whole fee. Off hides the rate field and does not tax the fee                            |
-| **Tax splits 50/50**                          | The billing run splits the tax into two equal parts                                                                           |
+| **Tax is one amount**                         | The billing run stores the tax for a line as one `tax_amount`                                                                 |
 | **Late fee is one of three modes**            | `none`, `flat` (1–4 steps), `interest`                                                                                        |
 | **Flat steps sort and refuse duplicate days** | Server sorts by `days_overdue` ascending                                                                                      |
 | **No grace period**                           | Late fees start the day after the due date                                                                                    |
@@ -698,24 +698,32 @@ ______________________________________________________________________
 
 ## 13. What the billing run will rely on
 
-Not built with this screen. Recorded so Invoices and Collections do not reinterpret the rules.
+The configuration screen does not generate invoices. Dkron calls the daily run in §13.1, which issues maintenance and club. Later electricity, late fees, and collections still rely on this table.
 
-| Promise         | Meaning                                                                                                                  |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Snapshot        | Generation copies the fee head `version` and the rate values onto the invoice line                                       |
-| Inactive        | Excluded from the run and named in the preview                                                                           |
-| Unit            | Every line is for the unit. Owner and occupant do not split the bill                                                     |
-| Merge           | Same unit and same `invoice_day` → one invoice                                                                           |
-| Split           | Different invoice days → separate invoices for that unit                                                                 |
-| Immutability    | A later config edit does not change an issued invoice                                                                    |
-| Arrears         | Electricity in month M bills the reading from month M−1                                                                  |
-| Area            | §6.6. Missing area skips that unit for maintenance and names it                                                          |
-| Tax             | One rate on the whole fee, split into two equal parts, when `applicable`                                                 |
-| Late fee        | Posted on the **next** invoice. Flat = the step reached. Interest = simple, per started month, on the outstanding amount |
-| Rounding        | Half up to the nearest rupee. Difference is a round-off line                                                             |
-| Pro-rata        | Refused at generation until a unit possession month exists                                                               |
-| Dunning         | Collections reads `finance_settings` for retry and reminder spacing                                                      |
-| Club vs booking | A facility with price mode `included` is not charged again per booking                                                   |
+| Promise         | Meaning                                                                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Snapshot        | Generation copies the fee head `version` and the rate values onto the invoice line                                                         |
+| Inactive        | Excluded from the run and named in the preview                                                                                             |
+| Unit            | Every line is for the unit. Owner and occupant do not split the bill. A unit is billed only when it has an owner, tenant, or family member |
+| Merge           | Same unit and same `invoice_day` → one invoice                                                                                             |
+| Split           | Different invoice days → separate invoices for that unit                                                                                   |
+| Immutability    | A later config edit does not change an issued invoice                                                                                      |
+| Arrears         | Electricity in month M bills the reading from month M−1                                                                                    |
+| Area            | §6.6. Missing area skips that unit for maintenance and names it                                                                            |
+| Tax             | One rate on the whole fee, stored as one `tax_amount` on the line, when `applicable`                                                       |
+| Late fee        | Posted on the **next** invoice. Flat = the step reached. Interest = simple, per started month, on the outstanding amount                   |
+| Rounding        | Half up to the nearest rupee. Difference is a round-off line                                                                               |
+| Pro-rata        | Refused at generation until a unit possession month exists                                                                                 |
+| Dunning         | The daily run emails pre-due reminders from `finance_settings`. Payment retries stay a setting for collections                             |
+| Club vs booking | A facility with price mode `included` is not charged again per booking                                                                     |
+
+### 13.1 Daily run
+
+Dkron is only the clock. Schedule `5 0 * * *` in UTC. It calls `POST /v1/internal/fee-billing/issue-due` with no auth. The route returns as soon as the run is queued. Billing, the PDF, and the mails happen after that response. The service bills every active maintenance or club head whose `invoice_day` is that day and whose month matches the cycle. `first_of_next_month` bills once the head is active. `specific_date` bills on or after `fee_start_date`. A unit is included when it has a current owner, tenant, or family member (pending or active, contact still active). Parking, a guest-only unit, and a unit with nobody linked are left out. Lines for the same unit and the same `invoice_day` in that month become one invoice. Its number is the unit code and that date, such as `INV-LUX-B2101-20261001`. A later invoice day for the same unit is a different number, such as `INV-LUX-B2101-20261005`. When the invoice is new, its PDF is stored in the media bucket at `fee-invoices/{invoice id}.pdf` and emailed to the owner, tenant, and family members on the unit who have an email address. A mail or storage failure does not remove the invoice. A second call the same day finds that invoice and does not insert another or send the mail again. The same run sends the project's pre-due reminders. Two reminders, three days apart, for an invoice due on 15 October, go out on 9 October and 12 October. Each reminder attaches the stored PDF. A paid invoice is left out, and the same day does not send that reminder again.
+
+Skipped, and named on the run: electricity (`electricity_not_ready`), `pro_rata` (`pro_rata_not_ready`), and a maintenance unit with no area (`missing_area`). No Dkron server config is added in this repo.
+
+A payment is recorded on the invoice that was issued. That invoice keeps its total. The next run adds a late-fee line for whatever was still unpaid after the due date. The unit balance is arrears (older invoices still open) plus that late-fee line plus the current period's charges. `GET /v1/projects/{project_id}/units/{unit_id}/fee-balance` returns the split. `GET /v1/projects/{project_id}/fee-invoices` lists invoices for the project. `GET /v1/units/{unit_id}/fee-invoices` lists invoices for one unit. The caller must have an active link to that unit. `GET /v1/units/{unit_id}/fee-invoices/{invoice_id}` returns that invoice's lines, tax, round-off, and payments. `GET /v1/units/{unit_id}/fee-outstanding` returns the pending-payments total: amount still to pay, whether any unpaid bill is overdue, the unpaid count, those billing months, and whether a late fee is included. Optional filters are `unit_id`, `status` (`issued`, `partial`, `paid`, or `overdue`), and repeated `months` (any day in a month selects that billing month). `POST /v1/projects/{project_id}/fee-invoices/{invoice_id}/payments` records one payment on that invoice and emails the owner, tenant, and family an acknowledgment with the amount received, the mode, and the amount still outstanding. A receipt larger than the outstanding is stored up to that invoice, and the extra is unit credit. Credit is applied to later open invoices, oldest first, on the date the money was received, so those invoices are paid before a late fee is added. What is still unapplied reduces `amount_due`. `mode` is `cash`, `cheque`, `neft_rtgs`, `card`, `upi`, or `other`. `reference` is the cheque number, UTR, or a note, and may be omitted.
 
 ______________________________________________________________________
 

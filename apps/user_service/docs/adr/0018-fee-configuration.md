@@ -128,8 +128,7 @@ month. This ADR does not add that column to `units`.
 ```
 
 Applicable false means the billing run adds no tax. The last rate may remain stored so the
-editor can show it again when the admin turns tax back on. The tax amount is split into two equal
-parts at invoice time, not stored as two rates.
+editor can show it again when the admin turns tax back on. The tax on a line is one amount.
 
 ```json
 { "mode": "none" }
