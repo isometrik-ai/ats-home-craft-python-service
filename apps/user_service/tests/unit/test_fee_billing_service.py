@@ -1111,6 +1111,7 @@ async def test_invoice_detail_returns_lines_and_breakdown():
         "tax_amount": Decimal("960.00"),
         "round_off_amount": Decimal("2.00"),
         "total_amount": Decimal("8962.00"),
+        "pdf_path": "fee-invoices/inv-oct.pdf",
         "lines": [
             {
                 "id": "line-1",
@@ -1157,6 +1158,7 @@ async def test_invoice_detail_returns_lines_and_breakdown():
     assert detail["lines"][0]["line_total"] == "4602.00"
     assert detail["payments"][0]["mode"] == "upi"
     assert detail["payments"][0]["reference"] == "UTR123"
+    assert detail["pdf_path"] == "fee-invoices/inv-oct.pdf"
 
     with pytest.raises(NotFoundException):
         await service.invoice_detail(

@@ -490,7 +490,8 @@ class FeeBillingRepository(BaseRepository):
                 i.taxable_amount,
                 i.tax_amount,
                 i.round_off_amount,
-                i.total_amount
+                i.total_amount,
+                i.pdf_path
             FROM fee_invoices i
             JOIN units u ON u.id = i.unit_id
             WHERE i.id = $1::uuid

@@ -151,6 +151,7 @@ class FeeInvoiceDetail(BaseModel):
     total_amount: str
     amount_paid: str
     outstanding: str
+    pdf_path: str | None = None
     lines: list[FeeInvoiceLineDetail]
     payments: list[FeeInvoicePaymentDetail]
 

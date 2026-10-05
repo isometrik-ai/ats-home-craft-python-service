@@ -358,6 +358,7 @@ def _invoice_detail(row: dict[str, Any], as_of: date) -> dict[str, Any]:
         "total_amount": money_str(total),
         "amount_paid": money_str(paid),
         "outstanding": money_str(money(total - paid)),
+        "pdf_path": row.get("pdf_path"),
         "lines": [_invoice_line_detail(line) for line in row.get("lines") or []],
         "payments": [
             {
