@@ -153,6 +153,48 @@ async def list_fee_invoices(
     )
 
 
+@handle_api_exceptions("get fee invoice")
+@router.get(
+    "/fee-invoices/{invoice_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Get one fee invoice",
+    response_model=None,
+    responses={
+        **_ERRORS,
+        200: {
+            "model": FeeInvoiceDetailApiResponse,
+            "description": "Invoice lines, tax, round-off, payments, and pdf path.",
+        },
+    },
+)
+@limiter.limit("100/minute")
+async def get_fee_invoice(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    invoice_id: str = Path(..., description="Invoice identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return one project invoice, its lines, its payments, and its pdf path."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=FINANCE_MANAGEMENT_VIEW,
+        request=request,
+    )
+    detail = await FeeBillingService(db_connection).invoice_detail(
+        organization_id=str(user_context.organization_id),
+        project_id=project_id,
+        invoice_id=invoice_id,
+    )
+    return success_response(
+        request=request,
+        message_key="fee_billing.success.invoice_retrieved",
+        data=detail,
+    )
+
+
 @handle_api_exceptions("list resident fee invoices")
 @unit_router.get(
     "/fee-invoices",

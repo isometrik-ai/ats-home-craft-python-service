@@ -442,7 +442,8 @@ class FeeBillingRepository(BaseRepository):
                     ELSE i.status
                 END AS status,
                 i.total_amount,
-                COALESCE(paid.amount_paid, 0) AS amount_paid
+                COALESCE(paid.amount_paid, 0) AS amount_paid,
+                i.pdf_path
             FROM fee_invoices i
             JOIN units u ON u.id = i.unit_id
             LEFT JOIN (
