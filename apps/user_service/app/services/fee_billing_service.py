@@ -309,6 +309,7 @@ def _invoice_summary(row: dict[str, Any], as_of: date) -> dict[str, Any]:
         "total_amount": money_str(total),
         "amount_paid": money_str(paid),
         "outstanding": money_str(money(total - paid)),
+        "pdf_path": row.get("pdf_path"),
     }
 
 
@@ -871,11 +872,20 @@ class FeeBillingService:
         *,
         organization_id: str,
         project_id: str,
-        unit_id: str,
         invoice_id: str,
+        unit_id: str | None = None,
         as_of: date | None = None,
     ) -> dict[str, Any]:
         """One invoice with lines and payments, or not found."""
+        if unit_id is None:
+            header = await self.repo.get_invoice(
+                organization_id=organization_id,
+                project_id=project_id,
+                invoice_id=invoice_id,
+            )
+            if header is None:
+                raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
+            unit_id = str(header["unit_id"])
         row = await self.repo.get_invoice(
             organization_id=organization_id,
             project_id=project_id,

@@ -180,6 +180,7 @@ class FeeInvoiceListItem(BaseModel):
     total_amount: str
     amount_paid: str
     outstanding: str
+    pdf_path: str | None = None
 
 
 class FeeInvoiceListApiResponse(BaseModel):
