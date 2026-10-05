@@ -1,0 +1,9 @@
+Hello {{.first_name}},
+
+This is a reminder that fee invoice {{.invoice_number}} for {{.unit_code}} at {{.project_name}} is due on {{.due_date}}.
+
+Amount: {{.total_amount}}
+
+The invoice PDF is attached.
+
+{{.app_name}}

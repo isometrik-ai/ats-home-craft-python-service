@@ -1,0 +1,14 @@
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Hello {{.first_name}},
+</p>
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  This is a reminder that fee invoice <strong>{{.invoice_number}}</strong>
+  for <strong>{{.unit_code}}</strong> at <strong>{{.project_name}}</strong>
+  is due on <strong>{{.due_date}}</strong>.
+</p>
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Amount: {{.total_amount}}
+</p>
+<p style="margin:0;font-size:15px;line-height:1.7;color:#374151;">
+  The invoice PDF is attached.
+</p>

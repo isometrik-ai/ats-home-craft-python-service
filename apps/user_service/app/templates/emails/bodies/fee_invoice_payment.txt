@@ -1,0 +1,12 @@
+Hello {{.first_name}},
+
+We have received a payment for {{.unit_code}} at {{.project_name}}.
+
+Invoice      : {{.invoice_number}}
+Received     : {{.received_amount}}
+Received on  : {{.received_on}}
+Mode         : {{.mode}}
+Reference    : {{.reference}}
+Outstanding  : {{.outstanding}}
+
+{{.app_name}}

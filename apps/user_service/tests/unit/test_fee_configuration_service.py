@@ -358,16 +358,13 @@ def test_specific_fee_start_requires_a_date():
     assert exc.value.message_key == "fee_configuration.errors.fee_start_date_required"
 
 
-def test_possession_fee_start_rejects_a_date():
-    """Unit possession date does not take a fee-head date."""
+def test_first_of_next_month_rejects_a_date():
+    """1st of next month does not take a fee-head date."""
     service = _service()
     with pytest.raises(ValidationException) as exc:
         service._prepare_update(
             kind="maintenance",
-            body=_maintenance_body(
-                fee_start_rule=FeeStartRule.UNIT_POSSESSION_DATE,
-                fee_start_date=date(2026, 10, 1),
-            ),
+            body=_maintenance_body(fee_start_date=date(2026, 10, 1)),
             current=_head(),
         )
     assert exc.value.message_key == "fee_configuration.errors.fee_start_date_not_allowed"

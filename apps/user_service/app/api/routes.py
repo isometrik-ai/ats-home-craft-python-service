@@ -39,8 +39,15 @@ from apps.user_service.app.api.facility_booking_admin import (
 from apps.user_service.app.api.facility_booking_resident import (
     router as facility_booking_resident_router,
 )
+from apps.user_service.app.api.fee_billing_internal import (
+    router as fee_billing_internal_router,
+)
 from apps.user_service.app.api.fee_configuration import (
     router as fee_configuration_router,
+)
+from apps.user_service.app.api.fee_invoices import router as fee_invoices_router
+from apps.user_service.app.api.fee_invoices import (
+    unit_router as fee_invoice_unit_router,
 )
 from apps.user_service.app.api.gate_passes import router as gate_passes_router
 from apps.user_service.app.api.invites import router as invites_router
@@ -119,6 +126,9 @@ router.include_router(community_events_internal_router)
 router.include_router(facility_booking_admin_router)
 router.include_router(facility_booking_resident_router)
 router.include_router(fee_configuration_router)
+router.include_router(fee_billing_internal_router)
+router.include_router(fee_invoices_router)
+router.include_router(fee_invoice_unit_router)
 router.include_router(gate_passes_router)
 router.include_router(passes_router)
 router.include_router(visitor_activities_resident_router)
