@@ -12,7 +12,9 @@ import asyncpg
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
-from apps.user_service.app.db.repositories.marketplace_repository import MarketplaceRepository
+from apps.user_service.app.db.repositories.marketplace_repository import (
+    MarketplaceRepository,
+)
 from apps.user_service.app.schemas.marketplace import (
     AddListingMediaRequest,
     CreateListingRequest,
@@ -21,7 +23,9 @@ from apps.user_service.app.schemas.marketplace import (
     PublishListingRequest,
     UpdateListingRequest,
 )
-from apps.user_service.app.services.marketplace_catalog_service import MarketplaceCatalogService
+from apps.user_service.app.services.marketplace_catalog_service import (
+    MarketplaceCatalogService,
+)
 from apps.user_service.app.services.marketplace_geo import (
     MARKETPLACE_NEARBY_RADIUS_KM,
     haversine_km,
@@ -224,9 +228,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     async def pickup_units(self, *, contact_id: str, unit_id: str) -> list[dict[str, Any]]:
         """Flats the caller may pick up from. unit_id confirms the caller is a resident."""
         await self._require_unit(contact_id=contact_id, unit_id=unit_id)
-        rows = await self.repo.list_pickup_units(
-            organization_id=self._org(), contact_id=contact_id
-        )
+        rows = await self.repo.list_pickup_units(organization_id=self._org(), contact_id=contact_id)
         return [
             {
                 "unit_id": row["unit_id"],
@@ -251,9 +253,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             category=category,
             subtype=subtype,
         )
-        listing = await self.repo.get_listing(
-            organization_id=self._org(), listing_id=created["id"]
-        )
+        listing = await self.repo.get_listing(organization_id=self._org(), listing_id=created["id"])
         assert listing
         return await self._detail(
             listing, viewer_contact_id=contact_id, viewer_project_id=unit["project_id"]
@@ -737,9 +737,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         ]
         return {"items": items, "total": total, "nearby_project_count": len(nearby)}
 
-    async def my_listings(
-        self, *, contact_id: str, unit_id: str, status: str
-    ) -> dict[str, Any]:
+    async def my_listings(self, *, contact_id: str, unit_id: str, status: str) -> dict[str, Any]:
         """The seller's own posts."""
         await self._require_unit(contact_id=contact_id, unit_id=unit_id)
         await self.repo.expire_due(organization_id=self._org())
@@ -754,8 +752,12 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 organization_id=self._org(), listing_id=row["id"]
             )
             items.append(self._mine_card(row, media_count))
-        live_rows = rows if status in {"all", "live"} else await self.repo.list_mine(
-            organization_id=self._org(), seller_contact_id=contact_id, status="live"
+        live_rows = (
+            rows
+            if status in {"all", "live"}
+            else await self.repo.list_mine(
+                organization_id=self._org(), seller_contact_id=contact_id, status="live"
+            )
         )
         live_count = sum(1 for row in live_rows if row["status"] == "live")
         earned = await self.repo.earned_amount(
@@ -842,9 +844,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         )
         return {"id": report_id, "listing_id": report["listing_id"], "status": "upheld"}
 
-    async def dismiss_report(
-        self, *, report_id: str, reviewer_user_id: str
-    ) -> dict[str, Any]:
+    async def dismiss_report(self, *, report_id: str, reviewer_user_id: str) -> dict[str, Any]:
         """Leave the listing live."""
         report = await self.get_report(report_id=report_id)
         if report["status"] != "open":

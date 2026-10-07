@@ -1,13 +1,13 @@
 # ADR 0019: Buy & sell — resident classifieds inside a society
 
-|                  |                                                                                                                                                                                                 |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                                                                        |
-| **Date**         | 2026-10-06                                                                                                                                                                                      |
-| **Authors**      | Home Craft platform team                                                                                                                                                                        |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0010](./0010-contact-roles.md), [project setup](../project-setup-flow.md) |
-| **Related docs** | [buy-and-sell-flow.md](../buy-and-sell-flow.md), [project-setup-flow.md](../project-setup-flow.md), [pets-flow.md](../pets-flow.md) (catalog + photo-path pattern)                             |
-| **Migrations**   | Proposed, not written: `20261006120000_marketplace_enums.sql`, `20261006121000_marketplace_tables.sql` (`ats-home-craft-supabase`)                                                              |
+|                  |                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Status**       | Proposed                                                                                                                                                           |
+| **Date**         | 2026-10-06                                                                                                                                                         |
+| **Authors**      | Home Craft platform team                                                                                                                                           |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0010](./0010-contact-roles.md), [project setup](../project-setup-flow.md)             |
+| **Related docs** | [buy-and-sell-flow.md](../buy-and-sell-flow.md), [project-setup-flow.md](../project-setup-flow.md), [pets-flow.md](../pets-flow.md) (catalog + photo-path pattern) |
+| **Migrations**   | Proposed, not written: `20261006120000_marketplace_enums.sql`, `20261006121000_marketplace_tables.sql` (`ats-home-craft-supabase`)                                 |
 
 ______________________________________________________________________
 
@@ -18,9 +18,9 @@ Residents of a gated community (a **project** in project setup — the prototype
 The prototype covers the whole loop:
 
 1. **Browse** — home, search, category grid, filters, saved items.
-2. **Buy** — listing detail, the same detail for a service, report to the committee.
-3. **Sell** — three steps (category, post details, preview), then a live confirmation.
-4. **Manage** — my listings (live, draft, sold, expired, removed) and mark as sold.
+1. **Buy** — listing detail, the same detail for a service, report to the committee.
+1. **Sell** — three steps (category, post details, preview), then a live confirmation.
+1. **Manage** — my listings (live, draft, sold, expired, removed) and mark as sold.
 
 Messages, chat, search suggestions, and recent searches are on the prototype and are **not** part of this feature.
 
@@ -28,35 +28,35 @@ Messages, chat, search suggestions, and recent searches are on the prototype and
 
 Project setup ([project-setup-flow.md](../project-setup-flow.md) §3) already stores the places and the people. Buy & sell **reads** those rows. It does **not** add columns to them.
 
-| Prototype label                         | Existing row                                                                                                                                          |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Society ("ATS Nobility")                | `projects.name`. Header tower count is `count(towers)` for that project                                                                              |
-| "6 towers", "Tower B", collection pin   | `towers` (`name`, `latitude`, `longitude` from site map)                                                                                             |
-| Flat "B-1104" / pickup dropdown         | `units.code` or `units.unit_label`, joined through the seller's active `contact_units`                                                               |
-| Nearby societies, "closest to me"       | `projects.latitude` / `longitude` and `towers.latitude` / `longitude`. No nearby-society table exists                                                |
-| Seller "Rohan B.", Owner, member since  | `contacts` (name, photo) + active `contact_roles` on that unit (`Owner`, `Tenant`, `Family`) + `contact_roles.started_at`                            |
-| Phone stays private                     | `contacts.phones` is never selected by this API                                                                                                      |
-| Committee                               | Staff with project access ([ADR 0011](./0011-project-membership.md)), same actor as notice-board moderation                                           |
-| Media upload                            | Presigned URL (`POST /v1/presigned-url`). Postgres stores the path only, as on `project_media` and `pets.photo_paths`                                |
+| Prototype label                        | Existing row                                                                                                              |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Society ("ATS Nobility")               | `projects.name`. Header tower count is `count(towers)` for that project                                                   |
+| "6 towers", "Tower B", collection pin  | `towers` (`name`, `latitude`, `longitude` from site map)                                                                  |
+| Flat "B-1104" / pickup dropdown        | `units.code` or `units.unit_label`, joined through the seller's active `contact_units`                                    |
+| Nearby societies, "closest to me"      | `projects.latitude` / `longitude` and `towers.latitude` / `longitude`. No nearby-society table exists                     |
+| Seller "Rohan B.", Owner, member since | `contacts` (name, photo) + active `contact_roles` on that unit (`Owner`, `Tenant`, `Family`) + `contact_roles.started_at` |
+| Phone stays private                    | `contacts.phones` is never selected by this API                                                                           |
+| Committee                              | Staff with project access ([ADR 0011](./0011-project-membership.md)), same actor as notice-board moderation               |
+| Media upload                           | Presigned URL (`POST /v1/presigned-url`). Postgres stores the path only, as on `project_media` and `pets.photo_paths`     |
 
 There is **no** listings table or bookmark table today. Household `vehicles` is the parking/onboarding registry. A cycle listed under marketplace **Vehicles** is not a row in `vehicles`.
 
 ### Product decisions (from the prototype, do not relitigate)
 
-| #   | Decision                                                                                                                                                                                          |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | A listing belongs to one society (`project_id`, copied from the pickup unit) and one pickup flat (`unit_id`). The seller is the contact who posts it. The HTTP API is not nested under a project |
-| 2   | Two kinds: **Sale** (price required) and **Giveaway** (price is null, card says Free)                                                                                                            |
-| 3   | A live post runs **30 days**, then becomes expired. The seller can renew for another 30 days in one tap, or list an expired post again. There is no reminder before expiry                       |
-| 4   | Drafts are real rows. Home shows the latest draft and what is still missing ("add 2 photos and a price")                                                                                         |
-| 5   | Publishing requires the rules acknowledgement. Firearms, alcohol, medicines, pets, and rental property are not listed here. Property stays in Homes (out of scope). Pets stay on the pets module |
+| #   | Decision                                                                                                                                                                                           |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | A listing belongs to one society (`project_id`, copied from the pickup unit) and one pickup flat (`unit_id`). The seller is the contact who posts it. The HTTP API is not nested under a project   |
+| 2   | Two kinds: **Sale** (price required) and **Giveaway** (price is null, card says Free)                                                                                                              |
+| 3   | A live post runs **30 days**, then becomes expired. The seller can renew for another 30 days in one tap, or list an expired post again. There is no reminder before expiry                         |
+| 4   | Drafts are real rows. Home shows the latest draft and what is still missing ("add 2 photos and a price")                                                                                           |
+| 5   | Publishing requires the rules acknowledgement. Firearms, alcohol, medicines, pets, and rental property are not listed here. Property stays in Homes (out of scope). Pets stay on the pets module   |
 | 6   | The flat number is visible to **other residents of the same society** only when the seller turns the toggle on. Residents of nearby societies never receive the flat. There is no share-later step |
-| 7   | Phone numbers are never returned                                                                                                                                                                  |
-| 8   | A report goes to the society committee, not to the seller. The seller is told only if the committee takes the post down, and then they see the committee's note                                 |
-| 9   | Marking sold records the buyer and an optional private rating (Smooth / Fine / Had trouble)                                                                                                      |
-| 10  | Sold price is visible to the seller in My listings. It is not shown on any public card after the post leaves the board                                                                           |
-| 11  | The platform does not take payment, escrow, or delivery. "₹18,000 earned" is the sum of sold asking prices, not money collected                                                                  |
-| 12  | Search is a query on the listings list. The API does not store recent searches, popular terms, suggestions, or wanted requests                                    |
+| 7   | Phone numbers are never returned                                                                                                                                                                   |
+| 8   | A report goes to the society committee, not to the seller. The seller is told only if the committee takes the post down, and then they see the committee's note                                    |
+| 9   | Marking sold records the buyer and an optional private rating (Smooth / Fine / Had trouble)                                                                                                        |
+| 10  | Sold price is visible to the seller in My listings. It is not shown on any public card after the post leaves the board                                                                             |
+| 11  | The platform does not take payment, escrow, or delivery. "₹18,000 earned" is the sum of sold asking prices, not money collected                                                                    |
+| 12  | Search is a query on the listings list. The API does not store recent searches, popular terms, suggestions, or wanted requests                                                                     |
 
 ______________________________________________________________________
 
@@ -64,13 +64,13 @@ ______________________________________________________________________
 
 ### 1. Five new tables. No changes to project-setup tables
 
-| Table                             | Purpose                                                                                                      |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| **`marketplace_listings`**        | One item: draft through sold / expired / removed. Sale or giveaway. Pickup unit, price, condition, 30-day window |
-| **`marketplace_listing_media`**   | Ordered media metadata (path, file type, size). One cover per listing. Same metadata-only rule as `project_media` |
-| **`marketplace_saved_items`**     | Bookmark. One row per resident per listing                                                                  |
-| **`marketplace_reports`**         | Resident report. Committee upholds or dismisses. Uphold removes the listing                                 |
-| **`marketplace_sale_feedback`**   | Seller's private rating of the buyer. One per sold listing. Hidden from the buyer and from the public feed  |
+| Table                           | Purpose                                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **`marketplace_listings`**      | One item: draft through sold / expired / removed. Sale or giveaway. Pickup unit, price, condition, 30-day window  |
+| **`marketplace_listing_media`** | Ordered media metadata (path, file type, size). One cover per listing. Same metadata-only rule as `project_media` |
+| **`marketplace_saved_items`**   | Bookmark. One row per resident per listing                                                                        |
+| **`marketplace_reports`**       | Resident report. Committee upholds or dismisses. Uphold removes the listing                                       |
+| **`marketplace_sale_feedback`** | Seller's private rating of the buyer. One per sold listing. Hidden from the buyer and from the public feed        |
 
 Categories and subtypes are **not** tables. They live in `app/data/marketplace_catalog.json`, same pattern as `pet_catalog.json`.
 
@@ -102,14 +102,14 @@ live ──committee uphold──► removed ──edit──► draft ──pub
 
 A seller remove lands on `draft`, not on `removed`. From that draft the seller edits with `PATCH`, then `POST .../actions` with `action: restore` returns the same row to `live`. Publish, remove, restore, renew, and relist share that one route. Save and unsave share `PUT .../save`. Uphold and dismiss share `POST .../reports/{id}/review`.
 
-| Status | On the public board | Seller can |
-| ------ | ------------------- | ---------- |
-| `draft` never published | No | Edit, delete the draft, publish when valid |
-| `draft` after the seller removed a live post | No | Edit, then restore. `published_at` is already set |
-| `live` | Yes | Edit step-2 fields (stays `live`), renew, mark sold, or remove |
-| `sold` | No | Read it in My listings for one year |
-| `expired` | No | List it again (same row, new 30-day window) |
-| `removed` by the committee | No | Edit and resubmit, which returns it to `draft` |
+| Status                                       | On the public board | Seller can                                                     |
+| -------------------------------------------- | ------------------- | -------------------------------------------------------------- |
+| `draft` never published                      | No                  | Edit, delete the draft, publish when valid                     |
+| `draft` after the seller removed a live post | No                  | Edit, then restore. `published_at` is already set              |
+| `live`                                       | Yes                 | Edit step-2 fields (stays `live`), renew, mark sold, or remove |
+| `sold`                                       | No                  | Read it in My listings for one year                            |
+| `expired`                                    | No                  | List it again (same row, new 30-day window)                    |
+| `removed` by the committee                   | No                  | Edit and resubmit, which returns it to `draft`                 |
 
 `expires_at` on publish is `published_at + 30 days`. Renew sets `expires_at = greatest(expires_at, now()) + 30 days`, so remaining days are kept. List-again on an expired row sets `published_at = now()` and `expires_at = now() + 30 days`.
 
@@ -127,21 +127,21 @@ Share to community feed has no table and no route. [ADR 0012](./0012-notice-boar
 
 ### 4. What "publish" requires
 
-| Field                         | Sale                         | Giveaway        |
-| ----------------------------- | ---------------------------- | --------------- |
-| Category                      | Required                     | Required        |
-| Subtype                       | Required when the catalog category has subtypes | Same |
-| Media                         | At least 2, exactly one cover | Same           |
-| Title, description            | Required                     | Required        |
-| Purchase year                 | Required, 1980 through the current year | Same |
-| Price                         | `numeric(12,2)` > 0          | Must be null    |
-| Original (struck-through) price | Optional; if set, must be **greater than** price | Null |
-| Negotiable                    | Optional, default false      | Forced false    |
-| Pickup unit                   | Required, caller must have active `contact_units` | Same |
-| Condition                     | Required                     | Required        |
-| Brand, product URL, original bill | Optional                | Optional        |
-| Show flat number              | Optional, default false      | Same            |
-| Rules accepted                | Required at publish          | Required        |
+| Field                             | Sale                                              | Giveaway     |
+| --------------------------------- | ------------------------------------------------- | ------------ |
+| Category                          | Required                                          | Required     |
+| Subtype                           | Required when the catalog category has subtypes   | Same         |
+| Media                             | At least 2, exactly one cover                     | Same         |
+| Title, description                | Required                                          | Required     |
+| Purchase year                     | Required, 1980 through the current year           | Same         |
+| Price                             | `numeric(12,2)` > 0                               | Must be null |
+| Original (struck-through) price   | Optional; if set, must be **greater than** price  | Null         |
+| Negotiable                        | Optional, default false                           | Forced false |
+| Pickup unit                       | Required, caller must have active `contact_units` | Same         |
+| Condition                         | Required                                          | Required     |
+| Brand, product URL, original bill | Optional                                          | Optional     |
+| Show flat number                  | Optional, default false                           | Same         |
+| Rules accepted                    | Required at publish                               | Required     |
 
 Save draft accepts a partial row. The home strip computes the gap; it is not stored.
 
@@ -153,21 +153,21 @@ Condition values: `like_new`, `lightly_used`, `well_used`, `needs_repair`. The f
 
 Default browse scope is the resident's society **plus** nearby societies. Home → Recently listed is the **current society only** (the prototype cards are Tower A and Tower B of ATS Nobility). Category and search use the wider scope. The client passes `unit_id`. The service reads the society from that unit.
 
-| Where chip        | Rule                                                                 |
-| ----------------- | -------------------------------------------------------------------- |
-| *(default)*       | Listing `project_id` = the unit's project, or a project inside the 5 km radius |
-| My tower          | Same `tower_id` as the viewer's unit                                 |
-| My society        | Same `project_id` as the viewer's unit                               |
-| Nearby societies  | Other projects inside the radius, excluding the viewer's project     |
+| Where chip       | Rule                                                                           |
+| ---------------- | ------------------------------------------------------------------------------ |
+| *(default)*      | Listing `project_id` = the unit's project, or a project inside the 5 km radius |
+| My tower         | Same `tower_id` as the viewer's unit                                           |
+| My society       | Same `project_id` as the viewer's unit                                         |
+| Nearby societies | Other projects inside the radius, excluding the viewer's project               |
 
 Flat number (`units.code` / `unit_label`):
 
-| Viewer                                      | `show_flat_number` | Structured flat |
-| ------------------------------------------- | ------------------ | --------------- |
-| Same society                                | true               | Shown on card, detail, seller line, preview |
-| Same society                                | false              | Hidden. Tower + society only                |
-| Nearby society                              | either             | Hidden                                          |
-| Seller looking at their own preview / My listings | either        | Shown, so they can confirm what they posted    |
+| Viewer                                            | `show_flat_number` | Structured flat                             |
+| ------------------------------------------------- | ------------------ | ------------------------------------------- |
+| Same society                                      | true               | Shown on card, detail, seller line, preview |
+| Same society                                      | false              | Hidden. Tower + society only                |
+| Nearby society                                    | either             | Hidden                                      |
+| Seller looking at their own preview / My listings | either             | Shown, so they can confirm what they posted |
 
 "Closest to me" sorts by distance between the viewer's tower coordinates and the listing's tower coordinates. A tower with no coordinates sorts last. Societies with no coordinates are absent from the nearby set and still appear in their own residents' feeds.
 
@@ -178,8 +178,8 @@ Price bands are fixed chips, not a slider: Free (giveaway), under ₹5,000, ₹5
 **Mark sold** (`buyer_contact_id` required):
 
 1. Buyer must have an active `contact_units` row in the same organization, and must not be the seller.
-2. Listing → `sold`, `sold_at`, `buyer_contact_id`.
-3. Optional rating is inserted into `marketplace_sale_feedback`. The mark-sold response may echo it once to the seller. No later read returns it to the buyer or on a public listing.
+1. Listing → `sold`, `sold_at`, `buyer_contact_id`.
+1. Optional rating is inserted into `marketplace_sale_feedback`. The mark-sold response may echo it once to the seller. No later read returns it to the buyer or on a public listing.
 
 Sold rows stay on the seller's My listings for **365 days** after `sold_at`, then drop off that list. The row stays in Postgres.
 
@@ -197,16 +197,16 @@ Feedback is for the committee, and only as a pattern: the admin read groups by s
 
 `app/data/marketplace_catalog.json`:
 
-| Category     | Subtypes in the prototype                                                                 |
-| ------------ | ----------------------------------------------------------------------------------------- |
-| Furniture    | Tables & desks, Sofas & seating, Beds & mattresses, Storage, Outdoor                     |
-| Electronics  | *(none drawn — category has an empty subtype list until product adds chips)*             |
-| Home decor   | *(none drawn)*                                                                            |
-| Appliances   | *(none drawn)*                                                                            |
-| Kids & toys  | *(none drawn)*                                                                            |
-| Vehicles     | *(none drawn)*                                                                            |
-| Services     | *(none drawn)*                                                                            |
-| Others       | *(none drawn)*                                                                            |
+| Category    | Subtypes in the prototype                                                    |
+| ----------- | ---------------------------------------------------------------------------- |
+| Furniture   | Tables & desks, Sofas & seating, Beds & mattresses, Storage, Outdoor         |
+| Electronics | *(none drawn — category has an empty subtype list until product adds chips)* |
+| Home decor  | *(none drawn)*                                                               |
+| Appliances  | *(none drawn)*                                                               |
+| Kids & toys | *(none drawn)*                                                               |
+| Vehicles    | *(none drawn)*                                                               |
+| Services    | *(none drawn)*                                                               |
+| Others      | *(none drawn)*                                                               |
 
 Step 1 shows "{Category} — pick a type" only when that category has one or more subtypes. Furniture does. The others continue after the category tap. Adding a chip is a JSON edit, not a migration.
 
@@ -220,10 +220,10 @@ One prefix: `/v1/marketplace`. Residents do not get a new permission code. Route
 
 Committee handlers use the same prefix. After the report or listing is loaded, they call staff project access on that row's `project_id`:
 
-| Action                                      | Code                            |
-| ------------------------------------------- | ------------------------------- |
-| List reports, read feedback patterns        | `marketplace_management.view`   |
-| Uphold (take down) or dismiss a report      | `marketplace_management.moderate` |
+| Action                                 | Code                              |
+| -------------------------------------- | --------------------------------- |
+| List reports, read feedback patterns   | `marketplace_management.view`     |
+| Uphold (take down) or dismiss a report | `marketplace_management.moderate` |
 
 Seed both on `community_admin`. Seed view on `viewer`. These codes do not exist yet; the migration that adds the tables also seeds them.
 

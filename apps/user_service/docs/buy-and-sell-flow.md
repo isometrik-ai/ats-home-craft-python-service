@@ -11,7 +11,7 @@
 - **Catalog:** `app/data/marketplace_catalog.json`
 - **DB schema:** `ats-home-craft-supabase` (migrations proposed, not written — see §3)
 
----
+______________________________________________________________________
 
 ## 1. What this flow does
 
@@ -48,14 +48,14 @@ The prototype's flow map, and the screen that implements each node:
 | **Report does not tell the seller**                | Insert report only. The seller sees `removal_note` on My listings after the committee takes it down                                     |
 | **Feedback stays off the public listing**          | Stored in `marketplace_sale_feedback`, never joined into browse or detail                                                               |
 | **Seller can edit a live post**                    | `PATCH` while `draft`, `live`, or `removed`. A live row stays `live` and must remain publish-valid. Category and subtype stay as posted |
-| **Seller remove returns the post to draft**        | `POST .../actions` with `action: remove` on a live listing sets `draft`. It leaves the board. Committee takedown is a different status |
-| **Seller can edit that draft and restore it**      | `PATCH` while `draft`, then `POST .../actions` with `action: restore`. Restore requires the same checks as publish and sets `live`     |
+| **Seller remove returns the post to draft**        | `POST .../actions` with `action: remove` on a live listing sets `draft`. It leaves the board. Committee takedown is a different status  |
+| **Seller can edit that draft and restore it**      | `PATCH` while `draft`, then `POST .../actions` with `action: restore`. Restore requires the same checks as publish and sets `live`      |
 | **Sold hidden from the seller after 1 year**       | My listings filters `sold_at >= now() - interval '1 year'`                                                                              |
 | **Media are paths**                                | Presigned upload, then metadata row. No blob                                                                                            |
 | **Categories from JSON**                           | `GET /marketplace/catalog`. Not Postgres                                                                                                |
 | **Routes are not project-scoped**                  | Every path is `/v1/marketplace/...`. The client never sends `project_id`                                                                |
 
----
+______________________________________________________________________
 
 ## 2. What this reads from project setup (no new columns)
 
@@ -79,7 +79,7 @@ The listing row stores `project_id` because the pickup flat belongs to a society
 
 Do **not** reuse `vehicles`, `facilities`, `notices`, or `pets` for a listing. A cycle for sale is a marketplace row whose category happens to be Vehicles.
 
----
+______________________________________________________________________
 
 ## 3. New tables
 
@@ -100,39 +100,39 @@ CREATE TYPE public.marketplace_sale_rating AS ENUM ('smooth', 'fine', 'had_troub
 
 ### `marketplace_listings`
 
-| Column                     | Type                           | Notes                                                                                  |
-| -------------------------- | ------------------------------ | -------------------------------------------------------------------------------------- |
-| `id`                       | uuid PK                        |                                                                                        |
-| `organization_id`          | uuid NOT NULL                  | Tenant                                                                                 |
-| `project_id`               | uuid NOT NULL                  | FK `projects`. Copied from the pickup unit. Not sent by the client                     |
-| `unit_id`                  | uuid NOT NULL                  | FK `units`. Pickup flat                                                                |
-| `tower_id`                 | uuid                           | Denormalized from `units.tower_id` for distance sort                                   |
-| `seller_contact_id`        | uuid NOT NULL                  | FK `contacts`. Set from the caller, not from the body                                  |
-| `category`                 | text NOT NULL                  | Catalog display name, e.g. `Furniture`                                                 |
-| `subtype`                  | text                           | Catalog subtype, e.g. `Tables & desks`. Null when the category has none                |
-| `kind`                     | marketplace_listing_kind       | `sale` or `giveaway`                                                                   |
-| `status`                   | marketplace_listing_status     | Default `draft`                                                                        |
-| `title`                    | text                           | Required to publish. 1–80 chars                                                        |
-| `description`              | text                           | Required to publish. 1–1000 chars                                                      |
-| `purchase_year`            | smallint                       | Required to publish. 1980 … current year                                               |
-| `price_amount`             | numeric(12,2)                  | Required and > 0 for a live sale. Null for giveaway                                    |
-| `original_price_amount`    | numeric(12,2)                  | Struck-through "new" price. If set on a sale, must be > `price_amount`                 |
-| `negotiable`               | boolean NOT NULL default false | Sale only. Giveaway stores false                                                       |
-| `brand`                    | text                           | Optional, 1–80                                                                         |
-| `condition`                | marketplace_item_condition     | Required to publish                                                                    |
-| `product_url`              | text                           | Optional http(s) link to the new product                                               |
-| `show_flat_number`         | boolean NOT NULL default false | Same-society residents see the flat when true                                          |
-| `original_bill_available`  | boolean NOT NULL default false | Detail line "Original bill"                                                            |
-| `rules_accepted_at`        | timestamptz                    | Set at publish. Null blocks publish                                                    |
-| `published_at`             | timestamptz                    |                                                                                        |
-| `expires_at`               | timestamptz                    | `published_at + 30 days`, extended by renew                                            |
-| `renewal_count`            | integer NOT NULL default 0     |                                                                                        |
-| `sold_at`                  | timestamptz                    |                                                                                        |
-| `buyer_contact_id`         | uuid                           | FK `contacts`. Set by mark-sold                                                        |
-| `removed_at`               | timestamptz                    |                                                                                        |
-| `removal_note`             | text                           | Committee sentence shown on the seller's removed card                                  |
-| `removed_by_user_id`       | uuid                           | Staff `auth.users` id. Set only by committee uphold                                    |
-| `created_at`, `updated_at` | timestamptz                    |                                                                                        |
+| Column                     | Type                           | Notes                                                                   |
+| -------------------------- | ------------------------------ | ----------------------------------------------------------------------- |
+| `id`                       | uuid PK                        |                                                                         |
+| `organization_id`          | uuid NOT NULL                  | Tenant                                                                  |
+| `project_id`               | uuid NOT NULL                  | FK `projects`. Copied from the pickup unit. Not sent by the client      |
+| `unit_id`                  | uuid NOT NULL                  | FK `units`. Pickup flat                                                 |
+| `tower_id`                 | uuid                           | Denormalized from `units.tower_id` for distance sort                    |
+| `seller_contact_id`        | uuid NOT NULL                  | FK `contacts`. Set from the caller, not from the body                   |
+| `category`                 | text NOT NULL                  | Catalog display name, e.g. `Furniture`                                  |
+| `subtype`                  | text                           | Catalog subtype, e.g. `Tables & desks`. Null when the category has none |
+| `kind`                     | marketplace_listing_kind       | `sale` or `giveaway`                                                    |
+| `status`                   | marketplace_listing_status     | Default `draft`                                                         |
+| `title`                    | text                           | Required to publish. 1–80 chars                                         |
+| `description`              | text                           | Required to publish. 1–1000 chars                                       |
+| `purchase_year`            | smallint                       | Required to publish. 1980 … current year                                |
+| `price_amount`             | numeric(12,2)                  | Required and > 0 for a live sale. Null for giveaway                     |
+| `original_price_amount`    | numeric(12,2)                  | Struck-through "new" price. If set on a sale, must be > `price_amount`  |
+| `negotiable`               | boolean NOT NULL default false | Sale only. Giveaway stores false                                        |
+| `brand`                    | text                           | Optional, 1–80                                                          |
+| `condition`                | marketplace_item_condition     | Required to publish                                                     |
+| `product_url`              | text                           | Optional http(s) link to the new product                                |
+| `show_flat_number`         | boolean NOT NULL default false | Same-society residents see the flat when true                           |
+| `original_bill_available`  | boolean NOT NULL default false | Detail line "Original bill"                                             |
+| `rules_accepted_at`        | timestamptz                    | Set at publish. Null blocks publish                                     |
+| `published_at`             | timestamptz                    |                                                                         |
+| `expires_at`               | timestamptz                    | `published_at + 30 days`, extended by renew                             |
+| `renewal_count`            | integer NOT NULL default 0     |                                                                         |
+| `sold_at`                  | timestamptz                    |                                                                         |
+| `buyer_contact_id`         | uuid                           | FK `contacts`. Set by mark-sold                                         |
+| `removed_at`               | timestamptz                    |                                                                         |
+| `removal_note`             | text                           | Committee sentence shown on the seller's removed card                   |
+| `removed_by_user_id`       | uuid                           | Staff `auth.users` id. Set only by committee uphold                     |
+| `created_at`, `updated_at` | timestamptz                    |                                                                         |
 
 Checks:
 
@@ -180,18 +180,18 @@ Unique `(contact_id, listing_id)`.
 
 ### `marketplace_reports`
 
-| Column                | Type                      | Notes                                      |
-| --------------------- | ------------------------- | ------------------------------------------ |
-| `id`                  | uuid PK                   |                                            |
-| `organization_id`     | uuid NOT NULL             |                                            |
-| `project_id`          | uuid NOT NULL             | Copied from the listing. Not a path param  |
-| `listing_id`          | uuid NOT NULL             |                                            |
-| `reporter_contact_id` | uuid NOT NULL             |                                            |
-| `reason`              | marketplace_report_reason |                                            |
-| `status`              | marketplace_report_status | Default `open`                             |
-| `created_at`          | timestamptz               |                                            |
-| `reviewed_at`         | timestamptz               |                                            |
-| `reviewed_by_user_id` | uuid                      | Staff user                                 |
+| Column                | Type                      | Notes                                     |
+| --------------------- | ------------------------- | ----------------------------------------- |
+| `id`                  | uuid PK                   |                                           |
+| `organization_id`     | uuid NOT NULL             |                                           |
+| `project_id`          | uuid NOT NULL             | Copied from the listing. Not a path param |
+| `listing_id`          | uuid NOT NULL             |                                           |
+| `reporter_contact_id` | uuid NOT NULL             |                                           |
+| `reason`              | marketplace_report_reason |                                           |
+| `status`              | marketplace_report_status | Default `open`                            |
+| `created_at`          | timestamptz               |                                           |
+| `reviewed_at`         | timestamptz               |                                           |
+| `reviewed_by_user_id` | uuid                      | Staff user                                |
 
 Partial unique: one `open` report per `(listing_id, reporter_contact_id)`.
 
@@ -219,7 +219,7 @@ Resident browse, detail, and My listings queries must not join this table. The c
 | "Earned"                    | Sum of `price_amount` on the seller's `sold` rows in the last 365 days          |
 | Draft gap ("add 2 photos…") | Computed from media count and null price                                        |
 
----
+______________________________________________________________________
 
 ## 4. Architecture (layers)
 
@@ -232,23 +232,23 @@ HTTP → API router → Service → Repository (SQL) → Postgres
 
 ### File map (to implement)
 
-| Concern            | File                                                                               |
-| ------------------ | ---------------------------------------------------------------------------------- |
-| Routes             | `app/api/marketplace.py`                                                           |
-| Route registration | `app/api/routes.py`                                                                |
-| Orchestration      | `app/services/marketplace_service.py`                                              |
-| Catalog            | `app/services/marketplace_catalog_service.py`                                      |
-| Nearby + distance  | `app/services/marketplace_geo.py` (`MARKETPLACE_NEARBY_RADIUS_KM`)                 |
-| SQL                | `app/db/repositories/marketplace_repository.py`                                    |
-| Schemas            | `app/schemas/marketplace.py`                                                       |
-| Enums              | `app/schemas/enums/marketplace.py`                                                 |
-| Static data        | `app/data/marketplace_catalog.json`                                                |
-| i18n               | `app/locales/en.json` under `marketplace.*`                                        |
+| Concern            | File                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------ |
+| Routes             | `app/api/marketplace.py`                                                                   |
+| Route registration | `app/api/routes.py`                                                                        |
+| Orchestration      | `app/services/marketplace_service.py`                                                      |
+| Catalog            | `app/services/marketplace_catalog_service.py`                                              |
+| Nearby + distance  | `app/services/marketplace_geo.py` (`MARKETPLACE_NEARBY_RADIUS_KM`)                         |
+| SQL                | `app/db/repositories/marketplace_repository.py`                                            |
+| Schemas            | `app/schemas/marketplace.py`                                                               |
+| Enums              | `app/schemas/enums/marketplace.py`                                                         |
+| Static data        | `app/data/marketplace_catalog.json`                                                        |
+| i18n               | `app/locales/en.json` under `marketplace.*`                                                |
 | Tests              | `tests/unit/test_marketplace_service.py`, `tests/unit/test_marketplace_catalog_service.py` |
 
 Resident and committee handlers live in the same router. Committee handlers require staff project access on the listing's `project_id` after the row is loaded. The URL does not contain `project_id`.
 
----
+______________________________________________________________________
 
 ## 5. Screen → API
 
@@ -337,12 +337,12 @@ The detail screen has no Chat button and no message thread.
 
 The overflow on a **live** listing the caller owns (prototype: "Dining set, 6 seater · Live · 4 people asking"):
 
-| Action                  | API                                                         | Effect                                                                                                                                                                                                            |
-| ----------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Edit listing            | `PATCH /v1/marketplace/listings/{id}`                       | Same step-2 fields as a draft. Status stays `live`. Category and subtype are rejected if changed. The row must still pass the publish checks (media, price, condition, and the rest)                              |
-| Mark as sold            | `POST .../mark-sold`                                        | See Marked as sold                                                                                                                                                                                                |
-| Share to community feed | No route in this feature                                    | The prototype shows the row. There is no resident community feed, and notices are staff-published ([ADR 0012](./adr/0012-notice-board.md)). Do not insert a notice. The client hides this row until a feed exists |
-| Remove listing          | `POST /v1/marketplace/listings/{id}/actions` `{ "unit_id", "action": "remove" }` | Seller only, `live` only. Sets `draft`. The post leaves the board. `published_at` and `expires_at` stay, so the draft can be restored. `removed_*` stays null |
+| Action                  | API                                                                              | Effect                                                                                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Edit listing            | `PATCH /v1/marketplace/listings/{id}`                                            | Same step-2 fields as a draft. Status stays `live`. Category and subtype are rejected if changed. The row must still pass the publish checks (media, price, condition, and the rest)                              |
+| Mark as sold            | `POST .../mark-sold`                                                             | See Marked as sold                                                                                                                                                                                                |
+| Share to community feed | No route in this feature                                                         | The prototype shows the row. There is no resident community feed, and notices are staff-published ([ADR 0012](./adr/0012-notice-board.md)). Do not insert a notice. The client hides this row until a feed exists |
+| Remove listing          | `POST /v1/marketplace/listings/{id}/actions` `{ "unit_id", "action": "remove" }` | Seller only, `live` only. Sets `draft`. The post leaves the board. `published_at` and `expires_at` stay, so the draft can be restored. `removed_*` stays null                                                     |
 
 "4 people asking" is prototype copy. This API does not return an asking count.
 
@@ -365,39 +365,39 @@ Furniture subtypes in the catalog: Tables & desks, Sofas & seating, Beds & mattr
 
 On `live`, the patch is a full edit of the post (the overflow "Edit listing") and the listing stays `live`. On a seller-removed draft, the patch is an edit of that draft and the row stays `draft` until restore. On `removed`, the patch is the committee "Edit and resubmit" path and moves the row back to `draft` until publish. `sold` and `expired` reject PATCH; expired uses list-again.
 
-| Field              | Body                                                                                                   |
-| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| Field              | Body                                                                                                     |
+| ------------------ | -------------------------------------------------------------------------------------------------------- |
 | Media              | `POST /v1/marketplace/listings/{id}/media` after presigned upload. Delete: `DELETE .../media/{media_id}` |
-| Cover              | `is_cover: true` on one file                                                                           |
-| Title, description | Text                                                                                                   |
-| Purchase year      | Integer                                                                                                |
-| Listing type       | `kind`: `sale` \| `giveaway`                                                                           |
-| Price              | `price_amount`. Omitted when giveaway. Switching to giveaway clears price and negotiable               |
-| Negotiable         | Boolean. The prototype shows it under price on a sale                                                  |
-| Original price     | `original_price_amount`. Helper copy is i18n, not stored                                               |
-| Pickup location    | `unit_id` chosen from `GET /v1/marketplace/pickup-units?unit_id=` (the caller's active units)          |
-| Brand              | Optional                                                                                               |
-| Condition          | `like_new`, `lightly_used`, `well_used`, `needs_repair`                                                |
-| Show flat number   | `show_flat_number`                                                                                     |
-| Original bill      | `original_bill_available`                                                                              |
-| Product URL        | Optional                                                                                               |
-| 30-day sentence    | i18n. "Closes 30 days after it goes live." Not stored                                                  |
-| Save draft         | The PATCH itself. Drafts are partial                                                                   |
-| Continue           | Client goes to step 3. Server does not publish yet                                                     |
+| Cover              | `is_cover: true` on one file                                                                             |
+| Title, description | Text                                                                                                     |
+| Purchase year      | Integer                                                                                                  |
+| Listing type       | `kind`: `sale` \| `giveaway`                                                                             |
+| Price              | `price_amount`. Omitted when giveaway. Switching to giveaway clears price and negotiable                 |
+| Negotiable         | Boolean. The prototype shows it under price on a sale                                                    |
+| Original price     | `original_price_amount`. Helper copy is i18n, not stored                                                 |
+| Pickup location    | `unit_id` chosen from `GET /v1/marketplace/pickup-units?unit_id=` (the caller's active units)            |
+| Brand              | Optional                                                                                                 |
+| Condition          | `like_new`, `lightly_used`, `well_used`, `needs_repair`                                                  |
+| Show flat number   | `show_flat_number`                                                                                       |
+| Original bill      | `original_bill_available`                                                                                |
+| Product URL        | Optional                                                                                                 |
+| 30-day sentence    | i18n. "Closes 30 days after it goes live." Not stored                                                    |
+| Save draft         | The PATCH itself. Drafts are partial                                                                     |
+| Continue           | Client goes to step 3. Server does not publish yet                                                       |
 
 Giveaway helper is i18n: the card shows Free. There is no timed boost.
 
 ### Sell step 3 — preview, then live
 
-| Element                            | API                                                                       |
-| ---------------------------------- | ------------------------------------------------------------------------- |
-| "This is what neighbours will see" | `GET /v1/marketplace/listings/{id}?unit_id=` as the seller                |
-| Edit details                       | Back to step 2. PATCH                                                     |
-| Rules checkbox                     | Required on the client before Post                                        |
+| Element                            | API                                                                                                       |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| "This is what neighbours will see" | `GET /v1/marketplace/listings/{id}?unit_id=` as the seller                                                |
+| Edit details                       | Back to step 2. PATCH                                                                                     |
+| Rules checkbox                     | Required on the client before Post                                                                        |
 | Post listing                       | `POST /v1/marketplace/listings/{id}/actions` `{ "unit_id", "action": "publish", "rules_accepted": true }` |
-| You're live                        | Publish response: `published_at`, `expires_at`, `project_name`            |
-| Post another                       | Step 1 again                                                              |
-| My listings                        | `GET /v1/marketplace/me/listings?unit_id=`                                |
+| You're live                        | Publish response: `published_at`, `expires_at`, `project_name`                                            |
+| Post another                       | Step 1 again                                                                                              |
+| My listings                        | `GET /v1/marketplace/me/listings?unit_id=`                                                                |
 
 Publish returns **422** with `missing[]` when the draft is not valid (see ADR §4).
 
@@ -407,14 +407,14 @@ Publish returns **422** with `missing[]` when the draft is not valid (see ADR §
 
 `past` is `expired` and `removed`. Header: `live_count`, `earned_amount` (sold asking prices in the last year).
 
-| Card                  | Fields                                                               | Action                                        |
-| --------------------- | -------------------------------------------------------------------- | --------------------------------------------- |
-| Live                  | Days left                                                            | `POST .../{id}/actions` `{ "action": "renew" }` |
-| Draft, never published | Gap sentence                                                        | Opens step 2                                  |
-| Draft, seller removed it | The saved post. `published_at` is already set                     | Edit (PATCH), then `POST .../{id}/actions` `{ "action": "restore" }` |
-| Sold                  | Buyer public name, tower, flat, `sold_at`. Price shown to the seller | None                                          |
-| Expired               | "Ran for 30 days"                                                    | `POST .../{id}/actions` `{ "action": "relist" }` |
-| Removed by committee  | `removal_note`                                                       | Edit (PATCH, returns to `draft`) then publish |
+| Card                     | Fields                                                               | Action                                                               |
+| ------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Live                     | Days left                                                            | `POST .../{id}/actions` `{ "action": "renew" }`                      |
+| Draft, never published   | Gap sentence                                                         | Opens step 2                                                         |
+| Draft, seller removed it | The saved post. `published_at` is already set                        | Edit (PATCH), then `POST .../{id}/actions` `{ "action": "restore" }` |
+| Sold                     | Buyer public name, tower, flat, `sold_at`. Price shown to the seller | None                                                                 |
+| Expired                  | "Ran for 30 days"                                                    | `POST .../{id}/actions` `{ "action": "relist" }`                     |
+| Removed by committee     | `removal_note`                                                       | Edit (PATCH, returns to `draft`) then publish                        |
 
 Sold cards older than 365 days are omitted.
 
@@ -438,7 +438,7 @@ Sold cards older than 365 days are omitted.
 
 Response (seller only, this call): item title, buyer public name, buyer flat, `price_amount`.
 
----
+______________________________________________________________________
 
 ## 6. Committee API
 
@@ -446,30 +446,30 @@ Same prefix as the resident API. Not on the resident flow map. Required so "Remo
 
 The handler loads the report, then checks staff access on that report's `project_id`. The client does not pass `project_id`.
 
-| Action          | Route                                                      | Permission                        |
-| --------------- | ---------------------------------------------------------- | --------------------------------- |
-| Open reports    | `GET /v1/marketplace/reports?status=open`                  | `marketplace_management.view`     |
+| Action               | Route                                                                                               | Permission                        |
+| -------------------- | --------------------------------------------------------------------------------------------------- | --------------------------------- |
+| Open reports         | `GET /v1/marketplace/reports?status=open`                                                           | `marketplace_management.view`     |
 | Take down or dismiss | `POST /v1/marketplace/reports/{id}/review` `{ "decision": "uphold" \| "dismiss", "removal_note"? }` | `marketplace_management.moderate` |
-| Trouble pattern | `GET /v1/marketplace/feedback-patterns`                    | `marketplace_management.view`     |
+| Trouble pattern      | `GET /v1/marketplace/feedback-patterns`                                                             | `marketplace_management.view`     |
 
 `decision: uphold` requires `removal_note`, sets the listing `removed`, and stores that note. The seller sees it on My listings. `decision: dismiss` leaves the listing live.
 
----
+______________________________________________________________________
 
 ## 7. Flat visibility (response builder)
 
 Apply in one function, `visible_flat(listing, viewer)`, used by every card, detail, and preview.
 
-| Viewer                                              | Result                          |
-| --------------------------------------------------- | ------------------------------- |
-| Seller                                              | Always the flat                 |
-| Active resident of the listing's project, toggle on | Flat                            |
-| Active resident of the listing's project, toggle off | Tower + society                |
-| Resident of another project                         | Tower + society. Never the flat |
+| Viewer                                               | Result                          |
+| ---------------------------------------------------- | ------------------------------- |
+| Seller                                               | Always the flat                 |
+| Active resident of the listing's project, toggle on  | Flat                            |
+| Active resident of the listing's project, toggle off | Tower + society                 |
+| Resident of another project                          | Tower + society. Never the flat |
 
 There is no later step that reveals the flat. The toggle is the only switch.
 
----
+______________________________________________________________________
 
 ## 8. Catalog file
 
@@ -501,7 +501,7 @@ There is no later step that reveals the flat. The toggle is the only switch.
 
 The API stores `name`, not `id`, same as pets. Ids exist for the picker.
 
----
+______________________________________________________________________
 
 ## 9. Out of scope
 
@@ -518,7 +518,7 @@ The API stores `name`, not `id`, same as pets. Ids exist for the picker.
 - Revealing `contacts.phones`.
 - A configurable nearby radius in admin settings (the constant is 5 km until product changes it).
 
----
+______________________________________________________________________
 
 ## 10. How to make common changes
 

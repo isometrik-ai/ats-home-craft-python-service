@@ -98,7 +98,9 @@ class MarketplaceRepository(BaseRepository):
             organization_id,
         )
 
-    async def get_unit_context(self, *, organization_id: str, unit_id: str) -> dict[str, Any] | None:
+    async def get_unit_context(
+        self, *, organization_id: str, unit_id: str
+    ) -> dict[str, Any] | None:
         """Load the flat, its society, and its tower coordinates."""
         return await self.db_connection.fetchrow(
             """
@@ -605,9 +607,7 @@ class MarketplaceRepository(BaseRepository):
             listing_id,
         )
 
-    async def delete_media(
-        self, *, organization_id: str, listing_id: str, media_id: str
-    ) -> bool:
+    async def delete_media(self, *, organization_id: str, listing_id: str, media_id: str) -> bool:
         """Delete one media row. True when a row was removed."""
         result = await self.db_connection.execute(
             """
@@ -647,9 +647,7 @@ class MarketplaceRepository(BaseRepository):
             listing_id,
         )
 
-    async def is_saved(
-        self, *, organization_id: str, contact_id: str, listing_id: str
-    ) -> bool:
+    async def is_saved(self, *, organization_id: str, contact_id: str, listing_id: str) -> bool:
         """Whether this resident bookmarked the listing."""
         found = await self.db_connection.fetchval(
             """
@@ -665,9 +663,7 @@ class MarketplaceRepository(BaseRepository):
         )
         return found is not None
 
-    async def save_item(
-        self, *, organization_id: str, contact_id: str, listing_id: str
-    ) -> None:
+    async def save_item(self, *, organization_id: str, contact_id: str, listing_id: str) -> None:
         """Bookmark. A second save is a no-op."""
         await self.db_connection.execute(
             """
@@ -680,9 +676,7 @@ class MarketplaceRepository(BaseRepository):
             listing_id,
         )
 
-    async def unsave_item(
-        self, *, organization_id: str, contact_id: str, listing_id: str
-    ) -> None:
+    async def unsave_item(self, *, organization_id: str, contact_id: str, listing_id: str) -> None:
         """Remove a bookmark."""
         await self.db_connection.execute(
             """
@@ -696,9 +690,7 @@ class MarketplaceRepository(BaseRepository):
             listing_id,
         )
 
-    async def list_saved(
-        self, *, organization_id: str, contact_id: str
-    ) -> list[dict[str, Any]]:
+    async def list_saved(self, *, organization_id: str, contact_id: str) -> list[dict[str, Any]]:
         """Live bookmarks, newest save first."""
         rows = await self.db_connection.fetch(
             f"""

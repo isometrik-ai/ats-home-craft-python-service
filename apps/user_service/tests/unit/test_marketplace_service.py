@@ -116,7 +116,15 @@ def test_publish_gaps_lists_what_a_sale_still_needs():
         },
         media_count=1,
     )
-    assert gaps == ["media", "title", "description", "purchase_year", "price", "condition", "pickup"]
+    assert gaps == [
+        "media",
+        "title",
+        "description",
+        "purchase_year",
+        "price",
+        "condition",
+        "pickup",
+    ]
 
 
 def test_giveaway_does_not_require_a_price():
@@ -138,11 +146,22 @@ def test_giveaway_does_not_require_a_price():
 
 def test_visible_flat_follows_the_seller_and_the_toggle():
     listing = _listing(show_flat_number=False)
-    assert visible_flat(listing=listing, viewer_contact_id="seller-1", viewer_project_id="project-1") == "B-1104"
-    assert visible_flat(listing=listing, viewer_contact_id="buyer-1", viewer_project_id="project-1") is None
+    assert (
+        visible_flat(listing=listing, viewer_contact_id="seller-1", viewer_project_id="project-1")
+        == "B-1104"
+    )
+    assert (
+        visible_flat(listing=listing, viewer_contact_id="buyer-1", viewer_project_id="project-1")
+        is None
+    )
     shown = _listing(show_flat_number=True)
-    assert visible_flat(listing=shown, viewer_contact_id="buyer-1", viewer_project_id="project-1") == "B-1104"
-    assert visible_flat(listing=shown, viewer_contact_id="buyer-1", viewer_project_id="other") is None
+    assert (
+        visible_flat(listing=shown, viewer_contact_id="buyer-1", viewer_project_id="project-1")
+        == "B-1104"
+    )
+    assert (
+        visible_flat(listing=shown, viewer_contact_id="buyer-1", viewer_project_id="other") is None
+    )
 
 
 @pytest.mark.asyncio
@@ -209,9 +228,7 @@ async def test_restore_rejects_a_draft_that_was_never_published():
     svc = _service()
     svc.repo.get_listing = AsyncMock(return_value=_listing(status="draft", published_at=None))
     with pytest.raises(ValidationException) as raised:
-        await svc.restore_listing(
-            contact_id="seller-1", listing_id="listing-1", unit_id="unit-1"
-        )
+        await svc.restore_listing(contact_id="seller-1", listing_id="listing-1", unit_id="unit-1")
     assert raised.value.message_key == "marketplace.errors.not_restorable"
 
 
@@ -234,7 +251,9 @@ async def test_restore_starts_a_new_window_when_the_old_one_has_passed():
 async def test_mark_sold_rejects_the_seller_as_buyer():
     svc = _service()
     svc.repo.get_listing = AsyncMock(return_value=_listing())
-    body = MarkSoldRequest(unit_id="unit-1", buyer_contact_id="seller-1", rating=MarketplaceSaleRating.SMOOTH)
+    body = MarkSoldRequest(
+        unit_id="unit-1", buyer_contact_id="seller-1", rating=MarketplaceSaleRating.SMOOTH
+    )
     with pytest.raises(ValidationException) as raised:
         await svc.mark_sold(contact_id="seller-1", listing_id="listing-1", body=body)
     assert raised.value.message_key == "marketplace.errors.buyer_is_seller"

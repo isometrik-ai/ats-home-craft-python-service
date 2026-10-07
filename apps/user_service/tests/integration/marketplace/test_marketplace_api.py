@@ -8,7 +8,11 @@ from apps.user_service.app.app_instance import app
 from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.tests.integration.helpers import admin_context
 from apps.user_service.tests.utils.assertions import assert_error, assert_success
-from libs.shared_utils.http_exceptions import ForbiddenException, NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 CONTACT_ID = "contact-1"
@@ -187,7 +191,11 @@ async def test_publish_action_success(monkeypatch, client):
         assert contact_id == CONTACT_ID
         assert listing_id == LISTING_ID
         assert body.rules_accepted is True
-        return {"id": LISTING_ID, "published_at": "2026-10-07T00:00:00Z", "expires_at": "2026-11-06T00:00:00Z"}
+        return {
+            "id": LISTING_ID,
+            "published_at": "2026-10-07T00:00:00Z",
+            "expires_at": "2026-11-06T00:00:00Z",
+        }
 
     monkeypatch.setattr(
         "apps.user_service.app.services.marketplace_service.MarketplaceService.publish",
@@ -203,12 +211,15 @@ async def test_publish_action_success(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("action,message", [
-    ("remove", "Listing moved back to drafts."),
-    ("restore", "Listing is live again."),
-    ("renew", "Listing renewed for 30 days."),
-    ("relist", "Listing is live again."),
-])
+@pytest.mark.parametrize(
+    "action,message",
+    [
+        ("remove", "Listing moved back to drafts."),
+        ("restore", "Listing is live again."),
+        ("renew", "Listing renewed for 30 days."),
+        ("relist", "Listing is live again."),
+    ],
+)
 async def test_listing_actions_success(monkeypatch, client, action, message):
     """Remove, restore, renew, and relist share the actions route."""
     _resident(monkeypatch)
@@ -357,7 +368,12 @@ async def test_review_uphold_and_dismiss(monkeypatch, client):
 
     async def fake_get(_self, *, report_id):
         assert report_id == REPORT_ID
-        return {"id": REPORT_ID, "project_id": "project-1", "status": "open", "listing_id": LISTING_ID}
+        return {
+            "id": REPORT_ID,
+            "project_id": "project-1",
+            "status": "open",
+            "listing_id": LISTING_ID,
+        }
 
     async def fake_uphold(_self, *, report_id, removal_note, reviewer_user_id):
         assert report_id == REPORT_ID

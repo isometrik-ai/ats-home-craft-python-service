@@ -561,9 +561,7 @@ async def review_report(
         )
         message_key = "marketplace.success.report_upheld"
     else:
-        data = await service.dismiss_report(
-            report_id=report_id, reviewer_user_id=reviewer_user_id
-        )
+        data = await service.dismiss_report(report_id=report_id, reviewer_user_id=reviewer_user_id)
         message_key = "marketplace.success.report_dismissed"
     return success_response(
         request=request,

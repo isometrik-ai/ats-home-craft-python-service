@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from apps.user_service.app.services.marketplace_catalog_service import MarketplaceCatalogService
+from apps.user_service.app.services.marketplace_catalog_service import (
+    MarketplaceCatalogService,
+)
 from apps.user_service.app.services.marketplace_geo import haversine_km
 from libs.shared_utils.http_exceptions import ValidationException
 
