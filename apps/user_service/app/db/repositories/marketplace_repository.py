@@ -1027,7 +1027,12 @@ class MarketplaceRepository(BaseRepository):
         org_wide_code: str,
         assigned_code: str,
     ) -> list[str]:
-        """Societies this staff member may view, in one query."""
+        """Societies this staff member may view, in one query.
+
+        Organization-wide project view includes every active membership.
+        Assigned staff need ``projects_management.view_assigned`` and a project
+        role that grants ``permission_code``.
+        """
         rows = await self.db_connection.fetch(
             """
             WITH org_codes AS (
@@ -1048,8 +1053,7 @@ class MarketplaceRepository(BaseRepository):
                AND (
                     $4::text = ANY(oc.codes)
                     OR (
-                        $3::text = ANY(oc.codes)
-                        AND $5::text = ANY(oc.codes)
+                        $5::text = ANY(oc.codes)
                         AND EXISTS (
                             SELECT 1
                               FROM project_role_permissions prp
