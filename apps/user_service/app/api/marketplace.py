@@ -589,32 +589,7 @@ async def feedback_patterns(
     """Sellers with three or more had_trouble ratings."""
     user_context = await extract_user_context(current_user, db_connection, request=request)
     service = _service(db_connection, user_context)
-    project_ids = [
-        str(row["project_id"])
-        for row in await db_connection.fetch(
-            """
-            SELECT project_id
-              FROM project_members
-             WHERE organization_id = $1::uuid
-               AND user_id = $2::uuid
-               AND status = 'active'
-            """,
-            user_context.organization_id,
-            user_context.user_id,
-        )
-    ]
-    allowed_ids: list[str] = []
-    for project_id in project_ids:
-        try:
-            await ensure_staff_project_access_for_context(
-                user_context=user_context,
-                db_connection=db_connection,
-                project_id=project_id,
-                permission_codes=_VIEW,
-            )
-            allowed_ids.append(project_id)
-        except ForbiddenException:
-            continue
+    allowed_ids = await service.authorized_project_ids(permission_code=_VIEW)
     if not allowed_ids:
         raise ForbiddenException(
             message_key="errors.insufficient_permissions",

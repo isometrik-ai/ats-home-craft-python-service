@@ -1018,6 +1018,57 @@ class MarketplaceRepository(BaseRepository):
             fields["rating"],
         )
 
+    async def authorized_project_ids(
+        self,
+        *,
+        organization_id: str,
+        user_id: str,
+        permission_code: str,
+        org_wide_code: str,
+        assigned_code: str,
+    ) -> list[str]:
+        """Societies this staff member may view, in one query."""
+        rows = await self.db_connection.fetch(
+            """
+            WITH org_codes AS (
+                SELECT COALESCE(ARRAY_AGG(DISTINCT p.code), ARRAY[]::text[]) AS codes
+                  FROM organization_members om
+                  JOIN role_permissions rp ON rp.role_id = om.role_id
+                  JOIN permissions p ON p.id = rp.permission_id
+                 WHERE om.user_id = $2::uuid
+                   AND om.organization_id = $1::uuid
+                   AND om.status = 'active'
+            )
+            SELECT pm.project_id::text AS project_id
+              FROM project_members pm
+              CROSS JOIN org_codes oc
+             WHERE pm.organization_id = $1::uuid
+               AND pm.user_id = $2::uuid
+               AND pm.status = 'active'
+               AND (
+                    $4::text = ANY(oc.codes)
+                    OR (
+                        $3::text = ANY(oc.codes)
+                        AND $5::text = ANY(oc.codes)
+                        AND EXISTS (
+                            SELECT 1
+                              FROM project_role_permissions prp
+                              JOIN project_permissions pp
+                                ON pp.id = prp.project_permission_id
+                             WHERE prp.project_role_id = pm.project_role_id
+                               AND pp.code = $3
+                        )
+                    )
+               )
+            """,
+            organization_id,
+            user_id,
+            permission_code,
+            org_wide_code,
+            assigned_code,
+        )
+        return [row["project_id"] for row in rows]
+
     async def feedback_patterns(
         self, *, organization_id: str, project_ids: list[str]
     ) -> list[dict[str, Any]]:

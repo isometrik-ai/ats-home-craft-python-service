@@ -31,6 +31,10 @@ from apps.user_service.app.services.marketplace_geo import (
     haversine_km,
 )
 from apps.user_service.app.utils.common_utils import UserContext
+from libs.shared_utils.common_query import (
+    PROJECTS_MANAGEMENT_VIEW,
+    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+)
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -887,6 +891,19 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             reviewed_at=_now(),
         )
         return {"id": report_id, "status": "dismissed"}
+
+    async def authorized_project_ids(self, *, permission_code: str) -> list[str]:
+        """Societies whose marketplace data this staff member may read."""
+        user_id = self.user_context.user_id
+        if not user_id:
+            return []
+        return await self.repo.authorized_project_ids(
+            organization_id=self._org(),
+            user_id=user_id,
+            permission_code=permission_code,
+            org_wide_code=PROJECTS_MANAGEMENT_VIEW,
+            assigned_code=PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+        )
 
     async def feedback_patterns(self, *, project_ids: list[str]) -> list[dict[str, Any]]:
         """Sellers with three or more had_trouble ratings in societies the caller can view."""
