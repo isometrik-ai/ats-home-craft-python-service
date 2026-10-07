@@ -1,0 +1,23 @@
+{
+  "categories": [
+    {
+      "id": "furniture",
+      "name": "Furniture",
+      "icon": "sofa",
+      "subtypes": [
+        { "id": "tables_desks", "name": "Tables & desks" },
+        { "id": "sofas_seating", "name": "Sofas & seating" },
+        { "id": "beds_mattresses", "name": "Beds & mattresses" },
+        { "id": "storage", "name": "Storage" },
+        { "id": "outdoor", "name": "Outdoor" }
+      ]
+    },
+    { "id": "electronics", "name": "Electronics", "icon": "tv", "subtypes": [] },
+    { "id": "home_decor", "name": "Home decor", "icon": "lamp", "subtypes": [] },
+    { "id": "appliances", "name": "Appliances", "icon": "fridge", "subtypes": [] },
+    { "id": "kids_toys", "name": "Kids & toys", "icon": "toy", "subtypes": [] },
+    { "id": "vehicles", "name": "Vehicles", "icon": "car", "subtypes": [] },
+    { "id": "services", "name": "Services", "icon": "services", "subtypes": [] },
+    { "id": "others", "name": "Others", "icon": "box", "subtypes": [] }
+  ]
+}

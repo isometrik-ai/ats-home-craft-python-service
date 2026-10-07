@@ -109,6 +109,8 @@ Post-setup parking allotment tables (`unit_parking_allotments`, `parking_slot_ev
 
 See `ats-home-craft-supabase/docs/project-setup-schema.md` for every column.
 
+Resident **Buy & sell** does not add columns or tables here. It reads `projects` (society name and coordinates), `towers` (name, count, map pin), and `units` (pickup flat) through the resident's active `contact_units`. The five marketplace tables are specified in [buy-and-sell-flow.md](./buy-and-sell-flow.md) and [ADR 0019](./adr/0019-buy-and-sell.md).
+
 ### Media handling (important)
 
 Media rows (`project_media`, `config_media`) store **metadata only** — `path`, `mime`,

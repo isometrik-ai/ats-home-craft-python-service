@@ -1455,5 +1455,67 @@
       "wallet_adjusted": "Wallet updated successfully.",
       "wallet_limit_updated": "Wallet credit limit updated successfully."
     }
+  },
+  "marketplace": {
+    "errors": {
+      "not_found": "This listing could not be found.",
+      "cannot_post": "Only an owner, tenant, or family member can post a listing.",
+      "invalid_category": "Choose a category from the list.",
+      "invalid_subtype": "Choose a type for this category.",
+      "subtype_required": "Choose a type for this category.",
+      "not_editable": "This listing cannot be edited.",
+      "not_live": "This listing is not live.",
+      "not_expired": "Only an expired listing can be listed again.",
+      "not_restorable": "Only a listing you removed can be restored.",
+      "incomplete": "Add the missing details before posting.",
+      "live_incomplete": "A live listing has to stay complete.",
+      "rules_required": "Accept the listing rules before posting.",
+      "invalid_file_type": "Photos must be JPEG or PNG.",
+      "too_many_files": "A listing can have at most 8 photos.",
+      "media_not_found": "That photo could not be found.",
+      "invalid_purchase_year": "Enter a purchase year from 1980 through this year.",
+      "invalid_product_url": "The product link must start with http:// or https://.",
+      "giveaway_price": "A giveaway cannot have a price.",
+      "price_required": "Enter a price greater than zero.",
+      "original_price": "The original price must be higher than the asking price.",
+      "buyer_is_seller": "You cannot mark the listing sold to yourself.",
+      "buyer_not_resident": "Choose a resident in your organisation.",
+      "cannot_report_own": "You cannot report your own listing.",
+      "report_exists": "You already reported this listing.",
+      "report_not_found": "This report could not be found.",
+      "report_closed": "This report has already been reviewed.",
+      "removal_note_required": "Write a note the seller will see."
+    },
+    "rules": {
+      "prohibited": "Firearms, alcohol, medicines, pets and rental property can't be listed here. Property goes under Homes.",
+      "closes_in_30_days": "Your post closes by itself 30 days after it goes live.",
+      "giveaway": "Giveaways show as Free."
+    },
+    "success": {
+      "home_retrieved": "Buy and sell home retrieved successfully.",
+      "catalog_retrieved": "Categories retrieved successfully.",
+      "pickup_units_retrieved": "Pickup locations retrieved successfully.",
+      "listings_retrieved": "Listings retrieved successfully.",
+      "saved_retrieved": "Saved listings retrieved successfully.",
+      "mine_retrieved": "Your listings retrieved successfully.",
+      "draft_created": "Draft created successfully.",
+      "detail_retrieved": "Listing retrieved successfully.",
+      "updated": "Listing updated successfully.",
+      "published": "Listing is live.",
+      "media_added": "Photo added successfully.",
+      "media_deleted": "Photo removed successfully.",
+      "removed": "Listing moved back to drafts.",
+      "restored": "Listing is live again.",
+      "renewed": "Listing renewed for 30 days.",
+      "relisted": "Listing is live again.",
+      "sold": "Listing marked as sold.",
+      "saved": "Listing saved.",
+      "unsaved": "Listing removed from saved.",
+      "reported": "Report sent to the committee.",
+      "reports_retrieved": "Reports retrieved successfully.",
+      "report_upheld": "Listing taken down.",
+      "report_dismissed": "Report dismissed.",
+      "patterns_retrieved": "Feedback patterns retrieved successfully."
+    }
   }
 }
