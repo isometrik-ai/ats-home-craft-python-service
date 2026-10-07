@@ -317,8 +317,9 @@ class MarketplaceRepository(BaseRepository):
         organization_id: str,
         listing_id: str,
         fields: dict[str, Any],
-    ) -> None:
-        """Update a whitelist of listing columns."""
+        only_live: bool = False,
+    ) -> bool:
+        """Update a whitelist of listing columns. False when only_live matches nothing."""
         allowed = {
             "unit_id",
             "project_id",
@@ -372,17 +373,25 @@ class MarketplaceRepository(BaseRepository):
             cast = casts.get(key, "")
             sets.append(f"{key} = ${len(params)}{cast}")
         if not sets:
-            return
+            return True
         sets.append("updated_at = now()")
-        await self.db_connection.execute(
+        live_sql = ""
+        if only_live:
+            live_sql = (
+                " AND status = 'live'::marketplace_listing_status"
+                " AND (expires_at IS NULL OR expires_at > now())"
+            )
+        result = await self.db_connection.execute(
             f"""
             UPDATE marketplace_listings
                SET {", ".join(sets)}
              WHERE organization_id = $1::uuid
                AND id = $2::uuid
+               {live_sql}
             """,
             *params,
         )
+        return str(result).split()[-1] != "0"
 
     async def latest_draft(
         self, *, organization_id: str, seller_contact_id: str
@@ -571,6 +580,81 @@ class MarketplaceRepository(BaseRepository):
         )
         return int(value or 0)
 
+    async def lock_listing(self, *, organization_id: str, listing_id: str) -> dict[str, Any] | None:
+        """Lock one listing row for a media or sale change."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT id::text AS id,
+                   seller_contact_id::text AS seller_contact_id,
+                   status::text AS status,
+                   expires_at
+              FROM marketplace_listings
+             WHERE organization_id = $1::uuid
+               AND id = $2::uuid
+             FOR UPDATE
+            """,
+            organization_id,
+            listing_id,
+        )
+        return dict(row) if row else None
+
+    async def cover_paths(self, *, organization_id: str, listing_ids: list[str]) -> dict[str, str]:
+        """One cover path per listing, preferring the flagged cover."""
+        if not listing_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT ON (listing_id)
+                   listing_id::text AS listing_id,
+                   path
+              FROM marketplace_listing_media
+             WHERE organization_id = $1::uuid
+               AND listing_id = ANY($2::uuid[])
+             ORDER BY listing_id, is_cover DESC, sort_order ASC, created_at ASC
+            """,
+            organization_id,
+            listing_ids,
+        )
+        return {row["listing_id"]: row["path"] for row in rows}
+
+    async def saved_listing_ids(
+        self, *, organization_id: str, contact_id: str, listing_ids: list[str]
+    ) -> set[str]:
+        """Which of these listings the contact has bookmarked."""
+        if not listing_ids:
+            return set()
+        rows = await self.db_connection.fetch(
+            """
+            SELECT listing_id::text AS listing_id
+              FROM marketplace_saved_items
+             WHERE organization_id = $1::uuid
+               AND contact_id = $2::uuid
+               AND listing_id = ANY($3::uuid[])
+            """,
+            organization_id,
+            contact_id,
+            listing_ids,
+        )
+        return {row["listing_id"] for row in rows}
+
+    async def media_counts(self, *, organization_id: str, listing_ids: list[str]) -> dict[str, int]:
+        """File counts for a page of listings."""
+        if not listing_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT listing_id::text AS listing_id,
+                   count(*)::int AS media_count
+              FROM marketplace_listing_media
+             WHERE organization_id = $1::uuid
+               AND listing_id = ANY($2::uuid[])
+             GROUP BY listing_id
+            """,
+            organization_id,
+            listing_ids,
+        )
+        return {row["listing_id"]: row["media_count"] for row in rows}
+
     async def insert_media(self, **fields: Any) -> dict[str, Any]:
         """Store media metadata."""
         row = await self.db_connection.fetchrow(
@@ -709,14 +793,31 @@ class MarketplaceRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def count_seller_live(self, *, organization_id: str, seller_contact_id: str) -> int:
+        """How many of this seller's posts are still live."""
+        value = await self.db_connection.fetchval(
+            """
+            SELECT count(*)::int
+              FROM marketplace_listings
+             WHERE organization_id = $1::uuid
+               AND seller_contact_id = $2::uuid
+               AND status = 'live'::marketplace_listing_status
+            """,
+            organization_id,
+            seller_contact_id,
+        )
+        return int(value or 0)
+
     async def list_mine(
         self,
         *,
         organization_id: str,
         seller_contact_id: str,
         status: str,
-    ) -> list[dict[str, Any]]:
-        """Seller's own listings. Sold rows older than a year are omitted."""
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """One page of the seller's listings. Sold rows older than a year are omitted."""
         status_sql = ""
         if status == "live":
             status_sql = "AND l.status = 'live'::marketplace_listing_status"
@@ -730,10 +831,7 @@ class MarketplaceRepository(BaseRepository):
                 "'expired'::marketplace_listing_status, "
                 "'removed'::marketplace_listing_status)"
             )
-        rows = await self.db_connection.fetch(
-            f"""
-            SELECT {_LISTING_COLUMNS}
-            {_LISTING_JOINS}
+        where_sql = f"""
             WHERE l.organization_id = $1::uuid
               AND l.seller_contact_id = $2::uuid
               AND (
@@ -741,12 +839,26 @@ class MarketplaceRepository(BaseRepository):
                     OR l.sold_at >= now() - interval '1 year'
                   )
               {status_sql}
-            ORDER BY l.updated_at DESC
-            """,
+        """
+        total = await self.db_connection.fetchval(
+            f"SELECT count(*)::int FROM marketplace_listings l {where_sql}",
             organization_id,
             seller_contact_id,
         )
-        return [dict(row) for row in rows]
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT {_LISTING_COLUMNS}
+            {_LISTING_JOINS}
+            {where_sql}
+            ORDER BY l.updated_at DESC
+            LIMIT $3 OFFSET $4
+            """,
+            organization_id,
+            seller_contact_id,
+            page_size,
+            (page - 1) * page_size,
+        )
+        return [dict(row) for row in rows], int(total or 0)
 
     async def earned_amount(self, *, organization_id: str, seller_contact_id: str) -> Any:
         """Sum of sold asking prices in the last 365 days."""
@@ -906,18 +1018,68 @@ class MarketplaceRepository(BaseRepository):
             fields["rating"],
         )
 
-    async def feedback_patterns(self, *, organization_id: str) -> list[dict[str, Any]]:
-        """Sellers with three or more had_trouble ratings. No individual ratings."""
+    async def feedback_patterns(
+        self, *, organization_id: str, project_ids: list[str]
+    ) -> list[dict[str, Any]]:
+        """Sellers with three or more had_trouble ratings in the given societies."""
+        if not project_ids:
+            return []
         rows = await self.db_connection.fetch(
             """
-            SELECT seller_contact_id::text AS seller_contact_id,
+            SELECT f.seller_contact_id::text AS seller_contact_id,
                    count(*)::int AS had_trouble_count
-              FROM marketplace_sale_feedback
-             WHERE organization_id = $1::uuid
-               AND rating = 'had_trouble'::marketplace_sale_rating
-             GROUP BY seller_contact_id
+              FROM marketplace_sale_feedback f
+              JOIN marketplace_listings l
+                ON l.id = f.listing_id
+               AND l.organization_id = f.organization_id
+             WHERE f.organization_id = $1::uuid
+               AND l.project_id = ANY($2::uuid[])
+               AND f.rating = 'had_trouble'::marketplace_sale_rating
+             GROUP BY f.seller_contact_id
             HAVING count(*) >= 3
             """,
             organization_id,
+            project_ids,
         )
         return [dict(row) for row in rows]
+
+    async def sell_live_listing(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        buyer_contact_id: str,
+        sold_at: datetime,
+        seller_contact_id: str,
+        rating: str | None,
+    ) -> bool:
+        """Mark a still-live listing sold and store the rating in one transaction."""
+        async with self.db_connection.transaction():
+            result = await self.db_connection.execute(
+                """
+                UPDATE marketplace_listings
+                   SET status = 'sold'::marketplace_listing_status,
+                       sold_at = $3,
+                       buyer_contact_id = $4::uuid,
+                       updated_at = now()
+                 WHERE organization_id = $1::uuid
+                   AND id = $2::uuid
+                   AND status = 'live'::marketplace_listing_status
+                   AND (expires_at IS NULL OR expires_at > now())
+                """,
+                organization_id,
+                listing_id,
+                sold_at,
+                buyer_contact_id,
+            )
+            if str(result).split()[-1] == "0":
+                return False
+            if rating:
+                await self.insert_feedback(
+                    organization_id=organization_id,
+                    listing_id=listing_id,
+                    seller_contact_id=seller_contact_id,
+                    buyer_contact_id=buyer_contact_id,
+                    rating=rating,
+                )
+        return True

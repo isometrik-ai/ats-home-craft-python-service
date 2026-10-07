@@ -195,8 +195,11 @@ async def list_saved_listings(
 @limiter.limit("100/minute")
 async def my_listings(
     request: Request,
+    *,
     unit_id: str = Query(...),
     status: MarketplaceMineStatus = Query(default=MarketplaceMineStatus.ALL),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -205,7 +208,11 @@ async def my_listings(
         current_user, db_connection, request=request
     )
     data = await _service(db_connection, user_context).my_listings(
-        contact_id=str(contact["id"]), unit_id=unit_id, status=status.value
+        contact_id=str(contact["id"]),
+        unit_id=unit_id,
+        status=status.value,
+        page=page,
+        page_size=page_size,
     )
     return success_response(
         request=request,
@@ -596,19 +603,7 @@ async def feedback_patterns(
             user_context.user_id,
         )
     ]
-    if not project_ids:
-        fallback = await db_connection.fetchval(
-            """
-            SELECT id
-              FROM projects
-             WHERE organization_id = $1::uuid
-             LIMIT 1
-            """,
-            user_context.organization_id,
-        )
-        if fallback:
-            project_ids = [str(fallback)]
-    allowed = False
+    allowed_ids: list[str] = []
     for project_id in project_ids:
         try:
             await ensure_staff_project_access_for_context(
@@ -617,16 +612,15 @@ async def feedback_patterns(
                 project_id=project_id,
                 permission_codes=_VIEW,
             )
-            allowed = True
-            break
+            allowed_ids.append(project_id)
         except ForbiddenException:
             continue
-    if not allowed:
+    if not allowed_ids:
         raise ForbiddenException(
             message_key="errors.insufficient_permissions",
             custom_code=CustomStatusCode.FORBIDDEN,
         )
-    data = await service.feedback_patterns()
+    data = await service.feedback_patterns(project_ids=allowed_ids)
     return success_response(
         request=request,
         message_key="marketplace.success.patterns_retrieved",

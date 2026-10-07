@@ -180,7 +180,7 @@ async def test_live_edit_rejects_a_blank_title_before_saving():
 async def test_live_edit_keeps_the_post_live():
     svc = _service()
     updated = _listing(title="Study table")
-    svc.repo.get_listing = AsyncMock(side_effect=[_listing(), updated])
+    svc.repo.get_listing = AsyncMock(side_effect=[_listing(), _listing(), updated])
     svc.repo.count_media = AsyncMock(return_value=2)
     svc.repo.list_media = AsyncMock(return_value=[])
     svc.repo.is_saved = AsyncMock(return_value=False)

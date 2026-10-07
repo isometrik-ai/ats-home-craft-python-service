@@ -485,7 +485,8 @@ async def test_feedback_patterns_success(monkeypatch, client):
 
     app.dependency_overrides[db_conn] = _conn
 
-    async def fake_patterns(_self):
+    async def fake_patterns(_self, *, project_ids):
+        assert project_ids == ["project-1"]
         return [{"seller_contact_id": CONTACT_ID, "had_trouble_count": 3}]
 
     monkeypatch.setattr(

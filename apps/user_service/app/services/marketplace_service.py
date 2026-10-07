@@ -182,6 +182,42 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             )
         return listing
 
+    async def _reload_if_still_live(self, *, contact_id: str, listing_id: str) -> dict[str, Any]:
+        """Expire a finished window, then require the row to still be live."""
+        await self.repo.expire_due(organization_id=self._org())
+        listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
+        if listing["status"] != "live" or _past_expiry(listing.get("expires_at")):
+            raise ValidationException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return listing
+
+    async def _locked_seller_listing(self, *, contact_id: str, listing_id: str) -> dict[str, Any]:
+        """Lock the seller's row. Call inside a transaction. Expire it if the window is over."""
+        listing = await self.repo.lock_listing(organization_id=self._org(), listing_id=listing_id)
+        if not listing or str(listing["seller_contact_id"]) != str(contact_id):
+            raise NotFoundException(
+                message_key="marketplace.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if listing["status"] == "live" and _past_expiry(listing.get("expires_at")):
+            await self.repo.update_listing(
+                organization_id=self._org(),
+                listing_id=listing_id,
+                fields={"status": "expired"},
+            )
+            raise ValidationException(
+                message_key="marketplace.errors.not_editable",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if listing["status"] not in {"draft", "live"}:
+            raise ValidationException(
+                message_key="marketplace.errors.not_editable",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return listing
+
     async def get_catalog(self) -> dict[str, Any]:
         """Static categories."""
         return MarketplaceCatalogService.get_catalog()
@@ -205,14 +241,11 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         recent_rows = await self.repo.list_recent(
             organization_id=org_id, project_id=unit["project_id"]
         )
-        recent = [
-            await self._card(
-                row,
-                viewer_contact_id=contact_id,
-                viewer_project_id=unit["project_id"],
-            )
-            for row in recent_rows
-        ]
+        recent = await self._cards(
+            recent_rows,
+            viewer_contact_id=contact_id,
+            viewer_project_id=unit["project_id"],
+        )
         return {
             "project_name": unit["project_name"],
             "tower_count": await self.repo.count_towers(
@@ -269,13 +302,11 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 message_key="marketplace.errors.not_editable",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        if body.unit_id:
-            unit = await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
-        else:
-            unit = await self.repo.get_unit_context(
-                organization_id=self._org(), unit_id=listing["unit_id"]
-            )
-            assert unit
+        unit = await self._require_poster(
+            contact_id=contact_id, unit_id=body.unit_id or listing["unit_id"]
+        )
+        if listing["status"] == "live":
+            listing = await self._reload_if_still_live(contact_id=contact_id, listing_id=listing_id)
         fields = self._patch_fields(listing, body, unit)
         if listing["status"] == "removed":
             fields["status"] = "draft"
@@ -292,9 +323,17 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                     params={"missing": gaps},
                 )
-        await self.repo.update_listing(
-            organization_id=self._org(), listing_id=listing_id, fields=fields
+        saved = await self.repo.update_listing(
+            organization_id=self._org(),
+            listing_id=listing_id,
+            fields=fields,
+            only_live=listing["status"] == "live",
         )
+        if listing["status"] == "live" and not saved:
+            raise ConflictException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         updated = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
         assert updated
         return await self._detail(
@@ -384,36 +423,32 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     ) -> dict[str, Any]:
         """Attach a presigned upload. Live posts stay live."""
         await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
-        listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
-        if listing["status"] not in {"draft", "live"}:
-            raise ValidationException(
-                message_key="marketplace.errors.not_editable",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
         file_type = body.file_type.strip().lower()
         if file_type not in _MEDIA_TYPES:
             raise ValidationException(
                 message_key="marketplace.errors.invalid_file_type",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        count = await self.repo.count_media(organization_id=self._org(), listing_id=listing_id)
-        if count >= MAX_MEDIA:
-            raise ValidationException(
-                message_key="marketplace.errors.too_many_files",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
+        async with self.db_connection.transaction():
+            await self._locked_seller_listing(contact_id=contact_id, listing_id=listing_id)
+            count = await self.repo.count_media(organization_id=self._org(), listing_id=listing_id)
+            if count >= MAX_MEDIA:
+                raise ValidationException(
+                    message_key="marketplace.errors.too_many_files",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            if body.is_cover:
+                await self.repo.clear_cover(organization_id=self._org(), listing_id=listing_id)
+            await self.repo.insert_media(
+                organization_id=self._org(),
+                listing_id=listing_id,
+                path=body.path.strip(),
+                file_type=file_type,
+                size_bytes=body.size_bytes,
+                original_name=body.original_name,
+                sort_order=body.sort_order,
+                is_cover=body.is_cover or count == 0,
             )
-        if body.is_cover:
-            await self.repo.clear_cover(organization_id=self._org(), listing_id=listing_id)
-        await self.repo.insert_media(
-            organization_id=self._org(),
-            listing_id=listing_id,
-            path=body.path.strip(),
-            file_type=file_type,
-            size_bytes=body.size_bytes,
-            original_name=body.original_name,
-            sort_order=body.sort_order,
-            is_cover=body.is_cover or count == 0,
-        )
         return {"id": listing_id}
 
     async def delete_media(
@@ -421,22 +456,22 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     ) -> None:
         """Remove one file. A live post must keep at least two."""
         await self._require_poster(contact_id=contact_id, unit_id=unit_id)
-        listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
-        if listing["status"] not in {"draft", "live"}:
-            raise ValidationException(
-                message_key="marketplace.errors.not_editable",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
+        async with self.db_connection.transaction():
+            listing = await self._locked_seller_listing(
+                contact_id=contact_id, listing_id=listing_id
             )
-        if listing["status"] == "live":
-            count = await self.repo.count_media(organization_id=self._org(), listing_id=listing_id)
-            if count <= MIN_PUBLISH_MEDIA:
-                raise ValidationException(
-                    message_key="marketplace.errors.live_incomplete",
-                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+            if listing["status"] == "live":
+                count = await self.repo.count_media(
+                    organization_id=self._org(), listing_id=listing_id
                 )
-        deleted = await self.repo.delete_media(
-            organization_id=self._org(), listing_id=listing_id, media_id=media_id
-        )
+                if count <= MIN_PUBLISH_MEDIA:
+                    raise ValidationException(
+                        message_key="marketplace.errors.live_incomplete",
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
+            deleted = await self.repo.delete_media(
+                organization_id=self._org(), listing_id=listing_id, media_id=media_id
+            )
         if not deleted:
             raise NotFoundException(
                 message_key="marketplace.errors.media_not_found",
@@ -488,17 +523,18 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     ) -> dict[str, Any]:
         """Take a live post off the board and keep it as a draft."""
         await self._require_poster(contact_id=contact_id, unit_id=unit_id)
-        listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
-        if listing["status"] != "live":
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        await self.repo.update_listing(
+        await self._reload_if_still_live(contact_id=contact_id, listing_id=listing_id)
+        saved = await self.repo.update_listing(
             organization_id=self._org(),
             listing_id=listing_id,
             fields={"status": "draft"},
+            only_live=True,
         )
+        if not saved:
+            raise ConflictException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         updated = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
         assert updated
         return {
@@ -540,20 +576,21 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     async def renew(self, *, contact_id: str, listing_id: str, unit_id: str) -> dict[str, Any]:
         """Add 30 days, keeping any time still left."""
         await self._require_poster(contact_id=contact_id, unit_id=unit_id)
-        listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
-        if listing["status"] != "live":
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+        listing = await self._reload_if_still_live(contact_id=contact_id, listing_id=listing_id)
         now = _now()
         current = _as_utc(listing["expires_at"]) if listing.get("expires_at") else now
         expires_at = max(current, now) + LIVE_WINDOW
-        await self.repo.update_listing(
+        saved = await self.repo.update_listing(
             organization_id=self._org(),
             listing_id=listing_id,
             fields={"expires_at": expires_at, "renewal_count": int(listing["renewal_count"]) + 1},
+            only_live=True,
         )
+        if not saved:
+            raise ConflictException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         return {"id": listing_id, "expires_at": expires_at}
 
     async def relist(self, *, contact_id: str, listing_id: str, unit_id: str) -> dict[str, Any]:
@@ -579,12 +616,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     ) -> dict[str, Any]:
         """Record the buyer. The rating stays off the public listing."""
         await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
-        listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
-        if listing["status"] != "live":
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+        listing = await self._reload_if_still_live(contact_id=contact_id, listing_id=listing_id)
         if str(body.buyer_contact_id) == str(contact_id):
             raise ValidationException(
                 message_key="marketplace.errors.buyer_is_seller",
@@ -598,19 +630,18 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 message_key="marketplace.errors.buyer_not_resident",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        now = _now()
-        await self.repo.update_listing(
+        sold = await self.repo.sell_live_listing(
             organization_id=self._org(),
             listing_id=listing_id,
-            fields={"status": "sold", "sold_at": now, "buyer_contact_id": body.buyer_contact_id},
+            buyer_contact_id=body.buyer_contact_id,
+            sold_at=_now(),
+            seller_contact_id=contact_id,
+            rating=body.rating.value if body.rating is not None else None,
         )
-        if body.rating is not None:
-            await self.repo.insert_feedback(
-                organization_id=self._org(),
-                listing_id=listing_id,
-                seller_contact_id=contact_id,
-                buyer_contact_id=body.buyer_contact_id,
-                rating=body.rating.value,
+        if not sold:
+            raise ConflictException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.CONFLICT,
             )
         buyer = await self.repo.get_contact_card(
             organization_id=self._org(), contact_id=body.buyer_contact_id
@@ -653,12 +684,9 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         unit = await self._require_unit(contact_id=contact_id, unit_id=unit_id)
         await self.repo.expire_due(organization_id=self._org())
         rows = await self.repo.list_saved(organization_id=self._org(), contact_id=contact_id)
-        return [
-            await self._card(
-                row, viewer_contact_id=contact_id, viewer_project_id=unit["project_id"]
-            )
-            for row in rows
-        ]
+        return await self._cards(
+            rows, viewer_contact_id=contact_id, viewer_project_id=unit["project_id"]
+        )
 
     async def get_listing(
         self, *, contact_id: str, listing_id: str, unit_id: str
@@ -673,11 +701,13 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         seller = str(listing["seller_contact_id"]) == str(contact_id)
-        if not seller and listing["status"] != "live":
-            raise NotFoundException(
-                message_key="marketplace.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
+        if not seller:
+            listing = await self._visible_listing(listing_id=listing_id, unit=unit)
+            if listing["status"] != "live":
+                raise NotFoundException(
+                    message_key="marketplace.errors.not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
         return await self._detail(
             listing, viewer_contact_id=contact_id, viewer_project_id=unit["project_id"]
         )
@@ -729,37 +759,31 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             page=page,
             page_size=page_size,
         )
-        items = [
-            await self._card(
-                row, viewer_contact_id=contact_id, viewer_project_id=unit["project_id"]
-            )
-            for row in rows
-        ]
+        items = await self._cards(
+            rows, viewer_contact_id=contact_id, viewer_project_id=unit["project_id"]
+        )
         return {"items": items, "total": total, "nearby_project_count": len(nearby)}
 
-    async def my_listings(self, *, contact_id: str, unit_id: str, status: str) -> dict[str, Any]:
-        """The seller's own posts."""
+    async def my_listings(
+        self, *, contact_id: str, unit_id: str, status: str, page: int, page_size: int
+    ) -> dict[str, Any]:
+        """One page of the seller's own posts."""
         await self._require_unit(contact_id=contact_id, unit_id=unit_id)
         await self.repo.expire_due(organization_id=self._org())
-        rows = await self.repo.list_mine(
+        rows, total = await self.repo.list_mine(
             organization_id=self._org(),
             seller_contact_id=contact_id,
             status=status,
+            page=page,
+            page_size=page_size,
         )
-        items = []
-        for row in rows:
-            media_count = await self.repo.count_media(
-                organization_id=self._org(), listing_id=row["id"]
-            )
-            items.append(self._mine_card(row, media_count))
-        live_rows = (
-            rows
-            if status in {"all", "live"}
-            else await self.repo.list_mine(
-                organization_id=self._org(), seller_contact_id=contact_id, status="live"
-            )
+        counts = await self.repo.media_counts(
+            organization_id=self._org(), listing_ids=[row["id"] for row in rows]
         )
-        live_count = sum(1 for row in live_rows if row["status"] == "live")
+        items = [self._mine_card(row, counts.get(row["id"], 0)) for row in rows]
+        live_count = await self.repo.count_seller_live(
+            organization_id=self._org(), seller_contact_id=contact_id
+        )
         earned = await self.repo.earned_amount(
             organization_id=self._org(), seller_contact_id=contact_id
         )
@@ -767,6 +791,9 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             "live_count": live_count,
             "earned_amount": _money(earned),
             "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
         }
 
     async def create_report(
@@ -861,9 +888,11 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         )
         return {"id": report_id, "status": "dismissed"}
 
-    async def feedback_patterns(self) -> list[dict[str, Any]]:
-        """Sellers with three or more had_trouble ratings."""
-        return await self.repo.feedback_patterns(organization_id=self._org())
+    async def feedback_patterns(self, *, project_ids: list[str]) -> list[dict[str, Any]]:
+        """Sellers with three or more had_trouble ratings in societies the caller can view."""
+        return await self.repo.feedback_patterns(
+            organization_id=self._org(), project_ids=project_ids
+        )
 
     async def _assert_publishable(self, listing: dict[str, Any]) -> None:
         """Raise when a listing is not ready to go live."""
@@ -916,8 +945,8 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         nearby = await self._nearby_project_ids(unit)
-        allowed = {unit["project_id"], *nearby}
-        if listing["project_id"] not in allowed and listing["status"] == "live":
+        allowed = {str(unit["project_id"]), *(str(item) for item in nearby)}
+        if str(listing["project_id"]) not in allowed:
             raise NotFoundException(
                 message_key="marketplace.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
@@ -942,10 +971,36 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 nearby.append(project["id"])
         return nearby
 
+    async def _cards(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        viewer_contact_id: str,
+        viewer_project_id: str,
+    ) -> list[dict[str, Any]]:
+        """Cards for a page, with covers and bookmarks loaded in two queries."""
+        listing_ids = [row["id"] for row in rows]
+        covers = await self.repo.cover_paths(organization_id=self._org(), listing_ids=listing_ids)
+        saved_ids = await self.repo.saved_listing_ids(
+            organization_id=self._org(),
+            contact_id=viewer_contact_id,
+            listing_ids=listing_ids,
+        )
+        return [
+            self._card_body(
+                row,
+                cover=covers.get(row["id"]),
+                saved=row["id"] in saved_ids,
+                viewer_contact_id=viewer_contact_id,
+                viewer_project_id=viewer_project_id,
+            )
+            for row in rows
+        ]
+
     async def _card(
         self, row: dict[str, Any], *, viewer_contact_id: str, viewer_project_id: str
     ) -> dict[str, Any]:
-        """Card fields shared by the home strip, browse, and saved list."""
+        """Card fields for one listing."""
         media = await self.repo.list_media(organization_id=self._org(), listing_id=row["id"])
         cover = next((item["path"] for item in media if item["is_cover"]), None)
         if cover is None and media:
@@ -955,6 +1010,24 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             contact_id=viewer_contact_id,
             listing_id=row["id"],
         )
+        return self._card_body(
+            row,
+            cover=cover,
+            saved=saved,
+            viewer_contact_id=viewer_contact_id,
+            viewer_project_id=viewer_project_id,
+        )
+
+    @staticmethod
+    def _card_body(
+        row: dict[str, Any],
+        *,
+        cover: str | None,
+        saved: bool,
+        viewer_contact_id: str,
+        viewer_project_id: str,
+    ) -> dict[str, Any]:
+        """Card fields from a listing row and already loaded cover and bookmark."""
         return {
             "id": row["id"],
             "title": row.get("title"),
@@ -1069,6 +1142,13 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 message_key="marketplace.errors.invalid_product_url",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+
+
+def _past_expiry(value: datetime | None) -> bool:
+    """True when a live window has already ended."""
+    if value is None:
+        return False
+    return _as_utc(value) <= _now()
 
 
 def _as_utc(value: datetime) -> datetime:

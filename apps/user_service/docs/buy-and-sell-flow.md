@@ -403,7 +403,7 @@ Publish returns **422** with `missing[]` when the draft is not valid (see ADR §
 
 ### My listings
 
-`GET /v1/marketplace/me/listings?unit_id=&status=all|live|draft|sold|past`
+`GET /v1/marketplace/me/listings?unit_id=&status=all|live|draft|sold|past&page=1&page_size=20`
 
 `past` is `expired` and `removed`. Header: `live_count`, `earned_amount` (sold asking prices in the last year).
 
