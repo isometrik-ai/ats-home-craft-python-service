@@ -128,11 +128,13 @@ async def test_insert_schedule_uses_jsonb_cast() -> None:
         },
     )
 
-    query, _args = conn.fetch_calls[0]
+    query, args = conn.fetch_calls[0]
     assert "INSERT INTO facility_schedule_periods" in query
     assert "::jsonb" in query
     assert "::date" in query
     assert "::uuid" in query
+    assert date(2026, 11, 1) in args
+    assert date(2026, 11, 30) in args
 
 
 @pytest.mark.asyncio

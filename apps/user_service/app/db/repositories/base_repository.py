@@ -10,6 +10,7 @@ All values are passed as parameters (no string interpolation of user input).
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import date
 from typing import Any
 
 import asyncpg
@@ -28,6 +29,21 @@ def _row_columns_present(rows: Iterable[dict[str, Any]], columns: Iterable[str])
             if col in row:
                 present.add(col)
     return [c for c in allowed if c in present]
+
+
+def _coerce_insert_value(
+    column: str,
+    value: Any,
+    *,
+    jsonb_columns: frozenset[str],
+    date_columns: frozenset[str],
+) -> Any:
+    """Normalize insert bind values for asyncpg typed placeholders."""
+    if value is None:
+        return None
+    if column in date_columns and isinstance(value, str):
+        return date.fromisoformat(value)
+    return serialize_jsonb_param(column, value, jsonb_columns)
 
 
 def _insert_placeholder(
@@ -103,7 +119,14 @@ class BaseRepository:
         values_flat: list[Any] = []
         for row in rows:
             for col in columns:
-                values_flat.append(serialize_jsonb_param(col, row.get(col), jsonb_columns))
+                values_flat.append(
+                    _coerce_insert_value(
+                        col,
+                        row.get(col),
+                        jsonb_columns=jsonb_columns,
+                        date_columns=date_columns,
+                    )
+                )
 
         conflict_clause = (
             f" {on_conflict_sql.strip()} " if on_conflict_sql and on_conflict_sql.strip() else " "
