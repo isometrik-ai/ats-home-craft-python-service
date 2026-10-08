@@ -39,6 +39,7 @@ ______________________________________________________________________
 | Household pets      | [pets-flow.md](./pets-flow.md)                             | [0016](./adr/0016-pets.md)                                                                          |
 | Facility booking    | [facility-booking-flow.md](./facility-booking-flow.md)     | [0017](./adr/0017-facility-booking.md)                                                              |
 | Fee configuration   | [fee-configuration-flow.md](./fee-configuration-flow.md)   | [0018](./adr/0018-fee-configuration.md)                                                             |
+| Buy & sell          | [buy-and-sell-flow.md](./buy-and-sell-flow.md)             | [0019](./adr/0019-buy-and-sell.md)                                                                  |
 
 Full ADR index: [adr/README.md](./adr/README.md)
 

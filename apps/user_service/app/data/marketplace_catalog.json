@@ -1,0 +1,88 @@
+{
+  "categories": [
+    {
+      "slug": "furniture",
+      "name": "Furniture",
+      "icon": "sofa",
+      "subtypes": [
+        { "slug": "tables_desks", "name": "Tables & desks" },
+        { "slug": "sofas_seating", "name": "Sofas & seating" },
+        { "slug": "beds_mattresses", "name": "Beds & mattresses" },
+        { "slug": "storage", "name": "Storage" },
+        { "slug": "outdoor", "name": "Outdoor" },
+        { "slug": "other", "name": "Other" }
+      ]
+    },
+    {
+      "slug": "electronics",
+      "name": "Electronics",
+      "icon": "tv",
+      "subtypes": [
+        { "slug": "mobiles_tablets", "name": "Mobiles & tablets" },
+        { "slug": "laptops_computers", "name": "Laptops & computers" },
+        { "slug": "tv_audio", "name": "TVs & audio" },
+        { "slug": "cameras", "name": "Cameras" },
+        { "slug": "other", "name": "Other" }
+      ]
+    },
+    {
+      "slug": "home_decor",
+      "name": "Home decor",
+      "icon": "lamp",
+      "subtypes": [
+        { "slug": "lighting", "name": "Lighting" },
+        { "slug": "wall_art", "name": "Wall art" },
+        { "slug": "rugs_carpets", "name": "Rugs & carpets" },
+        { "slug": "curtains_blinds", "name": "Curtains & blinds" },
+        { "slug": "other", "name": "Other" }
+      ]
+    },
+    {
+      "slug": "appliances",
+      "name": "Appliances",
+      "icon": "fridge",
+      "subtypes": [
+        { "slug": "kitchen", "name": "Kitchen" },
+        { "slug": "laundry", "name": "Laundry" },
+        { "slug": "ac_heating", "name": "AC & heating" },
+        { "slug": "small_appliances", "name": "Small appliances" },
+        { "slug": "other", "name": "Other" }
+      ]
+    },
+    {
+      "slug": "kids_toys",
+      "name": "Kids & toys",
+      "icon": "toy",
+      "subtypes": [
+        { "slug": "toys_games", "name": "Toys & games" },
+        { "slug": "baby_gear", "name": "Baby gear" },
+        { "slug": "kids_furniture", "name": "Kids furniture" },
+        { "slug": "kids_clothing", "name": "Kids clothing" },
+        { "slug": "other", "name": "Other" }
+      ]
+    },
+    {
+      "slug": "vehicles",
+      "name": "Vehicles",
+      "icon": "car",
+      "subtypes": [
+        { "slug": "cars", "name": "Cars" },
+        { "slug": "two_wheelers", "name": "Two-wheelers" },
+        { "slug": "cycles", "name": "Cycles" },
+        { "slug": "accessories", "name": "Accessories" },
+        { "slug": "other", "name": "Other" }
+      ]
+    },
+    {
+      "slug": "others",
+      "name": "Others",
+      "icon": "box",
+      "subtypes": [
+        { "slug": "sports_fitness", "name": "Sports & fitness" },
+        { "slug": "books_stationery", "name": "Books & stationery" },
+        { "slug": "hobbies", "name": "Hobbies" },
+        { "slug": "other", "name": "Other" }
+      ]
+    }
+  ]
+}
