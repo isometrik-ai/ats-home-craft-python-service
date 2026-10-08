@@ -9,14 +9,10 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
-from apps.user_service.app.schemas.enums.marketplace import (
-    MarketplaceItemCondition,
-    MarketplaceMineStatus,
-    MarketplacePriceBand,
-    MarketplaceSort,
-)
+from apps.user_service.app.schemas.enums.marketplace import MarketplaceMineStatus
 from apps.user_service.app.schemas.marketplace import (
-    CreateDraftListingRequest,
+    BrowseListingsQuery,
+    CreateListingRequest,
     MarketplaceCatalogApiResponse,
     MarketplaceListApiResponse,
     MarketplaceListingApiResponse,
@@ -24,7 +20,6 @@ from apps.user_service.app.schemas.marketplace import (
     MarkSoldRequest,
     PublishListingRequest,
     RemoveListingRequest,
-    RestoreListingRequest,
     SaveListingRequest,
     UpdateListingRequest,
 )
@@ -109,16 +104,9 @@ async def marketplace_catalog(
     responses=_ok_response(MarketplaceListApiResponse, "Listing cards retrieved."),
 )
 @limiter.limit("100/minute")
-async def list_marketplace_listings(  # pylint: disable=too-many-positional-arguments
+async def list_marketplace_listings(
     request: Request,
-    category: str | None = Query(default=None, description="Catalog category name."),
-    subtype: str | None = Query(default=None, description="Catalog subtype name."),
-    q: str | None = Query(default=None, description="Search title text."),
-    sort: MarketplaceSort = Query(default=MarketplaceSort.NEWEST),
-    price_band: MarketplacePriceBand | None = Query(default=None),
-    condition: list[MarketplaceItemCondition] | None = Query(default=None),
-    page: int = Query(default=1, ge=1, le=21_474_836),
-    page_size: int = Query(default=20, ge=1, le=100),
+    filters: BrowseListingsQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -129,21 +117,21 @@ async def list_marketplace_listings(  # pylint: disable=too-many-positional-argu
     service = MarketplaceService(db_connection=db_connection, user_context=user_context)
     data = await service.list_listings(
         contact_id=str(contact["id"]),
-        category=category,
-        subtype=subtype,
-        query=q,
-        sort=sort.value,
-        price_band=price_band.value if price_band else None,
-        conditions=[item.value for item in condition] if condition else [],
-        page=page,
-        page_size=page_size,
+        category=filters.category,
+        subtype=filters.subtype,
+        query=filters.q,
+        sort=filters.sort.value,
+        price_band=filters.price_band.value if filters.price_band else None,
+        conditions=[item.value for item in filters.condition] if filters.condition else [],
+        page=filters.page,
+        page_size=filters.page_size,
     )
     return list_response(
         request=request,
         items=data["items"],
         total=data["total"],
-        page=page,
-        page_size=page_size,
+        page=filters.page,
+        page_size=filters.page_size,
         message_key="marketplace.success.listings_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
     )
@@ -228,13 +216,13 @@ async def my_listings(
     )
 
 
-@handle_api_exceptions("create marketplace draft")
+@handle_api_exceptions("create marketplace listing")
 @router.post(
-    "/listings/drafts",
+    "/listings",
     status_code=http_status.HTTP_201_CREATED,
-    summary="Create a draft listing",
+    summary="Create a listing",
     response_model=None,
-    responses=_created_response(MarketplaceListingApiResponse, "Draft listing created."),
+    responses=_created_response(MarketplaceListingApiResponse, "Listing created."),
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -244,30 +232,30 @@ async def my_listings(
     table_name="marketplace_listings",
     category="MARKETPLACE",
 )
-async def create_draft_listing(
+async def create_listing(
     request: Request,
-    body: CreateDraftListingRequest = Body(...),
+    body: CreateListingRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Step 2 save draft, continue to preview, or post another (new category flow)."""
+    """Create a listing. It stays unpublished until POST /listings/{id}/publish."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
     service = MarketplaceService(db_connection=db_connection, user_context=user_context)
-    data = await service.create_draft(contact_id=str(contact["id"]), body=body)
+    data = await service.create_listing(contact_id=str(contact["id"]), body=body)
     set_audit_context(
         request,
         user_context,
         table="marketplace_listings",
         requested_id=str(data.get("id")),
-        description=f"Created marketplace draft for unit: {body.unit_id}",
+        description=f"Created marketplace listing for unit: {body.unit_id}",
         risk_level="low",
         new_data=data,
     )
     return success_response(
         request=request,
-        message_key="marketplace.success.draft_created",
+        message_key="marketplace.success.created",
         status_code=http_status.HTTP_201_CREATED,
         custom_code=CustomStatusCode.CREATED,
         data=data,
@@ -328,7 +316,8 @@ async def update_listing(
 ):
     """Patch listing fields while draft or live (seller only).
 
-    Live rows stay live if still valid. Media cannot change after create.
+    Status is not editable here. Live rows stay live if still valid.
+    Media cannot change after create.
     """
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
@@ -379,7 +368,7 @@ async def publish_listing(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Step 3 preview: accept rules and publish the draft."""
+    """Accept listing rules and go live. Only unpublished listings can be published."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -429,7 +418,7 @@ async def remove_listing(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Soft-delete a live listing. Restore with POST .../restore."""
+    """Soft-delete a live listing. The seller must create a new listing to post again."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -452,56 +441,6 @@ async def remove_listing(
     return success_response(
         request=request,
         message_key="marketplace.success.removed",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("restore marketplace listing")
-@router.post(
-    "/listings/{listing_id}/restore",
-    status_code=http_status.HTTP_200_OK,
-    summary="Restore a removed listing",
-    response_model=None,
-    responses=_ok_response(MarketplaceListingApiResponse, "Listing restored to live."),
-)
-@limiter.limit("30/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="pii",
-    compliance_tags=["audit_required"],
-    table_name="marketplace_listings",
-    category="MARKETPLACE",
-)
-async def restore_listing(
-    request: Request,
-    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
-    body: RestoreListingRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Put a seller-removed listing back on the board."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
-    data = await service.restore_listing(
-        contact_id=str(contact["id"]),
-        listing_id=listing_id,
-        unit_id=body.unit_id,
-    )
-    set_audit_context(
-        request,
-        user_context,
-        table="marketplace_listings",
-        requested_id=listing_id,
-        description=f"Restored marketplace listing: {listing_id}",
-        risk_level="low",
-        new_data=data,
-    )
-    return success_response(
-        request=request,
-        message_key="marketplace.success.restored",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

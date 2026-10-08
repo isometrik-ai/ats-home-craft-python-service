@@ -5,32 +5,60 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceItemCondition,
     MarketplaceListingKind,
+    MarketplaceMediaKind,
+    MarketplacePriceBand,
     MarketplaceSaleRating,
+    MarketplaceSort,
 )
 
 
 class ListingMediaInput(BaseModel):
-    """One image uploaded via presigned URL. Set only on create."""
+    """One image or video stored on listings.media. Set only on create."""
 
+    type: MarketplaceMediaKind
     path: str = Field(min_length=1)
     file_type: str
-    size_bytes: int = Field(gt=0, le=5_242_880)
-    original_name: str | None = None
-    sort_order: int = Field(ge=0)
-    is_cover: bool = False
+    preview_path: str | None = Field(default=None, min_length=1)
+    description: str | None = Field(default=None, max_length=200)
+    order: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def preview_required_for_video(self) -> ListingMediaInput:
+        """Videos need a poster path; images may omit it."""
+        if self.type == MarketplaceMediaKind.VIDEO and not (self.preview_path or "").strip():
+            raise ValueError("preview_path is required when type is video")
+        return self
 
 
-class CreateDraftListingRequest(BaseModel):
-    """Step 2: create a draft (category, post fields, media). Does not go live."""
+class BrowseListingsQuery(BaseModel):
+    """Query params for GET /marketplace/listings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    category: str | None = Field(default=None, description="Catalog category slug.")
+    subtype: str | None = Field(default=None, description="Catalog subtype slug.")
+    q: str | None = Field(default=None, description="Search title text.")
+    sort: MarketplaceSort = MarketplaceSort.NEWEST
+    price_band: MarketplacePriceBand | None = None
+    condition: list[MarketplaceItemCondition] | None = Field(
+        default=None,
+        description="Repeatable. lightly_used, well_used, needs_repair.",
+    )
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1)
+
+
+class CreateListingRequest(BaseModel):
+    """Create a listing (starts unpublished). Publish separately to go live."""
 
     unit_id: str
-    category: str = Field(min_length=1, max_length=80)
-    subtype: str | None = None
+    category: str = Field(min_length=1, max_length=80, description="Catalog category slug.")
+    subtype: str | None = Field(default=None, description="Catalog subtype slug. Required.")
     title: str | None = Field(default=None, max_length=80)
     description: str | None = Field(default=None, max_length=1000)
     purchase_year: int | None = None
@@ -47,7 +75,9 @@ class CreateDraftListingRequest(BaseModel):
 
 
 class UpdateListingRequest(BaseModel):
-    """Partial edit. Media cannot change. A live row must remain publish-valid."""
+    """Partial edit. Status and media cannot change. A live row must remain publish-valid."""
+
+    model_config = ConfigDict(extra="forbid")
 
     unit_id: str
     pickup_unit_id: str | None = None
@@ -63,10 +93,6 @@ class UpdateListingRequest(BaseModel):
     product_url: str | None = None
     show_flat_number: bool | None = None
     original_bill_available: bool | None = None
-    clear_price: bool = False
-    clear_original_price: bool = False
-    clear_brand: bool = False
-    clear_product_url: bool = False
 
 
 class PublishListingRequest(BaseModel):
@@ -81,12 +107,6 @@ class RemoveListingRequest(BaseModel):
 
     unit_id: str
     removal_note: str = Field(min_length=1, max_length=500)
-
-
-class RestoreListingRequest(BaseModel):
-    """Restore a seller-removed listing back to live."""
-
-    unit_id: str
 
 
 class SaveListingRequest(BaseModel):

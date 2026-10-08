@@ -27,48 +27,50 @@ def _resident(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_catalog_success_uses_the_real_catalog(monkeypatch, client):
-    """GET /marketplace/catalog returns the eight categories."""
+    """GET /marketplace/catalog returns the seven categories."""
     _resident(monkeypatch)
     response = await client.get("/v1/marketplace/catalog")
     payload = assert_success(response)
     names = [item["name"] for item in payload["data"]["categories"]]
     assert names[0] == "Furniture"
-    assert len(names) == 8
+    assert len(names) == 7
+    assert "Services" not in names
 
 
 @pytest.mark.asyncio
-async def test_create_draft_success(monkeypatch, client):
-    """POST /marketplace/listings/drafts starts a draft."""
+async def test_create_listing_success(monkeypatch, client):
+    """POST /marketplace/listings creates an unpublished listing."""
     _resident(monkeypatch)
 
     async def fake_create(_self, *, contact_id, body):
         assert contact_id == CONTACT_ID
-        assert body.category == "Electronics"
-        return {"id": LISTING_ID, "status": "draft", "category": "Electronics"}
+        assert body.category == "electronics"
+        assert body.subtype == "mobiles_tablets"
+        return {"id": LISTING_ID, "status": "draft", "category": "electronics"}
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.create_draft",
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.create_listing",
         fake_create,
     )
     response = await client.post(
-        "/v1/marketplace/listings/drafts",
-        json={"unit_id": UNIT_ID, "category": "Electronics"},
+        "/v1/marketplace/listings",
+        json={"unit_id": UNIT_ID, "category": "electronics", "subtype": "mobiles_tablets"},
     )
     payload = assert_success(response, status_code=201)
     assert payload["data"]["status"] == "draft"
 
 
 @pytest.mark.asyncio
-async def test_create_draft_fails_without_a_category(monkeypatch, client):
-    """POST /listings/drafts returns 422 when category is missing."""
+async def test_create_listing_fails_without_a_category(monkeypatch, client):
+    """POST /listings returns 422 when category is missing."""
     _resident(monkeypatch)
-    response = await client.post("/v1/marketplace/listings/drafts", json={"unit_id": UNIT_ID})
+    response = await client.post("/v1/marketplace/listings", json={"unit_id": UNIT_ID})
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_create_draft_fails_for_an_unknown_category(monkeypatch, client):
-    """POST /listings/drafts returns 422 when the category is not in the catalog."""
+async def test_create_listing_fails_for_an_unknown_category(monkeypatch, client):
+    """POST /listings returns 422 when the category is not in the catalog."""
     _resident(monkeypatch)
 
     async def fake_create(_self, *, contact_id, body):
@@ -79,11 +81,11 @@ async def test_create_draft_fails_for_an_unknown_category(monkeypatch, client):
         )
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.create_draft",
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.create_listing",
         fake_create,
     )
     response = await client.post(
-        "/v1/marketplace/listings/drafts",
+        "/v1/marketplace/listings",
         json={"unit_id": UNIT_ID, "category": "Spaceships"},
     )
     assert_error(response, status_code=422, message_fragment="category")

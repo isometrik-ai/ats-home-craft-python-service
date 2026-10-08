@@ -16,7 +16,7 @@ from apps.user_service.app.db.repositories.marketplace_repository import (
     MarketplaceRepository,
 )
 from apps.user_service.app.schemas.marketplace import (
-    CreateDraftListingRequest,
+    CreateListingRequest,
     ListingMediaInput,
     MarkSoldRequest,
     PublishListingRequest,
@@ -39,8 +39,11 @@ MAX_MEDIA = 8
 MIN_PUBLISH_MEDIA = 2
 PURCHASE_YEAR_MIN = 1980
 _KOLKATA = ZoneInfo("Asia/Kolkata")
-_EDITABLE = frozenset({"draft", "live", "removed"})
-_MEDIA_TYPES = frozenset({"jpeg", "png"})
+_EDITABLE = frozenset({"draft", "live"})
+_MEDIA_MIMES = {
+    "image": frozenset({"image/jpeg", "image/png"}),
+    "video": frozenset({"video/mp4"}),
+}
 
 
 def public_name(first_name: str | None, last_name: str | None) -> str:
@@ -79,6 +82,24 @@ def visible_flat(
     return None
 
 
+def listing_media(listing: dict[str, Any]) -> list[dict[str, Any]]:
+    """Ordered media documents from the listing jsonb column."""
+    items = listing.get("media") or []
+    if not isinstance(items, list):
+        return []
+    return sorted(items, key=lambda item: int(item.get("order") or 0))
+
+
+def cover_path(media: list[dict[str, Any]]) -> str | None:
+    """Card image: first still, otherwise the first item's preview or path."""
+    for item in media:
+        if item.get("type") == "image" and item.get("path"):
+            return item["path"]
+    if not media:
+        return None
+    return media[0].get("preview_path") or media[0].get("path")
+
+
 def publish_gaps(listing: dict[str, Any], media_count: int) -> list[str]:
     """Fields still required before a draft can go live."""
     gaps: list[str] = []
@@ -115,7 +136,7 @@ def _now() -> datetime:
 
 
 class MarketplaceService:  # pylint: disable=too-many-public-methods
-    """Listings, media, saves, reports, and committee takedown."""
+    """Listings, saves, and sale feedback."""
 
     def __init__(self, *, db_connection: asyncpg.Connection, user_context: UserContext) -> None:
         self.db_connection = db_connection
@@ -183,10 +204,10 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         """Static categories."""
         return MarketplaceCatalogService.get_catalog()
 
-    async def create_draft(
-        self, *, contact_id: str, body: CreateDraftListingRequest
+    async def create_listing(
+        self, *, contact_id: str, body: CreateListingRequest
     ) -> dict[str, Any]:
-        """Create a draft listing with optional post fields and media."""
+        """Create a listing. Status is unpublished until publish."""
         unit = await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
         category, subtype = MarketplaceCatalogService.resolve(body.category, body.subtype)
         created = await self.repo.insert_listing(
@@ -201,20 +222,18 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         )
         listing_id = created["id"]
         fields = self._create_fields(body, unit)
+        fields["media"] = self._media_documents(body.media)
         if fields:
             await self.repo.update_listing(
                 organization_id=self._org(), listing_id=listing_id, fields=fields
             )
-        await self._insert_media_batch(listing_id=listing_id, media=body.media)
         listing = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
         assert listing
         return await self._detail(
             listing, viewer_contact_id=contact_id, viewer_project_id=str(unit["project_id"])
         )
 
-    def _create_fields(
-        self, body: CreateDraftListingRequest, unit: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _create_fields(self, body: CreateListingRequest, unit: dict[str, Any]) -> dict[str, Any]:
         """Listing columns sent on create (excluding category handled at insert)."""
         fields: dict[str, Any] = {
             "unit_id": unit["id"],
@@ -250,36 +269,38 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             fields["negotiable"] = body.negotiable
         return fields
 
-    async def _insert_media_batch(self, *, listing_id: str, media: list[ListingMediaInput]) -> None:
-        """Persist media on create only."""
+    @staticmethod
+    def _media_documents(media: list[ListingMediaInput]) -> list[dict[str, Any]]:
+        """Normalize create-time media into the listing jsonb array."""
         if len(media) > MAX_MEDIA:
             raise ValidationException(
                 message_key="marketplace.errors.too_many_files",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         if not media:
-            return
-        cover_index = next((index for index, item in enumerate(media) if item.is_cover), 0)
-        for index, item in enumerate(media):
+            return []
+        documents: list[dict[str, Any]] = []
+        for item in media:
+            kind = item.type.value
             file_type = item.file_type.strip().lower()
-            if file_type not in _MEDIA_TYPES:
+            if file_type not in _MEDIA_MIMES[kind]:
                 raise ValidationException(
                     message_key="marketplace.errors.invalid_file_type",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
                 )
-            is_cover = index == cover_index
-            if is_cover:
-                await self.repo.clear_cover(organization_id=self._org(), listing_id=listing_id)
-            await self.repo.insert_media(
-                organization_id=self._org(),
-                listing_id=listing_id,
-                path=item.path.strip(),
-                file_type=file_type,
-                size_bytes=item.size_bytes,
-                original_name=item.original_name,
-                sort_order=item.sort_order,
-                is_cover=is_cover,
+            description = (item.description or "").strip() or None
+            preview_path = (item.preview_path or "").strip() or None
+            documents.append(
+                {
+                    "type": kind,
+                    "path": item.path.strip(),
+                    "file_type": file_type,
+                    "preview_path": preview_path,
+                    "description": description,
+                    "order": item.order,
+                }
             )
+        return documents
 
     async def update_listing(
         self,
@@ -288,7 +309,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         listing_id: str,
         body: UpdateListingRequest,
     ) -> dict[str, Any]:
-        """Edit a draft, a live sale listing, or a seller-removed row (owner/tenant poster only)."""
+        """Edit a draft or live listing. Status is not patched; use publish/remove/mark-sold."""
         await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
         listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
         if listing["status"] not in _EDITABLE:
@@ -304,14 +325,10 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             )
             assert unit
         fields = self._patch_fields(listing, body, unit)
-        if listing["status"] == "removed":
-            fields["status"] = "draft"
+        fields.pop("status", None)
         merged = {**listing, **fields}
         if listing["status"] == "live":
-            media_count = await self.repo.count_media(
-                organization_id=self._org(), listing_id=listing_id
-            )
-            gaps = publish_gaps(merged, media_count)
+            gaps = publish_gaps(merged, len(listing_media(merged)))
             self._raise_price_rules(merged)
             if gaps:
                 raise ValidationException(
@@ -345,7 +362,6 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         provided = body.model_fields_set
         self._copy_text_fields(fields, body, provided)
         self._apply_kind_and_price(fields, listing, body, provided)
-        self._apply_clears(fields, body)
         return fields
 
     def _copy_text_fields(
@@ -393,18 +409,6 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             fields["original_price_amount"] = body.original_price_amount
         if "negotiable" in provided:
             fields["negotiable"] = bool(body.negotiable)
-
-    @staticmethod
-    def _apply_clears(fields: dict[str, Any], body: UpdateListingRequest) -> None:
-        """Explicit clears win over a value sent in the same request."""
-        if body.clear_price:
-            fields["price_amount"] = None
-        if body.clear_original_price:
-            fields["original_price_amount"] = None
-        if body.clear_brand:
-            fields["brand"] = None
-        if body.clear_product_url:
-            fields["product_url"] = None
 
     async def publish(
         self, *, contact_id: str, listing_id: str, body: PublishListingRequest
@@ -492,41 +496,6 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             "status": updated["status"],
             "removed_at": updated.get("removed_at"),
             "removal_note": updated.get("removal_note"),
-        }
-
-    async def restore_listing(
-        self, *, contact_id: str, listing_id: str, unit_id: str
-    ) -> dict[str, Any]:
-        """Put a seller-removed listing back on the board."""
-        await self._require_poster(contact_id=contact_id, unit_id=unit_id)
-        listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
-        if listing["status"] != "removed":
-            raise ValidationException(
-                message_key="marketplace.errors.not_restorable",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        await self._assert_publishable(listing)
-        now = _now()
-        expires_at = listing.get("expires_at")
-        fields: dict[str, Any] = {
-            "status": "live",
-            "removed_at": None,
-            "removal_note": None,
-            "removed_by_user_id": None,
-        }
-        if expires_at is None or _as_utc(expires_at) <= now:
-            fields["published_at"] = now
-            fields["expires_at"] = now + LIVE_WINDOW
-        await self.repo.update_listing(
-            organization_id=self._org(), listing_id=listing_id, fields=fields
-        )
-        updated = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
-        assert updated
-        return {
-            "id": listing_id,
-            "status": updated["status"],
-            "published_at": updated["published_at"],
-            "expires_at": updated["expires_at"],
         }
 
     async def renew(self, *, contact_id: str, listing_id: str, unit_id: str) -> dict[str, Any]:
@@ -693,13 +662,14 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     ) -> dict[str, Any]:
         """Browse live listings org-wide."""
         await self.repo.expire_due(organization_id=self._org())
+        category_id, subtype_id = MarketplaceCatalogService.parse_filter(category, subtype)
         rows, total = await self.repo.list_listings(
             organization_id=self._org(),
             org_wide=True,
             project_ids=[],
             tower_id=None,
-            category=category,
-            subtype=subtype,
+            category=category_id,
+            subtype=subtype_id,
             query=query,
             conditions=conditions,
             price_band=price_band,
@@ -732,12 +702,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             page=page,
             page_size=page_size,
         )
-        items = []
-        for row in rows:
-            media_count = await self.repo.count_media(
-                organization_id=self._org(), listing_id=row["id"]
-            )
-            items.append(self._mine_card(row, media_count))
+        items = [self._mine_card(row, len(listing_media(row))) for row in rows]
         earned = await self.repo.earned_amount(
             organization_id=self._org(), seller_contact_id=contact_id
         )
@@ -749,11 +714,8 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
 
     async def _assert_publishable(self, listing: dict[str, Any]) -> None:
         """Raise when a listing is not ready to go live."""
-        await self.repo.ensure_cover(organization_id=self._org(), listing_id=listing["id"])
-        media_count = await self.repo.count_media(
-            organization_id=self._org(), listing_id=listing["id"]
-        )
-        gaps = publish_gaps(listing, media_count)
+        media = listing_media(listing)
+        gaps = publish_gaps(listing, len(media))
         self._raise_price_rules(listing)
         year = listing.get("purchase_year")
         if year is not None:
@@ -828,23 +790,26 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         self, row: dict[str, Any], *, viewer_contact_id: str, viewer_project_id: str | None
     ) -> dict[str, Any]:
         """Card fields shared by the home strip, browse, and saved list."""
-        media = await self.repo.list_media(organization_id=self._org(), listing_id=row["id"])
-        cover = next((item["path"] for item in media if item["is_cover"]), None)
-        if cover is None and media:
-            cover = media[0]["path"]
+        media = listing_media(row)
         saved = await self.repo.is_saved(
             organization_id=self._org(),
             contact_id=viewer_contact_id,
             listing_id=row["id"],
         )
+        category_name, subtype_name = MarketplaceCatalogService.labels(
+            str(row["category"]), row.get("subtype")
+        )
         return {
             "id": row["id"],
             "title": row.get("title"),
             "category": row["category"],
+            "category_name": category_name,
+            "subtype": row.get("subtype"),
+            "subtype_name": subtype_name,
             "kind": row["kind"],
             "price_amount": _money(row.get("price_amount")),
             "original_price_amount": _money(row.get("original_price_amount")),
-            "cover_path": cover,
+            "cover_path": cover_path(media),
             "is_new_today": _is_new_today(row.get("published_at")),
             "tower_name": row.get("tower_name"),
             "project_name": row.get("project_name"),
@@ -863,7 +828,6 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         card = await self._card(
             row, viewer_contact_id=viewer_contact_id, viewer_project_id=viewer_project_id
         )
-        media = await self.repo.list_media(organization_id=self._org(), listing_id=row["id"])
         others = 0
         if row["status"] == "live":
             others = await self.repo.count_other_live(
@@ -879,7 +843,6 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
         card.update(
             {
                 "status": row["status"],
-                "subtype": row.get("subtype"),
                 "description": row.get("description"),
                 "purchase_year": year,
                 "age_years": age_years,
@@ -899,7 +862,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
                 "viewer_is_seller": str(row["seller_contact_id"]) == str(viewer_contact_id),
                 "collection_latitude": _float_or_none(row.get("tower_latitude")),
                 "collection_longitude": _float_or_none(row.get("tower_longitude")),
-                "media": media,
+                "media": listing_media(row),
                 "more_from_seller_count": others,
                 "removal_note": row.get("removal_note")
                 if str(row["seller_contact_id"]) == str(viewer_contact_id)
@@ -925,7 +888,6 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             "published_at": row.get("published_at"),
             "sold_at": row.get("sold_at"),
             "removal_note": row.get("removal_note"),
-            "can_restore": row["status"] == "removed",
         }
 
     @staticmethod

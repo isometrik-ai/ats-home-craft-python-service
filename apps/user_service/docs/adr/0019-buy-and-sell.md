@@ -5,7 +5,7 @@
 | **Status**       | Proposed                                                                                                                                                                                                                                                                 |
 | **Date**         | 2026-10-06 (revised 2026-10-08)                                                                                                                                                                                                                                          |
 | **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                 |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0010](./0010-contact-roles.md), [ADR 0009](./0009-push-notifications-grpc.md) (optional wanted push), [project setup](../project-setup-flow.md)                                             |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0010](./0010-contact-roles.md), [project setup](../project-setup-flow.md)                                                                                                                   |
 | **Related docs** | [buy-and-sell-flow.md](../buy-and-sell-flow.md), [project-setup-flow.md](../project-setup-flow.md), [pets-flow.md](../pets-flow.md) (catalog + media-path pattern)                                                                                                       |
 | **Migrations**   | `ats-home-craft-supabase`: `20261006120000_marketplace_enums.sql`, `20261006121000_marketplace_tables.sql`, `20261006122000_marketplace_permissions.sql`, `20261008120000_marketplace_item_condition_drop_like_new.sql`, `20261008130000_marketplace_flow_alignment.sql` |
 
@@ -15,12 +15,12 @@ ______________________________________________________________________
 
 Residents need a place to sell or give away household items and browse what others have listed. Buy & Sell is a resident tab on the app shell.
 
-**Reduced scope (2026-10-08):** No in-app chat, no reports, no staff marketplace admin API, no search history or suggestions, no view counts, no giveaway sort boost, no expiry reminder push. All HTTP routes live under **`/v1/marketplace`** (organization-scoped). Listings still reference a pickup **project** via `units`, but URLs do not include `project_id`.
+**Reduced scope (2026-10-08):** No in-app chat, no reports, no wanted requests, no staff marketplace admin API, no search history or suggestions, no view counts, no giveaway sort boost, no expiry reminder push. All HTTP routes live under **`/v1/marketplace`** (organization-scoped). Listings still reference a pickup **project** via `units`, but URLs do not include `project_id`.
 
 ### In scope
 
 1. **Browse** — text search on list, category grid, filters, saved items (no dedicated home route).
-1. **Buy** — listing detail (including Services category).
+1. **Buy** — listing detail.
 1. **Sell** — category, post details, preview, live confirmation.
 1. **Manage** — my listings, mark as sold, renew, remove.
 
@@ -28,6 +28,7 @@ Residents need a place to sell or give away household items and browse what othe
 
 - Messages, chat, threads, messages tables
 - Reports and committee uphold/dismiss
+- Wanted requests ("Not finding it?") and matching-seller push
 - `marketplace_management.*` permissions and `/v1/projects/{project_id}/marketplace/*`
 - Recent searches and popular search terms
 - `view_count`, `giveaway_boost_until`, `expiry_reminder_sent_at`
@@ -41,17 +42,15 @@ ______________________________________________________________________
 
 ## Decision
 
-### 1. Five new tables
+### 1. Three new tables
 
-| Table                             | Purpose                                                                  |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| **`marketplace_listings`**        | Draft → live → sold / expired / removed. Sale or giveaway. 30-day window |
-| **`marketplace_listing_media`**   | Ordered image metadata (path, mime, size). One cover per listing         |
-| **`marketplace_saved_items`**     | Bookmarks                                                                |
-| **`marketplace_sale_feedback`**   | Optional seller rating after mark-sold. Not exposed on public reads      |
-| **`marketplace_wanted_requests`** | "Not finding it?" optional push to matching sellers in one society       |
+| Table                           | Purpose                                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **`marketplace_listings`**      | Draft → live → sold / expired / removed. Sale or giveaway. 30-day window. Media is `jsonb` on this row |
+| **`marketplace_saved_items`**   | Bookmarks                                                                                              |
+| **`marketplace_sale_feedback`** | Optional seller rating after mark-sold. Not exposed on public reads                                    |
 
-Categories: `app/data/marketplace_catalog.json` (not Postgres).
+Categories: `app/data/marketplace_catalog.json` (not Postgres). Listings store catalog **slugs**; display names are resolved on read so a rename does not break filters.
 
 Nearby societies: computed from project coordinates (`MARKETPLACE_NEARBY_RADIUS_KM = 5`), not a table.
 
@@ -62,8 +61,8 @@ Column detail: [buy-and-sell-flow.md](../buy-and-sell-flow.md) §3.
 - **Prefix:** `/v1/marketplace` only.
 - **Tenancy:** `organization_id` from auth on every query.
 - **Browse:** GET listing routes are **org-wide**; no `unit_id` query param. Flat display follows visibility rules without a viewer unit.
-- **Writes:** `unit_id` in the JSON body on draft create, save, patch, publish, remove, restore, and mark-sold (not on GET).
-- **Sell:** `POST /listings/drafts`, `PATCH /listings/{id}`, `GET /listings/{id}` (preview), **`POST /listings/{id}/publish`**, **`POST /listings/{id}/remove`**, **`POST /listings/{id}/restore`**. Media is not editable after draft create.
+- **Writes:** `unit_id` in the JSON body on create, save, patch, publish, remove, and mark-sold (not on GET).
+- **Sell:** `POST /listings` (unpublished), `PATCH /listings/{id}`, `GET /listings/{id}` (preview), **`POST /listings/{id}/publish`**, **`POST /listings/{id}/remove`**. Media is not editable after create. Remove is permanent; the seller creates a new listing to post again.
 - **Pagination:** `page` / `page_size` on browse, saved, and my listings.
 - **No** project-id path segments and **no** staff marketplace routes in v1.
 
@@ -77,16 +76,16 @@ draft ──publish──► live ──30 days──► expired ──list agai
                     │  └── renew 30 days ─┘
                     ├── edit (stays live)
                     ├── mark sold ──► sold
-                    └── seller remove ──► removed ──list again──► live
+                    └── seller remove ──► removed (create a new listing to post again)
 ```
 
-| Status    | Public board | Seller                                      |
-| --------- | ------------ | ------------------------------------------- |
-| `draft`   | No           | Edit, publish when valid                    |
-| `live`    | Yes          | Edit (stays live), renew, mark sold, remove |
-| `sold`    | No           | My listings ≤ 1 year                        |
-| `expired` | No           | List again                                  |
-| `removed` | No           | List again (seller-initiated only)          |
+| Status    | Public board | Seller                                       |
+| --------- | ------------ | -------------------------------------------- |
+| `draft`   | No           | Edit, publish when valid                     |
+| `live`    | Yes          | Edit (stays live), renew, mark sold, remove  |
+| `sold`    | No           | My listings ≤ 1 year                         |
+| `expired` | No           | List again                                   |
+| `removed` | No           | Terminal. Create a new listing to post again |
 
 No committee removal path. Seller remove sets `status = removed`, `removal_note`, and `removed_by_user_id`.
 
@@ -94,7 +93,7 @@ Giveaways display as **Free**; sort uses normal `newest` / price / distance — 
 
 ### 4. Publish requirements
 
-Unchanged from prior ADR: category, optional subtype, ≥2 media with cover, title, description, purchase year, condition, pickup unit, rules acceptance. Sale requires price > 0; giveaway requires null price.
+Unchanged from prior ADR: category, subtype, ≥2 media (image or video), title, description, purchase year, condition, pickup unit, rules acceptance. Sale requires price > 0; giveaway requires null price. Cover is the first image, or the first item's preview.
 
 ### 5. Browse and flat visibility
 
@@ -117,18 +116,19 @@ Search is **`GET /listings?q=`** only. Do not persist queries. Search UI must no
 
 ### 8. Media
 
-Table name **`marketplace_listing_media`**. Routes use `/media` not `/photos`. Max 8 images, ≥2 to publish, JPG/PNG, 5 MB.
+Stored on **`marketplace_listings.media`** (`jsonb` array). No child table and no `/listings/{id}/media` routes. Max 8 items, ≥2 to publish. Images: `image/jpeg`, `image/png`. Videos: `video/mp4`. Each item has `type`, `path`, `file_type`, optional `description`, and `order`. `preview_path` is required for video, optional for image. Set only on create.
 
 ### 9. Jobs and push
 
 Daily job expires live listings past `expires_at`. **No** 3-day reminder job or column.
 
-Optional push: wanted-request title match in the same project. No chat, report, or sold-to-other notifications.
+**No** wanted-request push, chat, report, or sold-to-other notifications.
 
 ### 10. Out of scope
 
 - Chat, threads, messages
 - Reports, moderation, admin marketplace permissions
+- Wanted requests ("Not finding it?") and matching-seller push
 - View counts, giveaway boost, expiry reminder
 - Search recents/terms APIs
 - Payments, phone reveal, community-feed share

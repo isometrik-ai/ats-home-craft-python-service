@@ -3,6 +3,13 @@
 from enum import Enum
 
 
+class MarketplaceMediaKind(str, Enum):
+    """Listing media kind stored in listings.media jsonb."""
+
+    IMAGE = "image"
+    VIDEO = "video"
+
+
 class MarketplaceListingKind(str, Enum):
     """Postgres marketplace_listing_kind."""
 
@@ -94,7 +101,6 @@ class MarketplaceListingAction(str, Enum):
 
     PUBLISH = "publish"
     REMOVE = "remove"
-    RESTORE = "restore"
     RENEW = "renew"
     RELIST = "relist"
 

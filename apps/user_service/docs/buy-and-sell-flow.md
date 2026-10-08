@@ -15,7 +15,7 @@ ______________________________________________________________________
 
 ## 1. What this flow does
 
-A resident lists a household item for **sale** or as a **giveaway**, and browses what others in the organization have listed. Money never moves through the app. Buyers and sellers coordinate offline (phone or in person). There is **no in-app chat**, **no reports**, and **no staff marketplace admin API**.
+A resident lists a household item for **sale** or as a **giveaway**, and browses what others in the organization have listed. Money never moves through the app. Buyers and sellers coordinate offline (phone or in person). There is **no in-app chat**, **no reports**, **no wanted requests**, and **no staff marketplace admin API**.
 
 The prototype flow map, adjusted for this scope:
 
@@ -26,10 +26,9 @@ The prototype flow map, adjusted for this scope:
 | Category & filters | Category grid + filter sheet (sort, price, condition, where)                        |
 | Saved items        | Bookmarked listings                                                                 |
 | Listing detail     | Price, seller, collection                                                           |
-| Service detail     | Same detail when the category is Services                                           |
 | Messages           | **Out of scope** (no threads or messages)                                           |
 | Chat with seller   | **Out of scope**                                                                    |
-| 1 · Category       | Pick category (+ subtype when the catalog has types)                                |
+| 1 · Category       | Pick category and subtype                                                           |
 | 2 · Post details   | Media, title, price or giveaway, pickup flat, condition                             |
 | 3 · Preview        | Preview, rules checkbox, post                                                       |
 | Live confirmation  | "You're live"                                                                       |
@@ -46,7 +45,7 @@ The prototype flow map, adjusted for this scope:
 | **Media immutable**                                | Set only on create. No `/listings/{id}/media` routes                                                                                    |
 | **Owner, Tenant, or Family**                       | Role read from `contact_roles`. Guest / Vendor / Staff cannot post                                                                      |
 | **Sale needs a price; giveaway must not have one** | Check constraint + service validation                                                                                                   |
-| **At least 2 media items to publish**              | Service count on `marketplace_listing_media`                                                                                            |
+| **At least 2 media items to publish**              | Service count on `marketplace_listings.media` jsonb                                                                                     |
 | **Live for 30 days**                               | `expires_at` set at publish. Job flips `live` → `expired`                                                                               |
 | **Flat only inside the listing's society**         | Response builder drops `unit_label` for other projects, and when `show_flat_number` is false                                            |
 | **Phone never returned**                           | Repository select list omits `contacts.phones`                                                                                          |
@@ -55,7 +54,7 @@ The prototype flow map, adjusted for this scope:
 | **Seller can edit a live post**                    | `PATCH` while `draft`, `live`, or `removed`. A live row stays `live` and must remain publish-valid. Category and subtype stay as posted |
 | **Seller can take their own post down**            | `POST .../remove` on a live listing                                                                                                     |
 | **Sold hidden from the seller after 1 year**       | My listings filters `sold_at >= now() - interval '1 year'`                                                                              |
-| **Media are paths**                                | Presigned upload, then metadata row. No blob                                                                                            |
+| **Media are paths**                                | Presigned upload, then metadata in `listings.media` jsonb. No blob                                                                      |
 | **Categories from JSON**                           | `GET /marketplace/catalog`. Not Postgres                                                                                                |
 
 ______________________________________________________________________
@@ -83,7 +82,7 @@ ______________________________________________________________________
 
 ## 3. New tables
 
-**Five tables.** Every table has `organization_id uuid NOT NULL` and is queried with that tenant id. Primary keys are `uuid`. Timestamps are `timestamptz`.
+**Three tables.** Every table has `organization_id uuid NOT NULL` and is queried with that tenant id. Primary keys are `uuid`. Timestamps are `timestamptz`. Media lives on the listing row as `jsonb`, not a child table.
 
 Listings still store `project_id` (society of the pickup flat). That is data denormalized from `units.project_id`, not an API path segment.
 
@@ -94,7 +93,6 @@ CREATE TYPE public.marketplace_listing_kind AS ENUM ('sale', 'giveaway');
 CREATE TYPE public.marketplace_listing_status AS ENUM ('draft', 'live', 'sold', 'expired', 'removed');
 CREATE TYPE public.marketplace_item_condition AS ENUM ('lightly_used', 'well_used', 'needs_repair');
 CREATE TYPE public.marketplace_sale_rating AS ENUM ('smooth', 'fine', 'had_trouble');
-CREATE TYPE public.marketplace_wanted_status AS ENUM ('open', 'closed');
 ```
 
 ### `marketplace_listings`
@@ -107,8 +105,8 @@ CREATE TYPE public.marketplace_wanted_status AS ENUM ('open', 'closed');
 | `unit_id`                  | uuid NOT NULL                  | FK `units`. Pickup flat                                                |
 | `tower_id`                 | uuid                           | Denormalized from `units.tower_id` for distance sort                   |
 | `seller_contact_id`        | uuid NOT NULL                  | FK `contacts`. Set from the caller, not from the body                  |
-| `category`                 | text NOT NULL                  | Catalog display name, e.g. `Furniture`                                 |
-| `subtype`                  | text                           | Catalog subtype. Null when the category has none                       |
+| `category`                 | text NOT NULL                  | Catalog slug, e.g. `furniture`. Display name comes from the catalog    |
+| `subtype`                  | text                           | Catalog subtype slug, e.g. `tables_desks`. Required on create          |
 | `kind`                     | marketplace_listing_kind       | `sale` or `giveaway`                                                   |
 | `status`                   | marketplace_listing_status     | Default `draft`                                                        |
 | `title`                    | text                           | Required to publish. 1–80 chars                                        |
@@ -131,6 +129,7 @@ CREATE TYPE public.marketplace_wanted_status AS ENUM ('open', 'closed');
 | `removed_at`               | timestamptz                    | Set on seller remove (`POST .../remove`)                               |
 | `removal_note`             | text                           | Required when `status = removed` (seller reason)                       |
 | `removed_by_user_id`       | uuid                           | FK `auth.users`. Resident session user on remove                       |
+| `media`                    | jsonb NOT NULL default `[]`    | Ordered image/video metadata. Max 8                                    |
 | `created_at`, `updated_at` | timestamptz                    |                                                                        |
 
 Checks:
@@ -140,6 +139,7 @@ Checks:
 - `original_price_amount` is null or greater than `price_amount`.
 - `status = 'sold'` ⇒ `buyer_contact_id` and `sold_at` are set.
 - `status = 'removed'` ⇒ `removed_by_user_id`, `removal_note`, and `removed_at` are set.
+- `media` is a JSON array of 0–8 objects.
 
 Indexes:
 
@@ -148,22 +148,18 @@ Indexes:
 - Partial `(expires_at)` where `status = 'live'` for the expiry job.
 - `(organization_id, tower_id)` for "My tower".
 
-### `marketplace_listing_media`
+Each `media` element:
 
-| Column            | Type                           | Notes                                       |
-| ----------------- | ------------------------------ | ------------------------------------------- |
-| `id`              | uuid PK                        |                                             |
-| `organization_id` | uuid NOT NULL                  |                                             |
-| `listing_id`      | uuid NOT NULL                  | FK `marketplace_listings` ON DELETE CASCADE |
-| `path`            | text NOT NULL                  | Storage path from the presigned upload      |
-| `file_type`       | text NOT NULL                  | `jpeg` or `png` (matches presigned upload)  |
-| `size_bytes`      | integer NOT NULL               | ≤ 5_242_880                                 |
-| `original_name`   | text                           |                                             |
-| `sort_order`      | integer NOT NULL               |                                             |
-| `is_cover`        | boolean NOT NULL default false | Partial unique: one cover per listing       |
-| `created_at`      | timestamptz                    |                                             |
+| Key            | Notes                                                       |
+| -------------- | ----------------------------------------------------------- |
+| `type`         | `image` or `video`                                          |
+| `path`         | Storage path from the presigned upload                      |
+| `file_type`    | `image/jpeg`, `image/png`, or `video/mp4` (must match type) |
+| `preview_path` | Required for `video` (poster). Optional for `image`         |
+| `description`  | Optional caption, ≤ 200 chars                               |
+| `order`        | Display order, 1-based                                      |
 
-Service cap: **8** items. Publish requires **≥ 2** and exactly one cover. If the client never flags a cover, the lowest `sort_order` is the cover.
+Service cap: **8** items (mix of photos and videos). Publish requires **≥ 2**. Card cover is the first image path, or the first item's `preview_path`. Media is set only on create.
 
 ### `marketplace_saved_items`
 
@@ -191,18 +187,6 @@ Unique `(contact_id, listing_id)`.
 
 Resident browse, detail, and My listings queries must not join this table. There is no admin API to read patterns in v1.
 
-### `marketplace_wanted_requests`
-
-| Column            | Type                      | Notes                                                 |
-| ----------------- | ------------------------- | ----------------------------------------------------- |
-| `id`              | uuid PK                   |                                                       |
-| `organization_id` | uuid NOT NULL             |                                                       |
-| `project_id`      | uuid NOT NULL             | Society the resident is searching in (from `unit_id`) |
-| `contact_id`      | uuid NOT NULL             |                                                       |
-| `query`           | text NOT NULL             | 3–120 chars                                           |
-| `status`          | marketplace_wanted_status | Default `open`                                        |
-| `created_at`      | timestamptz               |                                                       |
-
 ### Not a table
 
 | Thing                       | Where it lives                                                                  |
@@ -211,7 +195,7 @@ Resident browse, detail, and My listings queries must not join this table. There
 | Nearby societies            | Computed from `projects` coordinates, radius `MARKETPLACE_NEARBY_RADIUS_KM = 5` |
 | Prohibited-item rules copy  | `app/locales/en.json` → `marketplace.rules`                                     |
 | "Earned"                    | Sum of `price_amount` on the seller's `sold` rows in the last 365 days          |
-| Draft gap ("add 2 photos…") | Computed from media count and null price                                        |
+| Draft gap ("add 2 photos…") | Computed from `jsonb_array_length(media)` and null price                        |
 
 ______________________________________________________________________
 
@@ -221,8 +205,7 @@ ______________________________________________________________________
 HTTP → API router → Service → Repository (SQL) → Postgres
                       │
                       ├── MarketplaceCatalogService (JSON, read-only)
-                      ├── presigned upload (existing)
-                      └── PushNotificationService on wanted match only (optional)
+                      └── presigned upload (existing)
 ```
 
 ### File map (to implement)
@@ -269,27 +252,24 @@ Card fields: cover path, `is_new_today`, price, original price, title, tower, fl
 
 ### Search
 
-| Element         | API                                                             |
-| --------------- | --------------------------------------------------------------- |
-| Submit a query  | `GET /v1/marketplace/listings?q=&page=&page_size=`              |
-| Not finding it? | `POST /v1/marketplace/wanted-requests` `{ "unit_id", "query" }` |
+| Element        | API                                                |
+| -------------- | -------------------------------------------------- |
+| Submit a query | `GET /v1/marketplace/listings?q=&page=&page_size=` |
 
-There is **no** suggestions endpoint, **no** recent-search storage, and **no** popular chips API. The client must not call removed routes (`/search/suggestions`, `/search/recents`).
-
-Wanted-request side effect: sellers in **this** project with a live listing whose title contains the query may get one push. The response includes `notified_seller_count`.
+There is **no** suggestions endpoint, **no** recent-search storage, **no** popular chips API, and **no** "Not finding it?" / wanted-request route. The client must not call removed routes (`/search/suggestions`, `/search/recents`, `/wanted-requests`).
 
 ### Category & filters
 
 | Element                             | API                                                                                     |
 | ----------------------------------- | --------------------------------------------------------------------------------------- |
-| Category browse                     | `GET /v1/marketplace/listings?category=Furniture&page=&page_size=` → `total` (org-wide) |
+| Category browse                     | `GET /v1/marketplace/listings?category=furniture&page=&page_size=` → `total` (org-wide) |
 | Sticky chips (Newest, Under ₹5,000) | Same list route, repeated query params                                                  |
 | Filter sheet                        | Query params below                                                                      |
 
 | Param               | Values                                                   |
 | ------------------- | -------------------------------------------------------- |
-| `category`          | Catalog name                                             |
-| `subtype`           | Catalog subtype                                          |
+| `category`          | Catalog slug (`furniture`, `electronics`, …)             |
+| `subtype`           | Catalog subtype slug (`tables_desks`, …)                 |
 | `q`                 | Search text (title/description ILIKE)                    |
 | `sort`              | `newest` (default), `price_asc`, `price_desc`, `closest` |
 | `price_band`        | `free`, `under_5000`, `5000_20000`, `above_20000`        |
@@ -325,8 +305,6 @@ Giveaways sort with the chosen `sort`. Price sort puts giveaways (no price) at t
 | More from seller         | Other `live` listings by `seller_contact_id` in the same project  |
 | Bookmark                 | Save / unsave                                                     |
 
-Service detail is this response when `category = "Services"`. No second route.
-
 There is **no** Message / Chat CTA backed by this service and **no** report endpoint.
 
 ### Seller actions on their own listing
@@ -336,19 +314,18 @@ There is **no** Message / Chat CTA backed by this service and **no** report endp
 | Edit listing            | `PATCH /v1/marketplace/listings/{id}`                                                           | Step-2 fields. Status stays `live`. Category/subtype cannot change |
 | Mark as sold            | `POST .../mark-sold`                                                                            | See Marked as sold                                                 |
 | Share to community feed | Out of scope                                                                                    | Hide in client until a feed exists                                 |
-| Remove listing          | `POST /v1/marketplace/listings/{id}/remove` `{ "unit_id", "removal_note" }` → `status: removed` |                                                                    |
-| Restore listing         | `POST /v1/marketplace/listings/{id}/restore` `{ "unit_id" }` → back to `live`                   |                                                                    |
+| Remove listing          | `POST /v1/marketplace/listings/{id}/remove` `{ "unit_id", "removal_note" }` → `status: removed` | Permanent. Create a new listing to post again                      |
 
 ### Sell flow (3 steps + confirmation)
 
 | Step              | UI                                         | API                                                                                                                                                                        |
 | ----------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1 · Category      | Pick category / subtype                    | `GET /v1/marketplace/catalog` (client only)                                                                                                                                |
-| 2 · New post      | Save draft or Continue                     | `POST /v1/marketplace/listings/drafts` on first save; `PATCH /v1/marketplace/listings/{id}` to update the same draft                                                       |
+| 2 · New post      | Save or Continue                           | `POST /v1/marketplace/listings` on first save (unpublished); `PATCH /v1/marketplace/listings/{id}` to update the same listing                                              |
 | 3 · Preview       | Edit details, rules checkbox, Post listing | `GET /v1/marketplace/listings/{id}`; `PATCH` if needed; **`POST /v1/marketplace/listings/{id}/publish`** `{ "unit_id", "rules_accepted": true }` — **only** way to go live |
-| Live confirmation | Post another / My listings                 | Post another → step 1 then **`POST .../drafts`** again; My listings → `GET /v1/marketplace/me/listings`                                                                    |
+| Live confirmation | Post another / My listings                 | Post another → step 1 then **`POST /listings`** again; My listings → `GET /v1/marketplace/me/listings`                                                                     |
 
-**Draft create** (`POST .../drafts`): `unit_id`, `category`, `subtype?`, step-2 fields, and `media[]` in one body. Media is set only here; no media routes afterward.
+**Create** (`POST /listings`): `unit_id`, `category`, `subtype`, step-2 fields, and `media[]` in one body. Row is created unpublished (`status = draft`). Media is set only here; no media routes afterward. Go live with **`POST /listings/{id}/publish`**.
 
 Pickup flat: contact onboarding properties (Owner / Tenant / Family)—no marketplace pickup route.
 
@@ -360,13 +337,13 @@ Pickup flat: contact onboarding properties (Owner / Tenant / Family)—no market
 
 `GET /v1/marketplace/me/listings?status=all|live|draft|sold|past&page=&page_size=` (seller's posts org-wide; no `unit_id`)
 
-| Card    | Fields                                    | Action                 |
-| ------- | ----------------------------------------- | ---------------------- |
-| Live    | Days left                                 | —                      |
-| Draft   | Gap sentence                              | Opens step 2 (`PATCH`) |
-| Sold    | Buyer name, tower, flat, `sold_at`, price | None                   |
-| Expired | "Ran for 30 days"                         | —                      |
-| Removed | Seller removed                            | `POST .../restore`     |
+| Card    | Fields                                    | Action                     |
+| ------- | ----------------------------------------- | -------------------------- |
+| Live    | Days left                                 | —                          |
+| Draft   | Gap sentence                              | Opens step 2 (`PATCH`)     |
+| Sold    | Buyer name, tower, flat, `sold_at`, price | None                       |
+| Expired | "Ran for 30 days"                         | —                          |
+| Removed | Seller removed                            | None. Create a new listing |
 
 ### Marked as sold
 
@@ -407,37 +384,13 @@ Daily job `expire_marketplace_listings`:
 
 1. `status = live AND expires_at <= now()` → `expired`.
 
-Optional push: wanted request title match (see Search). No expiry reminder push.
+No wanted-request push and no expiry reminder push.
 
 ______________________________________________________________________
 
 ## 8. Catalog file
 
-```json
-{
-  "categories": [
-    {
-      "id": "furniture",
-      "name": "Furniture",
-      "icon": "sofa",
-      "subtypes": [
-        { "id": "tables_desks", "name": "Tables & desks" },
-        { "id": "sofas_seating", "name": "Sofas & seating" },
-        { "id": "beds_mattresses", "name": "Beds & mattresses" },
-        { "id": "storage", "name": "Storage" },
-        { "id": "outdoor", "name": "Outdoor" }
-      ]
-    },
-    { "id": "electronics", "name": "Electronics", "icon": "tv", "subtypes": [] },
-    { "id": "home_decor", "name": "Home decor", "icon": "lamp", "subtypes": [] },
-    { "id": "appliances", "name": "Appliances", "icon": "fridge", "subtypes": [] },
-    { "id": "kids_toys", "name": "Kids & toys", "icon": "toy", "subtypes": [] },
-    { "id": "vehicles", "name": "Vehicles", "icon": "car", "subtypes": [] },
-    { "id": "services", "name": "Services", "icon": "services", "subtypes": [] },
-    { "id": "others", "name": "Others", "icon": "box", "subtypes": [] }
-  ]
-}
-```
+Source of truth: `app/data/marketplace_catalog.json`. Every category has subtypes. Create and publish require both `category` and `subtype` slugs.
 
 ______________________________________________________________________
 

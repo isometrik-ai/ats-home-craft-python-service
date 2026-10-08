@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.utils.common_utils import serialize_jsonb_param
+
+_LISTING_JSONB = frozenset({"media"})
 
 _LISTING_COLUMNS = """
     l.id::text AS id,
@@ -38,6 +42,7 @@ _LISTING_COLUMNS = """
     l.removed_at,
     l.removal_note,
     l.removed_by_user_id::text AS removed_by_user_id,
+    l.media,
     l.created_at,
     l.updated_at,
     p.name AS project_name,
@@ -80,8 +85,25 @@ LEFT JOIN LATERAL (
 """
 
 
+def _decode_media(value: Any) -> list[dict[str, Any]]:
+    """Normalize listing.media from asyncpg (jsonb or text) to a list."""
+    if value is None:
+        return []
+    parsed = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(parsed, list):
+        return []
+    return parsed
+
+
+def _as_listing(row: Any) -> dict[str, Any]:
+    """Listing row with media decoded to a list of dicts."""
+    listing = dict(row)
+    listing["media"] = _decode_media(listing.get("media"))
+    return listing
+
+
 class MarketplaceRepository(BaseRepository):
-    """Persistence for listings, media, saves, reports, and sale feedback."""
+    """Persistence for listings, saves, and sale feedback."""
 
     async def expire_due(self, *, organization_id: str) -> None:
         """Mark live rows past expires_at as expired. Called on read, not by a job."""
@@ -258,7 +280,7 @@ class MarketplaceRepository(BaseRepository):
             organization_id,
             listing_id,
         )
-        return dict(row) if row else None
+        return _as_listing(row) if row else None
 
     async def update_listing(
         self,
@@ -296,6 +318,7 @@ class MarketplaceRepository(BaseRepository):
             "removed_at",
             "removal_note",
             "removed_by_user_id",
+            "media",
         }
         sets: list[str] = []
         params: list[Any] = [organization_id, listing_id]
@@ -313,11 +336,12 @@ class MarketplaceRepository(BaseRepository):
             "expires_at": "::timestamptz",
             "sold_at": "::timestamptz",
             "removed_at": "::timestamptz",
+            "media": "::jsonb",
         }
         for key, value in fields.items():
             if key not in allowed:
                 continue
-            params.append(value)
+            params.append(serialize_jsonb_param(key, value, _LISTING_JSONB))
             cast = casts.get(key, "")
             sets.append(f"{key} = ${len(params)}{cast}")
         if not sets:
@@ -430,120 +454,7 @@ class MarketplaceRepository(BaseRepository):
             """,
             *params,
         )
-        return [dict(row) for row in rows], int(total or 0)
-
-    async def list_media(self, *, organization_id: str, listing_id: str) -> list[dict[str, Any]]:
-        """Photos for one listing, cover first."""
-        rows = await self.db_connection.fetch(
-            """
-            SELECT id::text AS id,
-                   listing_id::text AS listing_id,
-                   path,
-                   file_type,
-                   size_bytes,
-                   original_name,
-                   sort_order,
-                   is_cover,
-                   created_at
-              FROM marketplace_listing_media
-             WHERE organization_id = $1::uuid
-               AND listing_id = $2::uuid
-             ORDER BY is_cover DESC, sort_order ASC, created_at ASC
-            """,
-            organization_id,
-            listing_id,
-        )
-        return [dict(row) for row in rows]
-
-    async def count_media(self, *, organization_id: str, listing_id: str) -> int:
-        """How many files a listing has."""
-        value = await self.db_connection.fetchval(
-            """
-            SELECT count(*)::int
-              FROM marketplace_listing_media
-             WHERE organization_id = $1::uuid
-               AND listing_id = $2::uuid
-            """,
-            organization_id,
-            listing_id,
-        )
-        return int(value or 0)
-
-    async def insert_media(self, **fields: Any) -> dict[str, Any]:
-        """Store media metadata."""
-        row = await self.db_connection.fetchrow(
-            """
-            INSERT INTO marketplace_listing_media (
-                organization_id, listing_id, path, file_type, size_bytes,
-                original_name, sort_order, is_cover
-            )
-            VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8)
-            RETURNING id::text AS id
-            """,
-            fields["organization_id"],
-            fields["listing_id"],
-            fields["path"],
-            fields["file_type"],
-            fields["size_bytes"],
-            fields.get("original_name"),
-            fields["sort_order"],
-            fields["is_cover"],
-        )
-        return dict(row)
-
-    async def clear_cover(self, *, organization_id: str, listing_id: str) -> None:
-        """Drop the current cover flag before setting a new one."""
-        await self.db_connection.execute(
-            """
-            UPDATE marketplace_listing_media
-               SET is_cover = false
-             WHERE organization_id = $1::uuid
-               AND listing_id = $2::uuid
-               AND is_cover = true
-            """,
-            organization_id,
-            listing_id,
-        )
-
-    async def delete_media(self, *, organization_id: str, listing_id: str, media_id: str) -> bool:
-        """Delete one media row. True when a row was removed."""
-        result = await self.db_connection.execute(
-            """
-            DELETE FROM marketplace_listing_media
-             WHERE organization_id = $1::uuid
-               AND listing_id = $2::uuid
-               AND id = $3::uuid
-            """,
-            organization_id,
-            listing_id,
-            media_id,
-        )
-        return result.split()[-1] == "1"
-
-    async def ensure_cover(self, *, organization_id: str, listing_id: str) -> None:
-        """If nobody flagged a cover, the lowest sort_order becomes the cover."""
-        await self.db_connection.execute(
-            """
-            UPDATE marketplace_listing_media
-               SET is_cover = true
-             WHERE id = (
-                 SELECT id
-                   FROM marketplace_listing_media
-                  WHERE organization_id = $1::uuid
-                    AND listing_id = $2::uuid
-                    AND NOT EXISTS (
-                        SELECT 1
-                          FROM marketplace_listing_media cover
-                         WHERE cover.listing_id = $2::uuid
-                           AND cover.is_cover = true
-                    )
-                  ORDER BY sort_order ASC, created_at ASC
-                  LIMIT 1
-             )
-            """,
-            organization_id,
-            listing_id,
-        )
+        return [_as_listing(row) for row in rows], int(total or 0)
 
     async def is_saved(self, *, organization_id: str, contact_id: str, listing_id: str) -> bool:
         """Whether this resident bookmarked the listing."""
@@ -629,7 +540,7 @@ class MarketplaceRepository(BaseRepository):
             page_size,
             (page - 1) * page_size,
         )
-        return [dict(row) for row in rows], int(total or 0)
+        return [_as_listing(row) for row in rows], int(total or 0)
 
     async def list_mine(
         self,
@@ -681,7 +592,7 @@ class MarketplaceRepository(BaseRepository):
             page_size,
             (page - 1) * page_size,
         )
-        return [dict(row) for row in rows], int(total or 0)
+        return [_as_listing(row) for row in rows], int(total or 0)
 
     async def earned_amount(self, *, organization_id: str, seller_contact_id: str) -> Any:
         """Sum of sold asking prices in the last 365 days."""
