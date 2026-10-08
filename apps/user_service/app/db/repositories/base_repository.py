@@ -31,14 +31,14 @@ def _row_columns_present(rows: Iterable[dict[str, Any]], columns: Iterable[str])
     return [c for c in allowed if c in present]
 
 
-def _coerce_insert_value(
+def _coerce_bind_value(
     column: str,
     value: Any,
     *,
     jsonb_columns: frozenset[str],
     date_columns: frozenset[str],
 ) -> Any:
-    """Normalize insert bind values for asyncpg typed placeholders."""
+    """Normalize bind values for asyncpg typed placeholders."""
     if value is None:
         return None
     if column in date_columns and isinstance(value, str):
@@ -120,7 +120,7 @@ class BaseRepository:
         for row in rows:
             for col in columns:
                 values_flat.append(
-                    _coerce_insert_value(
+                    _coerce_bind_value(
                         col,
                         row.get(col),
                         jsonb_columns=jsonb_columns,
@@ -148,6 +148,7 @@ class BaseRepository:
         where_params: list[Any],
         update_data: dict[str, Any],
         jsonb_columns: frozenset[str] = frozenset(),
+        date_columns: frozenset[str] = frozenset(),
         touch_updated_at: bool = True,
     ) -> dict[str, Any] | None:
         """Dynamic UPDATE ... RETURNING *.
@@ -162,9 +163,21 @@ class BaseRepository:
         params: list[Any] = []
         idx = 1
         for key, value in update_data.items():
-            cast = "::jsonb" if key in jsonb_columns else ""
+            if key in jsonb_columns:
+                cast = "::jsonb"
+            elif key in date_columns:
+                cast = "::date"
+            else:
+                cast = ""
             set_parts.append(f"{key} = ${idx}{cast}")
-            params.append(serialize_jsonb_param(key, value, jsonb_columns))
+            params.append(
+                _coerce_bind_value(
+                    key,
+                    value,
+                    jsonb_columns=jsonb_columns,
+                    date_columns=date_columns,
+                )
+            )
             idx += 1
 
         if touch_updated_at:
