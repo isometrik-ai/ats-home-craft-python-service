@@ -53,6 +53,7 @@ from apps.user_service.app.api.gate_passes import router as gate_passes_router
 from apps.user_service.app.api.invites import router as invites_router
 from apps.user_service.app.api.lead_stages import router as lead_stages_router
 from apps.user_service.app.api.leads import router as leads_router
+from apps.user_service.app.api.marketplace import router as marketplace_router
 from apps.user_service.app.api.move_events import router as move_events_router
 from apps.user_service.app.api.notices import router as notices_router
 from apps.user_service.app.api.notices_internal import router as notices_internal_router
@@ -117,6 +118,7 @@ router.include_router(daily_help_router)
 router.include_router(daily_help_resident_router)
 router.include_router(pets_router)
 router.include_router(pets_admin_router)
+router.include_router(marketplace_router)
 router.include_router(notices_router)
 router.include_router(notices_resident_router)
 router.include_router(notices_internal_router)
