@@ -93,7 +93,7 @@ Giveaways display as **Free**; sort uses normal `newest` / price / distance — 
 
 ### 4. Publish requirements
 
-Unchanged from prior ADR: category, subtype, ≥2 media (image or video), title, description, purchase year, condition, pickup unit, rules acceptance. Sale requires price > 0; giveaway requires null price. Cover is the first image, or the first item's preview.
+Unchanged from prior ADR: category, subtype, ≥2 media (image or video), title, description, purchase year, condition, pickup unit. Sale requires price > 0; giveaway requires null price. Cover is the first image, or the first item's preview.
 
 ### 5. Browse and flat visibility
 

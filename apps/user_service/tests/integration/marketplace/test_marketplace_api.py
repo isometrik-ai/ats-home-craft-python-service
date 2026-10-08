@@ -119,7 +119,7 @@ async def test_publish_success(monkeypatch, client):
     async def fake_publish(_self, *, contact_id, listing_id, body):
         assert contact_id == CONTACT_ID
         assert listing_id == LISTING_ID
-        assert body.rules_accepted is True
+        assert body.unit_id == UNIT_ID
         return {
             "id": LISTING_ID,
             "published_at": "2026-10-07T00:00:00Z",
@@ -132,35 +132,11 @@ async def test_publish_success(monkeypatch, client):
     )
     response = await client.post(
         f"/v1/marketplace/listings/{LISTING_ID}/publish",
-        json={"unit_id": UNIT_ID, "rules_accepted": True},
+        json={"unit_id": UNIT_ID},
     )
     payload = assert_success(response)
     assert payload["message"] == "Listing is live."
     assert payload["data"]["id"] == LISTING_ID
-
-
-@pytest.mark.asyncio
-async def test_publish_fails_when_rules_are_not_accepted(monkeypatch, client):
-    """Publish without rules_accepted returns 422 from the service."""
-    _resident(monkeypatch)
-
-    async def fake_publish(_self, *, contact_id, listing_id, body):
-        del _self, contact_id, listing_id
-        assert body.rules_accepted is False
-        raise ValidationException(
-            message_key="marketplace.errors.rules_required",
-            custom_code=CustomStatusCode.VALIDATION_ERROR,
-        )
-
-    monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.publish",
-        fake_publish,
-    )
-    response = await client.post(
-        f"/v1/marketplace/listings/{LISTING_ID}/publish",
-        json={"unit_id": UNIT_ID, "rules_accepted": False},
-    )
-    assert_error(response, status_code=422, message_fragment="rules")
 
 
 @pytest.mark.asyncio

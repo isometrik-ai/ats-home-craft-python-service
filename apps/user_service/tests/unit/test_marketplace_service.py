@@ -76,7 +76,6 @@ def _listing(**overrides):
         "product_url": None,
         "show_flat_number": True,
         "original_bill_available": False,
-        "rules_accepted_at": datetime(2026, 10, 1, tzinfo=UTC),
         "published_at": datetime(2026, 10, 1, tzinfo=UTC),
         "expires_at": datetime(2026, 10, 31, tzinfo=UTC),
         "renewal_count": 0,
@@ -406,7 +405,7 @@ async def test_create_listing_rejects_a_video_mime_on_an_image():
 
 
 def test_publish_and_save_bodies():
-    publish = PublishListingRequest(unit_id="unit-1", rules_accepted=True)
-    assert publish.rules_accepted is True
+    publish = PublishListingRequest(unit_id="unit-1")
+    assert publish.unit_id == "unit-1"
     save = SaveListingRequest(unit_id="unit-1", saved=False)
     assert save.saved is False

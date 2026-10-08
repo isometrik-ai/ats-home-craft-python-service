@@ -16,7 +16,6 @@ from apps.user_service.app.schemas.marketplace import (
     MarketplaceCatalogApiResponse,
     MarketplaceListApiResponse,
     MarketplaceListingApiResponse,
-    MarketplaceMineApiResponse,
     MarkSoldRequest,
     PublishListingRequest,
     RemoveListingRequest,
@@ -180,7 +179,7 @@ async def list_saved_listings(
     status_code=http_status.HTTP_200_OK,
     summary="My listings",
     response_model=None,
-    responses=_ok_response(MarketplaceMineApiResponse, "Seller dashboard list retrieved."),
+    responses=_ok_response(MarketplaceListApiResponse, "Seller dashboard list retrieved."),
 )
 @limiter.limit("100/minute")
 async def my_listings(
@@ -202,17 +201,14 @@ async def my_listings(
         page=page,
         page_size=page_size,
     )
-    return success_response(
+    return list_response(
         request=request,
+        items=data["items"],
+        total=data["total"],
+        page=page,
+        page_size=page_size,
         message_key="marketplace.success.mine_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
-        data={
-            "earned_amount": data["earned_amount"],
-            "items": data["items"],
-            "total": data["total"],
-            "page": page,
-            "page_size": page_size,
-        },
     )
 
 
@@ -368,7 +364,7 @@ async def publish_listing(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Accept listing rules and go live. Only unpublished listings can be published."""
+    """Go live. Only unpublished listings can be published."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )

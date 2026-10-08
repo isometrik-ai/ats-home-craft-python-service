@@ -96,10 +96,9 @@ class UpdateListingRequest(BaseModel):
 
 
 class PublishListingRequest(BaseModel):
-    """Step 3 preview: go live. rules_accepted is required."""
+    """Go live from an unpublished listing."""
 
     unit_id: str
-    rules_accepted: bool
 
 
 class RemoveListingRequest(BaseModel):
@@ -149,11 +148,3 @@ class MarketplaceListApiResponse(BaseModel):
     total: int
     page: int
     page_size: int
-
-
-class MarketplaceMineApiResponse(BaseModel):
-    """API envelope for GET /marketplace/me/listings."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    data: dict[str, Any]

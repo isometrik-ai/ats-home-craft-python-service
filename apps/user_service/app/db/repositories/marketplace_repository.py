@@ -33,7 +33,6 @@ _LISTING_COLUMNS = """
     l.product_url,
     l.show_flat_number,
     l.original_bill_available,
-    l.rules_accepted_at,
     l.published_at,
     l.expires_at,
     l.renewal_count,
@@ -309,7 +308,6 @@ class MarketplaceRepository(BaseRepository):
             "product_url",
             "show_flat_number",
             "original_bill_available",
-            "rules_accepted_at",
             "published_at",
             "expires_at",
             "renewal_count",
@@ -331,7 +329,6 @@ class MarketplaceRepository(BaseRepository):
             "condition": "::marketplace_item_condition",
             "buyer_contact_id": "::uuid",
             "removed_by_user_id": "::uuid",
-            "rules_accepted_at": "::timestamptz",
             "published_at": "::timestamptz",
             "expires_at": "::timestamptz",
             "sold_at": "::timestamptz",
@@ -593,21 +590,6 @@ class MarketplaceRepository(BaseRepository):
             (page - 1) * page_size,
         )
         return [_as_listing(row) for row in rows], int(total or 0)
-
-    async def earned_amount(self, *, organization_id: str, seller_contact_id: str) -> Any:
-        """Sum of sold asking prices in the last 365 days."""
-        return await self.db_connection.fetchval(
-            """
-            SELECT COALESCE(sum(price_amount), 0)
-              FROM marketplace_listings
-             WHERE organization_id = $1::uuid
-               AND seller_contact_id = $2::uuid
-               AND status = 'sold'::marketplace_listing_status
-               AND sold_at >= now() - interval '1 year'
-            """,
-            organization_id,
-            seller_contact_id,
-        )
 
     async def count_other_live(
         self,

@@ -1468,7 +1468,6 @@
       "not_expired": "Only an expired listing can be listed again.",
       "incomplete": "Add the missing details before posting.",
       "live_incomplete": "A live listing has to stay complete.",
-      "rules_required": "Accept the listing rules before posting.",
       "invalid_file_type": "Images must be JPEG or PNG. Videos must be MP4.",
       "too_many_files": "A listing can have at most 8 photos or videos.",
       "media_not_found": "That photo could not be found.",

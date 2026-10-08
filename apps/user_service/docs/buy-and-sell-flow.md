@@ -30,7 +30,7 @@ The prototype flow map, adjusted for this scope:
 | Chat with seller   | **Out of scope**                                                                    |
 | 1 · Category       | Pick category and subtype                                                           |
 | 2 · Post details   | Media, title, price or giveaway, pickup flat, condition                             |
-| 3 · Preview        | Preview, rules checkbox, post                                                       |
+| 3 · Preview        | Preview, post                                                                       |
 | Live confirmation  | "You're live"                                                                       |
 | My listings        | Live, draft, sold, expired, removed (seller remove only)                            |
 | Marked as sold     | Pick buyer from society residents, optional private rating                          |
@@ -120,7 +120,6 @@ CREATE TYPE public.marketplace_sale_rating AS ENUM ('smooth', 'fine', 'had_troub
 | `product_url`              | text                           | Optional http(s) link to the new product                               |
 | `show_flat_number`         | boolean NOT NULL default false | Same-society residents see the flat when true                          |
 | `original_bill_available`  | boolean NOT NULL default false | Detail line "Original bill"                                            |
-| `rules_accepted_at`        | timestamptz                    | Set at publish. Null blocks publish                                    |
 | `published_at`             | timestamptz                    |                                                                        |
 | `expires_at`               | timestamptz                    | `published_at + 30 days`, extended by renew                            |
 | `renewal_count`            | integer NOT NULL default 0     |                                                                        |
@@ -233,7 +232,7 @@ ______________________________________________________________________
 
 **Writes require `unit_id` in the JSON body** (not query params): create, save/unsave, patch, seller actions, and mark-sold. Pickup changes on patch use optional `pickup_unit_id`. Authorization uses active `contact_units`; posting actions require Owner / Tenant / Family on that unit.
 
-**Pagination** on every listing collection: `page` (default 1), `page_size` (defaults vary). Responses include `total` (and `page` / `page_size` on my listings).
+**Pagination** on every listing collection: `page` (default 1), `page_size` (defaults vary). Browse, saved, and my listings use `list_response` (`data`, `total`, `page`, `page_size`, `total_pages`).
 
 ### Buy & Sell home (client composition)
 
@@ -318,12 +317,12 @@ There is **no** Message / Chat CTA backed by this service and **no** report endp
 
 ### Sell flow (3 steps + confirmation)
 
-| Step              | UI                                         | API                                                                                                                                                                        |
-| ----------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 · Category      | Pick category / subtype                    | `GET /v1/marketplace/catalog` (client only)                                                                                                                                |
-| 2 · New post      | Save or Continue                           | `POST /v1/marketplace/listings` on first save (unpublished); `PATCH /v1/marketplace/listings/{id}` to update the same listing                                              |
-| 3 · Preview       | Edit details, rules checkbox, Post listing | `GET /v1/marketplace/listings/{id}`; `PATCH` if needed; **`POST /v1/marketplace/listings/{id}/publish`** `{ "unit_id", "rules_accepted": true }` — **only** way to go live |
-| Live confirmation | Post another / My listings                 | Post another → step 1 then **`POST /listings`** again; My listings → `GET /v1/marketplace/me/listings`                                                                     |
+| Step              | UI                         | API                                                                                                                                                |
+| ----------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 · Category      | Pick category / subtype    | `GET /v1/marketplace/catalog` (client only)                                                                                                        |
+| 2 · New post      | Save or Continue           | `POST /v1/marketplace/listings` on first save (unpublished); `PATCH /v1/marketplace/listings/{id}` to update the same listing                      |
+| 3 · Preview       | Edit details, Post listing | `GET /v1/marketplace/listings/{id}`; `PATCH` if needed; **`POST /v1/marketplace/listings/{id}/publish`** `{ "unit_id" }` — **only** way to go live |
+| Live confirmation | Post another / My listings | Post another → step 1 then **`POST /listings`** again; My listings → `GET /v1/marketplace/me/listings`                                             |
 
 **Create** (`POST /listings`): `unit_id`, `category`, `subtype`, step-2 fields, and `media[]` in one body. Row is created unpublished (`status = draft`). Media is set only here; no media routes afterward. Go live with **`POST /listings/{id}/publish`**.
 

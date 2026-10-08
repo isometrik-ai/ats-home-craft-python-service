@@ -413,17 +413,12 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
     async def publish(
         self, *, contact_id: str, listing_id: str, body: PublishListingRequest
     ) -> dict[str, Any]:
-        """First post, or republish after the committee sent it back to draft."""
+        """Go live from an unpublished listing."""
         unit = await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
         listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
         if listing["status"] != "draft":
             raise ValidationException(
                 message_key="marketplace.errors.not_editable",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        if not body.rules_accepted:
-            raise ValidationException(
-                message_key="marketplace.errors.rules_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         await self._assert_publishable(listing)
@@ -433,7 +428,6 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             listing_id=listing_id,
             fields={
                 "status": "live",
-                "rules_accepted_at": now,
                 "published_at": now,
                 "expires_at": now + LIVE_WINDOW,
                 "removed_at": None,
@@ -703,14 +697,7 @@ class MarketplaceService:  # pylint: disable=too-many-public-methods
             page_size=page_size,
         )
         items = [self._mine_card(row, len(listing_media(row))) for row in rows]
-        earned = await self.repo.earned_amount(
-            organization_id=self._org(), seller_contact_id=contact_id
-        )
-        return {
-            "earned_amount": _money(earned),
-            "items": items,
-            "total": total,
-        }
+        return {"items": items, "total": total}
 
     async def _assert_publishable(self, listing: dict[str, Any]) -> None:
         """Raise when a listing is not ready to go live."""
