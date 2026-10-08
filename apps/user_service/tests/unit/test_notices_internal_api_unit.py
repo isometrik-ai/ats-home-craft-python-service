@@ -27,21 +27,14 @@ def _request() -> Request:
 
 @pytest.mark.asyncio
 async def test_publish_due_notices_internal():
-    with (
-        patch(
-            "apps.user_service.app.api.notices_internal.require_super_admin",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "apps.user_service.app.api.notices_internal.publish_scheduled_notices",
-            new_callable=AsyncMock,
-            return_value=["n-1", "n-2"],
-        ),
+    with patch(
+        "apps.user_service.app.api.notices_internal.publish_scheduled_notices",
+        new_callable=AsyncMock,
+        return_value=["n-1", "n-2"],
     ):
         response = await publish_due_notices_internal(
             request=_request(),
             db_connection=MagicMock(),
-            current_user={"sub": "admin-1"},
         )
 
     assert response.status_code == 200
@@ -52,21 +45,14 @@ async def test_publish_due_notices_internal():
 
 @pytest.mark.asyncio
 async def test_expire_notice_pins_internal():
-    with (
-        patch(
-            "apps.user_service.app.api.notices_internal.require_super_admin",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "apps.user_service.app.api.notices_internal.expire_notice_pins",
-            new_callable=AsyncMock,
-            return_value=5,
-        ),
+    with patch(
+        "apps.user_service.app.api.notices_internal.expire_notice_pins",
+        new_callable=AsyncMock,
+        return_value=5,
     ):
         response = await expire_notice_pins_internal(
             request=_request(),
             db_connection=MagicMock(),
-            current_user={"sub": "admin-1"},
         )
 
     assert response.status_code == 200
