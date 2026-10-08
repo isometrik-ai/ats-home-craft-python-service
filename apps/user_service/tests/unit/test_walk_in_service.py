@@ -717,6 +717,85 @@ def test_format_contact_name():
 
 
 @pytest.mark.asyncio
+async def test_enrich_visit_unit_actor_labels_from_contacts_and_events():
+    """Visit units expose actor_label for approved/rejected flats."""
+    repo = _FakeWalkInRepo()
+    repo.visit_units = [
+        _visit_unit_row(
+            id="unit-row-approved",
+            status=WalkInVisitUnitStatus.APPROVED.value,
+            approved_by_contact_id=CONTACT_ID,
+        ),
+        _visit_unit_row(
+            id="unit-row-rejected",
+            status=WalkInVisitUnitStatus.REJECTED.value,
+            rejected_by_contact_id=CONTACT_ID,
+        ),
+        _visit_unit_row(
+            id="unit-row-system",
+            status=WalkInVisitUnitStatus.REJECTED.value,
+        ),
+    ]
+    repo.fetch_contact_display_names = AsyncMock(  # type: ignore[method-assign]
+        return_value={CONTACT_ID: "Mr Resident Owner"}
+    )
+    service = _service(repo=repo)
+
+    enriched = await service._enrich_visit_unit_actor_labels(
+        organization_id=ORG_ID,
+        visit_units=repo.visit_units,
+        events=[
+            {
+                "walk_in_visit_unit_id": "unit-row-system",
+                "event_type": WalkInEventType.VISIT_UNIT_REJECTED.value,
+                "actor_label": "System",
+            }
+        ],
+    )
+
+    by_id = {row["id"]: row for row in enriched}
+    assert by_id["unit-row-approved"]["actor_label"] == "Mr Resident Owner"
+    assert by_id["unit-row-rejected"]["actor_label"] == "Mr Resident Owner"
+    assert by_id["unit-row-system"]["actor_label"] == "System"
+
+
+@pytest.mark.asyncio
+async def test_get_project_walk_in_includes_visit_unit_actor_label():
+    """Walk-in detail includes actor_label on visit_units."""
+    repo = _FakeWalkInRepo()
+    repo.visit_units = [
+        _visit_unit_row(
+            status=WalkInVisitUnitStatus.APPROVED.value,
+            approved_by_contact_id=CONTACT_ID,
+        )
+    ]
+    repo.events = [
+        {
+            "id": "event-approve",
+            "event_type": WalkInEventType.VISIT_UNIT_APPROVED.value,
+            "walk_in_visit_unit_id": VISIT_UNIT_ID,
+            "actor_type": "resident",
+            "actor_contact_id": CONTACT_ID,
+            "occurred_at": datetime.now(timezone.utc),
+            "payload": {},
+        }
+    ]
+    repo.fetch_contact_display_names = AsyncMock(  # type: ignore[method-assign]
+        return_value={CONTACT_ID: "Mr Resident Owner"}
+    )
+    service = _service(repo=repo)
+    service.members_repo = MagicMock()
+    service.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
+
+    result = await service.get_project_walk_in(
+        project_id=PROJECT_ID,
+        walk_in_entry_id=ENTRY_ID,
+    )
+
+    assert result["visit_units"][0]["actor_label"] == "Mr Resident Owner"
+
+
+@pytest.mark.asyncio
 async def test_enrich_event_actor_labels_resolves_staff_resident_and_system():
     """Timeline actor labels are resolved at read time from actor ids."""
     repo = _FakeWalkInRepo()
