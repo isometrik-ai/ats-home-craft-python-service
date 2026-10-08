@@ -7,7 +7,7 @@
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Resident API:** `/v1/marketplace` (org-scoped)
-- **Staff API:** `/v1/projects/{project_id}/marketplace` (pets-admin pattern)
+- **Staff API:** `/v1/marketplace/admin` (org-scoped; optional `project_id` filter)
 - **Catalog:** `app/data/marketplace_catalog.json`
 - **DB schema:** `ats-home-craft-supabase` — `20261006120000_marketplace_enums.sql`, `20261006121000_marketplace_tables.sql`, `20261008140000_marketplace_permissions.sql`
 
@@ -15,7 +15,7 @@ ______________________________________________________________________
 
 ## 1. What this flow does
 
-A resident lists a household item for **sale** or as a **giveaway**, and browses what others in the organization have listed. Money never moves through the app. Buyers and sellers coordinate offline (phone or in person). There is **no in-app chat**, **no reports**, and **no wanted requests**. Society staff moderate posted listings on a project-scoped admin board (summary, search, filters, drawer, remove).
+A resident lists a household item for **sale** or as a **giveaway**, and browses what others in the organization have listed. Money never moves through the app. Buyers and sellers coordinate offline (phone or in person). There is **no in-app chat**, **no reports**, and **no wanted requests**. Staff moderate posted listings on an organization-scoped admin board (summary, search, filters, drawer, remove), with an optional society (`project_id`) filter.
 
 The prototype flow map, adjusted for this scope:
 
@@ -41,7 +41,7 @@ The prototype flow map, adjusted for this scope:
 | Rule                                               | Enforcement                                                                                                                             |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | **Org-scoped resident API**                        | Resident queries filter `organization_id` from auth. Resident URLs never use `project_id`                                               |
-| **Project-scoped staff API**                       | Staff routes are `/v1/projects/{project_id}/marketplace/*` with `ensure_staff_project_access`                                           |
+| **Org-scoped staff API**                           | Staff routes are `/v1/marketplace/admin/*` with `ensure_staff_project_access_optional`. `project_id` is an optional query filter        |
 | **Global browse**                                  | GET listing feeds are org-wide. No `unit_id` on read routes; flat numbers follow §6 (seller always sees own flat)                       |
 | **Unit on writes**                                 | `unit_id` in the body on create, save, patch, actions, and mark-sold. Active `contact_units`; seller actions need Owner/Tenant/Family   |
 | **Media immutable**                                | Set only on create. No `/listings/{id}/media` routes                                                                                    |
@@ -414,22 +414,22 @@ ______________________________________________________________________
 
 ## 10. How to make common changes
 
-| I want to…                | Change here                                            |
-| ------------------------- | ------------------------------------------------------ |
-| Add a category            | `app/data/marketplace_catalog.json`                    |
-| Change 30-day live window | `marketplace_service.py` and the expiry job            |
-| Change the nearby radius  | `MARKETPLACE_NEARBY_RADIUS_KM` in `marketplace_geo.py` |
-| Change who may post       | `contact_roles` check in `marketplace_service.py`      |
-| Change flat visibility    | `visible_flat` only                                    |
-| Change copy               | `app/locales/en.json` under `marketplace.*`            |
-| Change staff filters      | `AdminMarketplaceListQuery` + `list_for_project` SQL   |
-| Change staff header cards | `get_project_summary` in the repository                |
+| I want to…                | Change here                                             |
+| ------------------------- | ------------------------------------------------------- |
+| Add a category            | `app/data/marketplace_catalog.json`                     |
+| Change 30-day live window | `marketplace_service.py` and the expiry job             |
+| Change the nearby radius  | `MARKETPLACE_NEARBY_RADIUS_KM` in `marketplace_geo.py`  |
+| Change who may post       | `contact_roles` check in `marketplace_service.py`       |
+| Change flat visibility    | `visible_flat` only                                     |
+| Change copy               | `app/locales/en.json` under `marketplace.*`             |
+| Change staff filters      | `AdminMarketplaceListQuery` + `list_admin_listings` SQL |
+| Change staff header cards | `get_admin_summary` in the repository                   |
 
 ______________________________________________________________________
 
-## 11. Staff admin (project-scoped)
+## 11. Staff admin (organization-scoped)
 
-Same layering as pets admin: JWT → `ensure_staff_project_access` → `MarketplaceService` → `MarketplaceRepository`.
+Same layering as companies: JWT → `ensure_staff_project_access_optional` → `MarketplaceService` → `MarketplaceRepository`. `project_id` is never in the path.
 
 **Permissions** (`20261008140000_marketplace_permissions.sql`):
 
@@ -458,17 +458,18 @@ No `marketplace_reports` table. There is no Reported tab.
 
 ### Screen → API
 
-Prefix: `/v1/projects/{project_id}/marketplace`
+Prefix: `/v1/marketplace/admin`
 
-| Screen element                                         | API                                                                                           |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| Header cards Active / Sold / Past / Removed or deleted | `GET /summary` → `active_count`, `sold_count`, `past_count`, `removed_count` (drafts omitted) |
-| Category filter                                        | `GET /catalog` then `GET /listings?category=`                                                 |
-| Search (item, resident, unit, tower)                   | `GET /listings?q=`                                                                            |
-| Status filter                                          | `GET /listings?status=all\|live\|sold\|past\|removed`                                         |
-| Listings table                                         | `GET /listings?page=&page_size=` — flat, `published_at` desc. **No** group-by-tower           |
-| Row click / drawer                                     | `GET /listings/{listing_id}`                                                                  |
-| Remove (live only)                                     | `POST /listings/{listing_id}/remove` `{ "removal_note" }`                                     |
+| Screen element                                         | API                                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Header cards Active / Sold / Past / Removed or deleted | `GET /summary?project_id=` → `active_count`, `sold_count`, `past_count`, `removed_count` |
+| Category filter                                        | `GET /catalog` then `GET /listings?category=`                                            |
+| Search (item, resident, unit, tower)                   | `GET /listings?q=`                                                                       |
+| Society filter                                         | Optional `project_id` on summary, list, detail, and remove                               |
+| Status filter                                          | `GET /listings?status=all\|live\|sold\|past\|removed`                                    |
+| Listings table                                         | `GET /listings?page=&page_size=` — flat, org-wide, `published_at` desc                   |
+| Row click / drawer                                     | `GET /listings/{listing_id}`                                                             |
+| Remove (live only)                                     | `POST /listings/{listing_id}/remove` `{ "removal_note" }`                                |
 
 **Not implemented (hide in client):** Group by tower, All towers, Sort: tower & unit, Export, Settings, Reported tab, Restore, view counts, conversations.
 

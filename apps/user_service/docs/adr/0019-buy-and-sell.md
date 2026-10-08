@@ -15,7 +15,7 @@ ______________________________________________________________________
 
 Residents need a place to sell or give away household items and browse what others have listed. Buy & Sell is a resident tab on the app shell.
 
-**Reduced scope (2026-10-08):** No in-app chat, no reports, no wanted requests, no search history or suggestions, no view counts, no giveaway sort boost, no expiry reminder push. Resident HTTP routes live under **`/v1/marketplace`** (organization-scoped). Staff routes live under **`/v1/projects/{project_id}/marketplace`**. Listings still reference a pickup **project** via `units`.
+**Reduced scope (2026-10-08):** No in-app chat, no reports, no wanted requests, no search history or suggestions, no view counts, no giveaway sort boost, no expiry reminder push. Resident HTTP routes live under **`/v1/marketplace`**. Staff routes live under **`/v1/marketplace/admin`**. Both are organization-scoped. Listings still reference a pickup **project** via `units`; staff may pass optional `project_id` to filter one society.
 
 ### In scope
 
@@ -74,12 +74,12 @@ Column detail: [buy-and-sell-flow.md](../buy-and-sell-flow.md) §3.
 
 Residents do not get new RBAC codes. Posting requires Owner, Tenant, or Family on the pickup unit (same as pets).
 
-**Staff** (`/v1/projects/{project_id}/marketplace`, same pattern as pets admin):
+**Staff** (`/v1/marketplace/admin`, org-scoped like companies; optional `project_id` query):
 
-- **Auth:** `ensure_staff_project_access` with `marketplace_management.view` (reads) or `marketplace_management.edit` (remove).
-- **List:** search (`q` on title, resident name, unit, tower), `status` (`all` / `live` / `sold` / `past` / `removed`), `category` catalog slug. Flat table newest-first. **No** group-by-tower, all-towers, or tower-and-unit sort.
-- **Summary:** `active_count` (`live`), `sold_count`, `past_count` (`expired`), `removed_count`. Drafts are omitted. `removed` includes seller and staff take-downs; there is no committee status.
-- **Detail:** staff always see the pickup flat. History is derived from listing timestamps (no event table).
+- **Auth:** `ensure_staff_project_access_optional` with `marketplace_management.view` (reads) or `marketplace_management.edit` (remove). When `project_id` is omitted, HQ `projects_management.view` satisfies the ceiling. When it is set, assigned project staff need the marketplace project-role grant.
+- **List:** search (`q` on title, resident name, unit, tower), `status` (`all` / `live` / `sold` / `past` / `removed`), `category` catalog slug, optional `project_id`. Flat table newest-first. **No** group-by-tower, all-towers, or tower-and-unit sort.
+- **Summary:** `active_count` (`live`), `sold_count`, `past_count` (`expired`), `removed_count`. Drafts are omitted. Same optional `project_id`.
+- **Detail / remove:** `/listings/{id}` — org + listing id. Optional `project_id` further scopes the row.
 - **Remove:** `POST .../listings/{id}/remove` `{ "removal_note" }` on a **live** row → `status = removed`. Permanent; no restore.
 - **Not built:** export, settings, Reported tab, view counts, conversations.
 

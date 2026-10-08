@@ -125,10 +125,14 @@ class MarkSoldRequest(BaseModel):
 
 
 class AdminMarketplaceListQuery(BaseModel):
-    """Query params for GET /projects/{project_id}/marketplace/listings."""
+    """Query params for GET /marketplace/admin/listings."""
 
     model_config = ConfigDict(extra="forbid")
 
+    project_id: str | None = Field(
+        default=None,
+        description="Optional society filter (UUID). Omit to list the whole organization.",
+    )
     q: str | None = Field(
         default=None,
         description="Search item title, resident name, unit, or tower.",

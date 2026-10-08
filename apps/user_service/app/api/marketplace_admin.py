@@ -1,9 +1,9 @@
-"""Staff buy and sell API (project-scoped, ADR 0019)."""
+"""Staff buy and sell API (organization-scoped, ADR 0019)."""
 
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Request
+from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -20,7 +20,7 @@ from apps.user_service.app.schemas.marketplace import (
 from apps.user_service.app.services.marketplace_service import MarketplaceService
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
-    ensure_staff_project_access,
+    ensure_staff_project_access_optional,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
@@ -31,7 +31,14 @@ from libs.shared_utils.common_query import (
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
-router = APIRouter(prefix="/projects", tags=["Marketplace (Admin)"])
+router = APIRouter(prefix="/marketplace/admin", tags=["Marketplace (Admin)"])
+
+OPTIONAL_PROJECT_ID = Query(
+    None,
+    description=(
+        "Optional society filter (UUID). Omit to include every project in the organization."
+    ),
+)
 
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     401: {"description": "Unauthorized (missing/invalid JWT)."},
@@ -62,7 +69,7 @@ def _ok_response(
 
 SUMMARY_SUCCESS_RESPONSES = _ok_response(
     MarketplaceSummaryApiResponse,
-    "Active, sold, past, and removed counts for the project.",
+    "Active, sold, past, and removed counts for the organization.",
 )
 CATALOG_SUCCESS_RESPONSES = _ok_response(
     MarketplaceCatalogApiResponse,
@@ -70,7 +77,7 @@ CATALOG_SUCCESS_RESPONSES = _ok_response(
 )
 LIST_SUCCESS_RESPONSES = _ok_response(
     MarketplaceListApiResponse,
-    "Paginated marketplace listings for the project.",
+    "Paginated marketplace listings for the organization.",
 )
 DETAIL_SUCCESS_RESPONSES = _ok_response(
     MarketplaceListingApiResponse,
@@ -82,23 +89,23 @@ REMOVED_SUCCESS_RESPONSES = _ok_response(
 )
 
 
-@handle_api_exceptions("get project marketplace summary")
+@handle_api_exceptions("get marketplace admin summary")
 @router.get(
-    "/{project_id}/marketplace/summary",
+    "/summary",
     status_code=http_status.HTTP_200_OK,
-    summary="Buy and sell summary for a project",
+    summary="Buy and sell summary for the organization",
     response_model=None,
     responses=SUMMARY_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def get_project_marketplace_summary(
+async def get_marketplace_admin_summary(
     request: Request,
-    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    project_id: str | None = OPTIONAL_PROJECT_ID,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return active, sold, past, and removed counts for the listings header."""
-    user_context = await ensure_staff_project_access(
+    """Return active, sold, past, and removed counts. Filter with project_id."""
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
@@ -106,7 +113,7 @@ async def get_project_marketplace_summary(
         request=request,
     )
     service = MarketplaceService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_project_summary(project_id=project_id)
+    data = await service.get_admin_summary(project_id=project_id)
     return success_response(
         request=request,
         message_key="marketplace.success.summary_retrieved",
@@ -115,23 +122,23 @@ async def get_project_marketplace_summary(
     )
 
 
-@handle_api_exceptions("get project marketplace catalog")
+@handle_api_exceptions("get marketplace admin catalog")
 @router.get(
-    "/{project_id}/marketplace/catalog",
+    "/catalog",
     status_code=http_status.HTTP_200_OK,
     summary="Marketplace categories for staff filters",
     response_model=None,
     responses=CATALOG_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def get_project_marketplace_catalog(
+async def get_marketplace_admin_catalog(
     request: Request,
-    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    project_id: str | None = OPTIONAL_PROJECT_ID,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return static category options for the staff category filter."""
-    user_context = await ensure_staff_project_access(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
@@ -148,32 +155,31 @@ async def get_project_marketplace_catalog(
     )
 
 
-@handle_api_exceptions("list project marketplace listings")
+@handle_api_exceptions("list marketplace admin listings")
 @router.get(
-    "/{project_id}/marketplace/listings",
+    "/listings",
     status_code=http_status.HTTP_200_OK,
-    summary="List marketplace listings for a project",
+    summary="List marketplace listings for the organization",
     response_model=None,
     responses=LIST_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def list_project_marketplace_listings(
+async def list_marketplace_admin_listings(
     request: Request,
-    project_id: str = Path(..., description="Project identifier (UUID string)."),
     query: AdminMarketplaceListQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Paginated listings with search, status, and category. No tower grouping."""
-    user_context = await ensure_staff_project_access(
+    """Paginated listings with search, status, category, and optional project_id."""
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
-        project_id=project_id,
+        project_id=query.project_id,
         permission_codes=MARKETPLACE_MANAGEMENT_VIEW,
         request=request,
     )
     service = MarketplaceService(db_connection=db_connection, user_context=user_context)
-    data = await service.list_listings_for_project(project_id=project_id, query=query)
+    data = await service.list_listings_admin(query=query)
     return list_response(
         request=request,
         items=data["items"],
@@ -185,24 +191,24 @@ async def list_project_marketplace_listings(
     )
 
 
-@handle_api_exceptions("get project marketplace listing")
+@handle_api_exceptions("get marketplace admin listing")
 @router.get(
-    "/{project_id}/marketplace/listings/{listing_id}",
+    "/listings/{listing_id}",
     status_code=http_status.HTTP_200_OK,
     summary="Get a marketplace listing for staff",
     response_model=None,
     responses=DETAIL_SUCCESS_RESPONSES,
 )
 @limiter.limit("100/minute")
-async def get_project_marketplace_listing(
+async def get_marketplace_admin_listing(
     request: Request,
-    project_id: str = Path(..., description="Project identifier (UUID string)."),
     listing_id: str = Path(..., description="Listing identifier (UUID string)."),
+    project_id: str | None = OPTIONAL_PROJECT_ID,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Return the staff drawer payload for one posted listing."""
-    user_context = await ensure_staff_project_access(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
@@ -210,7 +216,7 @@ async def get_project_marketplace_listing(
         request=request,
     )
     service = MarketplaceService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_listing_for_project(project_id=project_id, listing_id=listing_id)
+    data = await service.get_listing_admin(listing_id=listing_id, project_id=project_id)
     return success_response(
         request=request,
         message_key="marketplace.success.detail_retrieved",
@@ -219,9 +225,9 @@ async def get_project_marketplace_listing(
     )
 
 
-@handle_api_exceptions("remove project marketplace listing")
+@handle_api_exceptions("remove marketplace admin listing")
 @router.post(
-    "/{project_id}/marketplace/listings/{listing_id}/remove",
+    "/listings/{listing_id}/remove",
     status_code=http_status.HTTP_200_OK,
     summary="Remove a live marketplace listing",
     response_model=None,
@@ -235,16 +241,16 @@ async def get_project_marketplace_listing(
     table_name="marketplace_listings",
     category="MARKETPLACE",
 )
-async def remove_project_marketplace_listing(
+async def remove_marketplace_admin_listing(
     request: Request,
-    project_id: str = Path(..., description="Project identifier (UUID string)."),
     listing_id: str = Path(..., description="Listing identifier (UUID string)."),
+    project_id: str | None = OPTIONAL_PROJECT_ID,
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
     body: AdminRemoveListingRequest = Body(...),
 ):
     """Take a live listing off the board. Removal is permanent (no restore)."""
-    user_context = await ensure_staff_project_access(
+    user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
@@ -253,14 +259,14 @@ async def remove_project_marketplace_listing(
     )
     service = MarketplaceService(db_connection=db_connection, user_context=user_context)
     data = await service.remove_listing_admin(
-        project_id=project_id,
         listing_id=listing_id,
         removal_note=body.removal_note,
+        project_id=project_id,
     )
     set_audit_context(
         request,
         user_context,
-        project_id=project_id,
+        project_id=project_id or data.get("project_id"),
         table="marketplace_listings",
         requested_id=listing_id,
         description=f"Staff removed marketplace listing: {listing_id}",

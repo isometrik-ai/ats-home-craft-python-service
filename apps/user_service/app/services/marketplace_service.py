@@ -684,41 +684,38 @@ class MarketplaceService:
         items = [self._mine_card(row, len(listing_media(row))) for row in rows]
         return {"items": items, "total": total}
 
-    async def get_project_summary(self, *, project_id: str) -> dict[str, int]:
+    async def get_admin_summary(self, *, project_id: str | None = None) -> dict[str, int]:
         """Active, sold, past, and removed counts for the staff header."""
         await self.repo.expire_due(organization_id=self._org())
-        return await self.repo.get_project_summary(
+        return await self.repo.get_admin_summary(
             organization_id=self._org(),
             project_id=project_id,
         )
 
-    async def list_listings_for_project(
+    async def list_listings_admin(
         self,
         *,
-        project_id: str,
         query: AdminMarketplaceListQuery,
     ) -> dict[str, Any]:
-        """Flat staff list: search, status, and category. No tower grouping."""
+        """Flat staff list: search, status, and category. Optional society filter."""
         await self.repo.expire_due(organization_id=self._org())
         category_slug = MarketplaceCatalogService.parse_filter(query.category, None)[0]
-        rows, total = await self.repo.list_for_project(
+        rows, total = await self.repo.list_admin_listings(
             organization_id=self._org(),
-            project_id=project_id,
-            query=query.q,
-            status=query.status.value,
+            query=query,
             category=category_slug,
-            page=query.page,
-            page_size=query.page_size,
         )
         return {"items": [self._admin_card(row) for row in rows], "total": total}
 
-    async def get_listing_for_project(self, *, project_id: str, listing_id: str) -> dict[str, Any]:
-        """Staff drawer for one posted listing in the project."""
+    async def get_listing_admin(
+        self, *, listing_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """Staff drawer for one posted listing in the organization."""
         await self.repo.expire_due(organization_id=self._org())
         listing = await self.repo.get_admin_listing(
             organization_id=self._org(),
-            project_id=project_id,
             listing_id=listing_id,
+            project_id=project_id,
         )
         if not listing:
             raise NotFoundException(
@@ -735,9 +732,9 @@ class MarketplaceService:
     async def remove_listing_admin(
         self,
         *,
-        project_id: str,
         listing_id: str,
         removal_note: str,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         """Take a live listing off the board. Same removed status as seller take-down."""
         note = removal_note.strip()
@@ -754,17 +751,17 @@ class MarketplaceService:
             )
         updated = await self.repo.remove_live_listing_admin(
             organization_id=self._org(),
-            project_id=project_id,
             listing_id=listing_id,
             removal_note=note,
             removed_by_user_id=actor_user_id,
             removed_at=_now(),
+            project_id=project_id,
         )
         if not updated:
             listing = await self.repo.get_admin_listing(
                 organization_id=self._org(),
-                project_id=project_id,
                 listing_id=listing_id,
+                project_id=project_id,
             )
             if not listing:
                 raise NotFoundException(
@@ -775,7 +772,7 @@ class MarketplaceService:
                 message_key="marketplace.errors.not_live",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        return await self.get_listing_for_project(project_id=project_id, listing_id=listing_id)
+        return await self.get_listing_admin(listing_id=listing_id, project_id=project_id)
 
     def _admin_card(self, row: dict[str, Any]) -> dict[str, Any]:
         """One row on the staff listings table."""
@@ -800,6 +797,8 @@ class MarketplaceService:
             "cover_path": cover_path(media),
             "resident_name": public_name(row.get("seller_first_name"), row.get("seller_last_name")),
             "seller_photo_url": row.get("seller_photo_url"),
+            "project_id": row.get("project_id"),
+            "project_name": row.get("project_name"),
             "unit_label": flat_label(row.get("unit_label"), row.get("unit_code")),
             "tower_name": row.get("tower_name"),
             "published_at": row.get("published_at"),

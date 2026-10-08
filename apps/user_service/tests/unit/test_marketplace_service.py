@@ -431,10 +431,10 @@ async def test_list_listings_passes_browse_query():
 
 
 @pytest.mark.asyncio
-async def test_get_project_summary_expires_then_counts():
+async def test_get_admin_summary_expires_then_counts():
     svc = _service()
     svc.repo.expire_due = AsyncMock()
-    svc.repo.get_project_summary = AsyncMock(
+    svc.repo.get_admin_summary = AsyncMock(
         return_value={
             "active_count": 12,
             "sold_count": 2,
@@ -442,38 +442,40 @@ async def test_get_project_summary_expires_then_counts():
             "removed_count": 3,
         }
     )
-    data = await svc.get_project_summary(project_id="project-1")
+    data = await svc.get_admin_summary()
     svc.repo.expire_due.assert_awaited_once_with(organization_id="org-1")
+    assert svc.repo.get_admin_summary.await_args.kwargs["project_id"] is None
     assert data["active_count"] == 12
     assert data["past_count"] == 1
 
 
 @pytest.mark.asyncio
-async def test_list_listings_for_project_maps_filters():
+async def test_list_listings_admin_maps_filters():
     svc = _service()
     svc.repo.expire_due = AsyncMock()
-    svc.repo.list_for_project = AsyncMock(return_value=([_listing()], 1))
+    svc.repo.list_admin_listings = AsyncMock(return_value=([_listing()], 1))
     query = AdminMarketplaceListQuery(
+        project_id="project-1",
         q="table",
         status=MarketplaceAdminStatus.LIVE,
         category="furniture",
         page=1,
         page_size=20,
     )
-    data = await svc.list_listings_for_project(project_id="project-1", query=query)
-    kwargs = svc.repo.list_for_project.await_args.kwargs
-    assert kwargs["query"] == "table"
-    assert kwargs["status"] == "live"
+    data = await svc.list_listings_admin(query=query)
+    kwargs = svc.repo.list_admin_listings.await_args.kwargs
+    assert kwargs["query"] is query
     assert kwargs["category"] == "furniture"
     assert data["total"] == 1
     assert data["items"][0]["resident_name"] == "Rohan B."
     assert data["items"][0]["unit_label"] == "B-1104"
+    assert data["items"][0]["project_id"] == "project-1"
     assert data["items"][0]["can_remove"] is True
     assert "tower" not in AdminMarketplaceListQuery.model_fields
 
 
 @pytest.mark.asyncio
-async def test_get_listing_for_project_builds_history_and_unit_stats():
+async def test_get_listing_admin_builds_history_and_unit_stats():
     svc = _service()
     svc.repo.expire_due = AsyncMock()
     svc.repo.get_admin_listing = AsyncMock(return_value=_listing())
@@ -484,7 +486,7 @@ async def test_get_listing_for_project_builds_history_and_unit_stats():
             "removed_before_count": 1,
         }
     )
-    data = await svc.get_listing_for_project(project_id="project-1", listing_id="listing-1")
+    data = await svc.get_listing_admin(listing_id="listing-1")
     assert data["listings_from_unit_total"] == 3
     assert data["removed_before_count"] == 1
     assert data["history"][0]["event"] == "posted"
@@ -493,12 +495,12 @@ async def test_get_listing_for_project_builds_history_and_unit_stats():
 
 
 @pytest.mark.asyncio
-async def test_get_listing_for_project_missing():
+async def test_get_listing_admin_missing():
     svc = _service()
     svc.repo.expire_due = AsyncMock()
     svc.repo.get_admin_listing = AsyncMock(return_value=None)
     with pytest.raises(NotFoundException):
-        await svc.get_listing_for_project(project_id="project-1", listing_id="missing")
+        await svc.get_listing_admin(listing_id="missing")
 
 
 @pytest.mark.asyncio
@@ -518,12 +520,11 @@ async def test_remove_listing_admin_takes_live_listing_down():
         }
     )
     data = await svc.remove_listing_admin(
-        project_id="project-1",
         listing_id="listing-1",
         removal_note="Photos didn't match",
     )
     kwargs = svc.repo.remove_live_listing_admin.await_args.kwargs
-    assert kwargs["project_id"] == "project-1"
+    assert kwargs["project_id"] is None
     assert kwargs["listing_id"] == "listing-1"
     assert kwargs["removed_by_user_id"] == "staff-1"
     assert kwargs["removal_note"] == "Photos didn't match"
@@ -539,7 +540,6 @@ async def test_remove_listing_admin_rejects_non_live():
     svc.repo.get_admin_listing = AsyncMock(return_value=_listing(status="sold"))
     with pytest.raises(ValidationException) as raised:
         await svc.remove_listing_admin(
-            project_id="project-1",
             listing_id="listing-1",
             removal_note="Taken down",
         )
@@ -554,7 +554,76 @@ async def test_remove_listing_admin_missing_listing():
     svc.repo.get_admin_listing = AsyncMock(return_value=None)
     with pytest.raises(NotFoundException):
         await svc.remove_listing_admin(
-            project_id="project-1",
             listing_id="listing-1",
             removal_note="Taken down",
         )
+
+
+@pytest.mark.asyncio
+async def test_get_admin_summary_filters_project():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_admin_summary = AsyncMock(
+        return_value={
+            "active_count": 4,
+            "sold_count": 1,
+            "past_count": 0,
+            "removed_count": 1,
+        }
+    )
+    data = await svc.get_admin_summary(project_id="project-1")
+    assert svc.repo.get_admin_summary.await_args.kwargs["project_id"] == "project-1"
+    assert data["active_count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_list_listings_admin_org_wide():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.list_admin_listings = AsyncMock(return_value=([_listing()], 1))
+    query = AdminMarketplaceListQuery(q="table")
+    data = await svc.list_listings_admin(query=query)
+    assert query.project_id is None
+    assert svc.repo.list_admin_listings.await_args.kwargs["query"] is query
+    assert data["items"][0]["can_remove"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_listings_admin_rejects_unknown_category():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    query = AdminMarketplaceListQuery(category="not-a-catalog-slug")
+    with pytest.raises(ValidationException) as raised:
+        await svc.list_listings_admin(query=query)
+    assert raised.value.message_key == "marketplace.errors.invalid_category"
+
+
+@pytest.mark.asyncio
+async def test_remove_listing_admin_rejects_blank_note():
+    svc = _service()
+    svc.user_context.user_id = "staff-1"
+    with pytest.raises(ValidationException) as raised:
+        await svc.remove_listing_admin(listing_id="listing-1", removal_note="   ")
+    assert raised.value.message_key == "marketplace.errors.removal_note_required"
+
+
+@pytest.mark.asyncio
+async def test_remove_listing_admin_passes_project_id():
+    svc = _service()
+    svc.user_context.user_id = "staff-1"
+    svc.repo.remove_live_listing_admin = AsyncMock(return_value=True)
+    svc.repo.get_admin_listing = AsyncMock(return_value=_listing(status="removed"))
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.count_unit_listing_stats = AsyncMock(
+        return_value={
+            "listings_from_unit_total": 1,
+            "listings_from_unit_active": 0,
+            "removed_before_count": 0,
+        }
+    )
+    await svc.remove_listing_admin(
+        listing_id="listing-1",
+        removal_note="Taken down",
+        project_id="project-1",
+    )
+    assert svc.repo.remove_live_listing_admin.await_args.kwargs["project_id"] == "project-1"
