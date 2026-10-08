@@ -505,13 +505,10 @@ async def test_get_listing_for_project_missing():
 async def test_remove_listing_admin_takes_live_listing_down():
     svc = _service()
     svc.user_context.user_id = "staff-1"
+    svc.repo.remove_live_listing_admin = AsyncMock(return_value=True)
     svc.repo.get_admin_listing = AsyncMock(
-        side_effect=[
-            _listing(),
-            _listing(status="removed", removal_note="Photos didn't match"),
-        ]
+        return_value=_listing(status="removed", removal_note="Photos didn't match")
     )
-    svc.repo.update_listing = AsyncMock()
     svc.repo.expire_due = AsyncMock()
     svc.repo.count_unit_listing_stats = AsyncMock(
         return_value={
@@ -525,9 +522,11 @@ async def test_remove_listing_admin_takes_live_listing_down():
         listing_id="listing-1",
         removal_note="Photos didn't match",
     )
-    fields = svc.repo.update_listing.await_args.kwargs["fields"]
-    assert fields["status"] == "removed"
-    assert fields["removed_by_user_id"] == "staff-1"
+    kwargs = svc.repo.remove_live_listing_admin.await_args.kwargs
+    assert kwargs["project_id"] == "project-1"
+    assert kwargs["listing_id"] == "listing-1"
+    assert kwargs["removed_by_user_id"] == "staff-1"
+    assert kwargs["removal_note"] == "Photos didn't match"
     assert data["status"] == "removed"
     assert data["removal_note"] == "Photos didn't match"
 
@@ -536,6 +535,7 @@ async def test_remove_listing_admin_takes_live_listing_down():
 async def test_remove_listing_admin_rejects_non_live():
     svc = _service()
     svc.user_context.user_id = "staff-1"
+    svc.repo.remove_live_listing_admin = AsyncMock(return_value=False)
     svc.repo.get_admin_listing = AsyncMock(return_value=_listing(status="sold"))
     with pytest.raises(ValidationException) as raised:
         await svc.remove_listing_admin(
@@ -544,3 +544,17 @@ async def test_remove_listing_admin_rejects_non_live():
             removal_note="Taken down",
         )
     assert raised.value.message_key == "marketplace.errors.not_live"
+
+
+@pytest.mark.asyncio
+async def test_remove_listing_admin_missing_listing():
+    svc = _service()
+    svc.user_context.user_id = "staff-1"
+    svc.repo.remove_live_listing_admin = AsyncMock(return_value=False)
+    svc.repo.get_admin_listing = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc.remove_listing_admin(
+            project_id="project-1",
+            listing_id="listing-1",
+            removal_note="Taken down",
+        )

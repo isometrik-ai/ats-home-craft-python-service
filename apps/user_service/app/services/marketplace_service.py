@@ -740,21 +740,6 @@ class MarketplaceService:
         removal_note: str,
     ) -> dict[str, Any]:
         """Take a live listing off the board. Same removed status as seller take-down."""
-        listing = await self.repo.get_admin_listing(
-            organization_id=self._org(),
-            project_id=project_id,
-            listing_id=listing_id,
-        )
-        if not listing:
-            raise NotFoundException(
-                message_key="marketplace.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        if listing["status"] != "live":
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
         note = removal_note.strip()
         if not note:
             raise ValidationException(
@@ -767,16 +752,29 @@ class MarketplaceService:
                 message_key="auth.errors.session_not_found",
                 custom_code=CustomStatusCode.UNAUTHORIZED,
             )
-        await self.repo.update_listing(
+        updated = await self.repo.remove_live_listing_admin(
             organization_id=self._org(),
+            project_id=project_id,
             listing_id=listing_id,
-            fields={
-                "status": "removed",
-                "removed_at": _now(),
-                "removal_note": note,
-                "removed_by_user_id": actor_user_id,
-            },
+            removal_note=note,
+            removed_by_user_id=actor_user_id,
+            removed_at=_now(),
         )
+        if not updated:
+            listing = await self.repo.get_admin_listing(
+                organization_id=self._org(),
+                project_id=project_id,
+                listing_id=listing_id,
+            )
+            if not listing:
+                raise NotFoundException(
+                    message_key="marketplace.errors.not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+            raise ValidationException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         return await self.get_listing_for_project(project_id=project_id, listing_id=listing_id)
 
     def _admin_card(self, row: dict[str, Any]) -> dict[str, Any]:

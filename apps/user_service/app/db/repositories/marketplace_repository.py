@@ -374,6 +374,40 @@ class MarketplaceRepository(BaseRepository):
             *params,
         )
 
+    async def remove_live_listing_admin(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        listing_id: str,
+        removal_note: str,
+        removed_by_user_id: str,
+        removed_at: datetime,
+    ) -> bool:
+        """Remove a live listing in one project. Returns False if the row is gone or not live."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE marketplace_listings
+               SET status = 'removed'::marketplace_listing_status,
+                   removed_at = $4::timestamptz,
+                   removal_note = $5,
+                   removed_by_user_id = $6::uuid,
+                   updated_at = now()
+             WHERE organization_id = $1::uuid
+               AND project_id = $2::uuid
+               AND id = $3::uuid
+               AND status = 'live'::marketplace_listing_status
+            RETURNING id
+            """,
+            organization_id,
+            project_id,
+            listing_id,
+            removed_at,
+            removal_note,
+            removed_by_user_id,
+        )
+        return row is not None
+
     async def list_listings(
         self,
         *,
