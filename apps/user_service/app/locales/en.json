@@ -1484,7 +1484,8 @@
       "report_exists": "You already reported this listing.",
       "report_not_found": "This report could not be found.",
       "report_closed": "This report has already been reviewed.",
-      "removal_note_required": "Write a note the seller will see."
+      "removal_note_required": "Write a note the seller will see.",
+      "unit_required_for_filter": "Choose your flat to use location filters."
     },
     "rules": {
       "prohibited": "Firearms, alcohol, medicines, pets and rental property can't be listed here. Property goes under Homes.",
@@ -1492,19 +1493,18 @@
       "giveaway": "Giveaways show as Free."
     },
     "success": {
-      "home_retrieved": "Buy and sell home retrieved successfully.",
       "catalog_retrieved": "Categories retrieved successfully.",
-      "pickup_units_retrieved": "Pickup locations retrieved successfully.",
       "listings_retrieved": "Listings retrieved successfully.",
       "saved_retrieved": "Saved listings retrieved successfully.",
       "mine_retrieved": "Your listings retrieved successfully.",
       "draft_created": "Draft created successfully.",
+      "created": "Listing created successfully.",
       "detail_retrieved": "Listing retrieved successfully.",
       "updated": "Listing updated successfully.",
       "published": "Listing is live.",
       "media_added": "Photo added successfully.",
       "media_deleted": "Photo removed successfully.",
-      "removed": "Listing moved back to drafts.",
+      "removed": "Listing removed from the board.",
       "restored": "Listing is live again.",
       "renewed": "Listing renewed for 30 days.",
       "relisted": "Listing is live again.",

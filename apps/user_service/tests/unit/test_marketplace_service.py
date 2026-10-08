@@ -8,17 +8,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from apps.user_service.app.schemas.enums.marketplace import (
-    MarketplaceListingAction,
-    MarketplaceReportDecision,
-    MarketplaceReportReason,
-    MarketplaceSaleRating,
-)
+from apps.user_service.app.schemas.enums.marketplace import MarketplaceSaleRating
 from apps.user_service.app.schemas.marketplace import (
-    CreateReportRequest,
-    ListingActionRequest,
     MarkSoldRequest,
-    ReviewReportRequest,
+    PublishListingRequest,
     SaveListingRequest,
     UpdateListingRequest,
 )
@@ -169,7 +162,7 @@ async def test_live_edit_rejects_a_blank_title_before_saving():
     svc = _service()
     svc.repo.get_listing = AsyncMock(return_value=_listing())
     svc.repo.count_media = AsyncMock(return_value=2)
-    body = UpdateListingRequest(title="")
+    body = UpdateListingRequest(unit_id="unit-1", title="")
     with pytest.raises(ValidationException) as raised:
         await svc.update_listing(contact_id="seller-1", listing_id="listing-1", body=body)
     assert raised.value.message_key == "marketplace.errors.live_incomplete"
@@ -180,12 +173,12 @@ async def test_live_edit_rejects_a_blank_title_before_saving():
 async def test_live_edit_keeps_the_post_live():
     svc = _service()
     updated = _listing(title="Study table")
-    svc.repo.get_listing = AsyncMock(side_effect=[_listing(), _listing(), updated])
+    svc.repo.get_listing = AsyncMock(side_effect=[_listing(), updated])
     svc.repo.count_media = AsyncMock(return_value=2)
     svc.repo.list_media = AsyncMock(return_value=[])
     svc.repo.is_saved = AsyncMock(return_value=False)
     svc.repo.count_other_live = AsyncMock(return_value=0)
-    body = UpdateListingRequest(title="Study table")
+    body = UpdateListingRequest(unit_id="unit-1", title="Study table")
     result = await svc.update_listing(contact_id="seller-1", listing_id="listing-1", body=body)
     fields = svc.repo.update_listing.await_args.kwargs["fields"]
     assert fields["title"] == "Study table"
@@ -194,39 +187,45 @@ async def test_live_edit_keeps_the_post_live():
 
 
 @pytest.mark.asyncio
-async def test_seller_remove_moves_a_live_post_to_draft():
+async def test_seller_remove_soft_deletes_a_live_post():
     svc = _service()
-    draft = _listing(status="draft")
-    svc.repo.get_listing = AsyncMock(side_effect=[_listing(), draft])
+    svc.user_context.user_id = "user-1"
+    removed = _listing(status="removed", removal_note="No longer selling")
+    svc.repo.get_listing = AsyncMock(side_effect=[_listing(), removed])
     result = await svc.remove_listing(
-        contact_id="seller-1", listing_id="listing-1", unit_id="unit-1"
+        contact_id="seller-1",
+        listing_id="listing-1",
+        unit_id="unit-1",
+        removal_note="No longer selling",
     )
     fields = svc.repo.update_listing.await_args.kwargs["fields"]
-    assert fields == {"status": "draft"}
-    assert result["status"] == "draft"
-    assert result["published_at"] == draft["published_at"]
+    assert fields["status"] == "removed"
+    assert fields["removal_note"] == "No longer selling"
+    assert fields["removed_by_user_id"] == "user-1"
+    assert result["status"] == "removed"
 
 
 @pytest.mark.asyncio
-async def test_restore_puts_a_removed_draft_back_live():
+async def test_restore_puts_a_removed_listing_back_live():
     svc = _service()
-    draft = _listing(status="draft")
+    removed = _listing(status="removed")
     restored = _listing(status="live")
-    svc.repo.get_listing = AsyncMock(side_effect=[draft, restored])
+    svc.repo.get_listing = AsyncMock(side_effect=[removed, restored])
     svc.repo.count_media = AsyncMock(return_value=2)
     svc.repo.ensure_cover = AsyncMock()
     result = await svc.restore_listing(
         contact_id="seller-1", listing_id="listing-1", unit_id="unit-1"
     )
     fields = svc.repo.update_listing.await_args.kwargs["fields"]
-    assert fields == {"status": "live"}
+    assert fields["status"] == "live"
+    assert fields["removed_at"] is None
     assert result["status"] == "live"
 
 
 @pytest.mark.asyncio
-async def test_restore_rejects_a_draft_that_was_never_published():
+async def test_restore_rejects_a_live_listing():
     svc = _service()
-    svc.repo.get_listing = AsyncMock(return_value=_listing(status="draft", published_at=None))
+    svc.repo.get_listing = AsyncMock(return_value=_listing(status="live"))
     with pytest.raises(ValidationException) as raised:
         await svc.restore_listing(contact_id="seller-1", listing_id="listing-1", unit_id="unit-1")
     assert raised.value.message_key == "marketplace.errors.not_restorable"
@@ -236,9 +235,9 @@ async def test_restore_rejects_a_draft_that_was_never_published():
 async def test_restore_starts_a_new_window_when_the_old_one_has_passed():
     svc = _service()
     past = datetime.now(UTC) - timedelta(days=1)
-    draft = _listing(status="draft", expires_at=past)
+    removed = _listing(status="removed", expires_at=past)
     restored = _listing(status="live", expires_at=past)
-    svc.repo.get_listing = AsyncMock(side_effect=[draft, restored])
+    svc.repo.get_listing = AsyncMock(side_effect=[removed, restored])
     svc.repo.count_media = AsyncMock(return_value=2)
     svc.repo.ensure_cover = AsyncMock()
     await svc.restore_listing(contact_id="seller-1", listing_id="listing-1", unit_id="unit-1")
@@ -261,25 +260,8 @@ async def test_mark_sold_rejects_the_seller_as_buyer():
     svc.repo.insert_feedback.assert_not_called()
 
 
-@pytest.mark.asyncio
-async def test_report_does_not_change_the_listing():
-    svc = _service()
-    listing = _listing()
-    svc.repo.expire_due = AsyncMock()
-    svc.repo.get_listing = AsyncMock(return_value=listing)
-    svc.repo.list_active_project_coords = AsyncMock(return_value=[])
-    svc.repo.insert_report = AsyncMock(return_value={"id": "report-1"})
-    body = CreateReportRequest(unit_id="unit-1", reason=MarketplaceReportReason.NOT_ALLOWED)
-    result = await svc.create_report(contact_id="buyer-1", listing_id="listing-1", body=body)
-    assert result["status"] == "open"
-    svc.repo.update_listing.assert_not_called()
-
-
-def test_listing_action_and_review_bodies():
-    action = ListingActionRequest(unit_id="unit-1", action=MarketplaceListingAction.RESTORE)
-    assert action.action == MarketplaceListingAction.RESTORE
-    assert action.rules_accepted is None
+def test_publish_and_save_bodies():
+    publish = PublishListingRequest(unit_id="unit-1", rules_accepted=True)
+    assert publish.rules_accepted is True
     save = SaveListingRequest(unit_id="unit-1", saved=False)
     assert save.saved is False
-    review = ReviewReportRequest(decision=MarketplaceReportDecision.DISMISS)
-    assert review.removal_note is None

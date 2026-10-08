@@ -21,9 +21,8 @@ class MarketplaceListingStatus(str, Enum):
 
 
 class MarketplaceItemCondition(str, Enum):
-    """Postgres marketplace_item_condition."""
+    """Postgres marketplace_item_condition (API; excludes deprecated like_new)."""
 
-    LIKE_NEW = "like_new"
     LIGHTLY_USED = "lightly_used"
     WELL_USED = "well_used"
     NEEDS_REPAIR = "needs_repair"

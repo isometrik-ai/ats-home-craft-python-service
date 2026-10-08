@@ -1,4 +1,4 @@
-"""Resident and committee buy and sell API (ADR 0019)."""
+"""Resident buy and sell API (ADR 0019)."""
 
 from __future__ import annotations
 
@@ -7,87 +7,91 @@ from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
-from apps.user_service.app.dependencies.db import db_conn
+from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
+from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceItemCondition,
-    MarketplaceListingAction,
     MarketplaceMineStatus,
     MarketplacePriceBand,
-    MarketplaceReportDecision,
     MarketplaceSort,
-    MarketplaceWhere,
 )
 from apps.user_service.app.schemas.marketplace import (
-    AddListingMediaRequest,
-    CreateListingRequest,
-    CreateReportRequest,
-    ListingActionRequest,
+    CreateDraftListingRequest,
+    MarketplaceCatalogApiResponse,
+    MarketplaceListApiResponse,
+    MarketplaceListingApiResponse,
+    MarketplaceMineApiResponse,
     MarkSoldRequest,
     PublishListingRequest,
-    ReviewReportRequest,
+    RemoveListingRequest,
+    RestoreListingRequest,
     SaveListingRequest,
     UpdateListingRequest,
 )
 from apps.user_service.app.services.marketplace_service import MarketplaceService
+from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
-    ensure_staff_project_access_for_context,
     extract_onboarding_contact_context,
-    extract_user_context,
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
-from libs.shared_utils.http_exceptions import ForbiddenException, ValidationException
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
-router = APIRouter(prefix="/marketplace", tags=["Marketplace"])
+router = APIRouter(prefix="/marketplace", tags=["Marketplace (Resident)"])
 
-_VIEW = "marketplace_management.view"
-_MODERATE = "marketplace_management.moderate"
+COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
+    401: {"description": "Unauthorized (missing/invalid JWT)."},
+    403: {"description": "Forbidden."},
+    404: {"description": "Not found."},
+    409: {"description": "Conflict."},
+    422: {"description": "Validation error."},
+    429: {"description": "Too many requests (rate limited)."},
+    500: {"description": "Internal server error."},
+}
 
 
-def _service(db_connection: asyncpg.Connection, user_context) -> MarketplaceService:
-    """Build the marketplace service for this request."""
-    return MarketplaceService(db_connection=db_connection, user_context=user_context)
+def _ok_response(
+    model: type,
+    description: str,
+    *,
+    status_code: int = http_status.HTTP_200_OK,
+) -> dict[int | str, dict]:
+    """Build OpenAPI responses for a successful JSON envelope."""
+    return {
+        **COMMON_ERROR_RESPONSES,
+        status_code: {
+            "description": description,
+            "content": {"application/json": {"schema": model.model_json_schema()}},
+        },
+    }
 
 
-@handle_api_exceptions("get marketplace home")
-@router.get("/home", summary="Buy and sell home")
-@limiter.limit("100/minute")
-async def marketplace_home(
-    request: Request,
-    unit_id: str = Query(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Society header, the latest draft, and recently listed posts."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    data = await _service(db_connection, user_context).home(
-        contact_id=str(contact["id"]), unit_id=unit_id
-    )
-    return success_response(
-        request=request,
-        message_key="marketplace.success.home_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
+def _created_response(model: type, description: str) -> dict[int | str, dict]:
+    """Build OpenAPI responses for HTTP 201 success."""
+    return _ok_response(model, description, status_code=http_status.HTTP_201_CREATED)
 
 
 @handle_api_exceptions("get marketplace catalog")
-@router.get("/catalog", summary="Marketplace categories")
+@router.get(
+    "/catalog",
+    status_code=http_status.HTTP_200_OK,
+    summary="Marketplace categories",
+    response_model=None,
+    responses=_ok_response(MarketplaceCatalogApiResponse, "Category catalog retrieved."),
+)
 @limiter.limit("100/minute")
 async def marketplace_catalog(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Category and subtype picker."""
+    """Return static category and subtype options."""
     user_context, _ = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    data = await _service(db_connection, user_context).get_catalog()
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_catalog()
     return success_response(
         request=request,
         message_key="marketplace.success.catalog_retrieved",
@@ -96,63 +100,41 @@ async def marketplace_catalog(
     )
 
 
-@handle_api_exceptions("list marketplace pickup units")
-@router.get("/pickup-units", summary="Pickup flats")
-@limiter.limit("100/minute")
-async def marketplace_pickup_units(
-    request: Request,
-    unit_id: str = Query(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Flats the caller may collect from."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    data = await _service(db_connection, user_context).pickup_units(
-        contact_id=str(contact["id"]), unit_id=unit_id
-    )
-    return success_response(
-        request=request,
-        message_key="marketplace.success.pickup_units_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
 @handle_api_exceptions("list marketplace listings")
-@router.get("/listings", summary="Browse listings")
+@router.get(
+    "/listings",
+    status_code=http_status.HTTP_200_OK,
+    summary="Browse live listings",
+    response_model=None,
+    responses=_ok_response(MarketplaceListApiResponse, "Listing cards retrieved."),
+)
 @limiter.limit("100/minute")
-async def list_marketplace_listings(
+async def list_marketplace_listings(  # pylint: disable=too-many-positional-arguments
     request: Request,
-    *,
-    unit_id: str = Query(...),
-    category: str | None = Query(default=None),
-    subtype: str | None = Query(default=None),
-    q: str | None = Query(default=None),
+    category: str | None = Query(default=None, description="Catalog category name."),
+    subtype: str | None = Query(default=None, description="Catalog subtype name."),
+    q: str | None = Query(default=None, description="Search title text."),
     sort: MarketplaceSort = Query(default=MarketplaceSort.NEWEST),
     price_band: MarketplacePriceBand | None = Query(default=None),
     condition: list[MarketplaceItemCondition] | None = Query(default=None),
-    where: MarketplaceWhere | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=21_474_836),
     page_size: int = Query(default=20, ge=1, le=100),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Live listings in this society and nearby societies."""
+    """Paginated live listings for the organization."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    data = await _service(db_connection, user_context).list_listings(
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.list_listings(
         contact_id=str(contact["id"]),
-        unit_id=unit_id,
         category=category,
         subtype=subtype,
         query=q,
         sort=sort.value,
         price_band=price_band.value if price_band else None,
         conditions=[item.value for item in condition] if condition else [],
-        where=where.value if where else None,
         page=page,
         page_size=page_size,
     )
@@ -163,53 +145,71 @@ async def list_marketplace_listings(
         page=page,
         page_size=page_size,
         message_key="marketplace.success.listings_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
     )
 
 
 @handle_api_exceptions("list saved listings")
-@router.get("/saved", summary="Saved listings")
+@router.get(
+    "/saved",
+    status_code=http_status.HTTP_200_OK,
+    summary="Saved listings",
+    response_model=None,
+    responses=_ok_response(MarketplaceListApiResponse, "Saved listing cards retrieved."),
+)
 @limiter.limit("100/minute")
 async def list_saved_listings(
     request: Request,
-    unit_id: str = Query(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Bookmarks that are still live."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    items = await _service(db_connection, user_context).list_saved(
-        contact_id=str(contact["id"]), unit_id=unit_id
-    )
-    return success_response(
-        request=request,
-        message_key="marketplace.success.saved_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=items,
-    )
-
-
-@handle_api_exceptions("list my listings")
-@router.get("/me/listings", summary="My listings")
-@limiter.limit("100/minute")
-async def my_listings(
-    request: Request,
-    *,
-    unit_id: str = Query(...),
-    status: MarketplaceMineStatus = Query(default=MarketplaceMineStatus.ALL),
-    page: int = Query(default=1, ge=1),
+    page: int = Query(default=1, ge=1, le=21_474_836),
     page_size: int = Query(default=20, ge=1, le=100),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """The caller's drafts, live posts, sold posts, and past posts."""
+    """Paginated bookmarks that are still live."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    data = await _service(db_connection, user_context).my_listings(
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.list_saved(
         contact_id=str(contact["id"]),
-        unit_id=unit_id,
+        page=page,
+        page_size=page_size,
+    )
+    return list_response(
+        request=request,
+        items=data["items"],
+        total=data["total"],
+        page=page,
+        page_size=page_size,
+        message_key="marketplace.success.saved_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("list my listings")
+@router.get(
+    "/me/listings",
+    status_code=http_status.HTTP_200_OK,
+    summary="My listings",
+    response_model=None,
+    responses=_ok_response(MarketplaceMineApiResponse, "Seller dashboard list retrieved."),
+)
+@limiter.limit("100/minute")
+async def my_listings(
+    request: Request,
+    status: MarketplaceMineStatus = Query(default=MarketplaceMineStatus.ALL),
+    page: int = Query(default=1, ge=1, le=21_474_836),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Paginated listings owned by the signed-in contact."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.my_listings(
+        contact_id=str(contact["id"]),
         status=status.value,
         page=page,
         page_size=page_size,
@@ -218,25 +218,52 @@ async def my_listings(
         request=request,
         message_key="marketplace.success.mine_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
-        data=data,
+        data={
+            "earned_amount": data["earned_amount"],
+            "items": data["items"],
+            "total": data["total"],
+            "page": page,
+            "page_size": page_size,
+        },
     )
 
 
-@handle_api_exceptions("create marketplace listing")
-@router.post("/listings", status_code=http_status.HTTP_201_CREATED, summary="Start a draft")
+@handle_api_exceptions("create marketplace draft")
+@router.post(
+    "/listings/drafts",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Create a draft listing",
+    response_model=None,
+    responses=_created_response(MarketplaceListingApiResponse, "Draft listing created."),
+)
 @limiter.limit("30/minute")
-async def create_listing(
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_listings",
+    category="MARKETPLACE",
+)
+async def create_draft_listing(
     request: Request,
-    body: CreateListingRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    body: CreateDraftListingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Create a draft in the chosen category."""
+    """Step 2 save draft, continue to preview, or post another (new category flow)."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    data = await _service(db_connection, user_context).create_listing(
-        contact_id=str(contact["id"]), body=body
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.create_draft(contact_id=str(contact["id"]), body=body)
+    set_audit_context(
+        request,
+        user_context,
+        table="marketplace_listings",
+        requested_id=str(data.get("id")),
+        description=f"Created marketplace draft for unit: {body.unit_id}",
+        risk_level="low",
+        new_data=data,
     )
     return success_response(
         request=request,
@@ -248,22 +275,26 @@ async def create_listing(
 
 
 @handle_api_exceptions("get marketplace listing")
-@router.get("/listings/{listing_id}", summary="Listing detail")
+@router.get(
+    "/listings/{listing_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Listing detail",
+    response_model=None,
+    responses=_ok_response(MarketplaceListingApiResponse, "Listing detail retrieved."),
+)
 @limiter.limit("100/minute")
 async def get_listing(
     request: Request,
-    listing_id: str = Path(...),
-    unit_id: str = Query(...),
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """What neighbours see, plus seller-only fields when the caller owns it."""
+    """Return one listing."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    data = await _service(db_connection, user_context).get_listing(
-        contact_id=str(contact["id"]), listing_id=listing_id, unit_id=unit_id
-    )
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_listing(contact_id=str(contact["id"]), listing_id=listing_id)
     return success_response(
         request=request,
         message_key="marketplace.success.detail_retrieved",
@@ -273,21 +304,49 @@ async def get_listing(
 
 
 @handle_api_exceptions("update marketplace listing")
-@router.patch("/listings/{listing_id}", summary="Edit a listing")
+@router.patch(
+    "/listings/{listing_id}",
+    status_code=http_status.HTTP_200_OK,
+    summary="Edit a listing",
+    response_model=None,
+    responses=_ok_response(MarketplaceListingApiResponse, "Listing updated."),
+)
 @limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_listings",
+    category="MARKETPLACE",
+)
 async def update_listing(
     request: Request,
-    listing_id: str = Path(...),
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
     body: UpdateListingRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Edit a draft, a live post, or a post the committee removed."""
+    """Patch listing fields while draft or live (seller only).
+
+    Live rows stay live if still valid. Media cannot change after create.
+    """
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    data = await _service(db_connection, user_context).update_listing(
-        contact_id=str(contact["id"]), listing_id=listing_id, body=body
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.update_listing(
+        contact_id=str(contact["id"]),
+        listing_id=listing_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="marketplace_listings",
+        requested_id=listing_id,
+        description=f"Updated marketplace listing: {listing_id}",
+        risk_level="low",
+        new_data=data,
     )
     return success_response(
         request=request,
@@ -297,134 +356,194 @@ async def update_listing(
     )
 
 
-_ACTION_MESSAGES = {
-    MarketplaceListingAction.PUBLISH: "marketplace.success.published",
-    MarketplaceListingAction.REMOVE: "marketplace.success.removed",
-    MarketplaceListingAction.RESTORE: "marketplace.success.restored",
-    MarketplaceListingAction.RENEW: "marketplace.success.renewed",
-    MarketplaceListingAction.RELIST: "marketplace.success.relisted",
-}
-
-
-@handle_api_exceptions("marketplace listing action")
-@router.post("/listings/{listing_id}/actions", summary="Publish, remove, restore, renew, or relist")
+@handle_api_exceptions("publish marketplace listing")
+@router.post(
+    "/listings/{listing_id}/publish",
+    status_code=http_status.HTTP_200_OK,
+    summary="Post listing (go live)",
+    response_model=None,
+    responses=_ok_response(MarketplaceListingApiResponse, "Listing is live."),
+)
 @limiter.limit("30/minute")
-async def listing_action(
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_listings",
+    category="MARKETPLACE",
+)
+async def publish_listing(
     request: Request,
-    listing_id: str = Path(...),
-    body: ListingActionRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
+    body: PublishListingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """One route for the seller status changes. action picks the change."""
+    """Step 3 preview: accept rules and publish the draft."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    service = _service(db_connection, user_context)
-    contact_id = str(contact["id"])
-    if body.action == MarketplaceListingAction.PUBLISH:
-        data = await service.publish(
-            contact_id=contact_id,
-            listing_id=listing_id,
-            body=PublishListingRequest(
-                unit_id=body.unit_id,
-                rules_accepted=bool(body.rules_accepted),
-            ),
-        )
-    elif body.action == MarketplaceListingAction.REMOVE:
-        data = await service.remove_listing(
-            contact_id=contact_id, listing_id=listing_id, unit_id=body.unit_id
-        )
-    elif body.action == MarketplaceListingAction.RESTORE:
-        data = await service.restore_listing(
-            contact_id=contact_id, listing_id=listing_id, unit_id=body.unit_id
-        )
-    elif body.action == MarketplaceListingAction.RENEW:
-        data = await service.renew(
-            contact_id=contact_id, listing_id=listing_id, unit_id=body.unit_id
-        )
-    else:
-        data = await service.relist(
-            contact_id=contact_id, listing_id=listing_id, unit_id=body.unit_id
-        )
-    return success_response(
-        request=request,
-        message_key=_ACTION_MESSAGES[body.action],
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("add listing media")
-@router.post("/listings/{listing_id}/media", status_code=http_status.HTTP_201_CREATED)
-@limiter.limit("30/minute")
-async def add_listing_media(
-    request: Request,
-    listing_id: str = Path(...),
-    body: AddListingMediaRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Record a file uploaded with a presigned URL."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    data = await _service(db_connection, user_context).add_media(
-        contact_id=str(contact["id"]), listing_id=listing_id, body=body
-    )
-    return success_response(
-        request=request,
-        message_key="marketplace.success.media_added",
-        status_code=http_status.HTTP_201_CREATED,
-        custom_code=CustomStatusCode.CREATED,
-        data=data,
-    )
-
-
-@handle_api_exceptions("delete listing media")
-@router.delete("/listings/{listing_id}/media/{media_id}", status_code=http_status.HTTP_200_OK)
-@limiter.limit("30/minute")
-async def delete_listing_media(
-    request: Request,
-    listing_id: str = Path(...),
-    media_id: str = Path(...),
-    unit_id: str = Query(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Remove one file. A live post must keep at least two."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    await _service(db_connection, user_context).delete_media(
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.publish(
         contact_id=str(contact["id"]),
         listing_id=listing_id,
-        media_id=media_id,
-        unit_id=unit_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="marketplace_listings",
+        requested_id=listing_id,
+        description=f"Published marketplace listing: {listing_id}",
+        risk_level="low",
+        new_data=data,
     )
     return success_response(
         request=request,
-        message_key="marketplace.success.media_deleted",
+        message_key="marketplace.success.published",
         custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("remove marketplace listing")
+@router.post(
+    "/listings/{listing_id}/remove",
+    status_code=http_status.HTTP_200_OK,
+    summary="Remove a live listing",
+    response_model=None,
+    responses=_ok_response(MarketplaceListingApiResponse, "Listing soft-removed."),
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="DELETE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_listings",
+    category="MARKETPLACE",
+)
+async def remove_listing(
+    request: Request,
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
+    body: RemoveListingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Soft-delete a live listing. Restore with POST .../restore."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.remove_listing(
+        contact_id=str(contact["id"]),
+        listing_id=listing_id,
+        unit_id=body.unit_id,
+        removal_note=body.removal_note,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="marketplace_listings",
+        requested_id=listing_id,
+        description=f"Removed marketplace listing: {listing_id}",
+        risk_level="low",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="marketplace.success.removed",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("restore marketplace listing")
+@router.post(
+    "/listings/{listing_id}/restore",
+    status_code=http_status.HTTP_200_OK,
+    summary="Restore a removed listing",
+    response_model=None,
+    responses=_ok_response(MarketplaceListingApiResponse, "Listing restored to live."),
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_listings",
+    category="MARKETPLACE",
+)
+async def restore_listing(
+    request: Request,
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
+    body: RestoreListingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Put a seller-removed listing back on the board."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.restore_listing(
+        contact_id=str(contact["id"]),
+        listing_id=listing_id,
+        unit_id=body.unit_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="marketplace_listings",
+        requested_id=listing_id,
+        description=f"Restored marketplace listing: {listing_id}",
+        risk_level="low",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="marketplace.success.restored",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
     )
 
 
 @handle_api_exceptions("mark listing sold")
-@router.post("/listings/{listing_id}/mark-sold", summary="Mark a listing sold")
+@router.post(
+    "/listings/{listing_id}/mark-sold",
+    status_code=http_status.HTTP_200_OK,
+    summary="Mark a listing sold",
+    response_model=None,
+    responses=_ok_response(MarketplaceListingApiResponse, "Listing marked sold."),
+)
 @limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_listings",
+    category="MARKETPLACE",
+)
 async def mark_listing_sold(
     request: Request,
-    listing_id: str = Path(...),
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
     body: MarkSoldRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
+    db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
     """Record the buyer and an optional private rating."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    data = await _service(db_connection, user_context).mark_sold(
-        contact_id=str(contact["id"]), listing_id=listing_id, body=body
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.mark_sold(contact_id=str(contact["id"]), listing_id=listing_id, body=body)
+    set_audit_context(
+        request,
+        user_context,
+        table="marketplace_listings",
+        requested_id=listing_id,
+        description=f"Marked marketplace listing sold: {listing_id}",
+        risk_level="low",
+        new_data=data,
     )
     return success_response(
         request=request,
@@ -435,11 +554,17 @@ async def mark_listing_sold(
 
 
 @handle_api_exceptions("save marketplace listing")
-@router.put("/listings/{listing_id}/save", summary="Save or unsave a listing")
+@router.post(
+    "/listings/{listing_id}/save",
+    status_code=http_status.HTTP_200_OK,
+    summary="Save or unsave a listing",
+    response_model=None,
+    responses=_ok_response(MarketplaceListingApiResponse, "Bookmark updated."),
+)
 @limiter.limit("60/minute")
 async def set_listing_saved(
     request: Request,
-    listing_id: str = Path(...),
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
     body: SaveListingRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
@@ -448,7 +573,7 @@ async def set_listing_saved(
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
-    service = _service(db_connection, user_context)
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
     contact_id = str(contact["id"])
     if body.saved:
         await service.save(contact_id=contact_id, listing_id=listing_id, unit_id=body.unit_id)
@@ -460,145 +585,4 @@ async def set_listing_saved(
         request=request,
         message_key=message_key,
         custom_code=CustomStatusCode.SUCCESS,
-    )
-
-
-@handle_api_exceptions("report marketplace listing")
-@router.post("/listings/{listing_id}/reports", status_code=http_status.HTTP_201_CREATED)
-@limiter.limit("20/minute")
-async def report_listing(
-    request: Request,
-    listing_id: str = Path(...),
-    body: CreateReportRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Report a listing to the committee. The seller is not told."""
-    user_context, contact = await extract_onboarding_contact_context(
-        current_user, db_connection, request=request
-    )
-    data = await _service(db_connection, user_context).create_report(
-        contact_id=str(contact["id"]), listing_id=listing_id, body=body
-    )
-    return success_response(
-        request=request,
-        message_key="marketplace.success.reported",
-        status_code=http_status.HTTP_201_CREATED,
-        custom_code=CustomStatusCode.CREATED,
-        data=data,
-    )
-
-
-async def _visible_reports(service: MarketplaceService, user_context, db_connection, status):
-    """Drop reports for societies this staff member cannot view."""
-    reports = await service.list_reports(status=status)
-    visible = []
-    allowed: dict[str, bool] = {}
-    for report in reports:
-        project_id = report["project_id"]
-        if project_id not in allowed:
-            try:
-                await ensure_staff_project_access_for_context(
-                    user_context=user_context,
-                    db_connection=db_connection,
-                    project_id=project_id,
-                    permission_codes=_VIEW,
-                )
-                allowed[project_id] = True
-            except ForbiddenException:
-                allowed[project_id] = False
-        if allowed[project_id]:
-            visible.append(report)
-    return visible
-
-
-@handle_api_exceptions("list marketplace reports")
-@router.get("/reports", summary="Open marketplace reports")
-@limiter.limit("60/minute")
-async def list_reports(
-    request: Request,
-    status: str | None = Query(default="open"),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Reports in societies the staff member can view."""
-    user_context = await extract_user_context(current_user, db_connection, request=request)
-    service = _service(db_connection, user_context)
-    data = await _visible_reports(service, user_context, db_connection, status)
-    return success_response(
-        request=request,
-        message_key="marketplace.success.reports_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("review marketplace report")
-@router.post("/reports/{report_id}/review", summary="Uphold or dismiss a report")
-@limiter.limit("30/minute")
-async def review_report(
-    request: Request,
-    report_id: str = Path(...),
-    body: ReviewReportRequest = Body(...),
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Uphold takes the listing down. Dismiss leaves it live."""
-    user_context = await extract_user_context(current_user, db_connection, request=request)
-    service = _service(db_connection, user_context)
-    report = await service.get_report(report_id=report_id)
-    await ensure_staff_project_access_for_context(
-        user_context=user_context,
-        db_connection=db_connection,
-        project_id=report["project_id"],
-        permission_codes=_MODERATE,
-    )
-    reviewer_user_id = str(user_context.user_id)
-    if body.decision == MarketplaceReportDecision.UPHOLD:
-        note = (body.removal_note or "").strip()
-        if not note:
-            raise ValidationException(
-                message_key="marketplace.errors.removal_note_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        data = await service.uphold_report(
-            report_id=report_id,
-            removal_note=note,
-            reviewer_user_id=reviewer_user_id,
-        )
-        message_key = "marketplace.success.report_upheld"
-    else:
-        data = await service.dismiss_report(report_id=report_id, reviewer_user_id=reviewer_user_id)
-        message_key = "marketplace.success.report_dismissed"
-    return success_response(
-        request=request,
-        message_key=message_key,
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
-    )
-
-
-@handle_api_exceptions("marketplace feedback patterns")
-@router.get("/feedback-patterns", summary="Sellers with repeated trouble")
-@limiter.limit("60/minute")
-async def feedback_patterns(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Sellers with three or more had_trouble ratings."""
-    user_context = await extract_user_context(current_user, db_connection, request=request)
-    service = _service(db_connection, user_context)
-    allowed_ids = await service.authorized_project_ids(permission_code=_VIEW)
-    if not allowed_ids:
-        raise ForbiddenException(
-            message_key="errors.insufficient_permissions",
-            custom_code=CustomStatusCode.FORBIDDEN,
-        )
-    data = await service.feedback_patterns(project_ids=allowed_ids)
-    return success_response(
-        request=request,
-        message_key="marketplace.success.patterns_retrieved",
-        custom_code=CustomStatusCode.SUCCESS,
-        data=data,
     )

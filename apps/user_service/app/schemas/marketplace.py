@@ -3,31 +3,54 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceItemCondition,
-    MarketplaceListingAction,
     MarketplaceListingKind,
-    MarketplaceReportDecision,
-    MarketplaceReportReason,
     MarketplaceSaleRating,
 )
 
 
-class CreateListingRequest(BaseModel):
-    """Start a draft from a category."""
+class ListingMediaInput(BaseModel):
+    """One image uploaded via presigned URL. Set only on create."""
+
+    path: str = Field(min_length=1)
+    file_type: str
+    size_bytes: int = Field(gt=0, le=5_242_880)
+    original_name: str | None = None
+    sort_order: int = Field(ge=0)
+    is_cover: bool = False
+
+
+class CreateDraftListingRequest(BaseModel):
+    """Step 2: create a draft (category, post fields, media). Does not go live."""
 
     unit_id: str
     category: str = Field(min_length=1, max_length=80)
     subtype: str | None = None
+    title: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=1000)
+    purchase_year: int | None = None
+    kind: MarketplaceListingKind = MarketplaceListingKind.SALE
+    price_amount: Decimal | None = None
+    original_price_amount: Decimal | None = None
+    negotiable: bool = False
+    brand: str | None = Field(default=None, max_length=80)
+    condition: MarketplaceItemCondition | None = None
+    product_url: str | None = None
+    show_flat_number: bool = False
+    original_bill_available: bool = False
+    media: list[ListingMediaInput] = Field(default_factory=list, max_length=8)
 
 
 class UpdateListingRequest(BaseModel):
-    """Partial edit. A live row must remain publish-valid after the patch."""
+    """Partial edit. Media cannot change. A live row must remain publish-valid."""
 
-    unit_id: str | None = None
+    unit_id: str
+    pickup_unit_id: str | None = None
     title: str | None = Field(default=None, max_length=80)
     description: str | None = Field(default=None, max_length=1000)
     purchase_year: int | None = None
@@ -47,30 +70,23 @@ class UpdateListingRequest(BaseModel):
 
 
 class PublishListingRequest(BaseModel):
-    """Post a draft. rules_accepted is required."""
+    """Step 3 preview: go live. rules_accepted is required."""
 
     unit_id: str
     rules_accepted: bool
 
 
-class AddListingMediaRequest(BaseModel):
-    """Record a file already uploaded with a presigned URL."""
+class RemoveListingRequest(BaseModel):
+    """Soft-remove a live listing from the board."""
 
     unit_id: str
-    path: str = Field(min_length=1)
-    file_type: str
-    size_bytes: int = Field(gt=0, le=5_242_880)
-    original_name: str | None = None
-    sort_order: int = Field(ge=0)
-    is_cover: bool = False
+    removal_note: str = Field(min_length=1, max_length=500)
 
 
-class ListingActionRequest(BaseModel):
-    """Publish, remove, restore, renew, or relist. rules_accepted is required to publish."""
+class RestoreListingRequest(BaseModel):
+    """Restore a seller-removed listing back to live."""
 
     unit_id: str
-    action: MarketplaceListingAction
-    rules_accepted: bool | None = None
 
 
 class SaveListingRequest(BaseModel):
@@ -88,15 +104,36 @@ class MarkSoldRequest(BaseModel):
     rating: MarketplaceSaleRating | None = None
 
 
-class CreateReportRequest(BaseModel):
-    """Report a live listing to the committee."""
+class MarketplaceCatalogApiResponse(BaseModel):
+    """API envelope for GET /marketplace/catalog."""
 
-    unit_id: str
-    reason: MarketplaceReportReason
+    model_config = ConfigDict(extra="ignore")
+
+    data: dict[str, Any]
 
 
-class ReviewReportRequest(BaseModel):
-    """Uphold takes the listing down. Dismiss leaves it live."""
+class MarketplaceListingApiResponse(BaseModel):
+    """API envelope for a single listing."""
 
-    decision: MarketplaceReportDecision
-    removal_note: str | None = Field(default=None, max_length=500)
+    model_config = ConfigDict(extra="ignore")
+
+    data: dict[str, Any]
+
+
+class MarketplaceListApiResponse(BaseModel):
+    """API envelope for paginated listing cards."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    data: list[dict[str, Any]]
+    total: int
+    page: int
+    page_size: int
+
+
+class MarketplaceMineApiResponse(BaseModel):
+    """API envelope for GET /marketplace/me/listings."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    data: dict[str, Any]
