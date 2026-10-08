@@ -1492,6 +1492,7 @@
     },
     "success": {
       "catalog_retrieved": "Categories retrieved successfully.",
+      "summary_retrieved": "Marketplace summary retrieved successfully.",
       "listings_retrieved": "Listings retrieved successfully.",
       "saved_retrieved": "Saved listings retrieved successfully.",
       "mine_retrieved": "Your listings retrieved successfully.",

@@ -1,21 +1,21 @@
 # Buy & Sell Flow — Context & Change Guide
 
-> **Status: Not yet implemented (ADR + flow spec).** No migrations, routes, or jobs exist yet.
 > Schema and decisions: [ADR 0019](./adr/0019-buy-and-sell.md).
 >
 > Society, towers, and flats come from [project-setup-flow.md](./project-setup-flow.md). This feature
 > does not add columns to those tables.
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
-- **API prefix:** `/v1/marketplace` only (org-scoped resident routes; no `/v1/projects/{project_id}/marketplace`)
+- **Resident API:** `/v1/marketplace` (org-scoped)
+- **Staff API:** `/v1/projects/{project_id}/marketplace` (pets-admin pattern)
 - **Catalog:** `app/data/marketplace_catalog.json`
-- **DB schema:** `ats-home-craft-supabase` (migrations proposed, not written — see §3)
+- **DB schema:** `ats-home-craft-supabase` — `20261006120000_marketplace_enums.sql`, `20261006121000_marketplace_tables.sql`, `20261008140000_marketplace_permissions.sql`
 
 ______________________________________________________________________
 
 ## 1. What this flow does
 
-A resident lists a household item for **sale** or as a **giveaway**, and browses what others in the organization have listed. Money never moves through the app. Buyers and sellers coordinate offline (phone or in person). There is **no in-app chat**, **no reports**, **no wanted requests**, and **no staff marketplace admin API**.
+A resident lists a household item for **sale** or as a **giveaway**, and browses what others in the organization have listed. Money never moves through the app. Buyers and sellers coordinate offline (phone or in person). There is **no in-app chat**, **no reports**, and **no wanted requests**. Society staff moderate posted listings on a project-scoped admin board (summary, search, filters, drawer, remove).
 
 The prototype flow map, adjusted for this scope:
 
@@ -34,12 +34,14 @@ The prototype flow map, adjusted for this scope:
 | Live confirmation  | "You're live"                                                                       |
 | My listings        | Live, draft, sold, expired, removed (seller remove only)                            |
 | Marked as sold     | Pick buyer from society residents, optional private rating                          |
+| Staff listings     | Summary cards, search, status + category, flat table, drawer, remove                |
 
 ### Business rules (must enforce)
 
 | Rule                                               | Enforcement                                                                                                                             |
 | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Org-scoped API**                                 | Every query filters `organization_id` from auth. Routes never use `project_id` in the path                                              |
+| **Org-scoped resident API**                        | Resident queries filter `organization_id` from auth. Resident URLs never use `project_id`                                               |
+| **Project-scoped staff API**                       | Staff routes are `/v1/projects/{project_id}/marketplace/*` with `ensure_staff_project_access`                                           |
 | **Global browse**                                  | GET listing feeds are org-wide. No `unit_id` on read routes; flat numbers follow §6 (seller always sees own flat)                       |
 | **Unit on writes**                                 | `unit_id` in the body on create, save, patch, actions, and mark-sold. Active `contact_units`; seller actions need Owner/Tenant/Family   |
 | **Media immutable**                                | Set only on create. No `/listings/{id}/media` routes                                                                                    |
@@ -184,7 +186,7 @@ Unique `(contact_id, listing_id)`.
 | `rating`            | marketplace_sale_rating | `smooth`, `fine`, `had_trouble` |
 | `created_at`        | timestamptz             |                                 |
 
-Resident browse, detail, and My listings queries must not join this table. There is no admin API to read patterns in v1.
+Resident browse, detail, and My listings queries must not join this table. Staff list/detail also omit this table.
 
 ### Not a table
 
@@ -209,20 +211,21 @@ HTTP → API router → Service → Repository (SQL) → Postgres
 
 ### File map (to implement)
 
-| Concern            | File                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------ |
-| Resident routes    | `app/api/marketplace.py`                                                                   |
-| Route registration | `app/api/routes.py`                                                                        |
-| Orchestration      | `app/services/marketplace_service.py`                                                      |
-| Catalog            | `app/services/marketplace_catalog_service.py`                                              |
-| Nearby + distance  | `app/services/marketplace_geo.py` (`MARKETPLACE_NEARBY_RADIUS_KM`)                         |
-| Expiry job         | `app/jobs/expire_marketplace_listings.py`                                                  |
-| SQL                | `app/db/repositories/marketplace_repository.py`                                            |
-| Schemas            | `app/schemas/marketplace.py`                                                               |
-| Enums              | `app/schemas/enums/marketplace.py`                                                         |
-| Static data        | `app/data/marketplace_catalog.json`                                                        |
-| i18n               | `app/locales/en.json` under `marketplace.*` and `notifications.push.marketplace.*`         |
-| Tests              | `tests/unit/test_marketplace_service.py`, `tests/unit/test_marketplace_catalog_service.py` |
+| Concern            | File                                                                                                                         |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| Resident routes    | `app/api/marketplace.py`                                                                                                     |
+| Staff routes       | `app/api/marketplace_admin.py`                                                                                               |
+| Route registration | `app/api/routes.py`                                                                                                          |
+| Orchestration      | `app/services/marketplace_service.py`                                                                                        |
+| Catalog            | `app/services/marketplace_catalog_service.py`                                                                                |
+| Nearby + distance  | `app/services/marketplace_geo.py` (`MARKETPLACE_NEARBY_RADIUS_KM`)                                                           |
+| Expiry job         | `app/jobs/expire_marketplace_listings.py`                                                                                    |
+| SQL                | `app/db/repositories/marketplace_repository.py`                                                                              |
+| Schemas            | `app/schemas/marketplace.py`                                                                                                 |
+| Enums              | `app/schemas/enums/marketplace.py`                                                                                           |
+| Static data        | `app/data/marketplace_catalog.json`                                                                                          |
+| i18n               | `app/locales/en.json` under `marketplace.*` and `notifications.push.marketplace.*`                                           |
+| Tests              | `tests/unit/test_marketplace_service.py`, `tests/unit/test_marketplace_catalog_service.py`, `tests/integration/marketplace/` |
 
 ______________________________________________________________________
 
@@ -396,14 +399,16 @@ ______________________________________________________________________
 ## 9. Out of scope
 
 - In-app **messages**, **chat**, **threads**
-- **Reports** and committee moderation / `marketplace_management.*` permissions
+- **Reports**, Reported tab, and committee uphold/dismiss
 - **Recent search**, **popular chips**, `marketplace_search_recents`, `marketplace_search_terms`
 - **View counts** and "people asking"
 - **Giveaway 24-hour boost** (`giveaway_boost_until`)
 - **Expiry reminder** push (3 days before)
-- Staff routes under `/v1/projects/{project_id}/marketplace`
 - Payments, phone reveal, in-app negotiation
 - Share to community feed
+- Staff **Removed by committee** filter (staff remove uses `removed`)
+- Group by tower, All towers, Sort: tower & unit
+- Export API and Settings
 
 ______________________________________________________________________
 
@@ -417,3 +422,69 @@ ______________________________________________________________________
 | Change who may post       | `contact_roles` check in `marketplace_service.py`      |
 | Change flat visibility    | `visible_flat` only                                    |
 | Change copy               | `app/locales/en.json` under `marketplace.*`            |
+| Change staff filters      | `AdminMarketplaceListQuery` + `list_for_project` SQL   |
+| Change staff header cards | `get_project_summary` in the repository                |
+
+______________________________________________________________________
+
+## 11. Staff admin (project-scoped)
+
+Same layering as pets admin: JWT → `ensure_staff_project_access` → `MarketplaceService` → `MarketplaceRepository`.
+
+**Permissions** (`20261008140000_marketplace_permissions.sql`):
+
+| Code                          | Use                            | Default roles                     |
+| ----------------------------- | ------------------------------ | --------------------------------- |
+| `marketplace_management.view` | Summary, catalog, list, detail | community_admin, security, viewer |
+| `marketplace_management.edit` | Remove a live listing          | community_admin                   |
+
+### Tables used
+
+| Table                       | Role for staff                                                                |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `marketplace_listings`      | Source of truth. List, summary, drawer, and `POST .../remove` update this row |
+| `projects`                  | Society of the pickup unit (already on `listings.project_id`)                 |
+| `towers`                    | Tower name on the card (search + display). Not a filter and not a sort        |
+| `units`                     | Pickup unit label / code                                                      |
+| `contacts`                  | Seller name and photo; remover name when the actor is a resident              |
+| `contact_roles`             | Seller role on the unit (drawer)                                              |
+| `organization_members`      | Remover display name when staff took the listing down                         |
+| `project_permissions`       | Catalog rows for `marketplace_management.*`                                   |
+| `project_role_permissions`  | Grants on default project roles                                               |
+| `marketplace_saved_items`   | **Unused** on staff routes                                                    |
+| `marketplace_sale_feedback` | **Unused** on staff routes                                                    |
+
+No `marketplace_reports` table. There is no Reported tab.
+
+### Screen → API
+
+Prefix: `/v1/projects/{project_id}/marketplace`
+
+| Screen element                                         | API                                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Header cards Active / Sold / Past / Removed or deleted | `GET /summary` → `active_count`, `sold_count`, `past_count`, `removed_count` (drafts omitted) |
+| Category filter                                        | `GET /catalog` then `GET /listings?category=`                                                 |
+| Search (item, resident, unit, tower)                   | `GET /listings?q=`                                                                            |
+| Status filter                                          | `GET /listings?status=all\|live\|sold\|past\|removed`                                         |
+| Listings table                                         | `GET /listings?page=&page_size=` — flat, `published_at` desc. **No** group-by-tower           |
+| Row click / drawer                                     | `GET /listings/{listing_id}`                                                                  |
+| Remove (live only)                                     | `POST /listings/{listing_id}/remove` `{ "removal_note" }`                                     |
+
+**Not implemented (hide in client):** Group by tower, All towers, Sort: tower & unit, Export, Settings, Reported tab, Restore, view counts, conversations.
+
+Status mapping for the mock:
+
+| Mock label           | Query `status` | Postgres `marketplace_listing_status` |
+| -------------------- | -------------- | ------------------------------------- |
+| All statuses         | `all`          | `live`, `sold`, `expired`, `removed`  |
+| Active               | `live`         | `live`                                |
+| Sold                 | `sold`         | `sold`                                |
+| Past — expired       | `past`         | `expired`                             |
+| Deleted by resident  | `removed`      | `removed` (seller **or** staff)       |
+| Removed by committee | **omitted**    | no separate value                     |
+
+Staff `POST .../remove` writes the same `removed` status as the seller. The listing leaves the Active card and appears under Removed. Removal is permanent (no restore).
+
+List card fields: cover, title, category names, price (or Free), resident public name, unit label, tower name, posted time, days left (live), status, `can_remove`.
+
+Drawer extra fields: media, description, price/condition/brand/age, collection pin, seller role, `listings_from_unit_total` / `listings_from_unit_active`, `removed_before_count`, `removal_note`, `history[]` derived from `published_at` / `sold_at` / `expires_at` / `removed_at` (no event table). Staff always see the pickup flat.

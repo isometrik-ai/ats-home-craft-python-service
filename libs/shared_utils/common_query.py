@@ -74,6 +74,9 @@ VEHICLE_MANAGEMENT_DELETE = "vehicle_management.delete"
 RESIDENT_MANAGEMENT_VIEW = "resident_management.view"
 RESIDENT_MANAGEMENT_EDIT = "resident_management.edit"
 
+MARKETPLACE_MANAGEMENT_VIEW = "marketplace_management.view"
+MARKETPLACE_MANAGEMENT_EDIT = "marketplace_management.edit"
+
 WORK_ORDER_MANAGEMENT_VIEW = "work_order_management.view"
 WORK_ORDER_MANAGEMENT_EDIT = "work_order_management.edit"
 WORK_ORDER_MANAGEMENT_APPROVE = "work_order_management.approve"
@@ -467,6 +470,18 @@ DEFAULT_PROJECT_PERMISSIONS = [
             "update resident occupancy within assigned projects"
         ),
         "residents",
+    ),
+    (
+        MARKETPLACE_MANAGEMENT_VIEW,
+        "View Buy and Sell",
+        "View resident marketplace listings within assigned projects",
+        "marketplace",
+    ),
+    (
+        MARKETPLACE_MANAGEMENT_EDIT,
+        "Moderate Buy and Sell",
+        "Remove live marketplace listings within assigned projects",
+        "marketplace",
     ),
     (
         BUSINESS_DASHBOARD_VIEW,
