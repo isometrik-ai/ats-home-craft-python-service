@@ -114,6 +114,7 @@ class WalkInVisitUnitResponse(BaseModel):
     rejection_reason: str | None = None
     approved_at: str | None = None
     rejected_at: str | None = None
+    actor_label: str | None = None
     sort_order: int = 0
 
 

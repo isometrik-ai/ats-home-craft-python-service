@@ -382,6 +382,60 @@ class WalkInService:
             enriched.append(item)
         return enriched
 
+    async def _enrich_visit_unit_actor_labels(
+        self,
+        *,
+        organization_id: str,
+        visit_units: list[dict[str, Any]],
+        events: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Resolve actor_label for approved/rejected visit units."""
+        # pylint: disable=too-complex
+        actor_label_by_unit_id: dict[str, str] = {}
+        for event in events:
+            visit_unit_id = str(event.get("walk_in_visit_unit_id") or "").strip()
+            if not visit_unit_id:
+                continue
+            if str(event.get("event_type")) not in {
+                WalkInEventType.VISIT_UNIT_APPROVED.value,
+                WalkInEventType.VISIT_UNIT_REJECTED.value,
+            }:
+                continue
+            label = str(event.get("actor_label") or "").strip()
+            if label:
+                actor_label_by_unit_id[visit_unit_id] = label
+
+        contact_ids: set[str] = set()
+        for unit in visit_units:
+            for key in ("approved_by_contact_id", "rejected_by_contact_id"):
+                contact_id = str(unit.get(key) or "").strip()
+                if contact_id:
+                    contact_ids.add(contact_id)
+
+        contact_names = await self.repo.fetch_contact_display_names(
+            organization_id=organization_id,
+            contact_ids=sorted(contact_ids),
+        )
+
+        enriched: list[dict[str, Any]] = []
+        for unit in visit_units:
+            item = dict(unit)
+            status = str(unit.get("status") or "")
+            label: str | None = None
+            if status == WalkInVisitUnitStatus.APPROVED.value:
+                contact_id = str(unit.get("approved_by_contact_id") or "").strip()
+                if contact_id:
+                    label = contact_names.get(contact_id)
+            elif status == WalkInVisitUnitStatus.REJECTED.value:
+                contact_id = str(unit.get("rejected_by_contact_id") or "").strip()
+                if contact_id:
+                    label = contact_names.get(contact_id)
+            if not label:
+                label = actor_label_by_unit_id.get(str(unit.get("id") or ""))
+            item["actor_label"] = label
+            enriched.append(item)
+        return enriched
+
     async def _resolve_requested_by(
         self,
         user_id: str | None,
@@ -418,6 +472,7 @@ class WalkInService:
             rejection_reason=row.get("rejection_reason"),
             approved_at=format_iso_datetime(row.get("approved_at")),
             rejected_at=format_iso_datetime(row.get("rejected_at")),
+            actor_label=row.get("actor_label"),
             sort_order=int(row.get("sort_order") or 0),
         ).model_dump()
 
@@ -550,6 +605,11 @@ class WalkInService:
             organization_id=org_id,
             events=events,
         )
+        enriched_visit_units = await self._enrich_visit_unit_actor_labels(
+            organization_id=org_id,
+            visit_units=visit_units,
+            events=enriched_events,
+        )
         serialized_events = [self._serialize_event(event) for event in enriched_events]
         summary = self._serialize_summary({**row, "primary_unit_label": None})
         if visit_units:
@@ -558,7 +618,7 @@ class WalkInService:
         detail = WalkInDetailResponse(
             **summary,
             vehicle_photo_paths=list(row.get("vehicle_photo_paths") or []),
-            visit_units=[self._serialize_visit_unit(unit) for unit in visit_units],
+            visit_units=[self._serialize_visit_unit(unit) for unit in enriched_visit_units],
             events=serialized_events,
             milestones=self._derive_milestones(row=row, events=events),
             requested_by=await self._resolve_requested_by(row.get("requested_by_user_id")),
