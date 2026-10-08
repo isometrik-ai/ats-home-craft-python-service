@@ -313,6 +313,43 @@ async def test_update_returns_serialized_row() -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_schedule_coerces_iso_date_strings() -> None:
+    """PATCH schedule payloads use JSON date strings that must bind as date objects."""
+    conn = _FakeConn(
+        fetchrow={
+            "id": ROW_ID,
+            "facility_id": FACILITY_ID,
+            "name": "Summer season",
+            "starts_on": date(2027, 4, 1),
+            "ends_on": date(2027, 7, 1),
+            "hours": _WEEK_HOURS,
+            "created_at": None,
+        }
+    )
+    repo = FacilityBookingInventoryRepository(db_connection=conn)
+
+    row = await repo.update(
+        "facility_schedule_periods",
+        organization_id=ORG_ID,
+        facility_id=FACILITY_ID,
+        row_id=ROW_ID,
+        update_data={
+            "name": "Summer season",
+            "starts_on": "2027-04-01",
+            "ends_on": "2027-07-01",
+            "hours": _WEEK_HOURS,
+        },
+    )
+
+    assert row is not None
+    query, args = conn.fetchrow_calls[0]
+    assert "UPDATE facility_schedule_periods" in query
+    assert "::date" in query
+    assert date(2027, 4, 1) in args
+    assert date(2027, 7, 1) in args
+
+
+@pytest.mark.asyncio
 async def test_delete_reports_affected_rows() -> None:
     """delete returns True when one row is removed."""
     conn = _FakeConn(execute_result="DELETE 1")
