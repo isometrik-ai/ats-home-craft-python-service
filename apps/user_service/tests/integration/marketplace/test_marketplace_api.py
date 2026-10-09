@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from apps.user_service.tests.integration.helpers import admin_context
+from apps.user_service.tests.integration.helpers import (
+    admin_context,
+    patch_ensure_staff_project_access_optional,
+)
 from apps.user_service.tests.utils.assertions import assert_error, assert_success
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -201,3 +204,323 @@ async def test_browse_listings_success(monkeypatch, client):
     payload = assert_success(response)
     assert payload["total"] == 1
     assert payload["data"][0]["title"] == "Study table"
+
+
+@pytest.mark.asyncio
+async def test_browse_listings_fails_for_unknown_category(monkeypatch, client):
+    """GET /listings returns 422 when the category is not in the catalog."""
+    _resident(monkeypatch)
+
+    async def fake_list(_self, **kwargs):
+        del _self, kwargs
+        raise ValidationException(
+            message_key="marketplace.errors.invalid_category",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_listings",
+        fake_list,
+    )
+    response = await client.get(
+        "/v1/marketplace/listings",
+        params={"category": "not-a-catalog-slug"},
+    )
+    assert_error(response, 422)
+
+
+@pytest.mark.asyncio
+async def test_listing_detail_success(monkeypatch, client):
+    """GET /marketplace/listings/{id} returns the listing drawer."""
+    _resident(monkeypatch)
+
+    async def fake_get(_self, *, contact_id, listing_id):
+        assert contact_id == CONTACT_ID
+        assert listing_id == LISTING_ID
+        return {"id": LISTING_ID, "title": "Study table", "status": "live"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.get_listing",
+        fake_get,
+    )
+    response = await client.get(f"/v1/marketplace/listings/{LISTING_ID}")
+    payload = assert_success(response)
+    assert payload["data"]["id"] == LISTING_ID
+    assert payload["message"] == "Listing retrieved successfully."
+
+
+@pytest.mark.asyncio
+async def test_list_saved_listings_success(monkeypatch, client):
+    """GET /marketplace/saved returns bookmarked live cards."""
+    _resident(monkeypatch)
+
+    async def fake_saved(_self, *, contact_id, page, page_size):
+        assert contact_id == CONTACT_ID
+        assert page == 1
+        assert page_size == 20
+        return {"items": [{"id": LISTING_ID, "saved": True}], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_saved",
+        fake_saved,
+    )
+    response = await client.get("/v1/marketplace/saved")
+    payload = assert_success(response)
+    assert payload["total"] == 1
+    assert payload["data"][0]["id"] == LISTING_ID
+
+
+@pytest.mark.asyncio
+async def test_my_listings_success(monkeypatch, client):
+    """GET /marketplace/me/listings returns the seller dashboard."""
+    _resident(monkeypatch)
+
+    async def fake_mine(_self, *, contact_id, status, page, page_size):
+        assert contact_id == CONTACT_ID
+        assert status == "live"
+        assert page == 1
+        assert page_size == 20
+        return {"items": [{"id": LISTING_ID, "status": "live"}], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.my_listings",
+        fake_mine,
+    )
+    response = await client.get("/v1/marketplace/me/listings", params={"status": "live"})
+    payload = assert_success(response)
+    assert payload["data"][0]["status"] == "live"
+
+
+@pytest.mark.asyncio
+async def test_my_listings_fails_for_committee_status(monkeypatch, client):
+    """GET /me/listings rejects a status that is not a seller tab."""
+    _resident(monkeypatch)
+    response = await client.get(
+        "/v1/marketplace/me/listings",
+        params={"status": "removed_by_committee"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_update_listing_success(monkeypatch, client):
+    """PATCH /listings/{id} updates title while the listing stays live."""
+    _resident(monkeypatch)
+
+    async def fake_update(_self, *, contact_id, listing_id, body):
+        assert contact_id == CONTACT_ID
+        assert listing_id == LISTING_ID
+        assert body.unit_id == UNIT_ID
+        assert body.title == "Study table"
+        return {"id": LISTING_ID, "title": "Study table", "status": "live"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.update_listing",
+        fake_update,
+    )
+    response = await client.patch(
+        f"/v1/marketplace/listings/{LISTING_ID}",
+        json={"unit_id": UNIT_ID, "title": "Study table"},
+    )
+    payload = assert_success(response)
+    assert payload["data"]["title"] == "Study table"
+
+
+@pytest.mark.asyncio
+async def test_update_listing_fails_when_status_is_in_the_body(monkeypatch, client):
+    """PATCH cannot change status."""
+    _resident(monkeypatch)
+    response = await client.patch(
+        f"/v1/marketplace/listings/{LISTING_ID}",
+        json={"unit_id": UNIT_ID, "status": "sold"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_publish_fails_without_unit_id(monkeypatch, client):
+    """POST /publish returns 422 when unit_id is missing."""
+    _resident(monkeypatch)
+    response = await client.post(f"/v1/marketplace/listings/{LISTING_ID}/publish", json={})
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_remove_listing_success(monkeypatch, client):
+    """POST /listings/{id}/remove takes a live listing down."""
+    _resident(monkeypatch)
+
+    async def fake_remove(_self, *, contact_id, listing_id, unit_id, removal_note):
+        assert contact_id == CONTACT_ID
+        assert listing_id == LISTING_ID
+        assert unit_id == UNIT_ID
+        assert removal_note == "No longer selling"
+        return {"id": LISTING_ID, "status": "removed", "removal_note": removal_note}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.remove_listing",
+        fake_remove,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/remove",
+        json={"unit_id": UNIT_ID, "removal_note": "No longer selling"},
+    )
+    payload = assert_success(response)
+    assert payload["data"]["status"] == "removed"
+
+
+@pytest.mark.asyncio
+async def test_remove_listing_fails_without_a_note(monkeypatch, client):
+    """POST /remove returns 422 when removal_note is empty."""
+    _resident(monkeypatch)
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/remove",
+        json={"unit_id": UNIT_ID, "removal_note": ""},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_remove_listing_fails_when_not_live(monkeypatch, client):
+    """POST /remove returns 422 when the listing is not live."""
+    _resident(monkeypatch)
+
+    async def fake_remove(_self, *, contact_id, listing_id, unit_id, removal_note):
+        del _self, contact_id, listing_id, unit_id, removal_note
+        raise ValidationException(
+            message_key="marketplace.errors.not_live",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.remove_listing",
+        fake_remove,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/remove",
+        json={"unit_id": UNIT_ID, "removal_note": "Taken down"},
+    )
+    assert_error(response, 422)
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_success(monkeypatch, client):
+    """POST /mark-sold records the buyer."""
+    _resident(monkeypatch)
+
+    async def fake_sold(_self, *, contact_id, listing_id, body):
+        assert contact_id == CONTACT_ID
+        assert listing_id == LISTING_ID
+        assert body.unit_id == UNIT_ID
+        assert body.buyer_contact_id == "buyer-1"
+        return {"id": LISTING_ID, "buyer_name": "Asha K."}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.mark_sold",
+        fake_sold,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
+        json={"unit_id": UNIT_ID, "buyer_contact_id": "buyer-1"},
+    )
+    payload = assert_success(response)
+    assert payload["data"]["buyer_name"] == "Asha K."
+    assert payload["message"] == "Listing marked as sold."
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_fails_when_buyer_is_the_seller(monkeypatch, client):
+    """POST /mark-sold returns 422 when the seller is chosen as buyer."""
+    _resident(monkeypatch)
+
+    async def fake_sold(_self, *, contact_id, listing_id, body):
+        del _self, contact_id, listing_id, body
+        raise ValidationException(
+            message_key="marketplace.errors.buyer_is_seller",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.mark_sold",
+        fake_sold,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
+        json={"unit_id": UNIT_ID, "buyer_contact_id": CONTACT_ID},
+    )
+    assert_error(response, 422)
+
+
+@pytest.mark.asyncio
+async def test_resident_lifecycle_then_admin_remove(monkeypatch, client):
+    """Resident create → publish → browse, then staff take the listing down."""
+    _resident(monkeypatch)
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+    service = "apps.user_service.app.services.marketplace_service.MarketplaceService"
+
+    async def fake_create(_self, *, contact_id, body):
+        del _self
+        assert contact_id == CONTACT_ID
+        assert body.unit_id == UNIT_ID
+        return {"id": LISTING_ID, "status": "draft"}
+
+    async def fake_publish(_self, *, contact_id, listing_id, body):
+        del _self
+        assert contact_id == CONTACT_ID
+        assert listing_id == LISTING_ID
+        assert body.unit_id == UNIT_ID
+        return {"id": LISTING_ID, "status": "live"}
+
+    async def fake_list(_self, **kwargs):
+        del _self, kwargs
+        return {"items": [{"id": LISTING_ID, "status": "live"}], "total": 1}
+
+    async def fake_admin_list(_self, *, query):
+        del _self
+        assert query.project_id is None
+        return {
+            "items": [{"id": LISTING_ID, "status": "live", "can_remove": True}],
+            "total": 1,
+        }
+
+    async def fake_admin_remove(_self, *, listing_id, removal_note, project_id=None):
+        del _self, project_id
+        assert listing_id == LISTING_ID
+        assert removal_note == "Photos didn't match"
+        return {"id": LISTING_ID, "status": "removed"}
+
+    monkeypatch.setattr(f"{service}.create_listing", fake_create)
+    monkeypatch.setattr(f"{service}.publish", fake_publish)
+    monkeypatch.setattr(f"{service}.list_listings", fake_list)
+    monkeypatch.setattr(f"{service}.list_listings_admin", fake_admin_list)
+    monkeypatch.setattr(f"{service}.remove_listing_admin", fake_admin_remove)
+
+    created = await client.post(
+        "/v1/marketplace/listings",
+        json={"unit_id": UNIT_ID, "category": "electronics", "subtype": "mobiles_tablets"},
+    )
+    assert_success(created, status_code=201)
+    assert created.json()["data"]["status"] == "draft"
+
+    published = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/publish",
+        json={"unit_id": UNIT_ID},
+    )
+    assert_success(published)
+
+    browsed = await client.get("/v1/marketplace/listings")
+    assert_success(browsed)
+    assert browsed.json()["data"][0]["id"] == LISTING_ID
+
+    admin_list = await client.get("/v1/marketplace/admin/listings")
+    assert_success(admin_list)
+    assert admin_list.json()["data"][0]["can_remove"] is True
+
+    removed = await client.post(
+        f"/v1/marketplace/admin/listings/{LISTING_ID}/remove",
+        json={"removal_note": "Photos didn't match"},
+    )
+    payload = assert_success(removed)
+    assert payload["data"]["status"] == "removed"
