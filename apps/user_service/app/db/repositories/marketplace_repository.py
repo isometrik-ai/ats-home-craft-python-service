@@ -411,6 +411,55 @@ class MarketplaceRepository(BaseRepository):
         )
         return row is not None
 
+    async def delete_draft_listing_admin(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        project_id: str | None = None,
+    ) -> bool:
+        """Hard-delete an unpublished listing. Saved rows cascade via FK."""
+        row = await self.db_connection.fetchrow(
+            """
+            DELETE FROM marketplace_listings
+             WHERE organization_id = $1::uuid
+               AND id = $2::uuid
+               AND status = 'draft'::marketplace_listing_status
+               AND ($3::uuid IS NULL OR project_id = $3::uuid)
+            RETURNING id
+            """,
+            organization_id,
+            listing_id,
+            project_id,
+        )
+        return row is not None
+
+    async def delete_draft_listing(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        seller_contact_id: str,
+        unit_id: str,
+    ) -> bool:
+        """Hard-delete the seller's unpublished listing for the given unit."""
+        row = await self.db_connection.fetchrow(
+            """
+            DELETE FROM marketplace_listings
+             WHERE organization_id = $1::uuid
+               AND id = $2::uuid
+               AND seller_contact_id = $3::uuid
+               AND unit_id = $4::uuid
+               AND status = 'draft'::marketplace_listing_status
+            RETURNING id
+            """,
+            organization_id,
+            listing_id,
+            seller_contact_id,
+            unit_id,
+        )
+        return row is not None
+
     async def list_listings(
         self,
         *,

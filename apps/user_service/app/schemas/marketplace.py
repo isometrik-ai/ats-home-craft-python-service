@@ -202,7 +202,7 @@ class UpdateListingRequest(BaseModel):
 
 
 class RemoveListingRequest(BaseModel):
-    """Soft-remove a live listing from the board."""
+    """Delete a draft listing or soft-remove a live listing from the board."""
 
     unit_id: str
     removal_note: str = Field(min_length=1, max_length=500)
@@ -544,7 +544,10 @@ class MarketplaceAdminRemovedApiResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "status": "success",
-                "message": "Listing removed from the board.",
+                "message": (
+                    "Listing marked as removed. It stays in admin under Removed "
+                    "and is hidden from the resident board."
+                ),
                 "statusCode": 200,
                 "code": CustomStatusCode.SUCCESS.value,
                 "data": _EXAMPLE_ADMIN_REMOVED,
