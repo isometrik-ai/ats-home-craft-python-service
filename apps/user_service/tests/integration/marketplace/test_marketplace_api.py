@@ -189,7 +189,7 @@ async def test_browse_listings_success(monkeypatch, client):
     _resident(monkeypatch)
 
     async def fake_list(_self, **kwargs):
-        assert kwargs["query"] == "table"
+        assert kwargs["query"].q == "table"
         assert "unit_id" not in kwargs
         return {"items": [{"id": LISTING_ID, "title": "Study table"}], "total": 1}
 

@@ -96,6 +96,16 @@ class MarketplaceMineStatus(str, Enum):
     PAST = "past"
 
 
+class MarketplaceAdminStatus(str, Enum):
+    """Staff list status filter. No removed-by-committee option."""
+
+    ALL = "all"
+    LIVE = "live"
+    SOLD = "sold"
+    PAST = "past"
+    REMOVED = "removed"
+
+
 class MarketplaceListingAction(str, Enum):
     """Seller actions that share POST /listings/{id}/actions."""
 

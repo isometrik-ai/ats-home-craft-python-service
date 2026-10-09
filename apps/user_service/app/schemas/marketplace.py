@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.enums.marketplace import (
+    MarketplaceAdminStatus,
     MarketplaceItemCondition,
     MarketplaceListingKind,
     MarketplaceMediaKind,
@@ -123,6 +124,31 @@ class MarkSoldRequest(BaseModel):
     rating: MarketplaceSaleRating | None = None
 
 
+class AdminMarketplaceListQuery(BaseModel):
+    """Query params for GET /marketplace/admin/listings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str | None = Field(
+        default=None,
+        description="Optional society filter (UUID). Omit to list the whole organization.",
+    )
+    q: str | None = Field(
+        default=None,
+        description="Search item title, resident name, unit, or tower.",
+    )
+    status: MarketplaceAdminStatus = MarketplaceAdminStatus.ALL
+    category: str | None = Field(default=None, description="Catalog category slug.")
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
+class AdminRemoveListingRequest(BaseModel):
+    """Staff take-down of a live listing. Removal is permanent."""
+
+    removal_note: str = Field(min_length=1, max_length=500)
+
+
 class MarketplaceCatalogApiResponse(BaseModel):
     """API envelope for GET /marketplace/catalog."""
 
@@ -148,3 +174,11 @@ class MarketplaceListApiResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class MarketplaceSummaryApiResponse(BaseModel):
+    """API envelope for staff header counts."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    data: dict[str, Any]

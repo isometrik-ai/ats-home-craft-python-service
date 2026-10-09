@@ -7,6 +7,10 @@ from datetime import datetime
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
+from apps.user_service.app.schemas.marketplace import (
+    AdminMarketplaceListQuery,
+    BrowseListingsQuery,
+)
 from apps.user_service.app.utils.common_utils import serialize_jsonb_param
 
 _LISTING_JSONB = frozenset({"media"})
@@ -81,6 +85,25 @@ LEFT JOIN LATERAL (
     ORDER BY cr.started_at ASC
     LIMIT 1
 ) role ON true
+"""
+
+_ADMIN_LISTING_COLUMNS = f"""
+    {_LISTING_COLUMNS},
+    remover_staff.first_name AS removed_by_staff_first_name,
+    remover_staff.last_name AS removed_by_staff_last_name,
+    remover_contact.first_name AS removed_by_contact_first_name,
+    remover_contact.last_name AS removed_by_contact_last_name
+"""
+
+_ADMIN_LISTING_JOINS = f"""
+{_LISTING_JOINS}
+LEFT JOIN organization_members remover_staff
+  ON remover_staff.user_id = l.removed_by_user_id
+ AND remover_staff.organization_id = l.organization_id
+ AND remover_staff.status <> 'deleted'
+LEFT JOIN contacts remover_contact
+  ON remover_contact.user_id = l.removed_by_user_id
+ AND remover_contact.organization_id = l.organization_id
 """
 
 
@@ -354,52 +377,68 @@ class MarketplaceRepository(BaseRepository):
             *params,
         )
 
+    async def remove_live_listing_admin(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        removal_note: str,
+        removed_by_user_id: str,
+        removed_at: datetime,
+        project_id: str | None = None,
+    ) -> bool:
+        """Remove a live listing in the org. Optional project_id further scopes the row."""
+        row = await self.db_connection.fetchrow(
+            """
+            UPDATE marketplace_listings
+               SET status = 'removed'::marketplace_listing_status,
+                   removed_at = $3::timestamptz,
+                   removal_note = $4,
+                   removed_by_user_id = $5::uuid,
+                   updated_at = now()
+             WHERE organization_id = $1::uuid
+               AND id = $2::uuid
+               AND status = 'live'::marketplace_listing_status
+               AND ($6::uuid IS NULL OR project_id = $6::uuid)
+            RETURNING id
+            """,
+            organization_id,
+            listing_id,
+            removed_at,
+            removal_note,
+            removed_by_user_id,
+            project_id,
+        )
+        return row is not None
+
     async def list_listings(
         self,
         *,
         organization_id: str,
-        org_wide: bool,
-        project_ids: list[str],
-        tower_id: str | None,
+        query: BrowseListingsQuery,
         category: str | None,
         subtype: str | None,
-        query: str | None,
-        conditions: list[str],
-        price_band: str | None,
-        sort: str,
-        viewer_lat: float | None,
-        viewer_lng: float | None,
-        page: int,
-        page_size: int,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Public live feed with filters."""
-        if not org_wide and not project_ids and tower_id is None:
-            return [], 0
+        """Public live feed with filters from BrowseListingsQuery."""
         where = [
             "l.organization_id = $1::uuid",
             "l.status = 'live'::marketplace_listing_status",
         ]
         params: list[Any] = [organization_id]
-        if org_wide:
-            pass
-        elif tower_id:
-            params.append(tower_id)
-            where.append(f"l.tower_id = ${len(params)}::uuid")
-        else:
-            params.append(project_ids)
-            where.append(f"l.project_id = ANY(${len(params)}::uuid[])")
         if category:
             params.append(category)
             where.append(f"l.category = ${len(params)}")
         if subtype:
             params.append(subtype)
             where.append(f"l.subtype = ${len(params)}")
-        if query:
-            params.append(f"%{query.strip()}%")
+        if query.q and query.q.strip():
+            params.append(f"%{query.q.strip()}%")
             where.append(f"l.title ILIKE ${len(params)}")
+        conditions = [item.value for item in query.condition] if query.condition else []
         if conditions:
             params.append(conditions)
             where.append(f"l.condition = ANY(${len(params)}::marketplace_item_condition[])")
+        price_band = query.price_band.value if query.price_band else None
         if price_band == "free":
             where.append("l.kind = 'giveaway'::marketplace_listing_kind")
         elif price_band == "under_5000":
@@ -417,29 +456,15 @@ class MarketplaceRepository(BaseRepository):
             f"SELECT count(*)::int FROM marketplace_listings l WHERE {where_sql}",
             *params,
         )
+        sort = query.sort.value
         order = "l.published_at DESC NULLS LAST"
         if sort == "price_asc":
             order = "l.price_amount ASC NULLS FIRST, l.published_at DESC"
         elif sort == "price_desc":
             order = "l.price_amount DESC NULLS LAST, l.published_at DESC"
-        elif sort == "closest" and viewer_lat is not None and viewer_lng is not None:
-            params.append(viewer_lat)
-            lat_idx = len(params)
-            params.append(viewer_lng)
-            lng_idx = len(params)
-            order = f"""
-                (t.latitude IS NULL OR t.longitude IS NULL),
-                (
-                    6371 * acos(least(1::float8, greatest(-1::float8,
-                        cos(radians(${lat_idx})) * cos(radians(t.latitude))
-                        * cos(radians(t.longitude) - radians(${lng_idx}))
-                        + sin(radians(${lat_idx})) * sin(radians(t.latitude))
-                    )))
-                ) ASC NULLS LAST
-            """
-        params.append(page_size)
+        params.append(query.page_size)
         limit_idx = len(params)
-        params.append((page - 1) * page_size)
+        params.append((query.page - 1) * query.page_size)
         offset_idx = len(params)
         rows = await self.db_connection.fetch(
             f"""
@@ -616,6 +641,178 @@ class MarketplaceRepository(BaseRepository):
             exclude_listing_id,
         )
         return int(value or 0)
+
+    async def get_admin_summary(
+        self, *, organization_id: str, project_id: str | None
+    ) -> dict[str, int]:
+        """Header counts for posted listings in the org, optionally one society."""
+        where = [
+            "organization_id = $1::uuid",
+            "status <> 'draft'::marketplace_listing_status",
+        ]
+        params: list[Any] = [organization_id]
+        if project_id:
+            params.append(project_id)
+            where.append(f"project_id = ${len(params)}::uuid")
+        where_sql = " AND ".join(where)
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT
+              COUNT(*) FILTER (
+                  WHERE status = 'live'::marketplace_listing_status
+              )::int AS active_count,
+              COUNT(*) FILTER (
+                  WHERE status = 'sold'::marketplace_listing_status
+              )::int AS sold_count,
+              COUNT(*) FILTER (
+                  WHERE status = 'expired'::marketplace_listing_status
+              )::int AS past_count,
+              COUNT(*) FILTER (
+                  WHERE status = 'removed'::marketplace_listing_status
+              )::int AS removed_count
+            FROM marketplace_listings
+            WHERE {where_sql}
+            """,
+            *params,
+        )
+        if not row:
+            return {
+                "active_count": 0,
+                "sold_count": 0,
+                "past_count": 0,
+                "removed_count": 0,
+            }
+        return {
+            "active_count": int(row["active_count"] or 0),
+            "sold_count": int(row["sold_count"] or 0),
+            "past_count": int(row["past_count"] or 0),
+            "removed_count": int(row["removed_count"] or 0),
+        }
+
+    async def list_admin_listings(
+        self,
+        *,
+        organization_id: str,
+        query: AdminMarketplaceListQuery,
+        category: str | None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Posted listings in the org, optionally one society. Flat list, newest first."""
+        where = [
+            "l.organization_id = $1::uuid",
+            "l.status <> 'draft'::marketplace_listing_status",
+        ]
+        params: list[Any] = [organization_id]
+        if query.project_id:
+            params.append(query.project_id)
+            where.append(f"l.project_id = ${len(params)}::uuid")
+        status = query.status.value
+        if status == "live":
+            where.append("l.status = 'live'::marketplace_listing_status")
+        elif status == "sold":
+            where.append("l.status = 'sold'::marketplace_listing_status")
+        elif status == "past":
+            where.append("l.status = 'expired'::marketplace_listing_status")
+        elif status == "removed":
+            where.append("l.status = 'removed'::marketplace_listing_status")
+        if category:
+            params.append(category)
+            where.append(f"l.category = ${len(params)}")
+        if query.q and query.q.strip():
+            params.append(f"%{query.q.strip()}%")
+            needle = f"${len(params)}"
+            where.append(
+                "("
+                f"l.title ILIKE {needle} "
+                f"OR concat_ws(' ', seller.first_name, seller.last_name) ILIKE {needle} "
+                f"OR COALESCE(u.unit_label, '') ILIKE {needle} "
+                f"OR COALESCE(u.code, '') ILIKE {needle} "
+                f"OR COALESCE(t.name, '') ILIKE {needle}"
+                ")"
+            )
+        where_sql = " AND ".join(where)
+        total = await self.db_connection.fetchval(
+            f"SELECT count(*)::int {_LISTING_JOINS} WHERE {where_sql}",
+            *params,
+        )
+        params.append(query.page_size)
+        limit_idx = len(params)
+        params.append((query.page - 1) * query.page_size)
+        offset_idx = len(params)
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT {_ADMIN_LISTING_COLUMNS}
+            {_ADMIN_LISTING_JOINS}
+            WHERE {where_sql}
+            ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC
+            LIMIT ${limit_idx} OFFSET ${offset_idx}
+            """,
+            *params,
+        )
+        return [_as_listing(row) for row in rows], int(total or 0)
+
+    async def get_admin_listing(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """One posted listing in the org, with remover names for history."""
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT {_ADMIN_LISTING_COLUMNS}
+            {_ADMIN_LISTING_JOINS}
+            WHERE l.organization_id = $1::uuid
+              AND l.id = $2::uuid
+              AND l.status <> 'draft'::marketplace_listing_status
+              AND ($3::uuid IS NULL OR l.project_id = $3::uuid)
+            """,
+            organization_id,
+            listing_id,
+            project_id,
+        )
+        return _as_listing(row) if row else None
+
+    async def count_unit_listing_stats(
+        self,
+        *,
+        organization_id: str,
+        unit_id: str,
+        exclude_listing_id: str,
+    ) -> dict[str, int]:
+        """Posted-listing counts on a pickup unit for the staff drawer."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+              COUNT(*) FILTER (
+                  WHERE status <> 'draft'::marketplace_listing_status
+              )::int AS listings_from_unit_total,
+              COUNT(*) FILTER (
+                  WHERE status = 'live'::marketplace_listing_status
+              )::int AS listings_from_unit_active,
+              COUNT(*) FILTER (
+                  WHERE status = 'removed'::marketplace_listing_status
+                    AND id <> $3::uuid
+              )::int AS removed_before_count
+            FROM marketplace_listings
+            WHERE organization_id = $1::uuid
+              AND unit_id = $2::uuid
+            """,
+            organization_id,
+            unit_id,
+            exclude_listing_id,
+        )
+        if not row:
+            return {
+                "listings_from_unit_total": 0,
+                "listings_from_unit_active": 0,
+                "removed_before_count": 0,
+            }
+        return {
+            "listings_from_unit_total": int(row["listings_from_unit_total"] or 0),
+            "listings_from_unit_active": int(row["listings_from_unit_active"] or 0),
+            "removed_before_count": int(row["removed_before_count"] or 0),
+        }
 
     async def insert_report(self, **fields: Any) -> dict[str, Any]:
         """Open a report. The partial unique index blocks a second open report."""
