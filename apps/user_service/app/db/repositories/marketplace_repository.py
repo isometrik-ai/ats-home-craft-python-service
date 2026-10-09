@@ -696,10 +696,9 @@ class MarketplaceRepository(BaseRepository):
         query: AdminMarketplaceListQuery,
         category: str | None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Posted listings in the org, optionally one society. Flat list, newest first."""
+        """Listings in the org, optionally one society. Flat list, newest first."""
         where = [
             "l.organization_id = $1::uuid",
-            "l.status <> 'draft'::marketplace_listing_status",
         ]
         params: list[Any] = [organization_id]
         if query.project_id:
@@ -714,6 +713,8 @@ class MarketplaceRepository(BaseRepository):
             where.append("l.status = 'expired'::marketplace_listing_status")
         elif status == "removed":
             where.append("l.status = 'removed'::marketplace_listing_status")
+        elif status == "draft":
+            where.append("l.status = 'draft'::marketplace_listing_status")
         if category:
             params.append(category)
             where.append(f"l.category = ${len(params)}")
@@ -764,7 +765,6 @@ class MarketplaceRepository(BaseRepository):
             {_ADMIN_LISTING_JOINS}
             WHERE l.organization_id = $1::uuid
               AND l.id = $2::uuid
-              AND l.status <> 'draft'::marketplace_listing_status
               AND ($3::uuid IS NULL OR l.project_id = $3::uuid)
             """,
             organization_id,
