@@ -86,3 +86,27 @@ def test_haversine_is_zero_for_the_same_point():
 
 def test_haversine_is_none_without_coordinates():
     assert haversine_km(None, 77.2, 28.6, 77.2) is None
+
+
+def test_report_reason_catalog_matches_the_resident_sheet():
+    catalog = MarketplaceCatalogService.get_report_reasons()
+    assert catalog["sheet_title"] == "Report this listing"
+    assert "committee" in (catalog.get("sheet_subtitle") or "").lower()
+    slugs = [item["slug"] for item in catalog["reasons"]]
+    assert slugs == [
+        "not_allowed",
+        "business_or_broker",
+        "sold_but_listed",
+        "something_else",
+    ]
+    assert catalog["reasons"][1]["name"] == "Looks like a business or broker"
+
+
+def test_resolve_report_reason_accepts_catalog_slugs():
+    assert MarketplaceCatalogService.resolve_report_reason("sold_but_listed") == "sold_but_listed"
+
+
+def test_resolve_report_reason_rejects_unknown_values():
+    with pytest.raises(ValidationException) as raised:
+        MarketplaceCatalogService.resolve_report_reason("spam")
+    assert raised.value.message_key == "marketplace.errors.invalid_report_reason"

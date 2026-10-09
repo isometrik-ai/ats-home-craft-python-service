@@ -325,6 +325,68 @@ class MarketplaceCatalogApiResponse(BaseModel):
     data: MarketplaceCatalogData
 
 
+_EXAMPLE_REPORT_REASON = {
+    "slug": "not_allowed",
+    "name": "Not allowed in the society",
+}
+
+_EXAMPLE_REPORT_REASON_CATALOG = {
+    "sheet_title": "Report this listing",
+    "sheet_subtitle": "It goes to the society committee, not to the seller.",
+    "reasons": [
+        _EXAMPLE_REPORT_REASON,
+        {"slug": "business_or_broker", "name": "Looks like a business or broker"},
+        {"slug": "sold_but_listed", "name": "Sold but still listed"},
+        {"slug": "something_else", "name": "Something else"},
+    ],
+}
+
+
+class MarketplaceReportReasonOption(BaseModel):
+    """One selectable reason on the report sheet."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    slug: str = Field(..., description="Stored on marketplace_reports.reason.")
+    name: str = Field(..., description="Resident-facing label.")
+
+
+class MarketplaceReportReasonCatalogData(BaseModel):
+    """Copy and options for the report listing sheet."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={"example": _EXAMPLE_REPORT_REASON_CATALOG},
+    )
+
+    sheet_title: str | None = None
+    sheet_subtitle: str | None = None
+    reasons: list[MarketplaceReportReasonOption] = Field(default_factory=list)
+
+
+class MarketplaceReportReasonCatalogApiResponse(BaseModel):
+    """API envelope for GET /marketplace/report-reasons."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Report reasons retrieved successfully.",
+                "statusCode": 200,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": _EXAMPLE_REPORT_REASON_CATALOG,
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarketplaceReportReasonCatalogData
+
+
 class MarketplaceListingApiResponse(BaseModel):
     """API envelope for a single resident listing."""
 

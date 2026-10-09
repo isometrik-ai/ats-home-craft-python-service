@@ -11,12 +11,22 @@ from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 _CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "marketplace_catalog.json"
+_REPORT_REASONS_PATH = (
+    Path(__file__).resolve().parent.parent / "data" / "marketplace_report_reasons.json"
+)
 
 
 @lru_cache(maxsize=1)
 def _load_catalog_raw() -> dict[str, Any]:
     """Load and cache the marketplace catalog JSON."""
     with _CATALOG_PATH.open(encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+@lru_cache(maxsize=1)
+def _load_report_reasons_raw() -> dict[str, Any]:
+    """Load and cache report reason copy for the resident report sheet."""
+    with _REPORT_REASONS_PATH.open(encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -58,6 +68,33 @@ class MarketplaceCatalogService:
     def get_catalog() -> dict[str, Any]:
         """Return the category list."""
         return {"categories": _categories()}
+
+    @staticmethod
+    def get_report_reasons() -> dict[str, Any]:
+        """Return report sheet copy and reason options (slugs match marketplace_report_reason)."""
+        raw = _load_report_reasons_raw()
+        return {
+            "sheet_title": raw.get("sheet_title"),
+            "sheet_subtitle": raw.get("sheet_subtitle"),
+            "reasons": list(raw.get("reasons") or []),
+        }
+
+    @staticmethod
+    def resolve_report_reason(reason: str) -> str:
+        """Return the canonical reason slug, or raise if it is not in the catalog."""
+        wanted = reason.strip().lower()
+        if not wanted:
+            raise ValidationException(
+                message_key="marketplace.errors.invalid_report_reason",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        for item in _load_report_reasons_raw().get("reasons") or []:
+            if str(item.get("slug", "")).lower() == wanted:
+                return str(item["slug"])
+        raise ValidationException(
+            message_key="marketplace.errors.invalid_report_reason",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
 
     @staticmethod
     def resolve(category: str, subtype: str | None) -> tuple[str, str | None]:

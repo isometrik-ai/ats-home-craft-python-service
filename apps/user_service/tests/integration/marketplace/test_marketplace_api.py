@@ -41,6 +41,23 @@ async def test_catalog_success_uses_the_real_catalog(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_report_reason_catalog_success(monkeypatch, client):
+    """GET /marketplace/report-reasons returns the four report options."""
+    _resident(monkeypatch)
+    response = await client.get("/v1/marketplace/report-reasons")
+    payload = assert_success(response)
+    data = payload["data"]
+    assert data["sheet_title"] == "Report this listing"
+    slugs = [item["slug"] for item in data["reasons"]]
+    assert slugs == [
+        "not_allowed",
+        "business_or_broker",
+        "sold_but_listed",
+        "something_else",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_create_listing_success(monkeypatch, client):
     """POST /marketplace/listings creates an unpublished listing."""
     _resident(monkeypatch)
