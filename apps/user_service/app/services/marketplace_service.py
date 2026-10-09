@@ -37,7 +37,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 LIVE_WINDOW = timedelta(days=30)
 SOLD_HISTORY = timedelta(days=365)
 MAX_MEDIA = 8
-MIN_PUBLISH_MEDIA = 2
+MIN_PUBLISH_MEDIA = 1
 PURCHASE_YEAR_MIN = 1980
 _KOLKATA = ZoneInfo("Asia/Kolkata")
 _EDITABLE = frozenset({"draft", "live"})
