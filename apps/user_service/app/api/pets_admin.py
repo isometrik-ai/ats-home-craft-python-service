@@ -27,8 +27,9 @@ from apps.user_service.app.utils.common_utils import (
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    RESIDENT_MANAGEMENT_EDIT,
-    RESIDENT_MANAGEMENT_VIEW,
+    PETS_MANAGEMENT_DELETE,
+    PETS_MANAGEMENT_EDIT,
+    PETS_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -113,7 +114,7 @@ async def get_project_pets_summary(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=RESIDENT_MANAGEMENT_VIEW,
+        permission_codes=PETS_MANAGEMENT_VIEW,
         request=request,
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)
@@ -147,7 +148,7 @@ async def list_project_pets(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=RESIDENT_MANAGEMENT_VIEW,
+        permission_codes=PETS_MANAGEMENT_VIEW,
         request=request,
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)
@@ -191,7 +192,7 @@ async def get_project_pet_catalog(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=RESIDENT_MANAGEMENT_VIEW,
+        permission_codes=PETS_MANAGEMENT_VIEW,
         request=request,
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)
@@ -225,7 +226,7 @@ async def get_project_pet_detail(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=RESIDENT_MANAGEMENT_VIEW,
+        permission_codes=PETS_MANAGEMENT_VIEW,
         request=request,
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)
@@ -266,7 +267,7 @@ async def create_project_pet(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=RESIDENT_MANAGEMENT_EDIT,
+        permission_codes=PETS_MANAGEMENT_EDIT,
         request=request,
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)
@@ -319,7 +320,7 @@ async def update_project_pet(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=RESIDENT_MANAGEMENT_EDIT,
+        permission_codes=PETS_MANAGEMENT_EDIT,
         request=request,
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)
@@ -371,7 +372,7 @@ async def remove_project_pet(
         current_user=current_user,
         db_connection=db_connection,
         project_id=project_id,
-        permission_codes=RESIDENT_MANAGEMENT_EDIT,
+        permission_codes=PETS_MANAGEMENT_DELETE,
         request=request,
     )
     service = PetsService(db_connection=db_connection, user_context=user_context)

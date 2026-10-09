@@ -9,6 +9,9 @@ from libs.shared_utils.common_query import (
     LEADS_MANAGEMENT_VIEW,
     MOVE_EVENTS_MANAGEMENT_VIEW,
     NOTICES_MANAGEMENT_EDIT,
+    PETS_MANAGEMENT_DELETE,
+    PETS_MANAGEMENT_EDIT,
+    PETS_MANAGEMENT_VIEW,
     PROJECT_SETUP_EDIT,
     PROJECTS_MANAGEMENT_EDIT,
     PROJECTS_MANAGEMENT_VIEW,
@@ -99,6 +102,45 @@ def test_daily_help_delete_satisfied_only_by_delete_permission():
         role_permission_codes={"daily_help_management.update"},
         required_permission_codes=[DAILY_HELP_MANAGEMENT_DELETE],
     )
+
+
+def test_default_project_permissions_pets_includes_view_edit_delete():
+    """Role editor pets group must expose view, edit, and delete."""
+    pets_entries = [entry for entry in DEFAULT_PROJECT_PERMISSIONS if entry[3] == "pets"]
+    codes = {entry[0] for entry in pets_entries}
+    assert len(pets_entries) == 3
+    assert codes == {
+        PETS_MANAGEMENT_VIEW,
+        PETS_MANAGEMENT_EDIT,
+        PETS_MANAGEMENT_DELETE,
+    }
+    view_entry = next(entry for entry in pets_entries if entry[0] == PETS_MANAGEMENT_VIEW)
+    assert view_entry[1] == "View Pets"
+
+
+def test_pets_view_not_satisfied_by_resident_management_only():
+    role_codes = {RESIDENT_MANAGEMENT_VIEW}
+    assert not project_role_grants_any(
+        role_permission_codes=role_codes,
+        required_permission_codes=[PETS_MANAGEMENT_VIEW],
+    )
+    assert project_role_grants_any(
+        role_permission_codes={PETS_MANAGEMENT_VIEW},
+        required_permission_codes=[PETS_MANAGEMENT_VIEW],
+    )
+
+
+def test_pets_view_ceiling_includes_assigned_project_view():
+    ceiling = org_ceiling_permission_codes(PETS_MANAGEMENT_VIEW)
+    assert PETS_MANAGEMENT_VIEW in ceiling
+    assert PROJECTS_MANAGEMENT_VIEW in ceiling
+    assert PROJECTS_MANAGEMENT_VIEW_ASSIGNED in ceiling
+
+
+def test_pets_delete_ceiling_requires_projects_management_edit():
+    ceiling = org_ceiling_permission_codes(PETS_MANAGEMENT_DELETE)
+    assert PETS_MANAGEMENT_DELETE in ceiling
+    assert PROJECTS_MANAGEMENT_EDIT in ceiling
 
 
 def test_vehicle_and_daily_help_delete_share_edit_ceiling_pattern():

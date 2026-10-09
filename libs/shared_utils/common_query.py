@@ -71,6 +71,10 @@ VEHICLE_MANAGEMENT_VIEW = "vehicle_management.view"
 VEHICLE_MANAGEMENT_EDIT = "vehicle_management.edit"
 VEHICLE_MANAGEMENT_DELETE = "vehicle_management.delete"
 
+PETS_MANAGEMENT_VIEW = "pets_management.view"
+PETS_MANAGEMENT_EDIT = "pets_management.edit"
+PETS_MANAGEMENT_DELETE = "pets_management.delete"
+
 RESIDENT_MANAGEMENT_VIEW = "resident_management.view"
 RESIDENT_MANAGEMENT_EDIT = "resident_management.edit"
 
@@ -455,6 +459,24 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "Delete Project Vehicles",
         "Remove resident vehicle registration requests and approved vehicles",
         "vehicles",
+    ),
+    (
+        PETS_MANAGEMENT_VIEW,
+        "View Pets",
+        "View household pet profiles within assigned projects",
+        "pets",
+    ),
+    (
+        PETS_MANAGEMENT_EDIT,
+        "Edit Pets",
+        "Create and update household pet profiles within assigned projects",
+        "pets",
+    ),
+    (
+        PETS_MANAGEMENT_DELETE,
+        "Remove Pets",
+        "Remove household pet profiles within assigned projects",
+        "pets",
     ),
     (
         RESIDENT_MANAGEMENT_VIEW,
