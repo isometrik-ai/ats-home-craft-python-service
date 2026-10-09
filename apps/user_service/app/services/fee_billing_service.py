@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -11,6 +12,8 @@ import asyncpg
 
 from apps.user_service.app.db.repositories.fee_billing_repository import (
     FeeBillingRepository,
+    fetch_collection_rows,
+    record_fee_invoice_activity,
 )
 from apps.user_service.app.schemas.enums.fee_configuration import (
     FeeBillingCycle,
@@ -26,8 +29,10 @@ from apps.user_service.app.services.fee_configuration_labels import (
     money_str,
     period_months,
 )
+from apps.user_service.app.services.fee_invoice_mail import invoice_unit_context
 from apps.user_service.app.services.fee_late_fee import (
     billing_today,
+    build_collection_summary,
     build_outstanding_summary,
     build_unit_balance,
     invoice_status,
@@ -35,8 +40,13 @@ from apps.user_service.app.services.fee_late_fee import (
     plan_credit_applications,
 )
 from apps.user_service.app.services.units_service import resolve_unit_property_type
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("fee_billing_service")
 
@@ -308,7 +318,7 @@ def _invoice_summary(row: dict[str, Any], as_of: date) -> dict[str, Any]:
         "status": invoice_status(row["status"], row["due_date"], as_of),
         "total_amount": money_str(total),
         "amount_paid": money_str(paid),
-        "outstanding": money_str(money(total - paid)),
+        "outstanding": money_str(_amount_still_due(row, total, paid)),
         "pdf_path": row.get("pdf_path"),
     }
 
@@ -358,7 +368,7 @@ def _invoice_detail(row: dict[str, Any], as_of: date) -> dict[str, Any]:
         "round_off_amount": money_str(row["round_off_amount"]),
         "total_amount": money_str(total),
         "amount_paid": money_str(paid),
-        "outstanding": money_str(money(total - paid)),
+        "outstanding": money_str(_amount_still_due(row, total, paid)),
         "pdf_path": row.get("pdf_path"),
         "lines": [_invoice_line_detail(line) for line in row.get("lines") or []],
         "payments": [
@@ -370,7 +380,79 @@ def _invoice_detail(row: dict[str, Any], as_of: date) -> dict[str, Any]:
             }
             for payment in row.get("payments") or []
         ],
+        "activities": [_activity_detail(activity) for activity in row.get("activities") or []],
     }
+
+
+def _activity_detail(activity: dict[str, Any]) -> dict[str, Any]:
+    """One invoice activity for the detail response."""
+    detail = activity.get("detail") or {}
+    if isinstance(detail, str):
+        detail = json.loads(detail)
+    actor = activity.get("actor_user_id")
+    return {
+        "event": activity["event"],
+        "actor_user_id": str(actor) if actor else None,
+        "detail": detail,
+        "created_at": _iso_timestamp(activity["created_at"]),
+    }
+
+
+def _iso_timestamp(value: datetime | str) -> str:
+    """ISO timestamp text."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _reminder_notice(
+    detail: dict[str, Any],
+    *,
+    organization_id: str,
+    project_id: str,
+    project_name: str,
+    sent_at: str,
+) -> dict[str, Any]:
+    """Mail and push payload for one unpaid invoice."""
+    return {
+        "invoice_id": str(detail["id"]),
+        "organization_id": organization_id,
+        "project_id": project_id,
+        "unit_id": str(detail["unit_id"]),
+        "invoice_number": detail["invoice_number"],
+        "unit_code": str(detail.get("unit_code") or "").strip(),
+        "project_name": project_name,
+        "pdf_path": detail.get("pdf_path"),
+        "billing_month": _iso_date(detail["billing_month"]),
+        "invoice_date": _iso_date(detail["invoice_date"]),
+        "due_date": _iso_date(detail["due_date"]),
+        "taxable_amount": money_str(detail["taxable_amount"]),
+        "tax_amount": money_str(detail["tax_amount"]),
+        "round_off_amount": money_str(detail["round_off_amount"]),
+        "total_amount": money_str(detail["total_amount"]),
+        "lines": [_reminder_line(line) for line in detail.get("lines") or []],
+        "remind_on": sent_at,
+    }
+
+
+def _reminder_line(line: dict[str, Any]) -> dict[str, str | None]:
+    """One invoice line as money text for the reminder PDF."""
+    return {
+        "description": str(line["description"]),
+        "kind": str(line.get("kind") or ""),
+        "area_or_quantity": _optional_money(line.get("area_or_quantity")),
+        "rate": _optional_money(line.get("rate")),
+        "taxable_amount": money_str(line["taxable_amount"]),
+        "tax_amount": money_str(line["tax_amount"]),
+        "line_total": money_str(line["line_total"]),
+    }
+
+
+def _amount_still_due(row: dict[str, Any], total: Decimal, paid: Decimal) -> Decimal:
+    """Nothing is due once the invoice is cancelled."""
+    if row.get("status") == "cancelled":
+        return money(0)
+    return money(total - paid)
 
 
 def _remember_payment(invoice: dict[str, Any], amount: Decimal, paid_on: date) -> str:
@@ -635,6 +717,16 @@ class FeeBillingService:
                     project_id=project_id,
                 )
             )
+        await self._record_activity(
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+            event="issued",
+            detail={
+                "invoice_number": invoice.get("invoice_number"),
+                "total_amount": money_str(invoice["total_amount"]),
+            },
+        )
         await self._email_new_invoice(invoice, lines=lines, invoice_id=invoice_id)
         return invoice_id
 
@@ -760,6 +852,74 @@ class FeeBillingService:
                 invoice_id=application["invoice_id"],
                 status=status,
             )
+            await self._record_activity(
+                organization_id=str(application["organization_id"]),
+                project_id=str(application["project_id"]),
+                invoice_id=str(application["invoice_id"]),
+                event="payment_recorded",
+                detail={
+                    "amount": money_str(application["amount"]),
+                    "paid_on": _iso_date(application["paid_on"]),
+                    "mode": application["mode"],
+                    "reference": application.get("reference"),
+                    "source": "credit",
+                    "status": status,
+                },
+            )
+
+    async def record_reminder(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        invoice_id: str,
+        actor_user_id: str,
+        email_count: int,
+        source: str = "manual",
+    ) -> None:
+        """Record a reminder that was queued for this invoice."""
+        await self._record_activity(
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+            event="reminder_sent",
+            actor_user_id=actor_user_id,
+            detail={"source": source, "email_count": email_count},
+        )
+
+    async def _record_activity(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        invoice_id: str,
+        event: str,
+        actor_user_id: str | None = None,
+        detail: dict[str, Any] | None = None,
+    ) -> None:
+        """Store one activity. Tests without a connection keep it on the fake."""
+        connection = getattr(self.repo, "db_connection", None)
+        if connection is None:
+            self.repo.activities.append(
+                {
+                    "organization_id": organization_id,
+                    "project_id": project_id,
+                    "invoice_id": invoice_id,
+                    "event": event,
+                    "actor_user_id": actor_user_id,
+                    "detail": detail or {},
+                }
+            )
+            return
+        await record_fee_invoice_activity(
+            connection,
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+            event=event,
+            actor_user_id=actor_user_id,
+            detail=detail,
+        )
 
     async def record_payment(
         self,
@@ -771,6 +931,7 @@ class FeeBillingService:
         paid_on: date,
         mode: str,
         reference: str | None,
+        actor_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Record a payment and update the invoice to partial or paid."""
         invoice = await self.repo.get_invoice(
@@ -780,6 +941,11 @@ class FeeBillingService:
         )
         if invoice is None:
             raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
+        if invoice.get("status") == "cancelled":
+            raise ConflictException(
+                message_key="fee_billing.errors.invoice_cancelled",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         paid = money(amount)
         if paid <= 0:
             raise ValidationException(message_key="fee_billing.errors.invalid_payment")
@@ -802,6 +968,20 @@ class FeeBillingService:
             )
             status = _remember_payment(invoice, applied, paid_on)
             await self.repo.update_invoice_status(invoice_id=invoice_id, status=status)
+            await self._record_activity(
+                organization_id=organization_id,
+                project_id=project_id,
+                invoice_id=invoice_id,
+                event="payment_recorded",
+                actor_user_id=actor_user_id,
+                detail={
+                    "amount": money_str(applied),
+                    "paid_on": paid_on.isoformat(),
+                    "mode": mode,
+                    "reference": reference,
+                    "status": status,
+                },
+            )
         else:
             status = str(invoice.get("status") or "paid")
         if surplus > 0:
@@ -867,6 +1047,37 @@ class FeeBillingService:
         )
         return [_invoice_summary(row, as_of) for row in rows], total
 
+    async def collection_summary(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        billing_months: list[date] | None,
+        as_of: date | None = None,
+    ) -> dict[str, Any]:
+        """Project cards for invoiced, collected, outstanding, and overdue."""
+        as_of = billing_today() if as_of is None else as_of
+        months = sorted({month.replace(day=1) for month in (billing_months or [])})
+        connection = getattr(self.repo, "db_connection", None)
+        if connection is None:
+            rows = [
+                row
+                for row in getattr(self.repo, "project_invoices", [])
+                if row.get("organization_id") == organization_id
+                and row.get("project_id") == project_id
+                and (not months or row.get("billing_month") in months)
+            ]
+        else:
+            rows = await fetch_collection_rows(
+                connection,
+                organization_id=organization_id,
+                project_id=project_id,
+                billing_months=months,
+            )
+        summary = build_collection_summary(rows, as_of=as_of)
+        summary["billing_months"] = [month.isoformat() for month in months]
+        return summary
+
     async def invoice_detail(
         self,
         *,
@@ -895,6 +1106,96 @@ class FeeBillingService:
         if row is None:
             raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
         return _invoice_detail(row, billing_today() if as_of is None else as_of)
+
+    async def cancel_invoice(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        invoice_id: str,
+        as_of: date | None = None,
+        actor_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Cancel an issued invoice that has not received a payment."""
+        invoice = await self.repo.get_invoice(
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+        )
+        if invoice is None:
+            raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
+        payments = await self.repo.list_payments(invoice_id=invoice_id)
+        received = money(sum((money(row["amount"]) for row in payments), Decimal("0")))
+        if invoice.get("status") != "issued" or received > 0:
+            raise ConflictException(
+                message_key="fee_billing.errors.invoice_not_cancellable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        await self.repo.update_invoice_status(invoice_id=invoice_id, status="cancelled")
+        await self._record_activity(
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+            event="cancelled",
+            actor_user_id=actor_user_id,
+            detail={"invoice_number": invoice.get("invoice_number")},
+        )
+        return await self.invoice_detail(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=str(invoice["unit_id"]),
+            invoice_id=invoice_id,
+            as_of=as_of,
+        )
+
+    async def reminder_notice(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        invoice_id: str,
+    ) -> dict[str, Any]:
+        """Notice for a manual reminder. Paid and cancelled invoices are refused."""
+        invoice = await self.repo.get_invoice(
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+        )
+        if invoice is None:
+            raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
+        payments = await self.repo.list_payments(invoice_id=invoice_id)
+        received = money(sum((money(row["amount"]) for row in payments), Decimal("0")))
+        outstanding = money(money(invoice["total_amount"]) - received)
+        if invoice.get("status") not in {"issued", "partial"} or outstanding <= 0:
+            raise ConflictException(
+                message_key="fee_billing.errors.invoice_not_remindable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        detail = await self.repo.get_invoice(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=str(invoice["unit_id"]),
+            invoice_id=invoice_id,
+        )
+        if detail is None:
+            raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
+        project_name = str(detail.get("project_name") or "")
+        connection = getattr(self.repo, "db_connection", None)
+        if connection is not None:
+            place = await invoice_unit_context(
+                connection,
+                project_id=project_id,
+                unit_id=str(invoice["unit_id"]),
+            )
+            project_name = place["project_name"]
+        sent_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        return _reminder_notice(
+            detail,
+            organization_id=organization_id,
+            project_id=project_id,
+            project_name=project_name,
+            sent_at=sent_at,
+        )
 
     async def unit_balance(
         self, *, organization_id: str, project_id: str, unit_id: str

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from apps.user_service.app.services.fee_configuration_labels import (
@@ -47,8 +47,10 @@ def late_fee_drafts(
 
 
 def invoice_status(stored: str, due_on: date, as_of: date) -> str:
-    """Overdue when the due date has passed and the invoice is not paid."""
-    if stored != "paid" and due_on < as_of:
+    """Overdue when the due date has passed and the invoice is still open."""
+    if stored in {"paid", "cancelled"}:
+        return stored
+    if due_on < as_of:
         return "overdue"
     return stored
 
@@ -66,7 +68,7 @@ def build_unit_balance(
 ) -> dict[str, Any]:
     """Arrears, late fee, current charges, and the amount still unpaid."""
     as_of = billing_today() if as_of is None else as_of
-    open_invoices = [invoice for invoice in invoices if _outstanding(invoice) > 0]
+    open_invoices = [invoice for invoice in invoices if _is_open(invoice)]
     open_invoices.sort(
         key=lambda invoice: (
             invoice["billing_month"],
@@ -108,7 +110,7 @@ def build_outstanding_summary(
 ) -> dict[str, Any]:
     """Total still to pay, for the resident pending-payments card."""
     as_of = billing_today() if as_of is None else as_of
-    open_invoices = [invoice for invoice in invoices if _outstanding(invoice) > 0]
+    open_invoices = [invoice for invoice in invoices if _is_open(invoice)]
     open_invoices.sort(
         key=lambda invoice: (
             invoice["billing_month"],
@@ -140,6 +142,58 @@ def build_outstanding_summary(
         "unpaid_count": len(open_invoices),
         "billing_months": months,
         "includes_late_fee": includes_late_fee,
+    }
+
+
+def build_collection_summary(
+    rows: list[dict[str, Any]],
+    *,
+    as_of: date,
+) -> dict[str, Any]:
+    """Invoiced, collected, outstanding, and overdue totals for the cards."""
+    invoiced = _ZERO
+    collected = _ZERO
+    outstanding = _ZERO
+    overdue_amount = _ZERO
+    invoice_count = 0
+    open_count = 0
+    overdue_count = 0
+    for row in rows:
+        if row.get("status") == "cancelled":
+            continue
+        total = money(row["total_amount"])
+        paid = money(row.get("amount_paid") or 0)
+        due = money(total - paid)
+        if due < 0:
+            due = _ZERO
+        invoiced = money(invoiced + total)
+        collected = money(collected + paid)
+        invoice_count += 1
+        if due <= 0:
+            continue
+        outstanding = money(outstanding + due)
+        open_count += 1
+        due_on = row["due_date"]
+        if row.get("status") in {"issued", "partial"} and due_on < as_of:
+            overdue_amount = money(overdue_amount + due)
+            overdue_count += 1
+    if invoiced == 0:
+        percent = 0
+    else:
+        share = (collected * Decimal(100) / invoiced).quantize(
+            Decimal("1"),
+            rounding=ROUND_HALF_UP,
+        )
+        percent = int(share)
+    return {
+        "invoiced_amount": money_str(invoiced),
+        "invoice_count": invoice_count,
+        "collected_amount": money_str(collected),
+        "collected_percent": percent,
+        "outstanding_amount": money_str(outstanding),
+        "open_count": open_count,
+        "overdue_count": overdue_count,
+        "overdue_amount": money_str(overdue_amount),
     }
 
 
@@ -385,6 +439,13 @@ def _amount_paid(invoice: dict[str, Any]) -> Decimal:
 def _outstanding(invoice: dict[str, Any]) -> Decimal:
     """Invoice total minus payments."""
     return money(money(invoice["total_amount"]) - _amount_paid(invoice))
+
+
+def _is_open(invoice: dict[str, Any]) -> bool:
+    """True when the invoice still asks the unit to pay."""
+    if invoice.get("status") == "cancelled":
+        return False
+    return _outstanding(invoice) > 0
 
 
 def _invoice_view(invoice: dict[str, Any], as_of: date) -> dict[str, Any]:
