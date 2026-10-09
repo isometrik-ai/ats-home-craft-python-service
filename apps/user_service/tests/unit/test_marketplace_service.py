@@ -134,7 +134,7 @@ def test_publish_gaps_lists_what_a_sale_still_needs():
             "condition": None,
             "unit_id": None,
         },
-        media_count=1,
+        media_count=0,
     )
     assert gaps == [
         "media",
