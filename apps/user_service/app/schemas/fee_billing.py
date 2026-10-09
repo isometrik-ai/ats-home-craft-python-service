@@ -16,6 +16,7 @@ class FeeInvoiceStatus(str, Enum):
     PARTIAL = "partial"
     PAID = "paid"
     OVERDUE = "overdue"
+    CANCELLED = "cancelled"
 
 
 class FeePaymentMode(str, Enum):
@@ -134,6 +135,15 @@ class FeeInvoicePaymentDetail(BaseModel):
     reference: str | None = None
 
 
+class FeeInvoiceActivity(BaseModel):
+    """One event in an invoice's history."""
+
+    event: str
+    actor_user_id: str | None = None
+    detail: dict
+    created_at: str
+
+
 class FeeInvoiceDetail(BaseModel):
     """Invoice header, lines, and payments."""
 
@@ -154,6 +164,7 @@ class FeeInvoiceDetail(BaseModel):
     pdf_path: str | None = None
     lines: list[FeeInvoiceLineDetail]
     payments: list[FeeInvoicePaymentDetail]
+    activities: list[FeeInvoiceActivity] = []
 
 
 class FeeInvoiceDetailApiResponse(BaseModel):
@@ -195,6 +206,48 @@ class FeeInvoiceListApiResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class FeeCollectionSummary(BaseModel):
+    """Invoiced, collected, outstanding, and overdue cards for a project."""
+
+    billing_months: list[str]
+    invoiced_amount: str
+    invoice_count: int
+    collected_amount: str
+    collected_percent: int
+    outstanding_amount: str
+    open_count: int
+    overdue_count: int
+    overdue_amount: str
+
+
+class FeeCollectionSummaryApiResponse(BaseModel):
+    """API envelope for the project collection cards."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: FeeCollectionSummary
+
+
+class FeeInvoiceReminderResult(BaseModel):
+    """A manual reminder queued for one unpaid invoice."""
+
+    invoice_id: str
+    invoice_number: str
+    email_count: int
+
+
+class FeeInvoiceReminderApiResponse(BaseModel):
+    """API envelope for a manual invoice reminder."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: FeeInvoiceReminderResult
 
 
 class FeePaymentApiResponse(BaseModel):

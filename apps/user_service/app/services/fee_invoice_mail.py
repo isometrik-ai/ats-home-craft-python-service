@@ -9,6 +9,9 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.db.repositories.fee_billing_repository import (
+    record_fee_invoice_activity,
+)
 from apps.user_service.app.services.fee_invoice_pdf import (
     build_fee_invoice_pdf,
     format_rupees,
@@ -49,13 +52,13 @@ async def prepare_fee_invoice_messages(
     notice: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Build one message per resident email, with the invoice PDF attached."""
-    context = await _unit_context(
+    context = await invoice_unit_context(
         connection,
         project_id=notice["project_id"],
         unit_id=notice["unit_id"],
     )
     people = recipient_addresses(
-        await _resident_rows(
+        await list_invoice_residents(
             connection,
             organization_id=notice["organization_id"],
             unit_id=notice["unit_id"],
@@ -81,7 +84,7 @@ async def prepare_fee_invoice_reminder(
 ) -> list[dict[str, Any]]:
     """Build one reminder per resident email, attaching the stored PDF."""
     people = recipient_addresses(
-        await _resident_rows(
+        await list_invoice_residents(
             connection,
             organization_id=notice["organization_id"],
             unit_id=notice["unit_id"],
@@ -186,14 +189,38 @@ async def collect_fee_invoice_reminders(
     """Prepare every reminder email. One invoice's failure is logged."""
     messages: list[dict[str, Any]] = []
     for notice in notices:
+        prepared: list[dict[str, Any]] = []
         try:
-            messages.extend(await prepare_fee_invoice_reminder(connection, notice))
+            prepared = await prepare_fee_invoice_reminder(connection, notice)
+            messages.extend(prepared)
         except Exception:
             logger.exception(
                 "fee invoice reminder failed invoice_number=%s",
                 notice.get("invoice_number"),
             )
+        await _record_scheduled_reminder(connection, notice, email_count=len(prepared))
     return messages
+
+
+async def _record_scheduled_reminder(
+    connection: asyncpg.Connection,
+    notice: dict[str, Any],
+    *,
+    email_count: int,
+) -> None:
+    """Keep the daily reminder on the invoice, including a send with no addresses."""
+    await record_fee_invoice_activity(
+        connection,
+        organization_id=str(notice["organization_id"]),
+        project_id=str(notice["project_id"]),
+        invoice_id=str(notice["invoice_id"]),
+        event="reminder_sent",
+        detail={
+            "source": "scheduled",
+            "remind_on": notice.get("remind_on"),
+            "email_count": email_count,
+        },
+    )
 
 
 _PAYMENT_MODES = {
@@ -245,7 +272,7 @@ async def prepare_fee_payment_messages(
     if context is None:
         return []
     people = recipient_addresses(
-        await _resident_rows(
+        await list_invoice_residents(
             connection,
             organization_id=notice["organization_id"],
             unit_id=context["unit_id"],
@@ -353,7 +380,7 @@ def _emails(value: Any) -> Any:
     return value
 
 
-async def _unit_context(
+async def invoice_unit_context(
     connection: asyncpg.Connection,
     *,
     project_id: str,
@@ -379,7 +406,7 @@ async def _unit_context(
     }
 
 
-async def _resident_rows(
+async def list_invoice_residents(
     connection: asyncpg.Connection,
     *,
     organization_id: str,
@@ -388,7 +415,7 @@ async def _resident_rows(
     """Owner, tenant, and family contacts currently linked to the unit."""
     rows = await connection.fetch(
         """
-        SELECT c.first_name, c.emails
+        SELECT c.user_id::text AS user_id, c.first_name, c.emails, c.additional_data
         FROM contact_units cu
         JOIN contacts c
           ON c.id = cu.contact_id

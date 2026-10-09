@@ -179,6 +179,7 @@ class FacilityBookingInventoryRepository(BaseRepository):
             where_params=[row_id, organization_id, facility_id],
             update_data=update_data,
             jsonb_columns=_SCHEDULE_JSONB,
+            date_columns=_INVENTORY_DATE_COLUMNS,
         )
         if not row:
             return None

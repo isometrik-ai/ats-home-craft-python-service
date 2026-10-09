@@ -27,21 +27,14 @@ def _request() -> Request:
 
 @pytest.mark.asyncio
 async def test_complete_past_community_events_internal():
-    with (
-        patch(
-            "apps.user_service.app.api.community_events_internal.require_super_admin",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "apps.user_service.app.api.community_events_internal.complete_past_community_events",
-            new_callable=AsyncMock,
-            return_value=["evt-1"],
-        ),
+    with patch(
+        "apps.user_service.app.api.community_events_internal.complete_past_community_events",
+        new_callable=AsyncMock,
+        return_value=["evt-1"],
     ):
         response = await complete_past_community_events_internal(
             request=_request(),
             db_connection=MagicMock(),
-            current_user={"sub": "admin-1"},
         )
 
     assert response.status_code == 200
@@ -52,21 +45,14 @@ async def test_complete_past_community_events_internal():
 
 @pytest.mark.asyncio
 async def test_send_community_event_reminders_internal():
-    with (
-        patch(
-            "apps.user_service.app.api.community_events_internal.require_super_admin",
-            new_callable=AsyncMock,
-        ),
-        patch(
-            "apps.user_service.app.api.community_events_internal.send_community_event_reminders",
-            new_callable=AsyncMock,
-            return_value={"sent_count": 3, "event_ids": ["e-1"]},
-        ),
+    with patch(
+        "apps.user_service.app.api.community_events_internal.send_community_event_reminders",
+        new_callable=AsyncMock,
+        return_value={"sent_count": 3, "event_ids": ["e-1"]},
     ):
         response = await send_community_event_reminders_internal(
             request=_request(),
             db_connection=MagicMock(),
-            current_user={"sub": "admin-1"},
         )
 
     assert response.status_code == 200
