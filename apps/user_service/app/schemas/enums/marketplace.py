@@ -100,6 +100,7 @@ class MarketplaceAdminStatus(str, Enum):
     """Staff list status filter. No removed-by-committee option."""
 
     ALL = "all"
+    DRAFT = "draft"
     LIVE = "live"
     SOLD = "sold"
     PAST = "past"
