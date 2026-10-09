@@ -1,4 +1,4 @@
-"""Pet persistence for household pets (ADR 0016)."""
+"""Pet persistence for household pets (ADR 0015)."""
 
 from __future__ import annotations
 

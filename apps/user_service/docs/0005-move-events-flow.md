@@ -2,7 +2,7 @@
 
 > **Status: Implemented (Phase 1 + 2 + occupancy turnover).** This document describes the **Move Events** feature in
 > `user_service`, written in the same style as
-> [`passes-flow.md`](./passes-flow.md), [`contact-onboarding-flow.md`](./contact-onboarding-flow.md),
+> [`0003-passes-flow.md`](./0003-passes-flow.md), [`0001-contact-onboarding-flow.md`](./0001-contact-onboarding-flow.md),
 > and [`project-setup-flow.md`](./project-setup-flow.md) so it drops straight into the codebase.
 > The schema/architecture rationale lives in [ADR 0005](./adr/0005-move-events.md).
 
@@ -99,14 +99,14 @@ move-event history.
 
 ### When full turnover runs (`release_outgoing_tenant_household`)
 
-| Trigger                    | Timing                                                                                        |
-| -------------------------- | --------------------------------------------------------------------------------------------- |
-| **Admin move-in**          | Before resolving/creating the new tenant `contact_units` link (sanitizes stale data)          |
-| **Admin move-out**         | After insert, when `contact_id` is the **active tenant** on the unit                          |
-| **Tenant request approve** | Before provisioning the new tenant (see [tenant-requests-flow.md](./tenant-requests-flow.md)) |
-| **Owner contact deleted**  | Before `vacate_unit_completely`, when the unit has an active tenant (see below)               |
-| **Owner unassigned**       | Before `vacate_unit_completely`, when the unit has an active tenant (see below)               |
-| **Owner reassigned**       | Before `vacate_unit_completely`, when the unit has an active tenant (see below)               |
+| Trigger                    | Timing                                                                                                  |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- |
+| **Admin move-in**          | Before resolving/creating the new tenant `contact_units` link (sanitizes stale data)                    |
+| **Admin move-out**         | After insert, when `contact_id` is the **active tenant** on the unit                                    |
+| **Tenant request approve** | Before provisioning the new tenant (see [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md)) |
+| **Owner contact deleted**  | Before `vacate_unit_completely`, when the unit has an active tenant (see below)                         |
+| **Owner unassigned**       | Before `vacate_unit_completely`, when the unit has an active tenant (see below)                         |
+| **Owner reassigned**       | Before `vacate_unit_completely`, when the unit has an active tenant (see below)                         |
 
 ### Owner-change tenant move-out (system-triggered)
 
@@ -233,7 +233,7 @@ All routes under `/v1/move-events`, authenticated + org-scoped, guarded by `cont
    `release_single_occupant()` for one family member.
 1. **Move-in only:** assign `Tenant` role when missing; call
    `TenantRequestsService.sync_after_admin_move_in()` so the owner mobile list shows an approved
-   tenant request (mirrors ledger row — see [tenant-requests-flow.md](./tenant-requests-flow.md)).
+   tenant request (mirrors ledger row — see [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md)).
 1. **Move-out only:** call `TenantRequestsService.sync_after_admin_move_out()` to mark the active
    approved `tenant_requests` row as `superseded` (so owner history no longer shows a current tenant).
 1. Return the created move with joined display fields (unit label, type, contact name/role).
@@ -398,7 +398,7 @@ ______________________________________________________________________
 ## Related
 
 - Design decision & new tables: [ADR 0005 — Move events](./adr/0005-move-events.md)
-- Occupancy link produced/synced: [contact-onboarding-flow.md](./contact-onboarding-flow.md) (`contact_units`)
-- Tenant approval + supersede (same turnover rules): [tenant-requests-flow.md](./tenant-requests-flow.md)
+- Occupancy link produced/synced: [0001-contact-onboarding-flow.md](./0001-contact-onboarding-flow.md) (`contact_units`)
+- Tenant approval + supersede (same turnover rules): [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md)
 - Inventory (`units`, `unit_configs`, `towers`): [project-setup-flow.md](./project-setup-flow.md)
 - Staff RBAC + `organization_member` model: [ADR 0004](./adr/0004-pass-validation-gate.md)

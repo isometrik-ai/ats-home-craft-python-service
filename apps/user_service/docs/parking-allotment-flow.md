@@ -3,7 +3,7 @@
 This document explains **parking facilities**, **slot provisioning**, **unit-first allotment**,
 and how **vehicles** optionally reference allotted slots. It complements the wizard coverage in
 [`project-setup-flow.md`](project-setup-flow.md) and resident vehicle onboarding in
-[`contact-onboarding-flow.md`](contact-onboarding-flow.md).
+[`0001-contact-onboarding-flow.md`](0001-contact-onboarding-flow.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **API prefixes:** `/v1/projects` (setup + allotment + vehicle review)
@@ -244,7 +244,7 @@ Reject:
 }
 ```
 
-See [`contact-onboarding-flow.md`](contact-onboarding-flow.md) for resident-side vehicle CRUD.
+See [`0001-contact-onboarding-flow.md`](0001-contact-onboarding-flow.md) for resident-side vehicle CRUD.
 
 ______________________________________________________________________
 

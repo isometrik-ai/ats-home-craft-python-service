@@ -1,13 +1,13 @@
 # ADR 0003: Visitor passes — schema and backend model
 
-|                  |                                                                                                                                    |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                           |
-| **Date**         | 2026-07-09                                                                                                                         |
-| **Authors**      | Home Craft platform team                                                                                                           |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + junction tables), [ADR 0002](./0002-resident-onboarding-implementation.md)   |
-| **Related docs** | [passes-flow.md](../passes-flow.md) (flow & change guide), [contact-onboarding-flow.md](../contact-onboarding-flow.md)             |
-| **Migrations**   | `2026XXXXXXXXXX_visitor_passes_enums.sql`, `2026XXXXXXXXXX_visitor_passes_tables.sql` (to be created in `ats-home-craft-supabase`) |
+|                  |                                                                                                                                            |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Status**       | Proposed                                                                                                                                   |
+| **Date**         | 2026-07-09                                                                                                                                 |
+| **Authors**      | Home Craft platform team                                                                                                                   |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + junction tables), [ADR 0002](./0002-resident-onboarding-implementation.md)           |
+| **Related docs** | [0003-passes-flow.md](../0003-passes-flow.md) (flow & change guide), [0001-contact-onboarding-flow.md](../0001-contact-onboarding-flow.md) |
+| **Migrations**   | `2026XXXXXXXXXX_visitor_passes_enums.sql`, `2026XXXXXXXXXX_visitor_passes_tables.sql` (to be created in `ats-home-craft-supabase`)         |
 
 ______________________________________________________________________
 
@@ -281,7 +281,7 @@ ______________________________________________________________________
 
 ### Follow-ups
 
-1. **Implementation** — see [passes-flow.md](../passes-flow.md) (endpoints, services, phases).
+1. **Implementation** — see [0003-passes-flow.md](../0003-passes-flow.md) (endpoints, services, phases).
 1. Add RLS policies keyed on `organization_id` and `contacts.user_id` (host) + gate role.
 1. Gate/security app endpoints + `VISITOR_MANAGEMENT_*` RBAC codes and a scanning device model.
 1. Optional nightly sweep to persist `expired`/`completed` for reporting.
@@ -305,7 +305,7 @@ ______________________________________________________________________
 
 ## References
 
-- Flow & change guide: [`passes-flow.md`](../passes-flow.md)
+- Flow & change guide: [`0003-passes-flow.md`](../0003-passes-flow.md)
 - Person model + junction-table decision: [ADR 0001](./0001-resident-onboarding.md)
 - Unit-ownership check reused: `ContactUnitsRepository.contact_has_active_unit`
 - Inventory reused: `units`, `tower_gates` (see [project-setup-flow.md](../project-setup-flow.md))

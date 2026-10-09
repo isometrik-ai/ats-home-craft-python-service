@@ -4,12 +4,12 @@
 > This document is the build contract for **Finance → Fee Configuration** only.
 > Invoices and Collections are separate screens and are not specified here.
 >
-> Schema and architecture rationale: [ADR 0018](./adr/0018-fee-configuration.md).
+> Schema and architecture rationale: [ADR 0017](./adr/0017-fee-configuration.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/fee-configuration`
 - **Resident API:** none
-- **DB schema:** `ats-home-craft-supabase` (migrations not yet added — names proposed in [ADR 0018](./adr/0018-fee-configuration.md))
+- **DB schema:** `ats-home-craft-supabase` (migrations not yet added — names proposed in [ADR 0017](./adr/0017-fee-configuration.md))
 
 ______________________________________________________________________
 
@@ -21,7 +21,7 @@ so a later billing run can produce each resident's invoice without that spreadsh
 
 **Nothing on this screen bills anybody.** It stores rules. The billing run (Invoices) is the
 only consumer, and it is out of scope for this build. Facility-booking invoices
-([ADR 0017](./adr/0017-facility-booking.md)) are a different ledger and are not configured here.
+([ADR 0016](./adr/0016-facility-booking.md)) are a different ledger and are not configured here.
 
 ### Who uses it
 
@@ -194,7 +194,7 @@ Static note under the amount:
 > Facilities set to Included in membership in Facilities → Pricing are covered by this charge, so residents are not billed again per booking.
 
 That note describes `FacilityPriceMode.INCLUDED` on facility booking config
-([facility-booking-flow.md](./facility-booking-flow.md)). This API does not read or write it.
+([0016-facility-booking-flow.md](./0016-facility-booking-flow.md)). This API does not read or write it.
 Deactivating the club fee head does not flip those facilities back to a per-booking charge.
 
 ______________________________________________________________________
@@ -252,7 +252,7 @@ months (`Quarterly · Jul, Oct, Jan, Apr`) so the list is readable without openi
 
 **Gap:** `units` has no possession date. `projects.possession_date` is the project's date, not
 the unit's. The editor may store `pro_rata`. The billing run must refuse to generate that fee
-head until Inventory has a per-unit possession month. See [ADR 0018](./adr/0018-fee-configuration.md).
+head until Inventory has a per-unit possession month. See [ADR 0017](./adr/0017-fee-configuration.md).
 
 ### 6.4 Invoice date → which invoice a fee lands on
 
@@ -399,13 +399,13 @@ Already seeded. Do not add new permission codes.
 
 `community_admin`, `accountant`, and `viewer` already have view. `community_admin` and
 `accountant` already have edit. `facility_manager` does not have view; implementation adds
-`finance_management.view` to that role so FM Head can read. See [ADR 0018](./adr/0018-fee-configuration.md).
+`finance_management.view` to that role so FM Head can read. See [ADR 0017](./adr/0017-fee-configuration.md).
 
 ______________________________________________________________________
 
 ## 9. Data model
 
-Full columns and checks: [ADR 0018 § Schema](./adr/0018-fee-configuration.md#schema-proposed).
+Full columns and checks: [ADR 0017 § Schema](./adr/0017-fee-configuration.md#schema-proposed).
 
 | Table                      | Purpose                                                                                                              |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -771,7 +771,7 @@ ______________________________________________________________________
 ## 17. Open questions
 
 These do not block building the screen. They block specific billing-run behaviour if the client
-answers yes. Details and the current default are in [ADR 0018](./adr/0018-fee-configuration.md).
+answers yes. Details and the current default are in [ADR 0017](./adr/0017-fee-configuration.md).
 
 1. Tax on grid electricity — exempt or taxed? Currently one rate on all four components.
 1. ₹7,500 per month RWA exemption on maintenance — applied or not? Currently not applied.
@@ -784,10 +784,10 @@ ______________________________________________________________________
 
 ## 18. Related docs
 
-| Doc                                                    | Relevance                                                   |
-| ------------------------------------------------------ | ----------------------------------------------------------- |
-| [ADR 0018](./adr/0018-fee-configuration.md)            | Decisions, schema, alternatives                             |
-| [ADR 0011](./adr/0011-project-membership.md)           | Staff project access                                        |
-| [ADR 0017](./adr/0017-facility-booking.md)             | Separate booking invoices; membership-included facilities   |
-| [project-setup-flow.md](./project-setup-flow.md)       | Where area, property type, and project possession date live |
-| [facility-booking-flow.md](./facility-booking-flow.md) | `included` price mode the club note refers to               |
+| Doc                                                              | Relevance                                                   |
+| ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| [ADR 0017](./adr/0017-fee-configuration.md)                      | Decisions, schema, alternatives                             |
+| [ADR 0010](./adr/0010-project-membership.md)                     | Staff project access                                        |
+| [ADR 0016](./adr/0016-facility-booking.md)                       | Separate booking invoices; membership-included facilities   |
+| [project-setup-flow.md](./project-setup-flow.md)                 | Where area, property type, and project possession date live |
+| [0016-facility-booking-flow.md](./0016-facility-booking-flow.md) | `included` price mode the club note refers to               |

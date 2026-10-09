@@ -14,12 +14,12 @@ All flow guides, API notes, and ADRs:
 
 Quick links:
 
-| Topic               | Doc                                                                                |
-| ------------------- | ---------------------------------------------------------------------------------- |
-| Membership model    | [membership-architecture.md](../apps/user_service/docs/membership-architecture.md) |
-| Resident onboarding | [contact-onboarding-flow.md](../apps/user_service/docs/contact-onboarding-flow.md) |
-| Project setup       | [project-setup-flow.md](../apps/user_service/docs/project-setup-flow.md)           |
-| ADRs                | [adr/README.md](../apps/user_service/docs/adr/README.md)                           |
+| Topic               | Doc                                                                                          |
+| ------------------- | -------------------------------------------------------------------------------------------- |
+| Membership model    | [0010-membership-architecture.md](../apps/user_service/docs/0010-membership-architecture.md) |
+| Resident onboarding | [0001-contact-onboarding-flow.md](../apps/user_service/docs/0001-contact-onboarding-flow.md) |
+| Project setup       | [project-setup-flow.md](../apps/user_service/docs/project-setup-flow.md)                     |
+| ADRs                | [adr/README.md](../apps/user_service/docs/adr/README.md)                                     |
 
 ______________________________________________________________________
 

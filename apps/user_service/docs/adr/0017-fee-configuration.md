@@ -1,13 +1,13 @@
-# ADR 0018: Fee configuration — three seeded fee heads, project dunning
+# ADR 0017: Fee configuration — three seeded fee heads, project dunning
 
-|                  |                                                                                                                                                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                                                                                      |
-| **Date**         | 2026-09-29                                                                                                                                                                                                    |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                      |
-| **Depends on**   | [ADR 0011](./0011-project-membership.md) (staff project access), [ADR 0015](./0015-project-level-rbac.md) (`finance_management.*` already seeded)                                                             |
-| **Related docs** | [fee-configuration-flow.md](../fee-configuration-flow.md), [project-setup-flow.md](../project-setup-flow.md), [facility-booking-flow.md](../facility-booking-flow.md), [ADR 0017](./0017-facility-booking.md) |
-| **Migrations**   | Proposed, not written: `20260929120000_fee_configuration_enums.sql`, `20260929121000_fee_configuration_tables.sql` (`ats-home-craft-supabase`)                                                                |
+|                  |                                                                                                                                                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Proposed                                                                                                                                                                                                                          |
+| **Date**         | 2026-09-29                                                                                                                                                                                                                        |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                          |
+| **Depends on**   | [ADR 0010](./0010-project-membership.md) (staff project access), [ADR 0014](./0014-project-level-rbac.md) (`finance_management.*` already seeded)                                                                                 |
+| **Related docs** | [0017-fee-configuration-flow.md](../0017-fee-configuration-flow.md), [project-setup-flow.md](../project-setup-flow.md), [0016-facility-booking-flow.md](../0016-facility-booking-flow.md), [ADR 0016](./0016-facility-booking.md) |
+| **Migrations**   | Proposed, not written: `20260929120000_fee_configuration_enums.sql`, `20260929121000_fee_configuration_tables.sql` (`ats-home-craft-supabase`)                                                                                    |
 
 ______________________________________________________________________
 
@@ -24,7 +24,7 @@ Finance nav item. Permission codes already describe this screen:
 | `finance_management.admin` | Generate invoices, run billing scheduler, and manage escalations |
 
 The screen in the agreed prototype is configuration only. It does not generate invoices.
-Facility-booking wallets and invoices ([ADR 0017](./0017-facility-booking.md)) stay a separate
+Facility-booking wallets and invoices ([ADR 0016](./0016-facility-booking.md)) stay a separate
 ledger keyed by contact, not by unit.
 
 ### What already exists to hang this on
@@ -345,7 +345,7 @@ ______________________________________________________________________
 
 ### Follow-ups
 
-1. Migrations and the service in [fee-configuration-flow.md](../fee-configuration-flow.md).
+1. Migrations and the service in [0017-fee-configuration-flow.md](../0017-fee-configuration-flow.md).
 1. Add `finance_management.view` to `DEFAULT_PROJECT_ROLE_PERMISSIONS["facility_manager"]`.
 1. Per-unit possession month, then pro-rata generation.
 1. Billing-run snapshot, merge rule, and the inactive-fee line in the run preview.

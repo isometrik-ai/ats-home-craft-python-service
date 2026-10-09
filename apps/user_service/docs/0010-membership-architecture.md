@@ -1,7 +1,7 @@
 # Membership Architecture — Multi-Tenant Projects
 
 > How organizations, projects, staff, residents, and teams fit together.
-> **Status:** Proposed (see [ADR 0011](./adr/0011-project-membership.md)).
+> **Status:** Proposed (see [ADR 0010](./adr/0010-project-membership.md)).
 > Schema reference: [membership-schema.md](../../../../ats-home-craft-supabase/docs/membership-schema.md).
 
 ______________________________________________________________________
@@ -179,7 +179,7 @@ auth.users
         └── contact_roles        ← Owner/Tenant/Family per unit (has project_id)
 ```
 
-See [ADR 0010](./adr/0010-contact-roles.md) for role history and scope rules.
+See [ADR 0009](./adr/0009-contact-roles.md) for role history and scope rules.
 
 ### Hard constraints
 
@@ -422,7 +422,7 @@ ______________________________________________________________________
 
 ### Phase 1 — Document & enforce (no schema change)
 
-- [x] ADR 0011 + this architecture guide + schema doc
+- [x] ADR 0010 + this architecture guide + schema doc
 - [x] `ensure_staff_project_access()` helper
 - [x] Audit project APIs for project access enforcement
 - [x] Split `projects_management.view` vs `view_assigned` permission codes
@@ -501,13 +501,13 @@ ______________________________________________________________________
 | Doc                               | Location                                                                                                |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------- |
 | Frontend flow (org/project/staff) | [frontend-membership-flow.md](./frontend-membership-flow.md)                                            |
-| ADR 0011 (decision)               | [adr/0011-project-membership.md](./adr/0011-project-membership.md)                                      |
+| ADR 0010 (decision)               | [adr/0010-project-membership.md](./adr/0010-project-membership.md)                                      |
 | Schema reference                  | [membership-schema.md](../../../../ats-home-craft-supabase/docs/membership-schema.md)                   |
-| Contact roles ADR                 | [adr/0010-contact-roles.md](./adr/0010-contact-roles.md)                                                |
+| Contact roles ADR                 | [adr/0009-contact-roles.md](./adr/0009-contact-roles.md)                                                |
 | Resident onboarding               | [adr/0001-resident-onboarding.md](./adr/0001-resident-onboarding.md)                                    |
 | Project setup flow                | [project-setup-flow.md](./project-setup-flow.md)                                                        |
 | Contact roles schema              | [contact-roles-schema.md](../../../../ats-home-craft-supabase/docs/contact-roles-schema.md)             |
-| Notice board flow                 | [notice-board-flow.md](./notice-board-flow.md)                                                          |
-| Notice board ADR                  | [adr/0012-notice-board.md](./adr/0012-notice-board.md)                                                  |
+| Notice board flow                 | [0011-notice-board-flow.md](./0011-notice-board-flow.md)                                                |
+| Notice board ADR                  | [adr/0011-notice-board.md](./adr/0011-notice-board.md)                                                  |
 | Notice board schema               | [notice-board-schema.md](../../../../ats-home-craft-supabase/docs/notice-board-schema.md)               |
 | Resident onboarding schema        | [resident-onboarding-schema.md](../../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md) |

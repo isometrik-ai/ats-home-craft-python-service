@@ -19,11 +19,11 @@ ______________________________________________________________________
 
 ## Start here
 
-| If you are working on…                        | Read                                                                                                                                                                                 |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Resident onboarding, membership, passes, fees | [user_service docs → contact-onboarding-flow](../apps/user_service/docs/contact-onboarding-flow.md), [membership-architecture](../apps/user_service/docs/membership-architecture.md) |
-| Cross-cutting auth / project access           | [user_service ADR 0011](../apps/user_service/docs/adr/0011-project-membership.md)                                                                                                    |
-| Push notifications                            | [user_service ADR 0009](../apps/user_service/docs/adr/0009-push-notifications-grpc.md)                                                                                               |
+| If you are working on…                        | Read                                                                                                                                                                                           |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Resident onboarding, membership, passes, fees | [user_service docs → contact-onboarding-flow](../apps/user_service/docs/0001-contact-onboarding-flow.md), [membership-architecture](../apps/user_service/docs/0010-membership-architecture.md) |
+| Cross-cutting auth / project access           | [user_service ADR 0010](../apps/user_service/docs/adr/0010-project-membership.md)                                                                                                              |
+| Push notifications                            | [user_service ADR 0008](../apps/user_service/docs/adr/0008-push-notifications-grpc.md)                                                                                                         |
 
 ______________________________________________________________________
 

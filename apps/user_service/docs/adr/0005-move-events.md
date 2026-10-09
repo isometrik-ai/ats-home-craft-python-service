@@ -1,13 +1,13 @@
 # ADR 0005: Move events — move-in / move-out records
 
-|                  |                                                                                                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted                                                                                                                                                      |
-| **Date**         | 2026-07-20                                                                                                                                                    |
-| **Authors**      | Home Craft platform team                                                                                                                                      |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0002](./0002-resident-onboarding-implementation.md)                              |
-| **Related docs** | [move-events-flow.md](../move-events-flow.md) (build guide), [contact-onboarding-flow.md](../contact-onboarding-flow.md), [ADR 0010](./0010-contact-roles.md) |
-| **Migrations**   | `20260720150000_move_events_enums.sql`, `20260720151000_move_events_tables.sql`                                                                               |
+|                  |                                                                                                                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted                                                                                                                                                                          |
+| **Date**         | 2026-07-20                                                                                                                                                                        |
+| **Authors**      | Home Craft platform team                                                                                                                                                          |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0002](./0002-resident-onboarding-implementation.md)                                                  |
+| **Related docs** | [0005-move-events-flow.md](../0005-move-events-flow.md) (build guide), [0001-contact-onboarding-flow.md](../0001-contact-onboarding-flow.md), [ADR 0009](./0009-contact-roles.md) |
+| **Migrations**   | `20260720150000_move_events_enums.sql`, `20260720151000_move_events_tables.sql`                                                                                                   |
 
 ______________________________________________________________________
 
@@ -90,7 +90,7 @@ and possible re-move-in).
 - **Type** column (`Apartment` / `Commercial` / `Plot`) = the unit's config kind
   (`units.config_id → unit_configs.kind`, `UnitConfigKind`).
 - **Contact role** (`Owner` / `Tenant`) = active row in **`contact_roles`** for the unit
-  (`role_type`, `status = active`). See [ADR 0010](./0010-contact-roles.md).
+  (`role_type`, `status = active`). See [ADR 0009](./0009-contact-roles.md).
 - **Unit label** = `units.code` + tower/building name.
 
 The list query **joins** these; nothing is copied onto `move_events` except the fee/date/notes that
@@ -228,7 +228,7 @@ ______________________________________________________________________
 
 ### Follow-ups
 
-1. **Implementation** — see [move-events-flow.md](../move-events-flow.md) (endpoints, services, phases).
+1. **Implementation** — see [0005-move-events-flow.md](../0005-move-events-flow.md) (endpoints, services, phases).
 1. Add RLS policies keyed on `organization_id` + admin role.
 1. Optional `MoveEventStatus` (`scheduled` / `completed`) if moves are pre-booked.
 1. Wire `fee_amount` into a billing/receipts module when one exists.
@@ -252,8 +252,8 @@ ______________________________________________________________________
 
 ## References
 
-- Build guide: [`move-events-flow.md`](../move-events-flow.md)
+- Build guide: [`0005-move-events-flow.md`](../0005-move-events-flow.md)
 - Person model + junction-table decision: [ADR 0001](./0001-resident-onboarding.md)
-- Occupancy link reused/synced: `contact_units` ([contact-onboarding-flow.md](../contact-onboarding-flow.md))
+- Occupancy link reused/synced: `contact_units` ([0001-contact-onboarding-flow.md](../0001-contact-onboarding-flow.md))
 - Inventory reused: `units`, `unit_configs`, `towers` (see [project-setup-flow.md](../project-setup-flow.md))
 - Staff RBAC + `organization_member` model: [ADR 0004](./0004-pass-validation-gate.md)

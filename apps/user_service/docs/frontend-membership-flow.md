@@ -2,8 +2,8 @@
 
 > How staff admin and resident portal apps should implement organization context,
 > RBAC, project switching, and API scoping.
-> **Status:** Proposed (companion to [membership-architecture.md](./membership-architecture.md)).
-> Backend reference: [ADR 0011](./adr/0011-project-membership.md).
+> **Status:** Proposed (companion to [0010-membership-architecture.md](./0010-membership-architecture.md)).
+> Backend reference: [ADR 0010](./adr/0010-project-membership.md).
 
 ______________________________________________________________________
 
@@ -573,8 +573,8 @@ ______________________________________________________________________
 
 | Doc                     | Location                                                                              |
 | ----------------------- | ------------------------------------------------------------------------------------- |
-| Membership architecture | [membership-architecture.md](./membership-architecture.md)                            |
-| ADR 0011 (decision)     | [adr/0011-project-membership.md](./adr/0011-project-membership.md)                    |
+| Membership architecture | [0010-membership-architecture.md](./0010-membership-architecture.md)                  |
+| ADR 0010 (decision)     | [adr/0010-project-membership.md](./adr/0010-project-membership.md)                    |
 | Schema reference        | [membership-schema.md](../../../../ats-home-craft-supabase/docs/membership-schema.md) |
 | Resident onboarding     | [adr/0001-resident-onboarding.md](./adr/0001-resident-onboarding.md)                  |
 | Project setup flow      | [project-setup-flow.md](./project-setup-flow.md)                                      |

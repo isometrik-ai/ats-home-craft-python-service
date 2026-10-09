@@ -1,4 +1,4 @@
-"""Fee configuration enums. Mirror Postgres fee_* types (ADR 0018)."""
+"""Fee configuration enums. Mirror Postgres fee_* types (ADR 0017)."""
 
 from enum import Enum
 

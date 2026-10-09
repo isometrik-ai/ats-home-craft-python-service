@@ -1,4 +1,4 @@
-"""Enumeration values for resident buy and sell (ADR 0019)."""
+"""Enumeration values for resident buy and sell (ADR 0018)."""
 
 from enum import Enum
 
