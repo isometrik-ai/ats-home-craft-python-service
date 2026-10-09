@@ -6,9 +6,15 @@ import pytest
 
 from apps.user_service.app.api import pets_admin as pets_admin_api
 from apps.user_service.tests.integration.helpers import (
+    admin_context,
     patch_ensure_staff_project_access,
 )
 from apps.user_service.tests.utils.assertions import assert_error, assert_success
+from libs.shared_utils.common_query import (
+    PETS_MANAGEMENT_DELETE,
+    PETS_MANAGEMENT_EDIT,
+    PETS_MANAGEMENT_VIEW,
+)
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -47,6 +53,93 @@ _ADMIN_PET = {
         "tower_name": "Tower A",
     },
 }
+
+
+@pytest.mark.asyncio
+async def test_unit_pets_list_requires_pets_view(monkeypatch, client):
+    """Unit detail pets refresh is gated on pets_management.view, not resident view."""
+    seen: list[str] = []
+
+    async def fake_access(**kwargs):
+        seen.append(kwargs["permission_codes"])
+        return admin_context()
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.pets_admin.ensure_staff_project_access",
+        fake_access,
+    )
+
+    async def fake_list(_self, *, project_id, query):
+        del _self, query
+        assert project_id == PROJECT_ID
+        return [], 0
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pets_service.PetsService.list_pets_for_project",
+        fake_list,
+    )
+
+    response = await client.get(
+        f"/v1/projects/{PROJECT_ID}/pets",
+        params={"unit_id": UNIT_ID},
+    )
+    assert_success(response)
+    assert seen == [PETS_MANAGEMENT_VIEW]
+
+
+@pytest.mark.asyncio
+async def test_create_and_remove_use_edit_and_delete(monkeypatch, client):
+    """Create uses pets_management.edit and remove uses pets_management.delete."""
+    seen: list[str] = []
+
+    async def fake_access(**kwargs):
+        seen.append(kwargs["permission_codes"])
+        return admin_context()
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.pets_admin.ensure_staff_project_access",
+        fake_access,
+    )
+
+    async def fake_create(_self, *, project_id, body):
+        del _self, body
+        assert project_id == PROJECT_ID
+        return _ADMIN_PET
+
+    async def fake_remove(_self, *, project_id, pet_id, body):
+        del _self, body
+        assert project_id == PROJECT_ID
+        assert pet_id == PET_ID
+        return {**_ADMIN_PET, "status": "removed"}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pets_service.PetsService.create_pet_admin",
+        fake_create,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.pets_service.PetsService.remove_pet_admin",
+        fake_remove,
+    )
+
+    create_response = await client.post(
+        f"/v1/projects/{PROJECT_ID}/pets",
+        json={
+            "unit_id": UNIT_ID,
+            "name": "Romeo",
+            "pet_type": "Dog",
+            "breed": "Golden Retriever",
+            "vaccination_status": "completely",
+            "gender": "male",
+        },
+    )
+    assert_success(create_response, status_code=201)
+
+    remove_response = await client.post(
+        f"/v1/projects/{PROJECT_ID}/pets/{PET_ID}/remove",
+        json={"reason": "Pet moved out"},
+    )
+    assert_success(remove_response)
+    assert seen == [PETS_MANAGEMENT_EDIT, PETS_MANAGEMENT_DELETE]
 
 
 def test_pets_admin_router_registered():
