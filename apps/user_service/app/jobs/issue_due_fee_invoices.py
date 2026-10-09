@@ -13,6 +13,7 @@ from apps.user_service.app.services.fee_invoice_mail import (
     collect_fee_invoice_reminders,
     dispatch_fee_invoice_emails,
 )
+from apps.user_service.app.services.fee_invoice_push import dispatch_fee_invoice_pushes
 from apps.user_service.app.services.fee_invoice_reminders import (
     claim_due_fee_invoice_reminders,
 )
@@ -23,7 +24,7 @@ logger = get_logger("issue_due_fee_invoices")
 
 
 async def run_due_fee_invoices() -> None:
-    """Issue today's invoices, then send the issue and reminder mail."""
+    """Issue today's invoices, then send the issue and reminder mail and push."""
     try:
         async with UnitOfWork() as connection:
             result, notices, reminders = await issue_due_fee_invoices(connection)
@@ -31,6 +32,7 @@ async def run_due_fee_invoices() -> None:
             messages.extend(await collect_fee_invoice_reminders(connection, reminders))
         if messages:
             dispatch_fee_invoice_emails(messages)
+        await _push_invoice_notices(notices, reminders)
         logger.info(
             "due fee invoice run finished run_date=%s invoices=%s reminders=%s",
             result.get("run_date"),
@@ -39,6 +41,20 @@ async def run_due_fee_invoices() -> None:
         )
     except Exception:
         logger.exception("due fee invoice run failed")
+
+
+async def _push_invoice_notices(
+    notices: list[dict[str, Any]],
+    reminders: list[dict[str, Any]],
+) -> None:
+    """Push after the invoice transaction commits. A push problem is logged."""
+    if not notices and not reminders:
+        return
+    try:
+        async with UnitOfWork() as connection:
+            await dispatch_fee_invoice_pushes(connection, notices, reminders)
+    except Exception:
+        logger.exception("fee invoice push failed")
 
 
 async def issue_due_fee_invoices(

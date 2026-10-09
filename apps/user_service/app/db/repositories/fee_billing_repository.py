@@ -357,6 +357,7 @@ class FeeBillingRepository(BaseRepository):
             """
             WHERE due_date < $1::date
               AND invoice_date < $1::date
+              AND status IN ('issued', 'partial')
             ORDER BY billing_month, invoice_date
             """,
             before,
@@ -410,6 +411,8 @@ class FeeBillingRepository(BaseRepository):
             filters.append("i.status IN ('issued', 'partial') AND i.due_date < $3::date")
         elif status == "paid":
             filters.append("i.status = 'paid'")
+        elif status == "cancelled":
+            filters.append("i.status = 'cancelled'")
         elif status is not None:
             args.append(status)
             filters.append(f"i.status = ${len(args)} AND i.due_date >= $3::date")
@@ -438,7 +441,8 @@ class FeeBillingRepository(BaseRepository):
                 i.invoice_date,
                 i.due_date,
                 CASE
-                    WHEN i.status <> 'paid' AND i.due_date < $3::date THEN 'overdue'
+                    WHEN i.status IN ('issued', 'partial') AND i.due_date < $3::date
+                        THEN 'overdue'
                     ELSE i.status
                 END AS status,
                 i.total_amount,
@@ -510,6 +514,7 @@ class FeeBillingRepository(BaseRepository):
         invoice = dict(row)
         invoice["lines"] = await self._detail_lines(invoice_id)
         invoice["payments"] = await self._detail_payments(invoice_id)
+        invoice["activities"] = await self._detail_activities(invoice_id)
         return invoice
 
     async def _invoice_header(
@@ -518,7 +523,8 @@ class FeeBillingRepository(BaseRepository):
         """Invoice columns used when recording a payment."""
         row = await self.db_connection.fetchrow(
             """
-            SELECT id, organization_id, project_id, unit_id, total_amount, status
+            SELECT id, organization_id, project_id, unit_id, invoice_number,
+                   total_amount, status
             FROM fee_invoices
             WHERE id = $1::uuid
               AND organization_id = $2::uuid
@@ -571,6 +577,26 @@ class FeeBillingRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+    async def _detail_activities(self, invoice_id: str) -> list[dict[str, Any]]:
+        """Activity rows for one invoice, oldest first."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT event, actor_user_id::text AS actor_user_id, detail, created_at
+            FROM fee_invoice_activities
+            WHERE invoice_id = $1::uuid
+            ORDER BY created_at, id
+            """,
+            invoice_id,
+        )
+        activities: list[dict[str, Any]] = []
+        for row in rows:
+            activity = dict(row)
+            detail = activity.get("detail")
+            if isinstance(detail, str):
+                activity["detail"] = json.loads(detail)
+            activities.append(activity)
+        return activities
+
     async def list_open_invoices(
         self, *, organization_id: str, project_id: str
     ) -> list[dict[str, Any]]:
@@ -579,7 +605,7 @@ class FeeBillingRepository(BaseRepository):
             """
             WHERE organization_id = $1::uuid
               AND project_id = $2::uuid
-              AND status <> 'paid'
+              AND status IN ('issued', 'partial')
             ORDER BY billing_month, invoice_date, id
             """,
             organization_id,
@@ -820,3 +846,70 @@ class FeeBillingRepository(BaseRepository):
             posted = dict(row)
             grouped[str(posted.pop("source_invoice_id"))].append(posted)
         return grouped
+
+
+async def fetch_collection_rows(
+    connection: Any,
+    *,
+    organization_id: str,
+    project_id: str,
+    billing_months: list[date],
+) -> list[dict[str, Any]]:
+    """Invoice totals for the project summary, leaving cancelled invoices out."""
+    filters = [
+        "i.organization_id = $1::uuid",
+        "i.project_id = $2::uuid",
+        "i.status <> 'cancelled'",
+    ]
+    args: list[Any] = [organization_id, project_id]
+    if billing_months:
+        args.append(billing_months)
+        filters.append(f"i.billing_month = ANY(${len(args)}::date[])")
+    where_sql = " AND ".join(filters)
+    rows = await connection.fetch(
+        f"""
+        SELECT
+            i.billing_month,
+            i.due_date,
+            i.status,
+            i.total_amount,
+            COALESCE(paid.amount_paid, 0) AS amount_paid
+        FROM fee_invoices i
+        LEFT JOIN (
+            SELECT invoice_id, SUM(amount) AS amount_paid
+            FROM fee_invoice_payments
+            GROUP BY invoice_id
+        ) paid ON paid.invoice_id = i.id
+        WHERE {where_sql}
+        """,
+        *args,
+    )
+    return [dict(row) for row in rows]
+
+
+async def record_fee_invoice_activity(
+    connection: Any,
+    *,
+    organization_id: str,
+    project_id: str,
+    invoice_id: str,
+    event: str,
+    actor_user_id: str | None = None,
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """Append one invoice activity. The daily job has no actor."""
+    actor = (actor_user_id or "").strip() or None
+    await connection.execute(
+        """
+        INSERT INTO fee_invoice_activities (
+            organization_id, project_id, invoice_id, event, actor_user_id, detail
+        )
+        VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6::jsonb)
+        """,
+        organization_id,
+        project_id,
+        invoice_id,
+        event,
+        actor,
+        json.dumps(detail or {}),
+    )

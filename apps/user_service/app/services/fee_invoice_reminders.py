@@ -52,7 +52,9 @@ async def claim_due_fee_invoice_reminders(
             continue
         if not await _claim(connection, invoice, today):
             continue
-        claimed.append(_notice(invoice))
+        notice = _notice(invoice)
+        notice["remind_on"] = today.isoformat()
+        claimed.append(notice)
     return claimed
 
 

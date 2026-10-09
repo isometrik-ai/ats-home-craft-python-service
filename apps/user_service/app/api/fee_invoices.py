@@ -15,8 +15,10 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.fee_billing import (
+    FeeCollectionSummaryApiResponse,
     FeeInvoiceDetailApiResponse,
     FeeInvoiceListApiResponse,
+    FeeInvoiceReminderApiResponse,
     FeeInvoiceStatus,
     FeeOutstandingSummaryApiResponse,
     FeePaymentApiResponse,
@@ -27,7 +29,9 @@ from apps.user_service.app.services.fee_billing_service import FeeBillingService
 from apps.user_service.app.services.fee_invoice_mail import (
     collect_fee_payment_messages,
     dispatch_fee_invoice_emails,
+    prepare_fee_invoice_reminder,
 )
+from apps.user_service.app.services.fee_invoice_push import dispatch_fee_invoice_pushes
 from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import (
     UserContext,
@@ -114,7 +118,7 @@ async def list_fee_invoices(
     unit_id: str | None = Query(default=None, description="Limit the list to one unit."),
     status: FeeInvoiceStatus | None = Query(
         default=None,
-        description="issued, partial, paid, or overdue.",
+        description="issued, partial, paid, overdue, or cancelled.",
     ),
     months: list[date] | None = Query(
         default=None,
@@ -150,6 +154,53 @@ async def list_fee_invoices(
         page_size=page_size,
         message_key="fee_billing.success.invoices_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("get fee collection summary")
+@router.get(
+    "/fee-invoices/summary",
+    status_code=http_status.HTTP_200_OK,
+    summary="Fee collection cards for a project",
+    response_model=None,
+    responses={
+        **_ERRORS,
+        200: {
+            "model": FeeCollectionSummaryApiResponse,
+            "description": "Invoiced, collected, outstanding, and overdue totals.",
+        },
+    },
+)
+@limiter.limit("100/minute")
+async def get_fee_collection_summary(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    *,
+    months: list[date] | None = Query(
+        default=None,
+        description="Billing months to include. Any day in the month selects that month.",
+    ),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return the four collection cards, optionally for selected billing months."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=FINANCE_MANAGEMENT_VIEW,
+        request=request,
+    )
+    data = await FeeBillingService(db_connection).collection_summary(
+        organization_id=str(user_context.organization_id),
+        project_id=project_id,
+        billing_months=months,
+    )
+    return success_response(
+        request=request,
+        message_key="fee_billing.success.summary_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
     )
 
 
@@ -216,7 +267,7 @@ async def list_resident_fee_invoices(
     *,
     status: FeeInvoiceStatus | None = Query(
         default=None,
-        description="issued, partial, paid, or overdue.",
+        description="issued, partial, paid, overdue, or cancelled.",
     ),
     months: list[date] | None = Query(
         default=None,
@@ -379,6 +430,145 @@ async def get_unit_fee_balance(
     )
 
 
+@handle_api_exceptions("cancel fee invoice")
+@router.post(
+    "/fee-invoices/{invoice_id}/cancel",
+    status_code=http_status.HTTP_200_OK,
+    summary="Cancel an unpaid fee invoice",
+    response_model=None,
+    responses={
+        **_ERRORS,
+        200: {
+            "model": FeeInvoiceDetailApiResponse,
+            "description": "The invoice is cancelled.",
+        },
+        409: {"description": "The invoice has a payment or is already closed."},
+    },
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="fee_invoices",
+    category="FEE_BILLING",
+)
+async def cancel_fee_invoice(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    invoice_id: str = Path(..., description="Fee invoice identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Cancel an issued invoice that has not received a payment."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=FINANCE_MANAGEMENT_EDIT,
+        request=request,
+    )
+    detail = await FeeBillingService(db_connection).cancel_invoice(
+        organization_id=str(user_context.organization_id),
+        project_id=project_id,
+        invoice_id=invoice_id,
+        actor_user_id=str(user_context.user_id),
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="fee_invoices",
+        description=f"Cancelled fee invoice {invoice_id}",
+        requested_id=invoice_id,
+        project_id=project_id,
+        risk_level="medium",
+        new_data={"id": invoice_id, "status": "cancelled"},
+    )
+    return success_response(
+        request=request,
+        message_key="fee_billing.success.invoice_cancelled",
+        data=detail,
+    )
+
+
+@handle_api_exceptions("send fee invoice reminder")
+@router.post(
+    "/fee-invoices/{invoice_id}/reminder",
+    status_code=http_status.HTTP_200_OK,
+    summary="Send a reminder for one unpaid fee invoice",
+    response_model=None,
+    responses={
+        **_ERRORS,
+        200: {
+            "model": FeeInvoiceReminderApiResponse,
+            "description": "Reminder email queued and push sent.",
+        },
+        409: {"description": "The invoice is paid or cancelled."},
+    },
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="fee_invoices",
+    category="FEE_BILLING",
+)
+async def send_fee_invoice_reminder(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    invoice_id: str = Path(..., description="Fee invoice identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Email and push a reminder for one issued or partly paid invoice."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=FINANCE_MANAGEMENT_EDIT,
+        request=request,
+    )
+    notice = await FeeBillingService(db_connection).reminder_notice(
+        organization_id=str(user_context.organization_id),
+        project_id=project_id,
+        invoice_id=invoice_id,
+    )
+    messages = await prepare_fee_invoice_reminder(db_connection, notice)
+    service = FeeBillingService(db_connection)
+    await service.record_reminder(
+        organization_id=str(user_context.organization_id),
+        project_id=project_id,
+        invoice_id=invoice_id,
+        actor_user_id=str(user_context.user_id),
+        email_count=len(messages),
+    )
+    await dispatch_fee_invoice_pushes(db_connection, [], [notice])
+    if messages:
+        background_tasks.add_task(dispatch_fee_invoice_emails, messages)
+    data = {
+        "invoice_id": notice["invoice_id"],
+        "invoice_number": notice["invoice_number"],
+        "email_count": len(messages),
+    }
+    set_audit_context(
+        request,
+        user_context,
+        table="fee_invoices",
+        description=f"Sent reminder for fee invoice {invoice_id}",
+        requested_id=invoice_id,
+        project_id=project_id,
+        risk_level="low",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="fee_billing.success.reminder_sent",
+        data=data,
+    )
+
+
 @handle_api_exceptions("record fee payment")
 @router.post(
     "/fee-invoices/{invoice_id}/payments",
@@ -423,6 +613,7 @@ async def record_fee_payment(
         paid_on=body.paid_on,
         mode=body.mode.value,
         reference=body.reference,
+        actor_user_id=str(user_context.user_id),
     )
     messages = await collect_fee_payment_messages(
         db_connection,

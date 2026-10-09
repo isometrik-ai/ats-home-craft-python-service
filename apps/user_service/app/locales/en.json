@@ -1097,6 +1097,16 @@
           "title": "Event cancelled",
           "body": "{title} has been cancelled"
         }
+      },
+      "fee_invoice": {
+        "issued": {
+          "title": "New fee invoice",
+          "body": "{invoice_number} for {amount} is due on {due_date}."
+        },
+        "reminder": {
+          "title": "Fee payment reminder",
+          "body": "{invoice_number} for {amount} is due on {due_date}."
+        }
       }
     }
   },
@@ -1231,6 +1241,9 @@
   "fee_billing": {
     "errors": {
       "invoice_not_found": "The invoice could not be found.",
+      "invoice_not_cancellable": "Only an unpaid invoice can be cancelled.",
+      "invoice_not_remindable": "Only an unpaid invoice can be reminded.",
+      "invoice_cancelled": "This invoice is cancelled.",
       "invalid_payment": "Enter a payment amount greater than 0.",
       "payment_exceeds_outstanding": "The payment is more than the amount still outstanding.",
       "unit_not_accessible": "You do not have access to invoices for this unit."
@@ -1240,7 +1253,10 @@
       "balance_retrieved": "Fee balance retrieved successfully.",
       "outstanding_retrieved": "Outstanding fee amount retrieved successfully.",
       "invoices_retrieved": "Fee invoices retrieved successfully.",
+      "summary_retrieved": "Fee collection summary retrieved successfully.",
       "invoice_retrieved": "Fee invoice retrieved successfully.",
+      "invoice_cancelled": "Fee invoice cancelled successfully.",
+      "reminder_sent": "Invoice reminder sent.",
       "payment_recorded": "Payment recorded successfully."
     }
   },
