@@ -205,6 +205,10 @@ class MarketplaceService:
         """Static categories."""
         return MarketplaceCatalogService.get_catalog()
 
+    async def get_report_reason_catalog(self) -> dict[str, Any]:
+        """Static report reasons for the resident report sheet."""
+        return MarketplaceCatalogService.get_report_reasons()
+
     async def create_listing(
         self, *, contact_id: str, body: CreateListingRequest
     ) -> dict[str, Any]:

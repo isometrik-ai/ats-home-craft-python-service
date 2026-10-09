@@ -1494,6 +1494,7 @@
       "original_price": "The original price must be higher than the asking price.",
       "buyer_is_seller": "You cannot mark the listing sold to yourself.",
       "buyer_not_resident": "Choose a resident in your organisation.",
+      "invalid_report_reason": "Choose a reason from the list.",
       "cannot_report_own": "You cannot report your own listing.",
       "report_exists": "You already reported this listing.",
       "report_not_found": "This report could not be found.",
@@ -1508,6 +1509,7 @@
     },
     "success": {
       "catalog_retrieved": "Categories retrieved successfully.",
+      "report_reasons_retrieved": "Report reasons retrieved successfully.",
       "summary_retrieved": "Marketplace summary retrieved successfully.",
       "listings_retrieved": "Listings retrieved successfully.",
       "saved_retrieved": "Saved listings retrieved successfully.",

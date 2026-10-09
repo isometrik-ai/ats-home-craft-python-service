@@ -16,6 +16,7 @@ from apps.user_service.app.schemas.marketplace import (
     MarketplaceCatalogApiResponse,
     MarketplaceListApiResponse,
     MarketplaceListingApiResponse,
+    MarketplaceReportReasonCatalogApiResponse,
     MarkSoldRequest,
     RemoveListingRequest,
     SaveListingRequest,
@@ -88,6 +89,37 @@ async def marketplace_catalog(
     return success_response(
         request=request,
         message_key="marketplace.success.catalog_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("get marketplace report reasons")
+@router.get(
+    "/report-reasons",
+    status_code=http_status.HTTP_200_OK,
+    summary="Report reasons for listing detail",
+    response_model=None,
+    responses=_ok_response(
+        MarketplaceReportReasonCatalogApiResponse,
+        "Report sheet copy and reason options retrieved.",
+    ),
+)
+@limiter.limit("100/minute")
+async def marketplace_report_reasons(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return static reasons for Report this listing. Slugs match marketplace_report_reason."""
+    user_context, _ = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.get_report_reason_catalog()
+    return success_response(
+        request=request,
+        message_key="marketplace.success.report_reasons_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )
