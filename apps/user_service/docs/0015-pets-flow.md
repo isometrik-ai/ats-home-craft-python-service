@@ -382,8 +382,8 @@ GET /v1/contact-onboarding/household/summary?unit_id={unit_id}
 
 ### 5b. Admin routes (`/v1/projects/{project_id}/pets`)
 
-Staff JWT + project membership. Permissions: `resident_management.view` (read),
-`resident_management.edit` (create/update/remove).
+Staff JWT + project membership. Permissions: `pets_management.view` (read),
+`pets_management.edit` (create/update), `pets_management.delete` (remove).
 
 | Method | Path                                             | Purpose                                        |
 | ------ | ------------------------------------------------ | ---------------------------------------------- |

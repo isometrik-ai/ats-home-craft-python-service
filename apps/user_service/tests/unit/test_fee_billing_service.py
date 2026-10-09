@@ -16,7 +16,7 @@ from apps.user_service.app.services.fee_late_fee import (
     build_unit_balance,
     invoice_status,
 )
-from libs.shared_utils.http_exceptions import NotFoundException
+from libs.shared_utils.http_exceptions import ConflictException, NotFoundException
 
 pytestmark = pytest.mark.asyncio
 
@@ -126,6 +126,7 @@ class FakeFeeBillingRepository:
         self.stored_invoices: dict[str, dict[str, Any]] = {}
         self.payments: list[dict[str, Any]] = []
         self.credits: list[dict[str, Any]] = []
+        self.activities: list[dict[str, Any]] = []
         self.unit_invoices: list[dict[str, Any]] = []
         self.project_invoices: list[dict[str, Any]] = []
         self.invoice_details: dict[str, dict[str, Any]] = {}
@@ -226,7 +227,9 @@ class FakeFeeBillingRepository:
         return [
             invoice
             for invoice in self.prior_invoices
-            if invoice["due_date"] < before and invoice["invoice_date"] < before
+            if invoice["due_date"] < before
+            and invoice["invoice_date"] < before
+            and invoice.get("status") != "cancelled"
         ]
 
     async def get_invoice(
@@ -269,6 +272,9 @@ class FakeFeeBillingRepository:
         """Update a stored invoice status."""
         if invoice_id in self.stored_invoices:
             self.stored_invoices[invoice_id]["status"] = status
+        detail = self.invoice_details.get(invoice_id)
+        if detail is not None:
+            detail["status"] = status
         for invoice in [*self.invoices, *self.prior_invoices]:
             if str(invoice["id"]) == invoice_id:
                 invoice["status"] = status
@@ -299,6 +305,8 @@ class FakeFeeBillingRepository:
             if invoice.get("organization_id") != organization_id:
                 continue
             if invoice.get("project_id") != project_id:
+                continue
+            if invoice.get("status") == "cancelled":
                 continue
             seen.add(invoice_id)
             paid = sum(
@@ -1161,6 +1169,7 @@ async def test_invoice_detail_returns_lines_and_breakdown():
     assert detail["payments"][0]["mode"] == "upi"
     assert detail["payments"][0]["reference"] == "UTR123"
     assert detail["pdf_path"] == "fee-invoices/inv-oct.pdf"
+    assert detail["activities"] == []
 
     with pytest.raises(NotFoundException):
         await service.invoice_detail(
@@ -1170,3 +1179,336 @@ async def test_invoice_detail_returns_lines_and_breakdown():
             invoice_id="inv-oct",
             as_of=date(2026, 10, 5),
         )
+
+
+def _issued_invoice(**overrides: Any) -> dict[str, Any]:
+    """One unpaid invoice an admin can cancel."""
+    payload: dict[str, Any] = {
+        "id": "inv-oct",
+        "organization_id": ORG_ID,
+        "project_id": PROJECT_ID,
+        "unit_id": "unit-1",
+        "unit_code": "A-101",
+        "invoice_number": "INV-A-101-20261001",
+        "billing_month": date(2026, 10, 1),
+        "invoice_date": date(2026, 10, 1),
+        "due_date": date(2026, 10, 11),
+        "status": "issued",
+        "taxable_amount": Decimal("1500.00"),
+        "tax_amount": Decimal("270.00"),
+        "round_off_amount": Decimal("0.00"),
+        "total_amount": Decimal("1770.00"),
+        "pdf_path": "fee-invoices/inv-oct.pdf",
+        "lines": [],
+        "payments": [],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _store_invoice(fake: FakeFeeBillingRepository, invoice: dict[str, Any]) -> None:
+    """Put one invoice where both cancel and detail can read it."""
+    fake.stored_invoices[invoice["id"]] = invoice
+    fake.invoice_details[invoice["id"]] = invoice
+
+
+async def test_cancel_unpaid_invoice():
+    """An issued invoice, even after its due date, becomes cancelled."""
+    fake = FakeFeeBillingRepository([], [])
+    _store_invoice(fake, _issued_invoice())
+    detail = await _service(fake).cancel_invoice(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        invoice_id="inv-oct",
+        as_of=date(2026, 10, 20),
+    )
+    assert detail["status"] == "cancelled"
+    assert detail["outstanding"] == "0.00"
+    assert fake.stored_invoices["inv-oct"]["status"] == "cancelled"
+
+
+async def test_cancel_rejects_paid_or_partial():
+    """A payment, or a closed invoice, blocks cancel."""
+    fake = FakeFeeBillingRepository([], [])
+    _store_invoice(fake, _issued_invoice(status="partial"))
+    service = _service(fake)
+    with pytest.raises(ConflictException):
+        await service.cancel_invoice(
+            organization_id=ORG_ID,
+            project_id=PROJECT_ID,
+            invoice_id="inv-oct",
+        )
+    fake.payments.append({"invoice_id": "inv-oct", "amount": Decimal("100.00")})
+    fake.stored_invoices["inv-oct"]["status"] = "issued"
+    with pytest.raises(ConflictException):
+        await service.cancel_invoice(
+            organization_id=ORG_ID,
+            project_id=PROJECT_ID,
+            invoice_id="inv-oct",
+        )
+    assert fake.stored_invoices["inv-oct"]["status"] == "issued"
+
+
+async def test_cancelled_invoice_is_left_out_of_balance():
+    """A cancelled bill does not add to the unit balance or the pending card."""
+    invoice = _issued_invoice(status="cancelled", lines=[], payments=[])
+    balance = build_unit_balance([invoice], as_of=date(2026, 10, 20))
+    summary = build_outstanding_summary([invoice], as_of=date(2026, 10, 20))
+    assert balance["amount_due"] == "0.00"
+    assert balance["invoices"] == []
+    assert summary["total_outstanding"] == "0.00"
+    assert summary["unpaid_count"] == 0
+
+
+async def test_payment_rejects_a_cancelled_invoice():
+    """A cancelled invoice cannot take a new receipt."""
+    fake = FakeFeeBillingRepository([], [])
+    fake.stored_invoices["inv-oct"] = _issued_invoice(status="cancelled")
+    with pytest.raises(ConflictException):
+        await _service(fake).record_payment(
+            organization_id=ORG_ID,
+            project_id=PROJECT_ID,
+            invoice_id="inv-oct",
+            amount=Decimal("100"),
+            paid_on=date(2026, 10, 12),
+            mode="cash",
+            reference=None,
+        )
+
+
+async def test_collection_summary_for_one_month():
+    """September cards skip a cancelled bill and an invoice from another month."""
+    fake = FakeFeeBillingRepository([], [])
+    fake.project_invoices = [
+        _listed_invoice(
+            id="paid",
+            billing_month=date(2026, 9, 1),
+            due_date=date(2026, 9, 11),
+            status="paid",
+            total_amount=Decimal("1000.00"),
+            amount_paid=Decimal("1000.00"),
+        ),
+        _listed_invoice(
+            id="overdue",
+            billing_month=date(2026, 9, 1),
+            due_date=date(2026, 9, 1),
+            status="partial",
+            total_amount=Decimal("500.00"),
+            amount_paid=Decimal("100.00"),
+        ),
+        _listed_invoice(
+            id="open",
+            billing_month=date(2026, 9, 1),
+            due_date=date(2026, 10, 20),
+            status="issued",
+            total_amount=Decimal("200.00"),
+            amount_paid=Decimal("0.00"),
+        ),
+        _listed_invoice(
+            id="cancelled",
+            billing_month=date(2026, 9, 1),
+            status="cancelled",
+            total_amount=Decimal("900.00"),
+            amount_paid=Decimal("0.00"),
+        ),
+        _listed_invoice(id="october", billing_month=date(2026, 10, 1)),
+    ]
+    summary = await _service(fake).collection_summary(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        billing_months=[date(2026, 9, 15)],
+        as_of=date(2026, 10, 9),
+    )
+    assert summary["billing_months"] == ["2026-09-01"]
+    assert summary["invoiced_amount"] == "1700.00"
+    assert summary["invoice_count"] == 3
+    assert summary["collected_amount"] == "1100.00"
+    assert summary["collected_percent"] == 65
+    assert summary["outstanding_amount"] == "600.00"
+    assert summary["open_count"] == 2
+    assert summary["overdue_count"] == 1
+    assert summary["overdue_amount"] == "400.00"
+
+
+async def test_collection_summary_includes_every_month():
+    """With no month filter, every non-cancelled invoice is included."""
+    fake = FakeFeeBillingRepository([], [])
+    fake.project_invoices = [
+        _listed_invoice(
+            id="sep",
+            billing_month=date(2026, 9, 1),
+            total_amount=Decimal("261961.00"),
+            amount_paid=Decimal("213508.20"),
+            status="partial",
+            due_date=date(2026, 9, 10),
+        ),
+        _listed_invoice(
+            id="oct",
+            billing_month=date(2026, 10, 1),
+            total_amount=Decimal("100.00"),
+            amount_paid=Decimal("0.00"),
+            status="issued",
+            due_date=date(2026, 10, 20),
+        ),
+    ]
+    summary = await _service(fake).collection_summary(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        billing_months=None,
+        as_of=date(2026, 10, 9),
+    )
+    assert summary["billing_months"] == []
+    assert summary["invoiced_amount"] == "262061.00"
+    assert summary["collected_percent"] == 81
+    assert summary["invoice_count"] == 2
+
+
+async def test_reminder_notice_for_an_unpaid_invoice():
+    """An issued or partly paid invoice can be reminded."""
+    fake = FakeFeeBillingRepository([], [])
+    _store_invoice(fake, _issued_invoice(project_name="Luxe"))
+    notice = await _service(fake).reminder_notice(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        invoice_id="inv-oct",
+    )
+    assert notice["invoice_number"] == "INV-A-101-20261001"
+    assert notice["organization_id"] == ORG_ID
+    assert notice["project_id"] == PROJECT_ID
+    assert notice["project_name"] == "Luxe"
+    assert notice["total_amount"] == "1770.00"
+    assert notice["remind_on"]
+
+    fake.stored_invoices["inv-oct"]["status"] = "partial"
+    fake.payments.append({"invoice_id": "inv-oct", "amount": Decimal("100.00")})
+    partial = await _service(fake).reminder_notice(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        invoice_id="inv-oct",
+    )
+    assert partial["invoice_id"] == "inv-oct"
+
+
+async def test_reminder_rejects_paid_or_cancelled():
+    """A paid or cancelled invoice is not reminded."""
+    fake = FakeFeeBillingRepository([], [])
+    _store_invoice(fake, _issued_invoice(status="paid"))
+    service = _service(fake)
+    with pytest.raises(ConflictException):
+        await service.reminder_notice(
+            organization_id=ORG_ID,
+            project_id=PROJECT_ID,
+            invoice_id="inv-oct",
+        )
+    fake.stored_invoices["inv-oct"]["status"] = "issued"
+    fake.payments.append({"invoice_id": "inv-oct", "amount": Decimal("1770.00")})
+    with pytest.raises(ConflictException):
+        await service.reminder_notice(
+            organization_id=ORG_ID,
+            project_id=PROJECT_ID,
+            invoice_id="inv-oct",
+        )
+    fake.payments.clear()
+    fake.stored_invoices["inv-oct"]["status"] = "cancelled"
+    with pytest.raises(ConflictException):
+        await service.reminder_notice(
+            organization_id=ORG_ID,
+            project_id=PROJECT_ID,
+            invoice_id="inv-oct",
+        )
+
+
+async def test_new_invoice_records_an_issued_activity():
+    """The daily run keeps an issued row with no staff actor."""
+    head = _head(tax={"applicable": True, "rate_percent": Decimal("18.5")})
+    fake = FakeFeeBillingRepository([head], [_unit()])
+    await _service(fake).issue_due(run_date=RUN_DATE)
+
+    activity = fake.activities[0]
+    assert activity["event"] == "issued"
+    assert activity["invoice_id"] == "inv-1"
+    assert activity["actor_user_id"] is None
+    assert activity["detail"]["invoice_number"] == "INV-A-101-20261001"
+    assert activity["detail"]["total_amount"] == "593.00"
+
+
+async def test_payment_and_cancel_record_the_staff_actor():
+    """A receipt and a cancel name the staff user who did them."""
+    fake = FakeFeeBillingRepository([], [])
+    _store_invoice(fake, _issued_invoice())
+    service = _service(fake)
+    await service.record_payment(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        invoice_id="inv-oct",
+        amount=Decimal("500.00"),
+        paid_on=date(2026, 10, 6),
+        mode="upi",
+        reference="UTR123",
+        actor_user_id="staff-1",
+    )
+    paid = fake.activities[0]
+    assert paid["event"] == "payment_recorded"
+    assert paid["actor_user_id"] == "staff-1"
+    assert paid["detail"]["amount"] == "500.00"
+    assert paid["detail"]["mode"] == "upi"
+    assert paid["detail"]["reference"] == "UTR123"
+
+    _store_invoice(fake, _issued_invoice(id="inv-late"))
+    await service.cancel_invoice(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        invoice_id="inv-late",
+        actor_user_id="staff-1",
+    )
+    cancelled = fake.activities[1]
+    assert cancelled["event"] == "cancelled"
+    assert cancelled["actor_user_id"] == "staff-1"
+    assert cancelled["detail"]["invoice_number"] == "INV-A-101-20261001"
+
+
+async def test_invoice_detail_lists_activities_oldest_first():
+    """The detail keeps the stored order: generated, then reminded."""
+    fake = FakeFeeBillingRepository([], [])
+    invoice = _issued_invoice()
+    invoice["activities"] = [
+        {
+            "event": "issued",
+            "actor_user_id": None,
+            "detail": {"invoice_number": "INV-A-101-20261001"},
+            "created_at": "2026-10-01T00:05:00+00:00",
+        },
+        {
+            "event": "reminder_sent",
+            "actor_user_id": "staff-1",
+            "detail": {"source": "manual", "email_count": 2},
+            "created_at": "2026-10-08T04:00:00+00:00",
+        },
+    ]
+    _store_invoice(fake, invoice)
+    detail = await _service(fake).invoice_detail(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id="unit-1",
+        invoice_id="inv-oct",
+        as_of=date(2026, 10, 5),
+    )
+    assert [row["event"] for row in detail["activities"]] == ["issued", "reminder_sent"]
+    assert detail["activities"][1]["actor_user_id"] == "staff-1"
+    assert detail["activities"][1]["detail"]["email_count"] == 2
+
+
+async def test_manual_reminder_records_the_queued_emails():
+    """The admin reminder stores who sent it and how many emails were queued."""
+    fake = FakeFeeBillingRepository([], [])
+    await _service(fake).record_reminder(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        invoice_id="inv-oct",
+        actor_user_id="staff-1",
+        email_count=2,
+    )
+    activity = fake.activities[0]
+    assert activity["event"] == "reminder_sent"
+    assert activity["actor_user_id"] == "staff-1"
+    assert activity["detail"] == {"source": "manual", "email_count": 2}

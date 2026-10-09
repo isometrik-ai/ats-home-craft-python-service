@@ -12,10 +12,11 @@ from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.marketplace import (
     AdminMarketplaceListQuery,
     AdminRemoveListingRequest,
+    MarketplaceAdminListApiResponse,
+    MarketplaceAdminListingApiResponse,
+    MarketplaceAdminRemovedApiResponse,
+    MarketplaceAdminSummaryApiResponse,
     MarketplaceCatalogApiResponse,
-    MarketplaceListApiResponse,
-    MarketplaceListingApiResponse,
-    MarketplaceSummaryApiResponse,
 )
 from apps.user_service.app.services.marketplace_service import MarketplaceService
 from apps.user_service.app.utils.audit_context import set_audit_context
@@ -62,13 +63,13 @@ def _ok_response(
         **COMMON_ERROR_RESPONSES,
         status_code: {
             "description": description,
-            "content": {"application/json": {"schema": model.model_json_schema()}},
+            "model": model,
         },
     }
 
 
 SUMMARY_SUCCESS_RESPONSES = _ok_response(
-    MarketplaceSummaryApiResponse,
+    MarketplaceAdminSummaryApiResponse,
     "Active, sold, past, and removed counts for the organization.",
 )
 CATALOG_SUCCESS_RESPONSES = _ok_response(
@@ -76,15 +77,15 @@ CATALOG_SUCCESS_RESPONSES = _ok_response(
     "Category catalog for the staff filter.",
 )
 LIST_SUCCESS_RESPONSES = _ok_response(
-    MarketplaceListApiResponse,
+    MarketplaceAdminListApiResponse,
     "Paginated marketplace listings for the organization.",
 )
 DETAIL_SUCCESS_RESPONSES = _ok_response(
-    MarketplaceListingApiResponse,
+    MarketplaceAdminListingApiResponse,
     "Listing detail for the staff drawer.",
 )
 REMOVED_SUCCESS_RESPONSES = _ok_response(
-    MarketplaceListingApiResponse,
+    MarketplaceAdminRemovedApiResponse,
     "Listing removed from the board.",
 )
 
