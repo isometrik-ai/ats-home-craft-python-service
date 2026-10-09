@@ -1,4 +1,4 @@
-"""Request models for resident buy and sell (ADR 0019)."""
+"""Request models for resident buy and sell (ADR 0018)."""
 
 from __future__ import annotations
 
@@ -199,12 +199,6 @@ class UpdateListingRequest(BaseModel):
     product_url: str | None = None
     show_flat_number: bool | None = None
     original_bill_available: bool | None = None
-
-
-class PublishListingRequest(BaseModel):
-    """Go live from an unpublished listing."""
-
-    unit_id: str
 
 
 class RemoveListingRequest(BaseModel):

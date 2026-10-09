@@ -1,4 +1,4 @@
-"""Enumeration values for resident buy and sell (ADR 0019)."""
+"""Enumeration values for resident buy and sell (ADR 0018)."""
 
 from enum import Enum
 
@@ -100,6 +100,7 @@ class MarketplaceAdminStatus(str, Enum):
     """Staff list status filter. No removed-by-committee option."""
 
     ALL = "all"
+    DRAFT = "draft"
     LIVE = "live"
     SOLD = "sold"
     PAST = "past"

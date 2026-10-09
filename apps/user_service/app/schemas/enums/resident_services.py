@@ -124,7 +124,7 @@ TENANT_REQUESTS_EXPORT_MAX_ROWS = 10_000
 
 
 # ============================================================================
-# DAILY HELP ENUMS — mirror Postgres daily_help_* enums (ADR 0013)
+# DAILY HELP ENUMS — mirror Postgres daily_help_* enums (ADR 0012)
 # ============================================================================
 
 
@@ -233,7 +233,7 @@ DEFAULT_DAILY_HELP_CATEGORY_NAMES: tuple[str, ...] = (
 
 
 # ============================================================================
-# WALK-IN ENUMS — mirror Postgres walk_in_* enums (ADR 0008)
+# WALK-IN ENUMS — mirror Postgres walk_in_* enums (ADR 0007)
 # ============================================================================
 
 

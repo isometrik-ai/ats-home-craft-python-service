@@ -1,4 +1,4 @@
-"""Resident buy and sell API (ADR 0019)."""
+"""Resident buy and sell API (ADR 0018)."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from apps.user_service.app.schemas.marketplace import (
     MarketplaceListApiResponse,
     MarketplaceListingApiResponse,
     MarkSoldRequest,
-    PublishListingRequest,
     RemoveListingRequest,
     SaveListingRequest,
     UpdateListingRequest,
@@ -353,11 +352,11 @@ async def update_listing(
 async def publish_listing(
     request: Request,
     listing_id: str = Path(..., description="Listing identifier (UUID string)."),
-    body: PublishListingRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Go live. Only unpublished listings can be published."""
+    """Go live. Only unpublished listings can be published.
+    Pickup unit is the one on the listing."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -365,7 +364,6 @@ async def publish_listing(
     data = await service.publish(
         contact_id=str(contact["id"]),
         listing_id=listing_id,
-        body=body,
     )
     set_audit_context(
         request,

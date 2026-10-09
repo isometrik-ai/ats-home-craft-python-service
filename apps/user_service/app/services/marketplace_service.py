@@ -1,4 +1,4 @@
-"""Buy and sell business rules (ADR 0019)."""
+"""Buy and sell business rules (ADR 0018)."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ from apps.user_service.app.schemas.marketplace import (
     CreateListingRequest,
     ListingMediaInput,
     MarkSoldRequest,
-    PublishListingRequest,
     UpdateListingRequest,
 )
 from apps.user_service.app.services.marketplace_catalog_service import (
@@ -336,7 +335,7 @@ class MarketplaceService:
                 raise ValidationException(
                     message_key="marketplace.errors.live_incomplete",
                     custom_code=CustomStatusCode.VALIDATION_ERROR,
-                    params={"missing": gaps},
+                    params={"missing": ", ".join(gaps)},
                 )
         await self.repo.update_listing(
             organization_id=self._org(), listing_id=listing_id, fields=fields
@@ -412,11 +411,8 @@ class MarketplaceService:
         if "negotiable" in provided:
             fields["negotiable"] = bool(body.negotiable)
 
-    async def publish(
-        self, *, contact_id: str, listing_id: str, body: PublishListingRequest
-    ) -> dict[str, Any]:
-        """Go live from an unpublished listing."""
-        unit = await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
+    async def publish(self, *, contact_id: str, listing_id: str) -> dict[str, Any]:
+        """Go live from an unpublished listing. Pickup unit comes from the listing."""
         listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
         if listing["status"] != "draft":
             raise ValidationException(
@@ -424,6 +420,7 @@ class MarketplaceService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         await self._assert_publishable(listing)
+        unit = await self._require_poster(contact_id=contact_id, unit_id=str(listing["unit_id"]))
         now = _now()
         await self.repo.update_listing(
             organization_id=self._org(),
@@ -894,7 +891,7 @@ class MarketplaceService:
             raise ValidationException(
                 message_key="marketplace.errors.incomplete",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
-                params={"missing": gaps},
+                params={"missing": ", ".join(gaps)},
             )
 
     def _raise_price_rules(self, listing: dict[str, Any]) -> None:

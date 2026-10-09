@@ -1,12 +1,12 @@
-# ADR 0013: Daily Help — project registry, household links, gate integration
+# ADR 0012: Daily Help — project registry, household links, gate integration
 
 |                  |                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Status**       | Accepted — implemented in `user_service` (Phases 1–5 core)                                                                                                                                                                                                                                                                                                                                                                    |
 | **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0008](./0008-walk-in-entries.md), [ADR 0009](./0009-push-notifications-grpc.md), [ADR 0010](./0010-contact-roles.md), [ADR 0011](./0011-project-membership.md) (project access)                                                                                                                                                        |
-| **Related docs** | [daily-help-flow.md](../daily-help-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [passes-flow.md](../passes-flow.md), [push-notifications-flow.md](../push-notifications-flow.md)                                                                                                                                                                                                                      |
+| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0007](./0007-walk-in-entries.md), [ADR 0008](./0008-push-notifications-grpc.md), [ADR 0009](./0009-contact-roles.md), [ADR 0010](./0010-project-membership.md) (project access)                                                                                                                                                        |
+| **Related docs** | [0012-daily-help-flow.md](../0012-daily-help-flow.md), [0004-passes-validation-flow.md](../0004-passes-validation-flow.md), [0003-passes-flow.md](../0003-passes-flow.md), [0008-push-notifications-flow.md](../0008-push-notifications-flow.md)                                                                                                                                                                              |
 | **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`, `20260820120000_daily_help_resident_submission.sql`, `20260923120000_daily_help_rating_trait_communication.sql` (`ats-home-craft-supabase`) |
 
 ______________________________________________________________________
@@ -86,7 +86,7 @@ delivery, and similar recurring service providers. Product UI spans:
 ### Constraints (carried from existing flows)
 
 - Multi-tenancy via **`organization_id`** on every new table and query.
-- **Staff actor** = `organization_member` with project access ([ADR 0011](./0011-project-membership.md))
+- **Staff actor** = `organization_member` with project access ([ADR 0010](./0010-project-membership.md))
   and RBAC (proposed `daily_help_management.*` or reuse `contacts_management.*` / `projects_management.*`).
 - **Resident actor** = `contacts` via `extract_onboarding_contact_context()` for directory + household links.
 - Reuse **`projects`**, **`units`**, **`passes`**, **`pass_events`**, **`visitor_logs`** read model.
@@ -110,7 +110,7 @@ ______________________________________________________________________
 Daily help persons are **managed resources**, like vendor directory entries, not platform users.
 Their name, phone, photo, and documents are stored on **`daily_help_profiles`** (+ documents child table).
 
-> **Why not `ContactType.Staff` / Vendor:** [ADR 0010](./0010-contact-roles.md) contact roles assume a
+> **Why not `ContactType.Staff` / Vendor:** [ADR 0009](./0009-contact-roles.md) contact roles assume a
 > `contacts` row and optional portal access. Daily help explicitly must **not** create contacts or auth
 > identities. A separate domain keeps onboarding, household invites, and RBAC unchanged.
 
@@ -150,7 +150,7 @@ already support pass rows; extend filters and overview cards for `daily_help`.
 
 > **Why a pass instead of a bespoke gate table:** Activities UI, guard columns, IN/OUT, time spent,
 > and exports already exist in visitor logs. Duplicating enter/exit would fork gate logic from
-> [ADR 0004](./0004-pass-validation-gate.md) and [ADR 0008](./0008-walk-in-entries.md).
+> [ADR 0004](./0004-pass-validation-gate.md) and [ADR 0007](./0007-walk-in-entries.md).
 
 ### 4. Status lifecycle
 
@@ -286,9 +286,9 @@ notify residents linked to that helper:
 
 1. Load **active** `daily_help_household_links` for the profile.
 1. For **each linked `unit_id`**, resolve contacts with an **active `contact_roles`** row where
-   **`role_type IN ('Owner', 'Tenant')`** and **`unit_id`** matches ([ADR 0010](./0010-contact-roles.md)).
+   **`role_type IN ('Owner', 'Tenant')`** and **`unit_id`** matches ([ADR 0009](./0009-contact-roles.md)).
 1. Send push only to contacts with a linked Supabase **`user_id`** and push enabled
-   ([ADR 0009](./0009-push-notifications-grpc.md), [push-notifications-flow.md](../push-notifications-flow.md)).
+   ([ADR 0008](./0008-push-notifications-grpc.md), [0008-push-notifications-flow.md](../0008-push-notifications-flow.md)).
 1. **Do not** notify Family / Guest members on the unit — only current Owner and Tenant holders.
 1. **Dedupe** recipients by `user_id` within one gate event (same person on two linked units still gets
    one notification per unit if both units are linked).

@@ -1,4 +1,4 @@
-"""Staff fee configuration API (ADR 0018)."""
+"""Staff fee configuration API (ADR 0017)."""
 
 from __future__ import annotations
 

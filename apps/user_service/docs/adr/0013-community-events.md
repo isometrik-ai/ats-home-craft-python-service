@@ -1,12 +1,12 @@
-# ADR 0014: Community events — admin create, resident book, manual payment
+# ADR 0013: Community events — admin create, resident book, manual payment
 
 |                  |                                                                                                                                                                                                                                 |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Status**       | Accepted                                                                                                                                                                                                                        |
 | **Date**         | 2026-08-20                                                                                                                                                                                                                      |
 | **Authors**      | Home Craft platform team                                                                                                                                                                                                        |
-| **Depends on**   | [ADR 0011](./0011-project-membership.md) (project scoping), [ADR 0009](./0009-push-notifications-grpc.md) (push, Phase 2), project setup `facilities` ([project-setup-flow.md](../project-setup-flow.md))                       |
-| **Related docs** | [events-flow.md](../events-flow.md), [community-events-schema.md](../../../../../ats-home-craft-supabase/docs/community-events-schema.md)                                                                                       |
+| **Depends on**   | [ADR 0010](./0010-project-membership.md) (project scoping), [ADR 0008](./0008-push-notifications-grpc.md) (push, Phase 2), project setup `facilities` ([project-setup-flow.md](../project-setup-flow.md))                       |
+| **Related docs** | [0013-events-flow.md](../0013-events-flow.md), [community-events-schema.md](../../../../../ats-home-craft-supabase/docs/community-events-schema.md)                                                                             |
 | **Migrations**   | `20260820120000_community_events_enums.sql`, `20260820121000_community_events_tables.sql`, `20260820130000_community_events_phase2.sql`, `20260821180000_community_events_drop_booking_unit_id.sql` (`ats-home-craft-supabase`) |
 
 ______________________________________________________________________
@@ -41,7 +41,7 @@ book tickets from the mobile app. Product UI spans:
 Use table prefix **`community_events`** — not `events` — to avoid confusion with existing
 `move_events`, `pass_events`, and `daily_help_events`.
 
-### Membership alignment ([ADR 0011](./0011-project-membership.md))
+### Membership alignment ([ADR 0010](./0010-project-membership.md))
 
 - Events are **project-scoped** (`organization_id` + `project_id`).
 - **Staff admin** routes: org RBAC + `ensure_staff_project_access(project_id)`.

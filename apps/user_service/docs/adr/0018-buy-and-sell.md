@@ -1,13 +1,13 @@
-# ADR 0019: Buy & sell — resident classifieds
+# ADR 0018: Buy & sell — resident classifieds
 
-|                  |                                                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Status**       | Proposed                                                                                                                                                           |
-| **Date**         | 2026-10-06 (revised 2026-10-08; staff admin 2026-10-08)                                                                                                            |
-| **Authors**      | Home Craft platform team                                                                                                                                           |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0010](./0010-contact-roles.md), [project setup](../project-setup-flow.md)             |
-| **Related docs** | [buy-and-sell-flow.md](../buy-and-sell-flow.md), [project-setup-flow.md](../project-setup-flow.md), [pets-flow.md](../pets-flow.md) (catalog + media-path pattern) |
-| **Migrations**   | `ats-home-craft-supabase`: `20261006120000_marketplace_enums.sql`, `20261006121000_marketplace_tables.sql`, `20261008140000_marketplace_permissions.sql`           |
+|                  |                                                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Proposed                                                                                                                                                                               |
+| **Date**         | 2026-10-06 (revised 2026-10-08; staff admin 2026-10-08)                                                                                                                                |
+| **Authors**      | Home Craft platform team                                                                                                                                                               |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (contacts + `contact_units`), [ADR 0009](./0009-contact-roles.md), [project setup](../project-setup-flow.md)                                 |
+| **Related docs** | [0018-buy-and-sell-flow.md](../0018-buy-and-sell-flow.md), [project-setup-flow.md](../project-setup-flow.md), [0015-pets-flow.md](../0015-pets-flow.md) (catalog + media-path pattern) |
+| **Migrations**   | `ats-home-craft-supabase`: `20261006120000_marketplace_enums.sql`, `20261006121000_marketplace_tables.sql`, `20261008140000_marketplace_permissions.sql`                               |
 
 ______________________________________________________________________
 
@@ -60,7 +60,7 @@ Categories: `app/data/marketplace_catalog.json` (not Postgres). Listings store c
 
 Nearby societies: computed from project coordinates (`MARKETPLACE_NEARBY_RADIUS_KM = 5`), not a table.
 
-Column detail: [buy-and-sell-flow.md](../buy-and-sell-flow.md) §3.
+Column detail: [0018-buy-and-sell-flow.md](../0018-buy-and-sell-flow.md) §3.
 
 ### 2. API surface
 
@@ -68,7 +68,7 @@ Column detail: [buy-and-sell-flow.md](../buy-and-sell-flow.md) §3.
 
 - **Tenancy:** `organization_id` from auth on every query.
 - **Browse:** GET listing routes are **org-wide**; no `unit_id` query param. Flat display follows visibility rules without a viewer unit.
-- **Writes:** `unit_id` in the JSON body on create, save, patch, publish, remove, and mark-sold (not on GET).
+- **Writes:** `unit_id` in the JSON body on create, save, patch, remove, and mark-sold (not on GET). Publish reads the pickup unit already stored on the listing.
 - **Sell:** `POST /listings` (unpublished), `PATCH /listings/{id}`, `GET /listings/{id}` (preview), **`POST /listings/{id}/publish`**, **`POST /listings/{id}/remove`**. Media is not editable after create. Remove is permanent; the seller creates a new listing to post again.
 - **Pagination:** `page` / `page_size` on browse, saved, and my listings.
 
@@ -148,7 +148,7 @@ Daily job expires live listings past `expires_at`. **No** 3-day reminder job or 
 - View counts, giveaway boost, expiry reminder
 - Search recents/terms APIs
 - Payments, phone reveal, community-feed share
-- Listing pets ([ADR 0016](./0016-pets.md)) or rental property
+- Listing pets ([ADR 0015](./0015-pets.md)) or rental property
 - Staff export, settings, group-by-tower / all-towers / sort tower & unit
 - Distinct `removed_by_committee` status
 

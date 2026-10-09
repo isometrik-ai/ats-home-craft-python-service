@@ -1,13 +1,13 @@
-# ADR 0009: Push notifications via notification-service gRPC
+# ADR 0008: Push notifications via notification-service gRPC
 
-|                  |                                                                                                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted                                                                                                                                                                                 |
-| **Date**         | 2026-07-29                                                                                                                                                                               |
-| **Authors**      | Home Craft platform team                                                                                                                                                                 |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`communication_preferences`), [ADR 0008](./0008-walk-in-entries.md), existing `user_push_tokens` migration                                    |
-| **Related docs** | [push-notifications-flow.md](../push-notifications-flow.md), notification-service `docs/adr/0001-grpc-topic-push-notifications.md`, [0008 walk-in follow-ups](./0008-walk-in-entries.md) |
-| **External**     | `notification-service` proto: `notification-service/proto/notification_service.proto`                                                                                                    |
+|                  |                                                                                                                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted                                                                                                                                                                                           |
+| **Date**         | 2026-07-29                                                                                                                                                                                         |
+| **Authors**      | Home Craft platform team                                                                                                                                                                           |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`communication_preferences`), [ADR 0007](./0007-walk-in-entries.md), existing `user_push_tokens` migration                                              |
+| **Related docs** | [0008-push-notifications-flow.md](../0008-push-notifications-flow.md), notification-service `docs/adr/0001-grpc-topic-push-notifications.md`, [0008 walk-in follow-ups](./0007-walk-in-entries.md) |
+| **External**     | `notification-service` proto: `notification-service/proto/notification_service.proto`                                                                                                              |
 
 ______________________________________________________________________
 
@@ -17,10 +17,10 @@ Several Home Craft features need **mobile push** and an **in-app notification fe
 
 | Feature area    | Example event                                 | ADR / flow reference                       |
 | --------------- | --------------------------------------------- | ------------------------------------------ |
-| Walk-in visits  | Resident must approve a flat on a new walk-in | [ADR 0008](./0008-walk-in-entries.md)      |
+| Walk-in visits  | Resident must approve a flat on a new walk-in | [ADR 0007](./0007-walk-in-entries.md)      |
 | Visitor passes  | Household member checked in at gate           | [ADR 0004](./0004-pass-validation-gate.md) |
-| Daily help      | Helper checked in/out at gate                 | [ADR 0013](./0013-daily-help.md)           |
-| Tenant requests | Document verified/rejected; request approved  | [ADR 0007](./0007-tenant-requests.md)      |
+| Daily help      | Helper checked in/out at gate                 | [ADR 0012](./0012-daily-help.md)           |
+| Tenant requests | Document verified/rejected; request approved  | [ADR 0006](./0006-tenant-requests.md)      |
 | Move events     | Move-in / move-out recorded                   | [ADR 0005](./0005-move-events.md)          |
 | Vehicles        | Vehicle submitted / approved / rejected       | Contact onboarding / vehicles flow         |
 | Notices         | Community notice published                    | Notices module                             |
@@ -28,7 +28,7 @@ Several Home Craft features need **mobile push** and an **in-app notification fe
 Today:
 
 - **Device registration** is implemented in `user_service` (`POST /users/me/push-devices`) and persisted in `public.user_push_tokens` (Supabase migration `20260728153000_user_push_tokens.sql`).
-- **Outbound push sender** is implemented: `PushNotificationService`, `PushNotificationDispatcher`, `NotificationGrpcClient`, and domain wiring for walk-in, passes, daily help, tenant requests, move events, vehicles, and notices (see [push-notifications-flow.md](../push-notifications-flow.md) §6).
+- **Outbound push sender** is implemented: `PushNotificationService`, `PushNotificationDispatcher`, `NotificationGrpcClient`, and domain wiring for walk-in, passes, daily help, tenant requests, move events, vehicles, and notices (see [0008-push-notifications-flow.md](../0008-push-notifications-flow.md) §6).
 
 ### Constraints
 
@@ -222,7 +222,7 @@ Feed rows are keyed by the same `tenant_id`, `project_id`, and `user_id` we send
 | `notice_published`          | `notices`          | `published`                                                                                                              |
 | `NOTIFICATION_TYPE_SYSTEM`  | `facility_booking` | confirmed, submitted, approval_requested, approved, rejected, checked_in, cancelled, rescheduled, no_show, charge_posted |
 
-Full trigger/recipient/API matrix: [push-notifications-flow.md §6](../push-notifications-flow.md#6-integrated-push-notifications-catalog).
+Full trigger/recipient/API matrix: [0008-push-notifications-flow.md §6](../0008-push-notifications-flow.md#6-integrated-push-notifications-catalog).
 
 ### Repository extension
 

@@ -119,10 +119,9 @@ async def test_publish_success(monkeypatch, client):
     """POST /listings/{id}/publish goes live from preview."""
     _resident(monkeypatch)
 
-    async def fake_publish(_self, *, contact_id, listing_id, body):
+    async def fake_publish(_self, *, contact_id, listing_id):
         assert contact_id == CONTACT_ID
         assert listing_id == LISTING_ID
-        assert body.unit_id == UNIT_ID
         return {
             "id": LISTING_ID,
             "published_at": "2026-10-07T00:00:00Z",
@@ -133,10 +132,7 @@ async def test_publish_success(monkeypatch, client):
         "apps.user_service.app.services.marketplace_service.MarketplaceService.publish",
         fake_publish,
     )
-    response = await client.post(
-        f"/v1/marketplace/listings/{LISTING_ID}/publish",
-        json={"unit_id": UNIT_ID},
-    )
+    response = await client.post(f"/v1/marketplace/listings/{LISTING_ID}/publish")
     payload = assert_success(response)
     assert payload["message"] == "Listing is live."
     assert payload["data"]["id"] == LISTING_ID
@@ -338,14 +334,6 @@ async def test_update_listing_fails_when_status_is_in_the_body(monkeypatch, clie
 
 
 @pytest.mark.asyncio
-async def test_publish_fails_without_unit_id(monkeypatch, client):
-    """POST /publish returns 422 when unit_id is missing."""
-    _resident(monkeypatch)
-    response = await client.post(f"/v1/marketplace/listings/{LISTING_ID}/publish", json={})
-    assert response.status_code == 422
-
-
-@pytest.mark.asyncio
 async def test_remove_listing_success(monkeypatch, client):
     """POST /listings/{id}/remove takes a live listing down."""
     _resident(monkeypatch)
@@ -466,11 +454,10 @@ async def test_resident_lifecycle_then_admin_remove(monkeypatch, client):
         assert body.unit_id == UNIT_ID
         return {"id": LISTING_ID, "status": "draft"}
 
-    async def fake_publish(_self, *, contact_id, listing_id, body):
+    async def fake_publish(_self, *, contact_id, listing_id):
         del _self
         assert contact_id == CONTACT_ID
         assert listing_id == LISTING_ID
-        assert body.unit_id == UNIT_ID
         return {"id": LISTING_ID, "status": "live"}
 
     async def fake_list(_self, **kwargs):
@@ -504,10 +491,7 @@ async def test_resident_lifecycle_then_admin_remove(monkeypatch, client):
     assert_success(created, status_code=201)
     assert created.json()["data"]["status"] == "draft"
 
-    published = await client.post(
-        f"/v1/marketplace/listings/{LISTING_ID}/publish",
-        json={"unit_id": UNIT_ID},
-    )
+    published = await client.post(f"/v1/marketplace/listings/{LISTING_ID}/publish")
     assert_success(published)
 
     browsed = await client.get("/v1/marketplace/listings")

@@ -19,7 +19,6 @@ from apps.user_service.app.schemas.marketplace import (
     CreateListingRequest,
     ListingMediaInput,
     MarkSoldRequest,
-    PublishListingRequest,
     SaveListingRequest,
     UpdateListingRequest,
 )
@@ -409,9 +408,7 @@ async def test_create_listing_rejects_a_video_mime_on_an_image():
     assert raised.value.message_key == "marketplace.errors.invalid_file_type"
 
 
-def test_publish_and_save_bodies():
-    publish = PublishListingRequest(unit_id="unit-1")
-    assert publish.unit_id == "unit-1"
+def test_save_body():
     save = SaveListingRequest(unit_id="unit-1", saved=False)
     assert save.saved is False
 

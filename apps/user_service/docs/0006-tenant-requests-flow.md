@@ -3,10 +3,10 @@
 > **Status: Phase 1–2 implemented (API + service + migrations + occupancy turnover).** Storage signed-upload,
 > portal invite are follow-ups. This document describes the **Tenant
 > Requests** feature — owner submit on mobile, admin review on dashboard — in the same style as
-> [`contact-onboarding-flow.md`](./contact-onboarding-flow.md), [`move-events-flow.md`](./move-events-flow.md),
-> and [`passes-flow.md`](./passes-flow.md).
+> [`0001-contact-onboarding-flow.md`](./0001-contact-onboarding-flow.md), [`0005-move-events-flow.md`](./0005-move-events-flow.md),
+> and [`0003-passes-flow.md`](./0003-passes-flow.md).
 >
-> Schema and architecture rationale: [ADR 0007](./adr/0007-tenant-requests.md), [ADR 0010](./adr/0010-contact-roles.md) (roles).
+> Schema and architecture rationale: [ADR 0006](./adr/0006-tenant-requests.md), [ADR 0009](./adr/0009-contact-roles.md) (roles).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Owner API prefix:** `/v1/contact-onboarding/tenant-requests`
@@ -27,7 +27,7 @@ On **approval**:
 
 1. **Household turnover** — `UnitOccupancyTurnoverService.release_outgoing_tenant_household()` clears
    outgoing tenant + family, vehicles, passes, daily help, invitations, and portal sessions (owner
-   preserved). See [move-events-flow.md §2.1](./move-events-flow.md#21-unit-occupancy-turnover-admin-move-in--move-out).
+   preserved). See [0005-move-events-flow.md §2.1](./0005-move-events-flow.md#21-unit-occupancy-turnover-admin-move-in--move-out).
 1. If a prior approved tenant exists → supersede that request + record a **move-out** ledger row in
    `move_events`.
 1. A real **`contacts`** row is created (identity only).
@@ -118,7 +118,7 @@ HTTP → API router → Service (business rules) → Repository (SQL) → Postgr
 | Admin RBAC              | Reuse `projects_management.*` (same as vehicle requests / project setup)            |
 | Tenant contact creation | Compose `ContactsService` (same as household member add)                            |
 | Unit link / supersede   | Compose `ContactUnitsRepository`                                                    |
-| Audit logging           | `@audit_api_call` + `set_audit_context` (see contact-onboarding-flow.md)            |
+| Audit logging           | `@audit_api_call` + `set_audit_context` (see 0001-contact-onboarding-flow.md)       |
 | i18n                    | `app/locales/en.json` (`tenant_requests.*`)                                         |
 
 `TenantRequestsService` **composes** existing services rather than duplicating contact/unit logic.
@@ -135,7 +135,7 @@ ______________________________________________________________________
 | **`tenant_request_documents`** | One row per document slot; independent verify/reject                            |
 | **`tenant_request_events`**    | Append-only timeline for mobile milestones + admin audit                        |
 
-Full column reference: [ADR 0007 § Schema](./adr/0007-tenant-requests.md#schema-proposed).
+Full column reference: [ADR 0006 § Schema](./adr/0006-tenant-requests.md#schema-proposed).
 
 ### Reused tables
 
@@ -386,7 +386,7 @@ Returns created tenant summary + request snapshot.
 
 ### 5.4 Admin move-in mirror (`sync_after_admin_move_in`)
 
-When staff records **move-in** via [`POST /v1/move-events`](./move-events-flow.md) instead of tenant
+When staff records **move-in** via [`POST /v1/move-events`](./0005-move-events-flow.md) instead of tenant
 request approval, `MoveEventsService` calls `TenantRequestsService.sync_after_admin_move_in()` so
 the **owner mobile list** still shows an approved row:
 
@@ -420,12 +420,12 @@ ______________________________________________________________________
 
 ## 6. Relationship to existing flows
 
-| Existing doc                                               | Relationship                                                                      |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Owner auth context; household/invite patterns for post-approval portal            |
-| [move-events-flow.md](./move-events-flow.md)               | Admin move-in/out ledger; `sync_after_admin_move_in/out`; shared turnover service |
-| [project-setup-flow.md](./project-setup-flow.md)           | Units must exist from project setup                                               |
-| [passes-flow.md](./passes-flow.md)                         | Same owner JWT pattern; different domain                                          |
+| Existing doc                                                         | Relationship                                                                      |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| [0001-contact-onboarding-flow.md](./0001-contact-onboarding-flow.md) | Owner auth context; household/invite patterns for post-approval portal            |
+| [0005-move-events-flow.md](./0005-move-events-flow.md)               | Admin move-in/out ledger; `sync_after_admin_move_in/out`; shared turnover service |
+| [project-setup-flow.md](./project-setup-flow.md)                     | Units must exist from project setup                                               |
+| [0003-passes-flow.md](./0003-passes-flow.md)                         | Same owner JWT pattern; different domain                                          |
 
 ### Difference from household member add
 

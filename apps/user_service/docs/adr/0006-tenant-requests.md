@@ -1,12 +1,12 @@
-# ADR 0007: Tenant requests — owner submit, admin review
+# ADR 0006: Tenant requests — owner submit, admin review
 
 |                  |                                                                                                                                                                                                                             |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Status**       | Accepted (Phase 1)                                                                                                                                                                                                          |
 | **Date**         | 2026-07-22                                                                                                                                                                                                                  |
 | **Authors**      | Home Craft platform team                                                                                                                                                                                                    |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`contacts`, `contact_units`), [ADR 0010](./0010-contact-roles.md) (`contact_roles`), [ADR 0002](./0002-resident-onboarding-implementation.md), [ADR 0005](./0005-move-events.md) |
-| **Related docs** | [tenant-requests-flow.md](../tenant-requests-flow.md), [contact-onboarding-flow.md](../contact-onboarding-flow.md)                                                                                                          |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`contacts`, `contact_units`), [ADR 0009](./0009-contact-roles.md) (`contact_roles`), [ADR 0002](./0002-resident-onboarding-implementation.md), [ADR 0005](./0005-move-events.md) |
+| **Related docs** | [0006-tenant-requests-flow.md](../0006-tenant-requests-flow.md), [0001-contact-onboarding-flow.md](../0001-contact-onboarding-flow.md)                                                                                      |
 | **Migrations**   | `20260722150000_tenant_requests_enums.sql`, `20260722151000_tenant_requests_tables.sql` (to be created in `ats-home-craft-supabase`)                                                                                        |
 
 ______________________________________________________________________
@@ -202,7 +202,7 @@ Exactly **three rows** per request (created at submit). Re-upload updates the sa
 | Owner | `/v1/contact-onboarding/tenant-requests`    | `extract_onboarding_contact_context`       |
 | Admin | `/v1/projects/{project_id}/tenant-requests` | `check_permissions(projects_management.*)` |
 
-See [tenant-requests-flow.md](../tenant-requests-flow.md) for endpoint catalogue and file map.
+See [0006-tenant-requests-flow.md](../0006-tenant-requests-flow.md) for endpoint catalogue and file map.
 
 ### 8. Integration with existing flows
 
@@ -348,7 +348,7 @@ ______________________________________________________________________
 
 ### Follow-ups
 
-1. Implement per [tenant-requests-flow.md](../tenant-requests-flow.md).
+1. Implement per [0006-tenant-requests-flow.md](../0006-tenant-requests-flow.md).
 1. Post-approval tenant portal invite (reuse `household_invitation_service` patterns or dedicated SMS).
 1. Link approve → `move_events` auto `move_in`.
 1. Admin export (CSV) for dashboard.

@@ -107,11 +107,11 @@ Defined in `20260629101000_property_setup_tables.sql` (+ `20260716120000_project
 Post-setup parking allotment tables (`unit_parking_allotments`, `parking_slot_events`) are documented in
 [`parking-allotment-flow.md`](parking-allotment-flow.md).
 
-Buy & Sell does **not** add a wizard step or columns. Resident and staff marketplace APIs **read** `projects`, `towers`, and `units` for society / tower / pickup-flat labels. See [`buy-and-sell-flow.md`](buy-and-sell-flow.md) §2 and §11.
+Buy & Sell does **not** add a wizard step or columns. Resident and staff marketplace APIs **read** `projects`, `towers`, and `units` for society / tower / pickup-flat labels. See [`0018-buy-and-sell-flow.md`](0018-buy-and-sell-flow.md) §2 and §11.
 
 See `ats-home-craft-supabase/docs/project-setup-schema.md` for every column.
 
-Resident **Buy & sell** does not add columns or tables here. It reads `projects` (society name and coordinates), `towers` (name, count, map pin), and `units` (pickup flat) through the resident's active `contact_units`. The three marketplace tables are specified in [buy-and-sell-flow.md](./buy-and-sell-flow.md) and [ADR 0019](./adr/0019-buy-and-sell.md).
+Resident **Buy & sell** does not add columns or tables here. It reads `projects` (society name and coordinates), `towers` (name, count, map pin), and `units` (pickup flat) through the resident's active `contact_units`. The three marketplace tables are specified in [0018-buy-and-sell-flow.md](./0018-buy-and-sell-flow.md) and [ADR 0018](./adr/0018-buy-and-sell.md).
 
 ### Media handling (important)
 
@@ -234,7 +234,7 @@ POST /v1/projects/{project_id}/site-map/overlays
 - **Grid / sidebar:** `GET /inventory/summary?tower_id=...` — towers, floors, slim unit rows.
 - **Unit click (slide-out / registry):** `GET /units/{unit_id}/detail` — tower/floor, config,
   owner, residents, vehicles, **`pets_count` + `pets[]`** (compact active pet cards); see
-  [`pets-flow.md`](pets-flow.md) §7g for admin add/edit/remove from the unit detail drawer.
+  [`0015-pets-flow.md`](0015-pets-flow.md) §7g for admin add/edit/remove from the unit detail drawer.
   `financials.base_fee_monthly` and `financials.outstanding_amount` are `null` until billing is
   implemented.
 
@@ -363,6 +363,6 @@ Unit tests (fake repos, no DB):
 - `tests/unit/test_vehicles_service.py` — vehicle review (optional slot, no status changes).
 - `tests/unit/test_inventory_service.py` — inventory summary aggregation.
 
-Related docs: [`parking-allotment-flow.md`](parking-allotment-flow.md), [`buy-and-sell-flow.md`](buy-and-sell-flow.md) (reads towers and units; no new setup columns).
+Related docs: [`parking-allotment-flow.md`](parking-allotment-flow.md), [`0018-buy-and-sell-flow.md`](0018-buy-and-sell-flow.md) (reads towers and units; no new setup columns).
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`
