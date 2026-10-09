@@ -736,7 +736,7 @@ class MarketplaceService:
         removal_note: str,
         project_id: str | None = None,
     ) -> dict[str, Any]:
-        """Take a live listing off the board. Same removed status as seller take-down."""
+        """Draft: hard-delete. Live: status removed (same as seller take-down)."""
         note = removal_note.strip()
         if not note:
             raise ValidationException(
@@ -749,8 +749,41 @@ class MarketplaceService:
                 message_key="auth.errors.session_not_found",
                 custom_code=CustomStatusCode.UNAUTHORIZED,
             )
+        org_id = self._org()
+        listing = await self.repo.get_admin_listing(
+            organization_id=org_id,
+            listing_id=listing_id,
+            project_id=project_id,
+        )
+        if not listing:
+            raise NotFoundException(
+                message_key="marketplace.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if listing["status"] == "draft":
+            deleted = await self.repo.delete_draft_listing_admin(
+                organization_id=org_id,
+                listing_id=listing_id,
+                project_id=project_id,
+            )
+            if not deleted:
+                raise NotFoundException(
+                    message_key="marketplace.errors.not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+            return {
+                "id": listing_id,
+                "status": "deleted",
+                "project_id": listing.get("project_id"),
+                "title": listing.get("title"),
+            }
+        if listing["status"] != "live":
+            raise ValidationException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         updated = await self.repo.remove_live_listing_admin(
-            organization_id=self._org(),
+            organization_id=org_id,
             listing_id=listing_id,
             removal_note=note,
             removed_by_user_id=actor_user_id,
@@ -758,16 +791,6 @@ class MarketplaceService:
             project_id=project_id,
         )
         if not updated:
-            listing = await self.repo.get_admin_listing(
-                organization_id=self._org(),
-                listing_id=listing_id,
-                project_id=project_id,
-            )
-            if not listing:
-                raise NotFoundException(
-                    message_key="marketplace.errors.not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
             raise ValidationException(
                 message_key="marketplace.errors.not_live",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -806,7 +829,7 @@ class MarketplaceService:
             "days_left": days_left,
             "sold_at": row.get("sold_at"),
             "removed_at": row.get("removed_at"),
-            "can_remove": row["status"] == "live",
+            "can_remove": row["status"] in ("live", "draft"),
         }
 
     def _admin_detail(self, row: dict[str, Any], stats: dict[str, int]) -> dict[str, Any]:

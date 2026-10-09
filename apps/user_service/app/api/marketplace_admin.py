@@ -86,7 +86,7 @@ DETAIL_SUCCESS_RESPONSES = _ok_response(
 )
 REMOVED_SUCCESS_RESPONSES = _ok_response(
     MarketplaceAdminRemovedApiResponse,
-    "Listing removed from the board.",
+    "Listing status set to removed; visible in admin Removed section.",
 )
 
 
@@ -230,7 +230,7 @@ async def get_marketplace_admin_listing(
 @router.post(
     "/listings/{listing_id}/remove",
     status_code=http_status.HTTP_200_OK,
-    summary="Remove a live marketplace listing",
+    summary="Delete a draft listing or mark a live listing as removed",
     response_model=None,
     responses=REMOVED_SUCCESS_RESPONSES,
 )
@@ -250,7 +250,7 @@ async def remove_marketplace_admin_listing(
     current_user: dict = Depends(get_user_from_auth),
     body: AdminRemoveListingRequest = Body(...),
 ):
-    """Take a live listing off the board. Removal is permanent (no restore)."""
+    """Draft: hard-delete. Live: set removed (stays in admin Removed; hidden on resident board)."""
     user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
@@ -264,19 +264,26 @@ async def remove_marketplace_admin_listing(
         removal_note=body.removal_note,
         project_id=project_id,
     )
+    deleted = data.get("status") == "deleted"
     set_audit_context(
         request,
         user_context,
         project_id=project_id or data.get("project_id"),
         table="marketplace_listings",
         requested_id=listing_id,
-        description=f"Staff removed marketplace listing: {listing_id}",
+        description=(
+            f"Staff deleted draft marketplace listing: {listing_id}"
+            if deleted
+            else f"Staff removed marketplace listing: {listing_id}"
+        ),
         risk_level="low",
         new_data=data,
     )
     return success_response(
         request=request,
-        message_key="marketplace.success.removed",
+        message_key=(
+            "marketplace.success.deleted_admin" if deleted else "marketplace.success.removed_admin"
+        ),
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )

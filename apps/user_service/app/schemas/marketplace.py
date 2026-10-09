@@ -550,7 +550,10 @@ class MarketplaceAdminRemovedApiResponse(BaseModel):
         json_schema_extra={
             "example": {
                 "status": "success",
-                "message": "Listing removed from the board.",
+                "message": (
+                    "Listing marked as removed. It stays in admin under Removed "
+                    "and is hidden from the resident board."
+                ),
                 "statusCode": 200,
                 "code": CustomStatusCode.SUCCESS.value,
                 "data": _EXAMPLE_ADMIN_REMOVED,

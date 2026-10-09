@@ -509,7 +509,10 @@ async def test_remove_listing_admin_takes_live_listing_down():
     svc.user_context.user_id = "staff-1"
     svc.repo.remove_live_listing_admin = AsyncMock(return_value=True)
     svc.repo.get_admin_listing = AsyncMock(
-        return_value=_listing(status="removed", removal_note="Photos didn't match")
+        side_effect=[
+            _listing(status="live"),
+            _listing(status="removed", removal_note="Photos didn't match"),
+        ]
     )
     svc.repo.expire_due = AsyncMock()
     svc.repo.count_unit_listing_stats = AsyncMock(
@@ -533,6 +536,22 @@ async def test_remove_listing_admin_takes_live_listing_down():
 
 
 @pytest.mark.asyncio
+async def test_remove_listing_admin_deletes_draft_permanently():
+    svc = _service()
+    svc.user_context.user_id = "staff-1"
+    svc.repo.get_admin_listing = AsyncMock(return_value=_listing(status="draft", title="Old draft"))
+    svc.repo.delete_draft_listing_admin = AsyncMock(return_value=True)
+    data = await svc.remove_listing_admin(
+        listing_id="listing-1",
+        removal_note="Unpublished duplicate",
+    )
+    assert data["status"] == "deleted"
+    assert data["title"] == "Old draft"
+    svc.repo.delete_draft_listing_admin.assert_awaited_once()
+    svc.repo.remove_live_listing_admin.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_remove_listing_admin_rejects_non_live():
     svc = _service()
     svc.user_context.user_id = "staff-1"
@@ -550,7 +569,6 @@ async def test_remove_listing_admin_rejects_non_live():
 async def test_remove_listing_admin_missing_listing():
     svc = _service()
     svc.user_context.user_id = "staff-1"
-    svc.repo.remove_live_listing_admin = AsyncMock(return_value=False)
     svc.repo.get_admin_listing = AsyncMock(return_value=None)
     with pytest.raises(NotFoundException):
         await svc.remove_listing_admin(
@@ -612,7 +630,12 @@ async def test_remove_listing_admin_passes_project_id():
     svc = _service()
     svc.user_context.user_id = "staff-1"
     svc.repo.remove_live_listing_admin = AsyncMock(return_value=True)
-    svc.repo.get_admin_listing = AsyncMock(return_value=_listing(status="removed"))
+    svc.repo.get_admin_listing = AsyncMock(
+        side_effect=[
+            _listing(status="live"),
+            _listing(status="removed"),
+        ]
+    )
     svc.repo.expire_due = AsyncMock()
     svc.repo.count_unit_listing_stats = AsyncMock(
         return_value={
