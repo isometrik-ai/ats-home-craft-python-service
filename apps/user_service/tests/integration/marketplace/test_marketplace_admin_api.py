@@ -7,7 +7,19 @@ from pydantic import ValidationError
 
 from apps.user_service.app.api import marketplace_admin as marketplace_admin_api
 from apps.user_service.app.schemas.enums.marketplace import MarketplaceAdminStatus
-from apps.user_service.app.schemas.marketplace import AdminMarketplaceListQuery
+from apps.user_service.app.schemas.marketplace import (
+    AdminMarketplaceListQuery,
+    AdminRemoveListingRequest,
+    MarketplaceAdminListApiResponse,
+    MarketplaceAdminListingApiResponse,
+    MarketplaceAdminListingCard,
+    MarketplaceAdminListingDetail,
+    MarketplaceAdminRemovedApiResponse,
+    MarketplaceAdminSummary,
+    MarketplaceAdminSummaryApiResponse,
+    MarketplaceCatalogApiResponse,
+    MarketplaceCatalogData,
+)
 from apps.user_service.tests.integration.helpers import (
     patch_ensure_staff_project_access_optional,
 )
@@ -60,6 +72,51 @@ def test_admin_status_filter_has_no_committee_option():
     assert "group" not in AdminMarketplaceListQuery.model_fields
     with pytest.raises(ValidationError):
         AdminMarketplaceListQuery(status="removed_by_committee")
+
+
+def test_marketplace_admin_response_schemas_are_typed():
+    """Staff OpenAPI envelopes expose counts, cards, drawer fields, and examples."""
+    assert set(MarketplaceAdminSummary.model_fields) == {
+        "active_count",
+        "sold_count",
+        "past_count",
+        "removed_count",
+    }
+    assert "can_remove" in MarketplaceAdminListingCard.model_fields
+    assert "project_id" in MarketplaceAdminListingCard.model_fields
+    assert "history" in MarketplaceAdminListingDetail.model_fields
+    assert "removal_note" in MarketplaceAdminListingDetail.model_fields
+    assert "categories" in MarketplaceCatalogData.model_fields
+    list_example = MarketplaceAdminListApiResponse.model_config["json_schema_extra"]["example"]
+    assert list_example["data"][0]["title"] == "Study table with chair"
+    assert list_example["total_pages"] == 1
+    remove_example = AdminRemoveListingRequest.model_config["json_schema_extra"]["example"]
+    assert remove_example["removal_note"]
+
+
+def test_marketplace_admin_routes_declare_response_models():
+    """Admin routes register typed envelopes so related schemas appear in OpenAPI."""
+    by_path = {route.path: route for route in marketplace_admin_api.router.routes}
+    assert (
+        by_path["/marketplace/admin/summary"].responses[200]["model"]
+        is MarketplaceAdminSummaryApiResponse
+    )
+    assert (
+        by_path["/marketplace/admin/catalog"].responses[200]["model"]
+        is MarketplaceCatalogApiResponse
+    )
+    assert (
+        by_path["/marketplace/admin/listings"].responses[200]["model"]
+        is MarketplaceAdminListApiResponse
+    )
+    assert (
+        by_path["/marketplace/admin/listings/{listing_id}"].responses[200]["model"]
+        is MarketplaceAdminListingApiResponse
+    )
+    assert (
+        by_path["/marketplace/admin/listings/{listing_id}/remove"].responses[200]["model"]
+        is MarketplaceAdminRemovedApiResponse
+    )
 
 
 @pytest.mark.asyncio
