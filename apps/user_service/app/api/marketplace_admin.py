@@ -1,4 +1,4 @@
-"""Staff buy and sell API (organization-scoped, ADR 0019)."""
+"""Staff buy and sell API (organization-scoped, ADR 0018)."""
 
 from __future__ import annotations
 

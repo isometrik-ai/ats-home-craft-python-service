@@ -1,4 +1,4 @@
-"""Request models for resident buy and sell (ADR 0019)."""
+"""Request models for resident buy and sell (ADR 0018)."""
 
 from __future__ import annotations
 

@@ -7,7 +7,7 @@ and know exactly where to change things.
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **API prefix:** `/v1/contact-onboarding`
 - **DB schema:** `ats-home-craft-supabase` (migrations `20260629110000_*` enums, `20260629111000_*` tables, `2026073112*_contact_roles_*`)
-- **Role model:** [ADR 0010](./adr/0010-contact-roles.md)
+- **Role model:** [ADR 0009](./adr/0009-contact-roles.md)
 - **Full column reference:** `ats-home-craft-supabase/docs/resident-onboarding-schema.md`, `contact-roles-schema.md`
 
 > Naming note: this feature was renamed from "resident onboarding" to "contact onboarding" in
@@ -102,12 +102,12 @@ GET /v1/contact-onboarding/household/summary?unit_id={unit_id}
 
 Requires an active `contact_units` link for the caller on `unit_id`; otherwise `unit_not_assigned`.
 Drill-down uses existing list APIs (`GET /household`, `GET /daily-help/household-links`, `GET /vehicles`,
-`GET /pets`, tenant request APIs — see [tenant-requests-flow.md](./tenant-requests-flow.md),
-[pets-flow.md](./pets-flow.md)).
+`GET /pets`, tenant request APIs — see [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md),
+[0015-pets-flow.md](./0015-pets-flow.md)).
 
 > **Tenant limit:** Only **one active tenant per unit**. Enforced by DB unique indexes on
 > `contact_roles` and `tenant_requests`, and by superseding the previous tenant on approve.
-> See [ADR 0007](./adr/0007-tenant-requests.md) §4.
+> See [ADR 0006](./adr/0006-tenant-requests.md) §4.
 
 ### Household-only members
 
@@ -117,7 +117,7 @@ They do not see accept-unit prompts for units where they are a family member.
 ### Role labels
 
 `Owner`, `Tenant`, `Family`, … live in **`contact_roles`**, not on `contacts`. Unit-scoped roles are
-assigned when a unit is linked (allotment, tenant approve, household). See [ADR 0010](./adr/0010-contact-roles.md).
+assigned when a unit is linked (allotment, tenant approve, household). See [ADR 0009](./adr/0009-contact-roles.md).
 
 ### Data tracked (persistence)
 
@@ -375,7 +375,7 @@ in `contact_onboarding_service.py`, `contact_units_service.py`, and related serv
 ### Tenant linking (one per unit)
 
 Tenant occupancy is **not** added via `POST /household`. Owners submit a **tenant request**
-([tenant-requests-flow.md](./tenant-requests-flow.md)); admin approval creates the tenant contact,
+([0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md)); admin approval creates the tenant contact,
 `contact_units` link (`relationship = self`), and `contact_roles` row (`role_type = Tenant`).
 
 | Rule                          | Enforcement                                                                  |
@@ -938,10 +938,10 @@ ______________________________________________________________________
 ## Related
 
 - [contact-onboarding-app-integration.md](./contact-onboarding-app-integration.md) — mobile scenarios
-- [tenant-requests-flow.md](./tenant-requests-flow.md) — owner tenant requests and one-tenant-per-unit rules
-- [daily-help-flow.md](./daily-help-flow.md) — household-linked daily help (counted in summary)
-- [ADR 0007 — Tenant requests](./adr/0007-tenant-requests.md)
-- [ADR 0010 — Contact roles](./adr/0010-contact-roles.md)
+- [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md) — owner tenant requests and one-tenant-per-unit rules
+- [0012-daily-help-flow.md](./0012-daily-help-flow.md) — household-linked daily help (counted in summary)
+- [ADR 0006 — Tenant requests](./adr/0006-tenant-requests.md)
+- [ADR 0009 — Contact roles](./adr/0009-contact-roles.md)
 - Project setup wizard (admin side): [project-setup-flow.md](./project-setup-flow.md). The two flows meet at
   **units** (project setup) and **vehicles** (onboarding submit → project admin review + parking slot).
   Schema reference: `ats-home-craft-supabase/docs/project-setup-schema.md`.

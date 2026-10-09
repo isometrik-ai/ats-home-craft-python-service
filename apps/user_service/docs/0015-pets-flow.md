@@ -1,7 +1,7 @@
 # Pets Flow — Context & Change Guide
 
 > **Status: Implemented** (Phase 1 resident + Phase 2 admin APIs in `user_service`).
-> Schema and decisions: [ADR 0016](./adr/0016-pets.md).
+> Schema and decisions: [ADR 0015](./adr/0015-pets.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Resident API prefix:** `/v1/pets`
@@ -24,7 +24,7 @@ vaccination status, date of birth/adoption, gender, and profile photo. Pets appe
 1. **Pet profile** — detail view with edit and remove (reason required).
 
 Pets are **optional** household data. They do **not** block onboarding (unlike legacy
-vehicles/household wizard steps). See [contact-onboarding-flow.md](./contact-onboarding-flow.md).
+vehicles/household wizard steps). See [0001-contact-onboarding-flow.md](./0001-contact-onboarding-flow.md).
 
 ### Product rules (must enforce)
 
@@ -126,7 +126,7 @@ ______________________________________________________________________
 
 ## 3. Data model
 
-See [ADR 0016 § Schema](./adr/0016-pets.md#schema-proposed) for full DDL.
+See [ADR 0015 § Schema](./adr/0015-pets.md#schema-proposed) for full DDL.
 
 ### New tables summary
 
@@ -582,9 +582,9 @@ ______________________________________________________________________
 
 ## 11. Related docs
 
-| Doc                                                        | Relevance                                              |
-| ---------------------------------------------------------- | ------------------------------------------------------ |
-| [contact-onboarding-flow.md](./contact-onboarding-flow.md) | Household hub, unit membership, summary counts         |
-| [project-setup-flow.md](./project-setup-flow.md)           | Doc structure reference; vehicles admin review pattern |
-| [daily-help-flow.md](./daily-help-flow.md)                 | Household links, resident API split                    |
-| [ADR 0016](./adr/0016-pets.md)                             | Schema DDL and architecture decisions                  |
+| Doc                                                                  | Relevance                                              |
+| -------------------------------------------------------------------- | ------------------------------------------------------ |
+| [0001-contact-onboarding-flow.md](./0001-contact-onboarding-flow.md) | Household hub, unit membership, summary counts         |
+| [project-setup-flow.md](./project-setup-flow.md)                     | Doc structure reference; vehicles admin review pattern |
+| [0012-daily-help-flow.md](./0012-daily-help-flow.md)                 | Household links, resident API split                    |
+| [ADR 0015](./adr/0015-pets.md)                                       | Schema DDL and architecture decisions                  |

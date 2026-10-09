@@ -1,4 +1,4 @@
-"""Admin project-scoped pets API (ADR 0016 Phase 2)."""
+"""Admin project-scoped pets API (ADR 0015 Phase 2)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# ADR 0017 — Facility booking
+# ADR 0016 — Facility booking
 
 ## Context
 

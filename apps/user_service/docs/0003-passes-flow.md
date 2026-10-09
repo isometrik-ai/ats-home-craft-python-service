@@ -2,7 +2,7 @@
 
 > **Status: Planned / target design.** This flow is **not built yet**. This document is the
 > build guide for the **Visitor Passes** feature in `user_service`, written in the same style as
-> [`contact-onboarding-flow.md`](./contact-onboarding-flow.md) and
+> [`0001-contact-onboarding-flow.md`](./0001-contact-onboarding-flow.md) and
 > [`project-setup-flow.md`](./project-setup-flow.md) so it drops straight into the codebase.
 > The schema/architecture rationale lives in [ADR 0003](./adr/0003-visitor-passes.md).
 
@@ -325,7 +325,7 @@ ______________________________________________________________________
 ## Related
 
 - Design decision & new tables: [ADR 0003 — Visitor passes](./adr/0003-visitor-passes.md)
-- Downstream flow (gate check-in/out + Visitor Logs): [ADR 0004](./adr/0004-pass-validation-gate.md) / [passes-validation-flow.md](./passes-validation-flow.md)
-- Upstream flow (produces active `contact_units`): [contact-onboarding-flow.md](./contact-onboarding-flow.md)
+- Downstream flow (gate check-in/out + Visitor Logs): [ADR 0004](./adr/0004-pass-validation-gate.md) / [0004-passes-validation-flow.md](./0004-passes-validation-flow.md)
+- Upstream flow (produces active `contact_units`): [0001-contact-onboarding-flow.md](./0001-contact-onboarding-flow.md)
 - Inventory (`units`, `tower_gates`): [project-setup-flow.md](./project-setup-flow.md)
 - Unit-ownership check reused: `ContactUnitsRepository.contact_has_active_unit`

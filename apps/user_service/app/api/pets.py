@@ -1,4 +1,4 @@
-"""Resident household pets API (ADR 0016)."""
+"""Resident household pets API (ADR 0015)."""
 
 from __future__ import annotations
 

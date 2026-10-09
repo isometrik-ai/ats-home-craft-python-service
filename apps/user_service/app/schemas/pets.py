@@ -1,4 +1,4 @@
-"""Pydantic schemas for household pets (ADR 0016)."""
+"""Pydantic schemas for household pets (ADR 0015)."""
 
 from __future__ import annotations
 

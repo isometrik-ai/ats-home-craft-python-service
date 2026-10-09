@@ -3,10 +3,10 @@
 > **Status: Not yet implemented (ADR + flow spec).** Migrations and schema doc exist; admin API,
 > resident feed, push, and background jobs are follow-ups. This document describes the **Notices**
 > feature — community admin publish/schedule on dashboard, resident read on mobile — in the same
-> style as [`tenant-requests-flow.md`](./tenant-requests-flow.md), [`walk-in-flow.md`](./walk-in-flow.md),
-> and [`move-events-flow.md`](./move-events-flow.md).
+> style as [`0006-tenant-requests-flow.md`](./0006-tenant-requests-flow.md), [`0007-walk-in-flow.md`](./0007-walk-in-flow.md),
+> and [`0005-move-events-flow.md`](./0005-move-events-flow.md).
 >
-> Schema and architecture rationale: [ADR 0012](./adr/0012-notice-board.md), [ADR 0011](./adr/0011-project-membership.md) (project access), [ADR 0010](./adr/0010-contact-roles.md) (recipient roles).
+> Schema and architecture rationale: [ADR 0011](./adr/0011-notice-board.md), [ADR 0010](./adr/0010-project-membership.md) (project access), [ADR 0009](./adr/0009-contact-roles.md) (recipient roles).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/notices`
@@ -17,7 +17,7 @@ ______________________________________________________________________
 
 ## 1. What this flow does
 
-A **community admin** (staff with project access per [ADR 0011](./adr/0011-project-membership.md))
+A **community admin** (staff with project access per [ADR 0010](./adr/0010-project-membership.md))
 creates **notices** for a **project** (gated community): maintenance alerts, events, billing
 reminders, security updates, etc.
 
@@ -116,23 +116,23 @@ HTTP → API router → NoticesService (business rules) → NoticesRepository (S
 
 ### File map (to create)
 
-| Concern                     | File                                                                                          |
-| --------------------------- | --------------------------------------------------------------------------------------------- |
-| Admin API endpoints         | `app/api/notices.py`                                                                          |
-| Resident API (Phase 2)      | `app/api/notices_resident.py`                                                                 |
-| Route registration          | `app/api/routes.py`                                                                           |
-| Orchestration               | `app/services/notices_service.py`                                                             |
-| Recipient / reach count     | `app/services/notice_recipient_resolution_service.py`                                         |
-| Persistence                 | `app/db/repositories/notices_repository.py`                                                   |
-| Request/response models     | `app/schemas/notices.py`                                                                      |
-| Enums (mirror Postgres)     | `app/schemas/enums.py`                                                                        |
-| Admin RBAC + project access | Reuse `projects_management.*` + `ensure_staff_project_access`                                 |
-| Presigned uploads           | Reuse `app/api/presigned_url.py`                                                              |
-| Scheduled publish job       | `app/jobs/publish_scheduled_notices.py` (or cron script)                                      |
-| Pin expiry job              | `app/jobs/expire_notice_pins.py`                                                              |
-| Audit logging               | `@audit_api_call` + `set_audit_context`                                                       |
-| i18n                        | `app/locales/en.json` (`notices.*`)                                                           |
-| Push (Phase 2)              | Hook `PushNotificationService` per [push-notifications-flow.md](./push-notifications-flow.md) |
+| Concern                     | File                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Admin API endpoints         | `app/api/notices.py`                                                                                    |
+| Resident API (Phase 2)      | `app/api/notices_resident.py`                                                                           |
+| Route registration          | `app/api/routes.py`                                                                                     |
+| Orchestration               | `app/services/notices_service.py`                                                                       |
+| Recipient / reach count     | `app/services/notice_recipient_resolution_service.py`                                                   |
+| Persistence                 | `app/db/repositories/notices_repository.py`                                                             |
+| Request/response models     | `app/schemas/notices.py`                                                                                |
+| Enums (mirror Postgres)     | `app/schemas/enums.py`                                                                                  |
+| Admin RBAC + project access | Reuse `projects_management.*` + `ensure_staff_project_access`                                           |
+| Presigned uploads           | Reuse `app/api/presigned_url.py`                                                                        |
+| Scheduled publish job       | `app/jobs/publish_scheduled_notices.py` (or cron script)                                                |
+| Pin expiry job              | `app/jobs/expire_notice_pins.py`                                                                        |
+| Audit logging               | `@audit_api_call` + `set_audit_context`                                                                 |
+| i18n                        | `app/locales/en.json` (`notices.*`)                                                                     |
+| Push (Phase 2)              | Hook `PushNotificationService` per [0008-push-notifications-flow.md](./0008-push-notifications-flow.md) |
 
 `NoticesService` composes `NoticeRecipientResolutionService` for reach estimates and (Phase 2) push
 recipient lists — it does not duplicate `contact_roles` / `contact_units` query logic inline.
@@ -164,7 +164,7 @@ Full column reference: [notice-board-schema.md](../../../../ats-home-craft-supab
 | `contacts`             | Like actor (Phase 2); admin `created_by` via user linkage                            |
 | `contact_units`        | Active residency for reach + resident visibility                                     |
 | `contact_roles`        | Owner / Tenant recipient resolution via units in project scope                       |
-| `project_members`      | Staff / Security recipient resolution ([ADR 0011](./adr/0011-project-membership.md)) |
+| `project_members`      | Staff / Security recipient resolution ([ADR 0010](./adr/0010-project-membership.md)) |
 | `organization_members` | Staff admin access gate only — not notice audience for Staff/Security groups         |
 
 ### Status lifecycle
@@ -830,21 +830,21 @@ Auth: `extract_notice_viewer_context()` — resolves **residents** via `contacts
 ### 8.3 Push on publish (Phase 2b)
 
 After publish-now or scheduled go-live, resolve recipient user IDs and call
-`PushNotificationService` per [push-notifications-flow.md](./push-notifications-flow.md) and
-[ADR 0009](./adr/0009-push-notifications-grpc.md).
+`PushNotificationService` per [0008-push-notifications-flow.md](./0008-push-notifications-flow.md) and
+[ADR 0008](./adr/0008-push-notifications-grpc.md).
 
 ______________________________________________________________________
 
 ## 9. Relationship to existing flows
 
-| Existing doc                                                 | Relationship                                                     |
-| ------------------------------------------------------------ | ---------------------------------------------------------------- |
-| [membership-architecture.md](./membership-architecture.md)   | Project scoping; staff `project_members` gate                    |
-| [frontend-membership-flow.md](./frontend-membership-flow.md) | Staff `activeProjectId`; route `/projects/:id/community/notices` |
-| [project-setup-flow.md](./project-setup-flow.md)             | Towers required for by-tower scope                               |
-| [ADR 0010 / contact-roles](./adr/0010-contact-roles.md)      | Owner/Tenant/Staff recipient resolution                          |
-| [push-notifications-flow.md](./push-notifications-flow.md)   | Phase 2 push on publish                                          |
-| [tenant-requests-flow.md](./tenant-requests-flow.md)         | Same admin project prefix pattern                                |
+| Existing doc                                                         | Relationship                                                     |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| [0010-membership-architecture.md](./0010-membership-architecture.md) | Project scoping; staff `project_members` gate                    |
+| [frontend-membership-flow.md](./frontend-membership-flow.md)         | Staff `activeProjectId`; route `/projects/:id/community/notices` |
+| [project-setup-flow.md](./project-setup-flow.md)                     | Towers required for by-tower scope                               |
+| [ADR 0009 / contact-roles](./adr/0009-contact-roles.md)              | Owner/Tenant/Staff recipient resolution                          |
+| [0008-push-notifications-flow.md](./0008-push-notifications-flow.md) | Phase 2 push on publish                                          |
+| [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md)       | Same admin project prefix pattern                                |
 
 ### Difference from CRM broadcasts (if added later)
 
@@ -917,7 +917,7 @@ ______________________________________________________________________
 | **1d** | Presigned upload integration + attachment validation                        |
 | **1e** | Scheduled publish job + pin expiry job                                      |
 | **2a** | Resident feed + banner + view/like                                          |
-| **2b** | Push on publish ([ADR 0009](./adr/0009-push-notifications-grpc.md))         |
+| **2b** | Push on publish ([ADR 0008](./adr/0008-push-notifications-grpc.md))         |
 | **3**  | RLS policies if client-side Supabase reads added                            |
 
 ______________________________________________________________________

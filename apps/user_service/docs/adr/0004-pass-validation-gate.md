@@ -1,13 +1,13 @@
 # ADR 0004: Pass validation — gate check-in/out and visitor logs
 
-|                  |                                                                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                    |
-| **Date**         | 2026-07-17                                                                                                                                  |
-| **Authors**      | Home Craft platform team                                                                                                                    |
-| **Depends on**   | [ADR 0003](./0003-visitor-passes.md) (`passes` + `pass_events`), [ADR 0001](./0001-resident-onboarding.md) (staff = `organization_members`) |
-| **Related docs** | [passes-validation-flow.md](../passes-validation-flow.md) (build guide), [passes-flow.md](../passes-flow.md) (resident side)                |
-| **Migrations**   | `20260717120000_visitor_gate_enums.sql`, `20260717121000_visitor_gate_columns.sql` (to be created in `ats-home-craft-supabase`)             |
+|                  |                                                                                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Status**       | Proposed                                                                                                                                         |
+| **Date**         | 2026-07-17                                                                                                                                       |
+| **Authors**      | Home Craft platform team                                                                                                                         |
+| **Depends on**   | [ADR 0003](./0003-visitor-passes.md) (`passes` + `pass_events`), [ADR 0001](./0001-resident-onboarding.md) (staff = `organization_members`)      |
+| **Related docs** | [0004-passes-validation-flow.md](../0004-passes-validation-flow.md) (build guide), [0003-passes-flow.md](../0003-passes-flow.md) (resident side) |
+| **Migrations**   | `20260717120000_visitor_gate_enums.sql`, `20260717121000_visitor_gate_columns.sql` (to be created in `ats-home-craft-supabase`)                  |
 
 ______________________________________________________________________
 
@@ -236,7 +236,7 @@ ______________________________________________________________________
 
 ### Follow-ups
 
-1. **Implementation** — see [passes-validation-flow.md](../passes-validation-flow.md).
+1. **Implementation** — see [0004-passes-validation-flow.md](../0004-passes-validation-flow.md).
 1. Extend `pass_type` (`daily_help` / `vendor` / `staff`) for exact card/filter parity.
 1. RLS policies keyed on `organization_id` + gate/admin role.
 1. Kafka events (`passes.checked_in` / `passes.checked_out`) for resident notifications
@@ -261,6 +261,6 @@ ______________________________________________________________________
 ## References
 
 - Resident side & schema: [ADR 0003 — Visitor passes](./0003-visitor-passes.md)
-- Build guide: [`passes-validation-flow.md`](../passes-validation-flow.md)
+- Build guide: [`0004-passes-validation-flow.md`](../0004-passes-validation-flow.md)
 - Staff RBAC + `organization_member` model: [ADR 0001](./0001-resident-onboarding.md)
 - Reused: `passes`, `pass_events`, `tower_gates`, `units`, `contacts`

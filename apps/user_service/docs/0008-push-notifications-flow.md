@@ -2,7 +2,7 @@
 
 > **Status: Implemented (Phase 1).** Device registration, gRPC sender, `PushNotificationDispatcher`, and feature wiring are live in `user_service`. Topic-based delivery and token pruning remain follow-ups.
 >
-> Architecture rationale: [ADR 0009](./adr/0009-push-notifications-grpc.md).
+> Architecture rationale: [ADR 0008](./adr/0008-push-notifications-grpc.md).
 >
 > External reference: notification-service `docs/fcm-flow.md`.
 
@@ -556,7 +556,7 @@ ______________________________________________________________________
 
 ## Related
 
-- [ADR 0009 — Push notifications gRPC](./adr/0009-push-notifications-grpc.md)
-- [walk-in-flow.md](./walk-in-flow.md) — walk-in domain flow (push wired)
+- [ADR 0008 — Push notifications gRPC](./adr/0008-push-notifications-grpc.md)
+- [0007-walk-in-flow.md](./0007-walk-in-flow.md) — walk-in domain flow (push wired)
 - [ADR 0001 — Resident onboarding](./adr/0001-resident-onboarding.md) — `communication_preferences`
 - notification-service: `docs/adr/0001-grpc-topic-push-notifications.md`, `docs/fcm-flow.md`

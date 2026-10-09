@@ -1,7 +1,7 @@
 # Contact Onboarding — Mobile App Integration Guide
 
 This document is the **app-side integration reference** for contact onboarding. It complements
-[contact-onboarding-flow.md](./contact-onboarding-flow.md) (backend / product context).
+[0001-contact-onboarding-flow.md](./0001-contact-onboarding-flow.md) (backend / product context).
 
 - **Base path:** `/v1/contact-onboarding`
 - **Auth:** Bearer JWT on every request. The contact is resolved from the token — **no contact id in the path**.
@@ -880,5 +880,5 @@ ______________________________________________________________________
 
 ## 12. Related docs
 
-- Backend flow & rules: [contact-onboarding-flow.md](./contact-onboarding-flow.md)
-- Role model: [adr/0010-contact-roles.md](./adr/0010-contact-roles.md)
+- Backend flow & rules: [0001-contact-onboarding-flow.md](./0001-contact-onboarding-flow.md)
+- Role model: [adr/0009-contact-roles.md](./adr/0009-contact-roles.md)

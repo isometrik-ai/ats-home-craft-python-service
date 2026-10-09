@@ -1,4 +1,4 @@
-"""Household pets business logic (ADR 0016)."""
+"""Household pets business logic (ADR 0015)."""
 
 from __future__ import annotations
 

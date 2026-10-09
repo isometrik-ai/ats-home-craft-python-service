@@ -4,9 +4,9 @@
 >
 > This document describes the **Walk-in** feature — security
 > marks **one enter** and **one exit** for the visit — in the same style as
-> [`passes-flow.md`](./passes-flow.md) and [`tenant-requests-flow.md`](./tenant-requests-flow.md).
+> [`0003-passes-flow.md`](./0003-passes-flow.md) and [`0006-tenant-requests-flow.md`](./0006-tenant-requests-flow.md).
 >
-> Schema and architecture rationale: [ADR 0008](./adr/0008-walk-in-entries.md).
+> Schema and architecture rationale: [ADR 0007](./adr/0007-walk-in-entries.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Security API prefix:** `/v1/projects/{project_id}/walk-ins`
@@ -68,7 +68,7 @@ ______________________________________________________________________
 | **`walk_in_visit_units`** | One row per flat: `tower_id`, `unit_id`, visit unit status         |
 | **`walk_in_events`**      | Timeline: requested, visit unit approved/rejected, entered, exited |
 
-Full DDL: [ADR 0008 § Schema](./adr/0008-walk-in-entries.md#schema-proposed).
+Full DDL: [ADR 0007 § Schema](./adr/0007-walk-in-entries.md#schema-proposed).
 
 ### Header status (`walk_in_entries.status`)
 
@@ -253,12 +253,12 @@ ______________________________________________________________________
 | `20260727120000_walk_in_enums.sql`  | `walk_in_status`, `walk_in_visit_unit_status`, `walk_in_event_type`, `walk_in_actor_type` |
 | `20260727121000_walk_in_tables.sql` | `walk_in_entries`, `walk_in_visit_units`, `walk_in_events`                                |
 
-See [ADR 0008](./adr/0008-walk-in-entries.md) for full column lists.
+See [ADR 0007](./adr/0007-walk-in-entries.md) for full column lists.
 
 ______________________________________________________________________
 
 ## Related
 
-- [ADR 0008 — Walk-in entries](./adr/0008-walk-in-entries.md)
-- [passes-flow.md](./passes-flow.md) — resident QR passes (no approval)
-- [tenant-requests-flow.md](./tenant-requests-flow.md) — similar approval + timeline pattern
+- [ADR 0007 — Walk-in entries](./adr/0007-walk-in-entries.md)
+- [0003-passes-flow.md](./0003-passes-flow.md) — resident QR passes (no approval)
+- [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md) — similar approval + timeline pattern

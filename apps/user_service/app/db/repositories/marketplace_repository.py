@@ -1,4 +1,4 @@
-"""SQL for resident buy and sell (ADR 0019)."""
+"""SQL for resident buy and sell (ADR 0018)."""
 
 from __future__ import annotations
 

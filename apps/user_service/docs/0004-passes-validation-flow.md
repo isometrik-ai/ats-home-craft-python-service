@@ -2,10 +2,10 @@
 
 > **Status: Planned / target design.** This flow is **not built yet**. It is the build guide for the
 > **gate/security + admin Visitor Logs** half of Visitor Passes in `user_service`, written in the same
-> style as [`passes-flow.md`](./passes-flow.md) (resident side) so it drops straight into the codebase.
+> style as [`0003-passes-flow.md`](./0003-passes-flow.md) (resident side) so it drops straight into the codebase.
 > The schema/architecture rationale lives in [ADR 0004](./adr/0004-pass-validation-gate.md); the
 > resident side that produces the passes being validated is [ADR 0003](./adr/0003-visitor-passes.md) /
-> [`passes-flow.md`](./passes-flow.md).
+> [`0003-passes-flow.md`](./0003-passes-flow.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **API prefixes:** `/v1/passes` (gate actions) and `/v1/visitor-logs` (admin dashboard)
@@ -16,7 +16,7 @@ ______________________________________________________________________
 
 ## 1. What this flow does
 
-The resident flow ([`passes-flow.md`](./passes-flow.md)) produces an **active pass** with a **4-digit
+The resident flow ([`0003-passes-flow.md`](./0003-passes-flow.md)) produces an **active pass** with a **4-digit
 `code`** (rendered as a QR). This flow is what happens **at the gate** and in the **community-admin
 dashboard**:
 
@@ -380,6 +380,6 @@ ______________________________________________________________________
 
 - Design decision & schema delta: [ADR 0004 — Pass validation](./adr/0004-pass-validation-gate.md)
 - Resident side (produces the passes): [ADR 0003](./adr/0003-visitor-passes.md) /
-  [`passes-flow.md`](./passes-flow.md)
+  [`0003-passes-flow.md`](./0003-passes-flow.md)
 - Staff RBAC + `organization_member` model: [ADR 0001](./adr/0001-resident-onboarding.md)
 - Inventory (`tower_gates`, `units`, `towers`): [project-setup-flow.md](./project-setup-flow.md)
