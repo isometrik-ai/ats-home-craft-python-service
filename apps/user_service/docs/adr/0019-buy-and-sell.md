@@ -68,7 +68,7 @@ Column detail: [buy-and-sell-flow.md](../buy-and-sell-flow.md) §3.
 
 - **Tenancy:** `organization_id` from auth on every query.
 - **Browse:** GET listing routes are **org-wide**; no `unit_id` query param. Flat display follows visibility rules without a viewer unit.
-- **Writes:** `unit_id` in the JSON body on create, save, patch, publish, remove, and mark-sold (not on GET).
+- **Writes:** `unit_id` in the JSON body on create, save, patch, remove, and mark-sold (not on GET). Publish reads the pickup unit already stored on the listing.
 - **Sell:** `POST /listings` (unpublished), `PATCH /listings/{id}`, `GET /listings/{id}` (preview), **`POST /listings/{id}/publish`**, **`POST /listings/{id}/remove`**. Media is not editable after create. Remove is permanent; the seller creates a new listing to post again.
 - **Pagination:** `page` / `page_size` on browse, saved, and my listings.
 

@@ -201,12 +201,6 @@ class UpdateListingRequest(BaseModel):
     original_bill_available: bool | None = None
 
 
-class PublishListingRequest(BaseModel):
-    """Go live from an unpublished listing."""
-
-    unit_id: str
-
-
 class RemoveListingRequest(BaseModel):
     """Soft-remove a live listing from the board."""
 
