@@ -386,9 +386,9 @@ async def publish_listing(
 @router.post(
     "/listings/{listing_id}/remove",
     status_code=http_status.HTTP_200_OK,
-    summary="Remove a live listing",
+    summary="Delete a draft listing or remove a live listing",
     response_model=None,
-    responses=_ok_response(MarketplaceListingApiResponse, "Listing soft-removed."),
+    responses=_ok_response(MarketplaceListingApiResponse, "Draft deleted or live listing removed."),
 )
 @limiter.limit("30/minute")
 @audit_api_call(
@@ -405,7 +405,7 @@ async def remove_listing(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Soft-delete a live listing. The seller must create a new listing to post again."""
+    """Draft: hard-delete. Live: soft-remove; seller must create a new listing to post again."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -416,18 +416,23 @@ async def remove_listing(
         unit_id=body.unit_id,
         removal_note=body.removal_note,
     )
+    deleted = data.get("status") == "deleted"
     set_audit_context(
         request,
         user_context,
         table="marketplace_listings",
         requested_id=listing_id,
-        description=f"Removed marketplace listing: {listing_id}",
+        description=(
+            f"Deleted draft marketplace listing: {listing_id}"
+            if deleted
+            else f"Removed marketplace listing: {listing_id}"
+        ),
         risk_level="low",
         new_data=data,
     )
     return success_response(
         request=request,
-        message_key="marketplace.success.removed",
+        message_key=("marketplace.success.deleted" if deleted else "marketplace.success.removed"),
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )
