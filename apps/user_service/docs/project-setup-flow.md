@@ -107,6 +107,8 @@ Defined in `20260629101000_property_setup_tables.sql` (+ `20260716120000_project
 Post-setup parking allotment tables (`unit_parking_allotments`, `parking_slot_events`) are documented in
 [`parking-allotment-flow.md`](parking-allotment-flow.md).
 
+Buy & Sell does **not** add a wizard step or columns. Resident and staff marketplace APIs **read** `projects`, `towers`, and `units` for society / tower / pickup-flat labels. See [`buy-and-sell-flow.md`](buy-and-sell-flow.md) §2 and §11.
+
 See `ats-home-craft-supabase/docs/project-setup-schema.md` for every column.
 
 Resident **Buy & sell** does not add columns or tables here. It reads `projects` (society name and coordinates), `towers` (name, count, map pin), and `units` (pickup flat) through the resident's active `contact_units`. The three marketplace tables are specified in [buy-and-sell-flow.md](./buy-and-sell-flow.md) and [ADR 0019](./adr/0019-buy-and-sell.md).
@@ -361,6 +363,6 @@ Unit tests (fake repos, no DB):
 - `tests/unit/test_vehicles_service.py` — vehicle review (optional slot, no status changes).
 - `tests/unit/test_inventory_service.py` — inventory summary aggregation.
 
-Related doc: [`parking-allotment-flow.md`](parking-allotment-flow.md).
+Related docs: [`parking-allotment-flow.md`](parking-allotment-flow.md), [`buy-and-sell-flow.md`](buy-and-sell-flow.md) (reads towers and units; no new setup columns).
 
 Run: `.venv/bin/python -m pytest apps/user_service/tests/unit`

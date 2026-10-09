@@ -116,14 +116,7 @@ async def list_marketplace_listings(
     service = MarketplaceService(db_connection=db_connection, user_context=user_context)
     data = await service.list_listings(
         contact_id=str(contact["id"]),
-        category=filters.category,
-        subtype=filters.subtype,
-        query=filters.q,
-        sort=filters.sort.value,
-        price_band=filters.price_band.value if filters.price_band else None,
-        conditions=[item.value for item in filters.condition] if filters.condition else [],
-        page=filters.page,
-        page_size=filters.page_size,
+        query=filters,
     )
     return list_response(
         request=request,
