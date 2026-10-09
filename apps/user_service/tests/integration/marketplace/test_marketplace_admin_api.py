@@ -64,7 +64,7 @@ def test_marketplace_admin_router_registered():
 def test_admin_status_filter_has_no_committee_option():
     """Staff status query does not include removed-by-committee."""
     values = {item.value for item in MarketplaceAdminStatus}
-    assert values == {"all", "live", "sold", "past", "removed"}
+    assert values == {"all", "draft", "live", "sold", "past", "removed"}
     query = AdminMarketplaceListQuery(status=MarketplaceAdminStatus.REMOVED)
     assert query.project_id is None
     assert "tower" not in AdminMarketplaceListQuery.model_fields

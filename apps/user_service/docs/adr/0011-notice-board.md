@@ -1,12 +1,12 @@
-# ADR 0012: Notice board — admin publish, resident feed
+# ADR 0011: Notice board — admin publish, resident feed
 
 |                  |                                                                                                                                                                |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Status**       | Proposed                                                                                                                                                       |
 | **Date**         | 2026-08-10                                                                                                                                                     |
 | **Authors**      | Home Craft platform team                                                                                                                                       |
-| **Depends on**   | [ADR 0011](./0011-project-membership.md) (project scoping), [ADR 0010](./0010-contact-roles.md), [ADR 0009](./0009-push-notifications-grpc.md) (push, Phase 2) |
-| **Related docs** | [notice-board-flow.md](../notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md)                  |
+| **Depends on**   | [ADR 0010](./0010-project-membership.md) (project scoping), [ADR 0009](./0009-contact-roles.md), [ADR 0008](./0008-push-notifications-grpc.md) (push, Phase 2) |
+| **Related docs** | [0011-notice-board-flow.md](../0011-notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md)        |
 | **Migrations**   | `20260810120000_notice_board_enums.sql`, `20260810121000_notice_board_tables.sql`, `20260810122000_notice_board_rls_deferred.sql`                              |
 
 ______________________________________________________________________
@@ -29,7 +29,7 @@ Community admins publish notices for a **project** (`projects` = gated community
 | **Banner pins**       | **6 generic slots**; **only live** notices; slot header = notice **category label**; click → detail |
 | **Soft delete**       | Audit retained; restore creates new draft copy (duplicate semantics)                                |
 
-### Membership alignment ([ADR 0011](./0011-project-membership.md))
+### Membership alignment ([ADR 0010](./0010-project-membership.md))
 
 - Notices are **project-scoped** (`organization_id` + `project_id`).
 - **Staff admin** routes: org RBAC + `ensure_staff_project_access(project_id)`.
@@ -74,7 +74,7 @@ Category on `notices` is for tagging and banner **display** only — not a slot 
 
 Prefix: **`/v1/projects/{project_id}/notices`**
 
-Staff access: permission (e.g. `projects_management.*` or dedicated `notices_management.*`) **and** [ADR 0011 staff project access](./0011-project-membership.md#2-staff-access-formula).
+Staff access: permission (e.g. `projects_management.*` or dedicated `notices_management.*`) **and** [ADR 0010 staff project access](./0010-project-membership.md#2-staff-access-formula).
 
 Key endpoints: summary, list, CRUD, pin/unpin, reach-estimate, duplicate (draft/scheduled only).
 
@@ -116,7 +116,7 @@ ______________________________________________________________________
 1. Migrations in `ats-home-craft-supabase`.
 1. Admin API + service in `user_service`.
 1. Scheduled publish + pin expiry jobs.
-1. Phase 2 resident feed + push ([ADR 0009](./0009-push-notifications-grpc.md)).
+1. Phase 2 resident feed + push ([ADR 0008](./0008-push-notifications-grpc.md)).
 
 ______________________________________________________________________
 

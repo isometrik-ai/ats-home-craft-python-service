@@ -1,4 +1,4 @@
-"""Buy and sell business rules (ADR 0019)."""
+"""Buy and sell business rules (ADR 0018)."""
 
 from __future__ import annotations
 

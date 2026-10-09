@@ -1,12 +1,12 @@
-# ADR 0011: Project membership — org layer + project layer
+# ADR 0010: Project membership — org layer + project layer
 
-|                  |                                                                                                                                                                                                                                                                                          |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                                                                                                                                                                 |
-| **Date**         | 2026-08-06                                                                                                                                                                                                                                                                               |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                 |
-| **Related docs** | [membership-architecture.md](../membership-architecture.md), [membership-schema.md](../../../../../ats-home-craft-supabase/docs/membership-schema.md), [ADR 0010](./0010-contact-roles.md), [ADR 0001](./0001-resident-onboarding.md), [project-setup-flow.md](../project-setup-flow.md) |
-| **Migrations**   | Existing: `20250821124646_initial_execute.sql`, `20260629101000_property_setup_tables.sql`. Follow-ups: `project_members` role enum, optional `teams.project_id`, new permission codes.                                                                                                  |
+|                  |                                                                                                                                                                                                                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Proposed                                                                                                                                                                                                                                                                                           |
+| **Date**         | 2026-08-06                                                                                                                                                                                                                                                                                         |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                           |
+| **Related docs** | [0010-membership-architecture.md](../0010-membership-architecture.md), [membership-schema.md](../../../../../ats-home-craft-supabase/docs/membership-schema.md), [ADR 0009](./0009-contact-roles.md), [ADR 0001](./0001-resident-onboarding.md), [project-setup-flow.md](../project-setup-flow.md) |
+| **Migrations**   | Existing: `20250821124646_initial_execute.sql`, `20260629101000_property_setup_tables.sql`. Follow-ups: `project_members` role enum, optional `teams.project_id`, new permission codes.                                                                                                            |
 
 ______________________________________________________________________
 
@@ -49,7 +49,7 @@ Today:
   and community-admin assignment on project create).
 - `teams` / `team_members` are org-wide CRM groupings with no `project_id`.
 - `contacts` are org-scoped identity; project membership is via `contact_units` + `contact_roles`
-  (ADR 0010).
+  (ADR 0009).
 - RBAC checks are org-only (`check_user_access_async` joins `organization_members` → permissions).
   Project-scoped APIs do not yet uniformly enforce `project_members` assignment.
 
@@ -92,7 +92,7 @@ Can resident contact C access data for project P?
    (and optionally matching contact_roles for billing / dashboards)
 ```
 
-One contact row; multiple projects via junction tables (ADR 0010).
+One contact row; multiple projects via junction tables (ADR 0009).
 
 ### 4. Teams — two types, one table with optional project scope
 

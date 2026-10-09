@@ -5,7 +5,7 @@
 > are live in `user_service`. See [community-events-schema.md](../../../../ats-home-craft-supabase/docs/community-events-schema.md)
 > for migrations.
 >
-> Schema and architecture rationale: [ADR 0014](./adr/0014-community-events.md), [ADR 0011](./adr/0011-project-membership.md) (project access), [community-events-schema.md](../../../../ats-home-craft-supabase/docs/community-events-schema.md).
+> Schema and architecture rationale: [ADR 0013](./adr/0013-community-events.md), [ADR 0010](./adr/0010-project-membership.md) (project access), [community-events-schema.md](../../../../ats-home-craft-supabase/docs/community-events-schema.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/community-events`
@@ -699,8 +699,8 @@ ______________________________________________________________________
 
 ## 10. Related docs
 
-- [ADR 0014 — Community events](./adr/0014-community-events.md)
+- [ADR 0013 — Community events](./adr/0013-community-events.md)
 - [community-events-schema.md](../../../../ats-home-craft-supabase/docs/community-events-schema.md)
 - [project-setup-flow.md](./project-setup-flow.md) — facilities source
-- [notice-board-flow.md](./notice-board-flow.md) — similar community admin + resident pattern
-- [push-notifications-flow.md](./push-notifications-flow.md) — Phase 2 notifications
+- [0011-notice-board-flow.md](./0011-notice-board-flow.md) — similar community admin + resident pattern
+- [0008-push-notifications-flow.md](./0008-push-notifications-flow.md) — Phase 2 notifications

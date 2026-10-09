@@ -1,13 +1,13 @@
-# ADR 0008: Walk-in entries — security request, resident approval
+# ADR 0007: Walk-in entries — security request, resident approval
 
-|                  |                                                                                                                                                                                              |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted (Phase 1)                                                                                                                                                                           |
-| **Date**         | 2026-07-27                                                                                                                                                                                   |
-| **Authors**      | Home Craft platform team                                                                                                                                                                     |
-| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`contacts`, `contact_units`), [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md)                                    |
-| **Related docs** | [walk-in-flow.md](../walk-in-flow.md), [passes-flow.md](../passes-flow.md), [passes-validation-flow.md](../passes-validation-flow.md), [tenant-requests-flow.md](../tenant-requests-flow.md) |
-| **Migrations**   | `20260727120000_walk_in_enums.sql`, `20260727121000_walk_in_tables.sql` (to be created in `ats-home-craft-supabase`)                                                                         |
+|                  |                                                                                                                                                                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Status**       | Accepted (Phase 1)                                                                                                                                                                                                                   |
+| **Date**         | 2026-07-27                                                                                                                                                                                                                           |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                             |
+| **Depends on**   | [ADR 0001](./0001-resident-onboarding.md) (`contacts`, `contact_units`), [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md)                                                                            |
+| **Related docs** | [0007-walk-in-flow.md](../0007-walk-in-flow.md), [0003-passes-flow.md](../0003-passes-flow.md), [0004-passes-validation-flow.md](../0004-passes-validation-flow.md), [0006-tenant-requests-flow.md](../0006-tenant-requests-flow.md) |
+| **Migrations**   | `20260727120000_walk_in_enums.sql`, `20260727121000_walk_in_tables.sql` (to be created in `ats-home-craft-supabase`)                                                                                                                 |
 
 ______________________________________________________________________
 

@@ -1,6 +1,6 @@
 # Buy & Sell Flow — Context & Change Guide
 
-> Schema and decisions: [ADR 0019](./adr/0019-buy-and-sell.md).
+> Schema and decisions: [ADR 0018](./adr/0018-buy-and-sell.md).
 >
 > Society, towers, and flats come from [project-setup-flow.md](./project-setup-flow.md). This feature
 > does not add columns to those tables.

@@ -2,12 +2,12 @@
 
 > **Status: Implemented** (Phases 1–3 core APIs in `user_service`). Admin registry, resident directory,
 > household links, ratings, attendance calendar, and gate integration are live. Schema and decisions:
-> [ADR 0013](./adr/0013-daily-help.md).
+> [ADR 0012](./adr/0012-daily-help.md).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/daily-help`
 - **Resident API prefix:** `/v1/daily-help`
-- **Gate / Activities:** existing `/v1/passes/*` + `/v1/visitor-logs/*` ([passes-validation-flow.md](./passes-validation-flow.md))
+- **Gate / Activities:** existing `/v1/passes/*` + `/v1/visitor-logs/*` ([0004-passes-validation-flow.md](./0004-passes-validation-flow.md))
 - **DB schema:** `ats-home-craft-supabase` (migrations `20260811120000_*`, `20260811121000_*`, `20260811121500_*`, `20260811122000_*`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`, `20260820120000_daily_help_resident_submission.sql`)
 
 ______________________________________________________________________
@@ -144,7 +144,7 @@ ______________________________________________________________________
 
 ## 3. Data model
 
-See [ADR 0013 § Schema](./adr/0013-daily-help.md#schema-proposed) for full DDL.
+See [ADR 0012 § Schema](./adr/0012-daily-help.md#schema-proposed) for full DDL.
 
 ### New tables summary
 
@@ -455,13 +455,13 @@ PassVerificationService.check_in / check_out
 
 **Recipient rules:**
 
-- Only **Owner** and **Tenant** currently holding the linked unit ([ADR 0010](./adr/0010-contact-roles.md)).
+- Only **Owner** and **Tenant** currently holding the linked unit ([ADR 0009](./adr/0009-contact-roles.md)).
 - **Not** Family / Guest / other `contact_units` members.
 - Contact must have linked Supabase `user_id` (portal user with registered push device).
 - If no active household links → **no notifications**.
 - Idempotency key: `daily_help:{profile_id}:{pass_event_id}:checked_in|checked_out`.
 
-See [push-notifications-flow.md](./push-notifications-flow.md) and [ADR 0009](./adr/0009-push-notifications-grpc.md).
+See [0008-push-notifications-flow.md](./0008-push-notifications-flow.md) and [ADR 0008](./adr/0008-push-notifications-grpc.md).
 
 ### Derived aggregates for resident category cards (Phase 2)
 
@@ -962,13 +962,13 @@ ______________________________________________________________________
 
 ## Related
 
-- [ADR 0013 — Daily Help](./adr/0013-daily-help.md)
+- [ADR 0012 — Daily Help](./adr/0012-daily-help.md)
 - [ADR 0003 — Visitor passes](./adr/0003-visitor-passes.md)
 - [ADR 0004 — Pass validation & visitor logs](./adr/0004-pass-validation-gate.md)
-- [passes-validation-flow.md](./passes-validation-flow.md) — Activities / visitor logs
-- [passes-flow.md](./passes-flow.md) — resident pass creation (distinct from admin registry)
-- [tenant-requests-flow.md](./tenant-requests-flow.md) — reference for admin list + documents pattern
-- [ADR 0009 — Push notifications](./adr/0009-push-notifications-grpc.md)
-- [push-notifications-flow.md](./push-notifications-flow.md)
-- [ADR 0010 — Contact roles](./adr/0010-contact-roles.md) — Owner/Tenant resolution for notifications
-- [walk-in-flow.md](./walk-in-flow.md) — separate gate flow for unannounced visitors
+- [0004-passes-validation-flow.md](./0004-passes-validation-flow.md) — Activities / visitor logs
+- [0003-passes-flow.md](./0003-passes-flow.md) — resident pass creation (distinct from admin registry)
+- [0006-tenant-requests-flow.md](./0006-tenant-requests-flow.md) — reference for admin list + documents pattern
+- [ADR 0008 — Push notifications](./adr/0008-push-notifications-grpc.md)
+- [0008-push-notifications-flow.md](./0008-push-notifications-flow.md)
+- [ADR 0009 — Contact roles](./adr/0009-contact-roles.md) — Owner/Tenant resolution for notifications
+- [0007-walk-in-flow.md](./0007-walk-in-flow.md) — separate gate flow for unannounced visitors

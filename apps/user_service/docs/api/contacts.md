@@ -79,7 +79,7 @@ Creates a contact. Optionally links **one** company (existing or created inline)
 when a unit is linked (allotment, tenant approve, household) — not via bare contact create.
 Optional `unit_assignment` on create performs admin pre-allotment in the same request (Community
 Contacts drawer).
-See [ADR 0010](../adr/0010-contact-roles.md).
+See [ADR 0009](../adr/0009-contact-roles.md).
 
 ### Request body (all fields shown)
 
@@ -659,7 +659,7 @@ email is omitted.
 
 **Note:** Import creates contact records only. Unit-scoped roles (`Owner`, `Tenant`, `Family`) are
 assigned when a unit is linked (allotment / onboarding), not during CSV import. See
-[ADR 0010](../adr/0010-contact-roles.md).
+[ADR 0009](../adr/0009-contact-roles.md).
 
 ______________________________________________________________________
 

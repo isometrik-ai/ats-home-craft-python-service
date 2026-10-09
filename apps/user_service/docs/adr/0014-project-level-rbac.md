@@ -1,18 +1,18 @@
-# ADR 0015: Project-level RBAC — per-project roles and permissions
+# ADR 0014: Project-level RBAC — per-project roles and permissions
 
-|                  |                                                                                                                                                                                                                                                    |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted                                                                                                                                                                                                                                           |
-| **Date**         | 2026-09-07                                                                                                                                                                                                                                         |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                           |
-| **Related docs** | [ADR 0011](./0011-project-membership.md), [membership-architecture.md](../membership-architecture.md), [project-setup-flow.md](../project-setup-flow.md), [membership-schema.md](../../../../../ats-home-craft-supabase/docs/membership-schema.md) |
-| **Migrations**   | `20260907120000_project_scoped_permissions.sql`, `20260907121000_project_roles_schema.sql`, `20260907122000_prevent_system_project_role_delete.sql`, `20260908123000_allow_custom_project_role_slugs.sql`                                          |
+|                  |                                                                                                                                                                                                                                                              |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Status**       | Accepted                                                                                                                                                                                                                                                     |
+| **Date**         | 2026-09-07                                                                                                                                                                                                                                                   |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                     |
+| **Related docs** | [ADR 0010](./0010-project-membership.md), [0010-membership-architecture.md](../0010-membership-architecture.md), [project-setup-flow.md](../project-setup-flow.md), [membership-schema.md](../../../../../ats-home-craft-supabase/docs/membership-schema.md) |
+| **Migrations**   | `20260907120000_project_scoped_permissions.sql`, `20260907121000_project_roles_schema.sql`, `20260907122000_prevent_system_project_role_delete.sql`, `20260908123000_allow_custom_project_role_slugs.sql`                                                    |
 
 ______________________________________________________________________
 
 ## Context
 
-Staff access uses a two-layer model (ADR 0011):
+Staff access uses a two-layer model (ADR 0010):
 
 1. **Org layer** — `organization_members` + org `roles` / `permissions` (ceiling).
 1. **Project layer** — `project_members` gates which projects a user can access.
