@@ -208,7 +208,7 @@ class PublishListingRequest(BaseModel):
 
 
 class RemoveListingRequest(BaseModel):
-    """Soft-remove a live listing from the board."""
+    """Delete a draft listing or soft-remove a live listing from the board."""
 
     unit_id: str
     removal_note: str = Field(min_length=1, max_length=500)

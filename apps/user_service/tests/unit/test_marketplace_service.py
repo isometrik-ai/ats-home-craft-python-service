@@ -246,6 +246,23 @@ async def test_update_rejects_a_removed_listing():
 
 
 @pytest.mark.asyncio
+async def test_seller_remove_deletes_draft_permanently():
+    svc = _service()
+    svc.repo.get_listing = AsyncMock(return_value=_listing(status="draft", title="Old phone"))
+    svc.repo.delete_draft_listing = AsyncMock(return_value=True)
+    result = await svc.remove_listing(
+        contact_id="seller-1",
+        listing_id="listing-1",
+        unit_id="unit-1",
+        removal_note="Do not need this listing",
+    )
+    assert result["status"] == "deleted"
+    assert result["title"] == "Old phone"
+    svc.repo.delete_draft_listing.assert_awaited_once()
+    svc.repo.update_listing.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_seller_remove_soft_deletes_a_live_post():
     svc = _service()
     svc.user_context.user_id = "user-1"

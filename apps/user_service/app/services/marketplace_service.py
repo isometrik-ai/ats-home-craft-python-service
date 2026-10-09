@@ -454,18 +454,35 @@ class MarketplaceService:
         unit_id: str,
         removal_note: str,
     ) -> dict[str, Any]:
-        """Soft-delete a live post (status removed, hidden from browse)."""
+        """Draft: hard-delete. Live: status removed (hidden from browse)."""
         await self._require_poster(contact_id=contact_id, unit_id=unit_id)
         listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
-        if listing["status"] != "live":
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
         note = removal_note.strip()
         if not note:
             raise ValidationException(
                 message_key="marketplace.errors.removal_note_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if listing["status"] == "draft":
+            deleted = await self.repo.delete_draft_listing(
+                organization_id=self._org(),
+                listing_id=listing_id,
+                seller_contact_id=contact_id,
+                unit_id=unit_id,
+            )
+            if not deleted:
+                raise NotFoundException(
+                    message_key="marketplace.errors.not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+            return {
+                "id": listing_id,
+                "status": "deleted",
+                "title": listing.get("title"),
+            }
+        if listing["status"] != "live":
+            raise ValidationException(
+                message_key="marketplace.errors.not_live",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
         actor_user_id = self.user_context.user_id
