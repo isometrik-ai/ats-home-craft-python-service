@@ -102,6 +102,14 @@ def test_report_reason_catalog_matches_the_resident_sheet():
     assert catalog["reasons"][1]["name"] == "Looks like a business or broker"
 
 
+def test_report_reason_label_maps_slugs_to_copy():
+    assert (
+        MarketplaceCatalogService.report_reason_label("business_or_broker")
+        == "Looks like a business or broker"
+    )
+    assert MarketplaceCatalogService.report_reason_label("unknown") is None
+
+
 def test_resolve_report_reason_accepts_catalog_slugs():
     assert MarketplaceCatalogService.resolve_report_reason("sold_but_listed") == "sold_but_listed"
 

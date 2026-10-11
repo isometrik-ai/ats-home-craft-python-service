@@ -9,7 +9,11 @@ from apps.user_service.tests.integration.helpers import (
     patch_ensure_staff_project_access_optional,
 )
 from apps.user_service.tests.utils.assertions import assert_error, assert_success
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 CONTACT_ID = "contact-1"
@@ -55,6 +59,163 @@ async def test_report_reason_catalog_success(monkeypatch, client):
         "sold_but_listed",
         "something_else",
     ]
+    assert payload["data"]["reasons"][1]["name"] == "Looks like a business or broker"
+
+
+@pytest.mark.asyncio
+async def test_report_listing_success_returns_display_reason(monkeypatch, client):
+    """POST /listings/{id}/report returns 201 and reason as label, not slug."""
+    _resident(monkeypatch)
+
+    async def fake_report(_self, *, contact_id, listing_id, body):
+        assert contact_id == CONTACT_ID
+        assert listing_id == LISTING_ID
+        assert body.unit_id == UNIT_ID
+        assert body.reason.value == "business_or_broker"
+        return {
+            "id": "323d45d8-ba1b-4bf9-988c-ede6043fe566",
+            "listing_id": LISTING_ID,
+            "reason": "Looks like a business or broker",
+            "listing_report_count": 1,
+            "listing_hidden": False,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.report_listing",
+        fake_report,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/report",
+        json={"unit_id": UNIT_ID, "reason": "business_or_broker"},
+    )
+    payload = assert_success(response, status_code=201)
+    assert payload["message"] == "Report sent to the committee."
+    assert payload["statusCode"] == 201
+    data = payload["data"]
+    assert data["reason"] == "Looks like a business or broker"
+    assert "business_or_broker" not in data["reason"]
+    assert data["listing_report_count"] == 1
+    assert data["listing_hidden"] is False
+    assert data["listing_id"] == LISTING_ID
+
+
+@pytest.mark.asyncio
+async def test_report_listing_success_flags_hidden_at_three_reports(monkeypatch, client):
+    """POST /report sets listing_hidden when the listing hits three reports."""
+    _resident(monkeypatch)
+
+    async def fake_report(_self, *, contact_id, listing_id, body):
+        del contact_id, listing_id, body
+        return {
+            "id": "report-3",
+            "listing_id": LISTING_ID,
+            "reason": "Not allowed in the society",
+            "listing_report_count": 3,
+            "listing_hidden": True,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.report_listing",
+        fake_report,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/report",
+        json={"unit_id": UNIT_ID, "reason": "not_allowed"},
+    )
+    payload = assert_success(response, status_code=201)
+    assert payload["data"]["listing_report_count"] == 3
+    assert payload["data"]["listing_hidden"] is True
+
+
+@pytest.mark.asyncio
+async def test_report_listing_conflict_when_already_reported(monkeypatch, client):
+    """POST /report returns 409 when this resident already has an open report."""
+    _resident(monkeypatch)
+
+    async def fake_report(_self, *, contact_id, listing_id, body):
+        del contact_id, listing_id, body
+        raise ConflictException(
+            message_key="marketplace.errors.report_exists",
+            custom_code=CustomStatusCode.CONFLICT,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.report_listing",
+        fake_report,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/report",
+        json={"unit_id": UNIT_ID, "reason": "sold_but_listed"},
+    )
+    assert_error(response, 409, message_fragment="already reported")
+
+
+@pytest.mark.asyncio
+async def test_report_listing_fails_for_own_listing(monkeypatch, client):
+    """POST /report returns 422 when the seller tries to report themselves."""
+    _resident(monkeypatch)
+
+    async def fake_report(_self, *, contact_id, listing_id, body):
+        del contact_id, listing_id, body
+        raise ValidationException(
+            message_key="marketplace.errors.cannot_report_own",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.report_listing",
+        fake_report,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/report",
+        json={"unit_id": UNIT_ID, "reason": "something_else"},
+    )
+    assert_error(response, 422, message_fragment="own listing")
+
+
+@pytest.mark.asyncio
+async def test_report_listing_not_found_when_listing_missing(monkeypatch, client):
+    """POST /report returns 404 when the listing is not live or does not exist."""
+    _resident(monkeypatch)
+
+    async def fake_report(_self, *, contact_id, listing_id, body):
+        del contact_id, listing_id, body
+        raise NotFoundException(
+            message_key="marketplace.errors.not_found",
+            custom_code=CustomStatusCode.NOT_FOUND,
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.report_listing",
+        fake_report,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/report",
+        json={"unit_id": UNIT_ID, "reason": "not_allowed"},
+    )
+    assert_error(response, 404)
+
+
+@pytest.mark.asyncio
+async def test_report_listing_rejects_invalid_reason_slug(monkeypatch, client):
+    """POST /report returns 422 when reason is not one of the catalog slugs."""
+    _resident(monkeypatch)
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/report",
+        json={"unit_id": UNIT_ID, "reason": "spam"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_report_listing_requires_unit_id_and_reason(monkeypatch, client):
+    """POST /report returns 422 when the body is incomplete."""
+    _resident(monkeypatch)
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/report",
+        json={"unit_id": UNIT_ID},
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -463,7 +624,8 @@ async def test_resident_lifecycle_then_admin_remove(monkeypatch, client):
     patch_ensure_staff_project_access_optional(
         monkeypatch, "apps.user_service.app.api.marketplace_admin"
     )
-    service = "apps.user_service.app.services.marketplace_service.MarketplaceService"
+    resident = "apps.user_service.app.services.marketplace_service.MarketplaceService"
+    admin = "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService"
 
     async def fake_create(_self, *, contact_id, body):
         del _self
@@ -495,11 +657,11 @@ async def test_resident_lifecycle_then_admin_remove(monkeypatch, client):
         assert removal_note == "Photos didn't match"
         return {"id": LISTING_ID, "status": "removed"}
 
-    monkeypatch.setattr(f"{service}.create_listing", fake_create)
-    monkeypatch.setattr(f"{service}.publish", fake_publish)
-    monkeypatch.setattr(f"{service}.list_listings", fake_list)
-    monkeypatch.setattr(f"{service}.list_listings_admin", fake_admin_list)
-    monkeypatch.setattr(f"{service}.remove_listing_admin", fake_admin_remove)
+    monkeypatch.setattr(f"{resident}.create_listing", fake_create)
+    monkeypatch.setattr(f"{resident}.publish", fake_publish)
+    monkeypatch.setattr(f"{resident}.list_listings", fake_list)
+    monkeypatch.setattr(f"{admin}.list_listings_admin", fake_admin_list)
+    monkeypatch.setattr(f"{admin}.remove_listing_admin", fake_admin_remove)
 
     created = await client.post(
         "/v1/marketplace/listings",

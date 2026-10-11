@@ -16,9 +16,11 @@ from apps.user_service.app.schemas.marketplace import (
     MarketplaceCatalogApiResponse,
     MarketplaceListApiResponse,
     MarketplaceListingApiResponse,
+    MarketplaceReportCreatedApiResponse,
     MarketplaceReportReasonCatalogApiResponse,
     MarkSoldRequest,
     RemoveListingRequest,
+    ReportListingRequest,
     SaveListingRequest,
     UpdateListingRequest,
 )
@@ -513,6 +515,60 @@ async def mark_listing_sold(
         message_key="marketplace.success.sold",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
+    )
+
+
+@handle_api_exceptions("report marketplace listing")
+@router.post(
+    "/listings/{listing_id}/report",
+    status_code=http_status.HTTP_201_CREATED,
+    summary="Report a listing to the committee",
+    response_model=None,
+    responses=_created_response(
+        MarketplaceReportCreatedApiResponse,
+        "Report recorded. The response reason is display text, not the slug.",
+    ),
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_reports",
+    category="MARKETPLACE",
+)
+async def report_marketplace_listing(
+    request: Request,
+    listing_id: str = Path(..., description="Listing identifier (UUID string)."),
+    body: ReportListingRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Send one report. You cannot report your own listing or report twice while open."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    data = await service.report_listing(
+        contact_id=str(contact["id"]),
+        listing_id=listing_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="marketplace_reports",
+        requested_id=data["id"],
+        description=f"Reported marketplace listing: {listing_id}",
+        risk_level="low",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="marketplace.success.reported",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+        status_code=http_status.HTTP_201_CREATED,
     )
 
 

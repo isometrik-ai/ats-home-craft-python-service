@@ -80,6 +80,17 @@ class MarketplaceCatalogService:
         }
 
     @staticmethod
+    def report_reason_label(reason_slug: str) -> str | None:
+        """Resident-facing label for a stored report reason slug."""
+        wanted = reason_slug.strip().lower()
+        if not wanted:
+            return None
+        for item in _load_report_reasons_raw().get("reasons") or []:
+            if str(item.get("slug", "")).lower() == wanted:
+                return str(item["name"])
+        return None
+
+    @staticmethod
     def resolve_report_reason(reason: str) -> str:
         """Return the canonical reason slug, or raise if it is not in the catalog."""
         wanted = reason.strip().lower()

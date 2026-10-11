@@ -11,12 +11,17 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.marketplace import (
     AdminMarketplaceListQuery,
+    AdminMarketplaceReportListQuery,
     AdminRemoveListingRequest,
     MarketplaceAdminListApiResponse,
     MarketplaceAdminListingApiResponse,
     MarketplaceAdminRemovedApiResponse,
+    MarketplaceAdminReportListApiResponse,
     MarketplaceAdminSummaryApiResponse,
     MarketplaceCatalogApiResponse,
+)
+from apps.user_service.app.services.marketplace_admin_service import (
+    MarketplaceAdminService,
 )
 from apps.user_service.app.services.marketplace_service import MarketplaceService
 from apps.user_service.app.utils.audit_context import set_audit_context
@@ -88,6 +93,10 @@ REMOVED_SUCCESS_RESPONSES = _ok_response(
     MarketplaceAdminRemovedApiResponse,
     "Listing status set to removed; visible in admin Removed section.",
 )
+REPORTS_SUCCESS_RESPONSES = _ok_response(
+    MarketplaceAdminReportListApiResponse,
+    "Paginated resident reports for the organization (reason as display text).",
+)
 
 
 @handle_api_exceptions("get marketplace admin summary")
@@ -113,7 +122,7 @@ async def get_marketplace_admin_summary(
         permission_codes=MARKETPLACE_MANAGEMENT_VIEW,
         request=request,
     )
-    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
     data = await service.get_admin_summary(project_id=project_id)
     return success_response(
         request=request,
@@ -156,6 +165,42 @@ async def get_marketplace_admin_catalog(
     )
 
 
+@handle_api_exceptions("list marketplace admin reports")
+@router.get(
+    "/reports",
+    status_code=http_status.HTTP_200_OK,
+    summary="List resident reports for the organization",
+    response_model=None,
+    responses=REPORTS_SUCCESS_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def list_marketplace_admin_reports(
+    request: Request,
+    query: AdminMarketplaceReportListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Paginated Reported tab. Each row includes the reason label, not the stored slug."""
+    user_context = await ensure_staff_project_access_optional(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=query.project_id,
+        permission_codes=MARKETPLACE_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
+    data = await service.list_reports_admin(query=query)
+    return list_response(
+        request=request,
+        items=data["items"],
+        total=data["total"],
+        page=query.page,
+        page_size=query.page_size,
+        message_key="marketplace.success.reports_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
 @handle_api_exceptions("list marketplace admin listings")
 @router.get(
     "/listings",
@@ -179,7 +224,7 @@ async def list_marketplace_admin_listings(
         permission_codes=MARKETPLACE_MANAGEMENT_VIEW,
         request=request,
     )
-    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
     data = await service.list_listings_admin(query=query)
     return list_response(
         request=request,
@@ -216,7 +261,7 @@ async def get_marketplace_admin_listing(
         permission_codes=MARKETPLACE_MANAGEMENT_VIEW,
         request=request,
     )
-    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
     data = await service.get_listing_admin(listing_id=listing_id, project_id=project_id)
     return success_response(
         request=request,
@@ -258,7 +303,7 @@ async def remove_marketplace_admin_listing(
         permission_codes=MARKETPLACE_MANAGEMENT_EDIT,
         request=request,
     )
-    service = MarketplaceService(db_connection=db_connection, user_context=user_context)
+    service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
     data = await service.remove_listing_admin(
         listing_id=listing_id,
         removal_note=body.removal_note,
