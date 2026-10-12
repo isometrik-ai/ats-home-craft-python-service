@@ -93,14 +93,7 @@ _EXAMPLE_ADMIN_DETAIL = {
     "listings_from_unit_total": 3,
     "listings_from_unit_active": 2,
     "removed_before_count": 1,
-    "history": [
-        {
-            "event": "posted",
-            "at": _EXAMPLE_PUBLISHED_AT,
-            "actor_name": "Rohan B.",
-        },
-        {"event": "live", "at": _EXAMPLE_PUBLISHED_AT},
-    ],
+    "isometrik_id": "6a4fb3e2f96daa0001281d6c",
 }
 
 _EXAMPLE_ADMIN_REMOVED = {
@@ -110,20 +103,6 @@ _EXAMPLE_ADMIN_REMOVED = {
     "days_left": None,
     "removed_at": _EXAMPLE_REMOVED_AT,
     "removal_note": "Photos didn't show the actual item",
-    "history": [
-        {
-            "event": "posted",
-            "at": _EXAMPLE_PUBLISHED_AT,
-            "actor_name": "Rohan B.",
-        },
-        {"event": "live", "at": _EXAMPLE_PUBLISHED_AT},
-        {
-            "event": "removed",
-            "at": _EXAMPLE_REMOVED_AT,
-            "actor_name": "Priya K.",
-            "note": "Photos didn't show the actual item",
-        },
-    ],
 }
 
 
@@ -597,17 +576,6 @@ class MarketplaceListingMediaItem(BaseModel):
     order: int | None = None
 
 
-class MarketplaceAdminHistoryEvent(BaseModel):
-    """One derived lifecycle event on the staff drawer."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    event: str = Field(..., description="posted, live, sold, expired, or removed.")
-    at: str
-    actor_name: str | None = None
-    note: str | None = None
-
-
 class MarketplaceAdminListingCard(BaseModel):
     """One row on the staff listings table."""
 
@@ -667,7 +635,10 @@ class MarketplaceAdminListingDetail(MarketplaceAdminListingCard):
     listings_from_unit_total: int = 0
     listings_from_unit_active: int = 0
     removed_before_count: int = 0
-    history: list[MarketplaceAdminHistoryEvent] = Field(default_factory=list)
+    isometrik_id: str | None = Field(
+        default=None,
+        description="Seller Isometrik user id (contacts.isometrik_user_id). Detail API only.",
+    )
 
 
 class MarketplaceAdminListApiResponse(BaseModel):

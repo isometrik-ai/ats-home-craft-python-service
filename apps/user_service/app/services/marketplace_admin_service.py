@@ -419,7 +419,7 @@ class MarketplaceAdminService:
         }
 
     def _admin_detail(self, row: dict[str, Any], stats: dict[str, int]) -> dict[str, Any]:
-        """Staff drawer payload, including unit stats and derived history."""
+        """Staff drawer payload, including unit stats."""
         card = self._admin_card(row)
         year = row.get("purchase_year")
         age_years = None
@@ -446,46 +446,16 @@ class MarketplaceAdminService:
                 "listings_from_unit_total": stats["listings_from_unit_total"],
                 "listings_from_unit_active": stats["listings_from_unit_active"],
                 "removed_before_count": stats["removed_before_count"],
-                "history": self._admin_history(row),
+                "isometrik_id": self._seller_isometrik_id(row),
             }
         )
         return card
 
     @staticmethod
-    def _removed_by_name(row: dict[str, Any]) -> str | None:
-        """Staff member name, otherwise the resident who took the listing down."""
-        staff = public_name(
-            row.get("removed_by_staff_first_name"),
-            row.get("removed_by_staff_last_name"),
-        )
-        if staff:
-            return staff
-        contact = public_name(
-            row.get("removed_by_contact_first_name"),
-            row.get("removed_by_contact_last_name"),
-        )
-        return contact or None
-
-    def _admin_history(self, row: dict[str, Any]) -> list[dict[str, Any]]:
-        """Lifecycle events derived from listing timestamps. No event table."""
-        seller = public_name(row.get("seller_first_name"), row.get("seller_last_name"))
-        events: list[dict[str, Any]] = []
-        posted_at = row.get("published_at") or row.get("created_at")
-        if posted_at:
-            events.append({"event": "posted", "at": posted_at, "actor_name": seller})
-        if row.get("published_at"):
-            events.append({"event": "live", "at": row["published_at"]})
-        if row.get("sold_at"):
-            events.append({"event": "sold", "at": row["sold_at"]})
-        if row["status"] == "expired" and row.get("expires_at"):
-            events.append({"event": "expired", "at": row["expires_at"]})
-        if row.get("removed_at"):
-            events.append(
-                {
-                    "event": "removed",
-                    "at": row["removed_at"],
-                    "actor_name": self._removed_by_name(row) or seller,
-                    "note": row.get("removal_note"),
-                }
-            )
-        return events
+    def _seller_isometrik_id(row: dict[str, Any]) -> str | None:
+        """Seller chat id from contacts.isometrik_user_id (staff drawer only)."""
+        raw = row.get("seller_isometrik_user_id")
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        return text or None
