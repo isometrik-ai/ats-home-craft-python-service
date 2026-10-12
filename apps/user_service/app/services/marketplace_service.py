@@ -71,15 +71,6 @@ def flat_label(unit_label: str | None, unit_code: str | None) -> str | None:
     return code or None
 
 
-def isometric_id(unit_label: str | None, unit_code: str | None) -> str | None:
-    """Staff drawer pickup unit id (prefer code, e.g. BS-0981)."""
-    code = (unit_code or "").strip()
-    if code:
-        return code
-    label = (unit_label or "").strip()
-    return label or None
-
-
 def visible_flat(
     *,
     listing: dict[str, Any],

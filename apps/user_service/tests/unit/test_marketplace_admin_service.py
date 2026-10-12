@@ -127,10 +127,12 @@ async def test_list_listings_admin_maps_filters():
 
 
 @pytest.mark.asyncio
-async def test_get_listing_admin_builds_history_and_unit_stats():
+async def test_get_listing_admin_builds_detail_and_unit_stats():
     svc = _admin_service()
     svc.repo.expire_due = AsyncMock()
-    svc.repo.get_admin_listing = AsyncMock(return_value=_listing())
+    svc.repo.get_admin_listing = AsyncMock(
+        return_value=_listing(seller_isometrik_user_id="6a4fb3e2f96daa0001281d6c")
+    )
     svc.repo.count_unit_listing_stats = AsyncMock(
         return_value={
             "listings_from_unit_total": 3,
@@ -139,13 +141,27 @@ async def test_get_listing_admin_builds_history_and_unit_stats():
         }
     )
     data = await svc.get_listing_admin(listing_id="listing-1")
-    assert data["isometric_id"] == "B-1104"
-    assert data["unit_id"] == "unit-1"
     assert data["listings_from_unit_total"] == 3
     assert data["removed_before_count"] == 1
-    assert data["history"][0]["event"] == "posted"
-    assert data["history"][1]["event"] == "live"
+    assert "history" not in data
     assert data["can_remove"] is True
+    assert data["isometrik_id"] == "6a4fb3e2f96daa0001281d6c"
+
+
+@pytest.mark.asyncio
+async def test_get_listing_admin_isometrik_id_null_when_contact_has_none():
+    svc = _admin_service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_admin_listing = AsyncMock(return_value=_listing(seller_isometrik_user_id=None))
+    svc.repo.count_unit_listing_stats = AsyncMock(
+        return_value={
+            "listings_from_unit_total": 0,
+            "listings_from_unit_active": 0,
+            "removed_before_count": 0,
+        }
+    )
+    data = await svc.get_listing_admin(listing_id="listing-1")
+    assert data["isometrik_id"] is None
 
 
 @pytest.mark.asyncio
