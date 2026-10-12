@@ -36,6 +36,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 
 PROJECT_ID = "project-1"
 LISTING_ID = "listing-1"
+REPORT_ID = "report-1"
 
 _ADMIN_CARD = {
     "id": LISTING_ID,
@@ -59,6 +60,7 @@ def test_marketplace_admin_router_registered():
     assert "/marketplace/admin/listings" in paths
     assert "/marketplace/admin/listings/{listing_id}" in paths
     assert "/marketplace/admin/listings/{listing_id}/remove" in paths
+    assert "/marketplace/admin/reports/{report_id}/review" in paths
     assert not any("{project_id}" in path for path in paths)
     assert not any("export" in path for path in paths)
     assert not any("settings" in path for path in paths)
@@ -247,6 +249,78 @@ def test_admin_report_list_query_accepts_status_filter():
 
 
 @pytest.mark.asyncio
+async def test_review_marketplace_admin_report_dismiss(monkeypatch, client):
+    """POST /reports/{id}/review dismiss closes the report without removing the listing."""
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+
+    async def fake_review(_self, *, report_id, decision, removal_note=None, project_id=None):
+        del _self, removal_note, project_id
+        assert report_id == REPORT_ID
+        assert decision.value == "dismiss"
+        return {
+            "report": {
+                "id": REPORT_ID,
+                "listing_id": LISTING_ID,
+                "project_id": PROJECT_ID,
+                "reason": "Sold but still listed",
+                "status": "dismissed",
+                "listing_report_count": 1,
+            }
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.review_report_admin",
+        fake_review,
+    )
+    response = await client.post(
+        f"/v1/marketplace/admin/reports/{REPORT_ID}/review",
+        json={"decision": "dismiss"},
+    )
+    payload = assert_success(response)
+    assert payload["message"] == "Report dismissed."
+    assert payload["data"]["status"] == "dismissed"
+
+
+@pytest.mark.asyncio
+async def test_review_marketplace_admin_report_uphold(monkeypatch, client):
+    """POST /reports/{id}/review uphold soft-removes the listing and updates reports."""
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+
+    async def fake_review(_self, *, report_id, decision, removal_note=None, project_id=None):
+        del _self, project_id
+        assert report_id == REPORT_ID
+        assert decision.value == "uphold"
+        assert removal_note == "Not allowed in the society"
+        return {
+            "report": {
+                "id": REPORT_ID,
+                "listing_id": LISTING_ID,
+                "project_id": PROJECT_ID,
+                "reason": "Not allowed in the society",
+                "status": "upheld",
+                "listing_report_count": 3,
+            },
+            "listing": {"id": LISTING_ID, "status": "removed"},
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.review_report_admin",
+        fake_review,
+    )
+    response = await client.post(
+        f"/v1/marketplace/admin/reports/{REPORT_ID}/review",
+        json={"decision": "uphold", "removal_note": "Not allowed in the society"},
+    )
+    payload = assert_success(response)
+    assert payload["message"] == "Listing taken down."
+    assert payload["data"]["listing"]["status"] == "removed"
+
+
+@pytest.mark.asyncio
 async def test_list_marketplace_admin_listings(monkeypatch, client):
     """GET /marketplace/admin/listings lists with optional project, search, and status."""
     patch_ensure_staff_project_access_optional(
@@ -359,8 +433,8 @@ async def test_remove_marketplace_admin_listing(monkeypatch, client):
         monkeypatch, "apps.user_service.app.api.marketplace_admin"
     )
 
-    async def fake_remove(_self, *, listing_id, removal_note, project_id=None):
-        del _self
+    async def fake_remove(_self, *, listing_id, removal_note, project_id=None, report_id=None):
+        del _self, report_id
         assert listing_id == LISTING_ID
         assert project_id is None
         assert removal_note == "Photos didn't show the actual item"
@@ -386,8 +460,8 @@ async def test_remove_marketplace_admin_listing_with_project_id(monkeypatch, cli
         monkeypatch, "apps.user_service.app.api.marketplace_admin"
     )
 
-    async def fake_remove(_self, *, listing_id, removal_note, project_id=None):
-        del _self
+    async def fake_remove(_self, *, listing_id, removal_note, project_id=None, report_id=None):
+        del _self, report_id
         assert listing_id == LISTING_ID
         assert project_id == PROJECT_ID
         assert removal_note == "Taken down"
@@ -419,8 +493,8 @@ async def test_remove_marketplace_admin_listing_not_live(monkeypatch, client):
         monkeypatch, "apps.user_service.app.api.marketplace_admin"
     )
 
-    async def fake_remove(_self, *, listing_id, removal_note, project_id=None):
-        del _self, listing_id, removal_note, project_id
+    async def fake_remove(_self, *, listing_id, removal_note, project_id=None, report_id=None):
+        del _self, listing_id, removal_note, project_id, report_id
         raise ValidationException(
             message_key="marketplace.errors.not_live",
             custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -531,8 +605,8 @@ async def test_remove_marketplace_admin_listing_missing(monkeypatch, client):
         monkeypatch, "apps.user_service.app.api.marketplace_admin"
     )
 
-    async def fake_remove(_self, *, listing_id, removal_note, project_id=None):
-        del _self, listing_id, removal_note, project_id
+    async def fake_remove(_self, *, listing_id, removal_note, project_id=None, report_id=None):
+        del _self, listing_id, removal_note, project_id, report_id
         raise NotFoundException(
             message_key="marketplace.errors.not_found",
             custom_code=CustomStatusCode.NOT_FOUND,

@@ -9,14 +9,17 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.schemas.enums.marketplace import MarketplaceReportDecision
 from apps.user_service.app.schemas.marketplace import (
     AdminMarketplaceListQuery,
     AdminMarketplaceReportListQuery,
     AdminRemoveListingRequest,
+    AdminReviewMarketplaceReportRequest,
     MarketplaceAdminListApiResponse,
     MarketplaceAdminListingApiResponse,
     MarketplaceAdminRemovedApiResponse,
     MarketplaceAdminReportListApiResponse,
+    MarketplaceAdminReportReviewApiResponse,
     MarketplaceAdminSummaryApiResponse,
     MarketplaceCatalogApiResponse,
 )
@@ -96,6 +99,10 @@ REMOVED_SUCCESS_RESPONSES = _ok_response(
 REPORTS_SUCCESS_RESPONSES = _ok_response(
     MarketplaceAdminReportListApiResponse,
     "Paginated resident reports for the organization (reason as display text).",
+)
+REPORT_REVIEW_UPHOLD_SUCCESS_RESPONSES = _ok_response(
+    MarketplaceAdminReportReviewApiResponse,
+    "Listing soft-removed and open reports marked upheld.",
 )
 
 
@@ -198,6 +205,75 @@ async def list_marketplace_admin_reports(
         page_size=query.page_size,
         message_key="marketplace.success.reports_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
+    )
+
+
+@handle_api_exceptions("review marketplace admin report")
+@router.post(
+    "/reports/{report_id}/review",
+    status_code=http_status.HTTP_200_OK,
+    summary="Dismiss or uphold a resident report (Reported tab)",
+    response_model=None,
+    responses=REPORT_REVIEW_UPHOLD_SUCCESS_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["audit_required"],
+    table_name="marketplace_reports",
+    category="MARKETPLACE",
+)
+async def review_marketplace_admin_report(
+    request: Request,
+    report_id: str = Path(..., description="Report identifier (UUID string)."),
+    project_id: str | None = OPTIONAL_PROJECT_ID,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: AdminReviewMarketplaceReportRequest = Body(...),
+):
+    """Dismiss = false report. Uphold = soft-delete listing and close open reports."""
+    user_context = await ensure_staff_project_access_optional(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=MARKETPLACE_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
+    data = await service.review_report_admin(
+        report_id=report_id,
+        decision=body.decision,
+        removal_note=body.removal_note,
+        project_id=project_id,
+    )
+    upheld = body.decision == MarketplaceReportDecision.UPHOLD
+    set_audit_context(
+        request,
+        user_context,
+        project_id=project_id or (data.get("report") or data).get("project_id"),
+        table="marketplace_reports",
+        requested_id=report_id,
+        description=(
+            f"Upheld marketplace report and removed listing: {report_id}"
+            if upheld
+            else f"Dismissed marketplace report: {report_id}"
+        ),
+        risk_level="low",
+        new_data=data,
+    )
+    if upheld:
+        return success_response(
+            request=request,
+            message_key="marketplace.success.report_upheld",
+            custom_code=CustomStatusCode.SUCCESS,
+            data=data,
+        )
+    return success_response(
+        request=request,
+        message_key="marketplace.success.report_dismissed",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data["report"],
     )
 
 
