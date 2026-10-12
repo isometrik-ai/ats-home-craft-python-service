@@ -1050,6 +1050,80 @@ class MarketplaceRepository(BaseRepository):
             out.append(item)
         return out, int(total or 0)
 
+    async def get_admin_report(
+        self,
+        *,
+        organization_id: str,
+        report_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """One staff Reported-tab row, or None if outside org/project scope."""
+        where = ["r.organization_id = $1::uuid", "r.id = $2::uuid"]
+        params: list[Any] = [organization_id, report_id]
+        if project_id:
+            params.append(project_id)
+            where.append(f"r.project_id = ${len(params)}::uuid")
+        where_sql = " AND ".join(where)
+        joins = """
+            FROM marketplace_reports r
+            JOIN marketplace_listings l
+              ON l.id = r.listing_id
+             AND l.organization_id = r.organization_id
+            JOIN units listing_unit
+              ON listing_unit.id = l.unit_id
+             AND listing_unit.organization_id = l.organization_id
+            JOIN contacts reporter
+              ON reporter.id = r.reporter_contact_id
+             AND reporter.organization_id = r.organization_id
+            LEFT JOIN LATERAL (
+                SELECT u.unit_label, u.code
+                  FROM contact_units cu
+                  JOIN units u
+                    ON u.id = cu.unit_id
+                   AND u.organization_id = cu.organization_id
+                 WHERE cu.organization_id = r.organization_id
+                   AND cu.contact_id = r.reporter_contact_id
+                   AND cu.status = 'active'::contact_unit_status
+                 ORDER BY cu.is_default_login DESC,
+                          cu.is_primary DESC,
+                          cu.sort_order ASC
+                 LIMIT 1
+            ) reporter_unit ON true
+        """
+        row = await self.db_connection.fetchrow(
+            f"""
+            SELECT r.id::text AS id,
+                   r.project_id::text AS project_id,
+                   r.listing_id::text AS listing_id,
+                   r.reason::text AS reason,
+                   r.status::text AS status,
+                   r.created_at,
+                   l.title,
+                   l.category,
+                   l.media,
+                   listing_unit.unit_label AS listing_unit_label,
+                   listing_unit.code AS listing_unit_code,
+                   reporter.first_name AS reporter_first_name,
+                   reporter.last_name AS reporter_last_name,
+                   reporter_unit.unit_label AS reporter_unit_label,
+                   reporter_unit.code AS reporter_unit_code,
+                   (
+                       SELECT count(*)::int
+                         FROM marketplace_reports r2
+                        WHERE r2.organization_id = r.organization_id
+                          AND r2.listing_id = r.listing_id
+                   ) AS listing_report_count
+            {joins}
+            WHERE {where_sql}
+            """,
+            *params,
+        )
+        if not row:
+            return None
+        item = dict(row)
+        item["media"] = _decode_media(item.pop("media", None))
+        return item
+
     async def review_report(
         self,
         *,
@@ -1071,6 +1145,33 @@ class MarketplaceRepository(BaseRepository):
             """,
             organization_id,
             report_id,
+            status,
+            reviewed_at,
+            reviewed_by_user_id,
+        )
+
+    async def review_open_reports_for_listing(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        status: str,
+        reviewed_by_user_id: str,
+        reviewed_at: datetime,
+    ) -> None:
+        """Close every open report on a listing (after staff remove from Reported tab)."""
+        await self.db_connection.execute(
+            """
+            UPDATE marketplace_reports
+               SET status = $3::marketplace_report_status,
+                   reviewed_at = $4,
+                   reviewed_by_user_id = $5::uuid
+             WHERE organization_id = $1::uuid
+               AND listing_id = $2::uuid
+               AND status = 'open'::marketplace_report_status
+            """,
+            organization_id,
+            listing_id,
             status,
             reviewed_at,
             reviewed_by_user_id,
