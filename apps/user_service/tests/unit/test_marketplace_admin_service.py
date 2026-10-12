@@ -139,6 +139,8 @@ async def test_get_listing_admin_builds_history_and_unit_stats():
         }
     )
     data = await svc.get_listing_admin(listing_id="listing-1")
+    assert data["isometric_id"] == "B-1104"
+    assert data["unit_id"] == "unit-1"
     assert data["listings_from_unit_total"] == 3
     assert data["removed_before_count"] == 1
     assert data["history"][0]["event"] == "posted"

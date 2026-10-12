@@ -74,6 +74,8 @@ _EXAMPLE_ADMIN_CARD = {
 
 _EXAMPLE_ADMIN_DETAIL = {
     **_EXAMPLE_ADMIN_CARD,
+    "isometric_id": "B-1104",
+    "unit_id": _EXAMPLE_UNIT_ID,
     "description": "Used about a year. Pickup from Tower B.",
     "purchase_year": 2025,
     "age_years": 1,
@@ -648,6 +650,14 @@ class MarketplaceAdminListingDetail(MarketplaceAdminListingCard):
         json_schema_extra={"example": _EXAMPLE_ADMIN_DETAIL},
     )
 
+    isometric_id: str | None = Field(
+        default=None,
+        description="Pickup unit code for the admin drawer header (e.g. BS-0981).",
+    )
+    unit_id: str | None = Field(
+        default=None,
+        description="Pickup unit UUID (same flat as collection point).",
+    )
     description: str | None = None
     purchase_year: int | None = None
     age_years: int | None = None

@@ -91,6 +91,7 @@ def test_marketplace_admin_response_schemas_are_typed():
     assert "project_id" in MarketplaceAdminListingCard.model_fields
     assert "history" in MarketplaceAdminListingDetail.model_fields
     assert "removal_note" in MarketplaceAdminListingDetail.model_fields
+    assert "isometric_id" in MarketplaceAdminListingDetail.model_fields
     assert "categories" in MarketplaceCatalogData.model_fields
     list_example = MarketplaceAdminListApiResponse.model_config["json_schema_extra"]["example"]
     assert list_example["data"][0]["title"] == "Study table with chair"

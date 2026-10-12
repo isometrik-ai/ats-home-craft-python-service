@@ -25,6 +25,7 @@ from apps.user_service.app.services.marketplace_service import (
     _year,
     cover_path,
     flat_label,
+    isometric_id,
     listing_media,
     public_name,
 )
@@ -427,6 +428,8 @@ class MarketplaceAdminService:
             age_years = max(0, _now().year - int(year))
         card.update(
             {
+                "isometric_id": isometric_id(row.get("unit_label"), row.get("unit_code")),
+                "unit_id": row.get("unit_id"),
                 "description": row.get("description"),
                 "purchase_year": year,
                 "age_years": age_years,
