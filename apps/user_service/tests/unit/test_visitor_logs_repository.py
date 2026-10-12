@@ -432,7 +432,9 @@ async def test_list_logs_pass_resident_uses_creator_name():
         page_size=20,
     )
     count_query, _ = conn.fetchval_calls[0]
-    assert "p.created_by_contact_id::text AS resident_contact_id" in count_query
+    assert "AS resident_contact_id" in count_query
+    assert "dhl_primary.linked_by_contact_id" in count_query
+    assert "dh.submitted_by_contact_id" in count_query
     assert "WHEN 'Owner' THEN 1" not in count_query
 
 

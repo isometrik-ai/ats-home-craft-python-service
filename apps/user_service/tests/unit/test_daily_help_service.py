@@ -2430,6 +2430,52 @@ async def test_resolve_contact_and_submitted_by_name():
 
 
 @pytest.mark.asyncio
+async def test_resolve_primary_household_context_uses_profile_then_link():
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.repo = MagicMock()
+    svc.repo.get_profile = AsyncMock(
+        return_value={
+            "submitted_by_contact_id": "contact-1",
+            "submitted_unit_id": "unit-1",
+            "submitted_unit_label": "3101",
+        }
+    )
+    svc.repo.list_active_links_for_profile = AsyncMock()
+    svc._resolve_contact_name = AsyncMock(return_value="Swati Waghmare")
+
+    ctx = await svc.resolve_primary_household_context(
+        project_id="project-1",
+        profile_id="profile-1",
+    )
+    assert ctx["created_by_contact_id"] == "contact-1"
+    assert ctx["unit_id"] == "unit-1"
+    assert ctx["unit_label"] == "3101"
+    assert ctx["requester_name"] == "Swati Waghmare"
+    svc.repo.list_active_links_for_profile.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_profile_created_by_name_falls_back_to_resident_contact():
+    """Resident creators are not org members; use submitter contact for created_by_name."""
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.members_repo = MagicMock()
+    svc.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
+    svc.contacts_repo = MagicMock()
+    svc.contacts_repo.get_contact_details = AsyncMock(
+        return_value={"first_name": "Swati", "last_name": "Waghmare"}
+    )
+
+    name = await svc._resolve_profile_created_by_name(
+        {
+            "created_by_user_id": "resident-user-1",
+            "submitted_by_user_id": "resident-user-1",
+            "submitted_by_contact_id": "contact-1",
+        }
+    )
+    assert name == "Swati Waghmare"
+
+
+@pytest.mark.asyncio
 async def test_ensure_project_unit_rejects_mismatch():
     svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
     svc.setup_service = MagicMock()
@@ -2927,6 +2973,7 @@ async def test_approve_profile_skips_duplicate_auto_link():
     svc.passes_repo.insert_daily_help = AsyncMock(return_value={"id": "pass-1"})
     svc._resolve_created_by_name = AsyncMock(return_value=None)
     svc._resolve_submitted_by_name = AsyncMock(return_value="Resident")
+    svc._resolve_profile_created_by_name = AsyncMock(return_value=None)
 
     await svc.approve_profile(project_id="project-1", profile_id="profile-pending")
     svc.repo.insert_link.assert_not_awaited()

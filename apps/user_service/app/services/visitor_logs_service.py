@@ -37,6 +37,7 @@ from apps.user_service.app.schemas.visitor_logs import (
     VisitorLogExportQuery,
     VisitorLogMonthlyReportQuery,
 )
+from apps.user_service.app.services.daily_help_service import DailyHelpService
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.common_utils import UserContext
@@ -84,6 +85,33 @@ class VisitorLogsService:
             user_context=user_context,
         )
         self._members_repo = OrganizationMemberRepository(db_connection)
+        self._daily_help_service = DailyHelpService(
+            db_connection=db_connection,
+            user_context=user_context,
+        )
+
+    async def _daily_help_pass_context(
+        self,
+        *,
+        row: dict[str, Any],
+        project_id: str,
+    ) -> tuple[dict[str, Any], str | None]:
+        """Merge daily help household context onto a pass row via DailyHelpService."""
+        profile_id = self._optional_id(row.get("daily_help_id"))
+        if not profile_id:
+            return row, None
+        if row.get("created_by_contact_id") and row.get("unit_id"):
+            return row, None
+
+        ctx = await self._daily_help_service.resolve_primary_household_context(
+            project_id=project_id,
+            profile_id=profile_id,
+        )
+        enriched = dict(row)
+        for field in ("created_by_contact_id", "unit_id", "unit_label"):
+            if not enriched.get(field) and ctx.get(field):
+                enriched[field] = ctx[field]
+        return enriched, ctx.get("requester_name")
 
     @staticmethod
     def _format_person_name(
@@ -938,13 +966,18 @@ class VisitorLogsService:
                 row_project_id=self._optional_id(row.get("project_id")),
                 project_id=project_id,
             )
+            row, requester_name = await self._daily_help_pass_context(
+                row=row,
+                project_id=project_id,
+            )
+            created_by_label = self._contact_created_by(row) or requester_name
             event_rows = await self.events_repo.list_by_pass(
                 organization_id=org_id,
                 pass_id=pass_id,
             )
             events = await self._passes_service._normalize_events(
                 event_rows,
-                created_by=self._contact_created_by(row),
+                created_by=created_by_label,
             )
             detail = self._passes_service._normalize_pass(
                 row,
@@ -966,7 +999,7 @@ class VisitorLogsService:
             )
             return self._enrich_detail_fields(
                 detail=detail,
-                created_by=self._contact_created_by(row),
+                created_by=created_by_label,
                 guard_user_id=guard_user_id,
                 guard_name=guard_name,
                 pass_image_url=image_fields["pass_image_url"],

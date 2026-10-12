@@ -297,7 +297,7 @@ class PassesRepository(BaseRepository):
                 $11, $12, $13::pass_validity_type,
                 $14, $15, $16, $17,
                 $18::pass_status, $19, $20, $21,
-                NULL, $22::uuid
+                $22::uuid, $23::uuid
             )
             RETURNING id::text AS id
             """,
@@ -322,6 +322,7 @@ class PassesRepository(BaseRepository):
             data["code"],
             data.get("pass_image_path"),
             data.get("notes"),
+            data.get("created_by_contact_id"),
             data["created_by_user_id"],
         )
         return dict(row)

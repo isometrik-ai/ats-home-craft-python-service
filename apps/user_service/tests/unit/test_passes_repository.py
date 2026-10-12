@@ -394,6 +394,7 @@ async def test_insert_daily_help_pass():
     query, _ = conn.fetchrow_calls[0]
     assert "daily_help_id" in query
     assert "NULL, NULL" in query.replace("\n", " ")
+    assert "$22::uuid, $23::uuid" in query.replace("\n", " ")
 
 
 @pytest.mark.asyncio

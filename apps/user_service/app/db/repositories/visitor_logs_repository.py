@@ -37,6 +37,24 @@ TRIM(
 )
 """
 
+# Daily help passes are project-scoped (p.unit_id / p.created_by_contact_id are NULL).
+# Resolve flat and requester from household links or submission metadata on the profile.
+_DAILY_HELP_REQUESTER_CONTACT_SQL = """
+COALESCE(
+  p.created_by_contact_id,
+  dhl_primary.linked_by_contact_id,
+  dh.submitted_by_contact_id
+)
+"""
+
+_DAILY_HELP_VISITED_UNIT_SQL = """
+COALESCE(
+  p.unit_id,
+  dhl_primary.unit_id,
+  dh.submitted_unit_id
+)
+"""
+
 _UNION_OUTPUT_COLUMNS = """
   source,
   pass_id,
@@ -377,6 +395,8 @@ class VisitorLogsRepository(BaseRepository):
     @classmethod
     def _pass_resident_select_columns(cls) -> str:
         """SQL columns for the pass requester on the visited flat."""
+        contact_expr = _DAILY_HELP_REQUESTER_CONTACT_SQL
+        unit_expr = _DAILY_HELP_VISITED_UNIT_SQL
         person_name = """
 TRIM(
     COALESCE(creator.prefix, '') || ' ' ||
@@ -385,17 +405,17 @@ TRIM(
 )
 """
         return f"""
-              p.created_by_contact_id::text AS resident_contact_id,
+              ({contact_expr})::text AS resident_contact_id,
               CASE
-                WHEN p.created_by_contact_id IS NOT NULL THEN {person_name}
+                WHEN ({contact_expr}) IS NOT NULL THEN {person_name}
                 ELSE NULL
               END AS resident_person_name,
               CASE
-                WHEN p.created_by_contact_id IS NOT NULL AND p.unit_id IS NOT NULL THEN {
+                WHEN ({contact_expr}) IS NOT NULL AND ({unit_expr}) IS NOT NULL THEN {
             cls._contact_role_sql(
                 org_expr="p.organization_id",
-                contact_expr="p.created_by_contact_id",
-                unit_expr="p.unit_id",
+                contact_expr=f"({contact_expr})",
+                unit_expr=f"({unit_expr})",
             )
         }
                 ELSE NULL
@@ -523,12 +543,27 @@ TRIM(
               dhc.name AS daily_help_category_name,
               p.daily_help_id::text AS daily_help_profile_id
             FROM passes p
-            LEFT JOIN units u ON u.id = p.unit_id
-            LEFT JOIN towers t ON t.id = u.tower_id
-            LEFT JOIN contacts creator ON creator.id = p.created_by_contact_id
             LEFT JOIN daily_help_profiles dh
               ON dh.id = p.daily_help_id
              AND dh.organization_id = p.organization_id
+            LEFT JOIN LATERAL (
+                SELECT
+                  dhl.unit_id,
+                  dhl.linked_by_contact_id
+                FROM daily_help_household_links dhl
+                WHERE p.daily_help_id IS NOT NULL
+                  AND dhl.organization_id = p.organization_id
+                  AND dhl.daily_help_profile_id = p.daily_help_id
+                  AND dhl.status = 'active'::daily_help_household_link_status
+                ORDER BY dhl.started_at ASC, dhl.created_at ASC
+                LIMIT 1
+            ) dhl_primary ON true
+            LEFT JOIN units u
+              ON u.id = {_DAILY_HELP_VISITED_UNIT_SQL.strip()}
+            LEFT JOIN towers t ON t.id = u.tower_id
+            LEFT JOIN contacts creator
+              ON creator.id = {_DAILY_HELP_REQUESTER_CONTACT_SQL.strip()}
+             AND creator.organization_id = p.organization_id
             LEFT JOIN daily_help_categories dhc
               ON dhc.id = dh.category_id
              AND dhc.organization_id = dh.organization_id

@@ -361,6 +361,63 @@ class DailyHelpService:
             return await self._resolve_contact_name(str(row["submitted_by_contact_id"]))
         return await self._resolve_created_by_name(row.get("submitted_by_user_id"))
 
+    async def _resolve_profile_created_by_name(self, row: dict[str, Any]) -> str | None:
+        """Resolve profile creator name (staff org member or resident contact)."""
+        name = await self._resolve_created_by_name(row.get("created_by_user_id"))
+        if name:
+            return name
+        created_user_id = str(row.get("created_by_user_id") or "").strip()
+        submitted_user_id = str(row.get("submitted_by_user_id") or "").strip()
+        if row.get("submitted_by_contact_id") and (
+            not created_user_id or created_user_id == submitted_user_id
+        ):
+            return await self._resolve_contact_name(str(row["submitted_by_contact_id"]))
+        return None
+
+    async def resolve_primary_household_context(
+        self,
+        *,
+        project_id: str,
+        profile_id: str,
+    ) -> dict[str, str | None]:
+        """Primary flat and linking resident for gate/admin visitor surfaces."""
+        org_id = self.organization_id
+        assert org_id
+        profile = await self.repo.get_profile(
+            organization_id=org_id,
+            project_id=project_id,
+            profile_id=profile_id,
+        )
+        contact_id = str(profile.get("submitted_by_contact_id") or "").strip() if profile else ""
+        unit_id = str(profile.get("submitted_unit_id") or "").strip() if profile else ""
+        unit_label = (
+            str(profile.get("submitted_unit_label") or "").strip() if profile else ""
+        ) or None
+
+        if not contact_id or not unit_id:
+            links = await self.repo.list_active_links_for_profile(
+                organization_id=org_id,
+                profile_id=profile_id,
+            )
+            if links:
+                primary = links[0]
+                if not contact_id:
+                    contact_id = str(primary.get("linked_by_contact_id") or "").strip()
+                if not unit_id:
+                    unit_id = str(primary.get("unit_id") or "").strip()
+                if not unit_label:
+                    unit_label = str(primary.get("unit_label") or "").strip() or None
+
+        contact_id = contact_id or None
+        unit_id = unit_id or None
+        requester_name = await self._resolve_contact_name(contact_id) if contact_id else None
+        return {
+            "created_by_contact_id": contact_id,
+            "unit_id": unit_id,
+            "unit_label": unit_label,
+            "requester_name": requester_name,
+        }
+
     async def _get_active_category_or_raise(
         self,
         *,
@@ -551,6 +608,8 @@ class DailyHelpService:
         photo_path: str | None,
         gate_passcode: str,
         actor_user_id: str | None,
+        requester_contact_id: str | None = None,
+        requester_user_id: str | None = None,
     ) -> str:
         """Issue recurring pass, link profile, and append pass audit events."""
         pass_row = await self._issue_recurring_pass(
@@ -561,6 +620,8 @@ class DailyHelpService:
             phone_number=phone_number,
             gate_passcode=gate_passcode,
             photo_path=photo_path,
+            created_by_contact_id=requester_contact_id,
+            created_by_user_id=requester_user_id,
         )
         pass_id = str(pass_row["id"])
         await self.repo.link_pass_id(
@@ -616,11 +677,13 @@ class DailyHelpService:
         phone_number: str,
         gate_passcode: str,
         photo_path: str | None,
+        created_by_contact_id: str | None = None,
+        created_by_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Create a recurring daily help pass for a profile."""
         now = datetime.now(timezone.utc)
         valid_until = now + timedelta(days=365 * _RECURRING_PASS_YEARS)
-        user_id = self.user_context.user_id
+        actor_user_id = created_by_user_id or self.user_context.user_id
         return await self.passes_repo.insert_daily_help(
             {
                 "organization_id": self.organization_id,
@@ -637,7 +700,8 @@ class DailyHelpService:
                 "is_private": False,
                 "code": gate_passcode,
                 "pass_image_path": photo_path,
-                "created_by_user_id": str(user_id) if user_id else None,
+                "created_by_contact_id": created_by_contact_id,
+                "created_by_user_id": str(actor_user_id) if actor_user_id else None,
             }
         )
 
@@ -693,6 +757,8 @@ class DailyHelpService:
             phone_number=str(row["phone_number"]),
             gate_passcode=str(row["gate_passcode"]),
             photo_path=row.get("photo_path"),
+            created_by_contact_id=str(row.get("submitted_by_contact_id") or "").strip() or None,
+            created_by_user_id=str(row.get("submitted_by_user_id") or "").strip() or None,
         )
         await self.repo.link_pass_id(
             organization_id=self.organization_id,
@@ -1154,7 +1220,7 @@ class DailyHelpService:
         else:
             phone = self._format_phone(isd_code=phone_isd, phone_number=phone_number)
 
-        created_by_name = await self._resolve_created_by_name(row.get("created_by_user_id"))
+        created_by_name = await self._resolve_profile_created_by_name(row)
 
         return DailyHelpDetailResponse(
             id=profile_id,
@@ -2003,6 +2069,9 @@ class DailyHelpService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
+        submitted_unit_id = str(updated.get("submitted_unit_id") or "").strip()
+        submitted_contact_id = str(updated.get("submitted_by_contact_id") or "").strip()
+        submitted_user_id = str(updated.get("submitted_by_user_id") or "").strip() or None
         await self._activate_profile_with_pass(
             project_id=project_id,
             profile_id=profile_id,
@@ -2012,9 +2081,9 @@ class DailyHelpService:
             photo_path=updated.get("photo_path"),
             gate_passcode=gate_passcode,
             actor_user_id=str(user_id) if user_id else None,
+            requester_contact_id=submitted_contact_id or None,
+            requester_user_id=submitted_user_id,
         )
-        submitted_unit_id = str(updated.get("submitted_unit_id") or "").strip()
-        submitted_contact_id = str(updated.get("submitted_by_contact_id") or "").strip()
         if submitted_unit_id and submitted_contact_id:
             if not await self.repo.has_active_link(
                 organization_id=self.organization_id,
