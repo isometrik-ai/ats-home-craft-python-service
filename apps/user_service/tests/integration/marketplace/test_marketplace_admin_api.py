@@ -89,8 +89,10 @@ def test_marketplace_admin_response_schemas_are_typed():
     }
     assert "can_remove" in MarketplaceAdminListingCard.model_fields
     assert "project_id" in MarketplaceAdminListingCard.model_fields
-    assert "history" in MarketplaceAdminListingDetail.model_fields
+    assert "history" not in MarketplaceAdminListingDetail.model_fields
     assert "removal_note" in MarketplaceAdminListingDetail.model_fields
+    assert "isometrik_id" in MarketplaceAdminListingDetail.model_fields
+    assert "isometrik_id" not in MarketplaceAdminListingCard.model_fields
     assert "categories" in MarketplaceCatalogData.model_fields
     list_example = MarketplaceAdminListApiResponse.model_config["json_schema_extra"]["example"]
     assert list_example["data"][0]["title"] == "Study table with chair"
@@ -365,7 +367,7 @@ async def test_get_marketplace_admin_listing(monkeypatch, client):
         del _self
         assert listing_id == LISTING_ID
         assert project_id is None
-        return {**_ADMIN_CARD, "history": [{"event": "posted"}]}
+        return {**_ADMIN_CARD, "isometrik_id": "6abdf6ad9126be00010e596f"}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_listing_admin",
@@ -375,7 +377,7 @@ async def test_get_marketplace_admin_listing(monkeypatch, client):
     response = await client.get(f"/v1/marketplace/admin/listings/{LISTING_ID}")
     payload = assert_success(response)
     assert payload["data"]["id"] == LISTING_ID
-    assert payload["data"]["history"][0]["event"] == "posted"
+    assert payload["data"]["isometrik_id"] == "6abdf6ad9126be00010e596f"
 
 
 @pytest.mark.asyncio
@@ -389,7 +391,7 @@ async def test_get_marketplace_admin_listing_filters_project(monkeypatch, client
         del _self
         assert listing_id == LISTING_ID
         assert project_id == PROJECT_ID
-        return {**_ADMIN_CARD, "history": [{"event": "posted"}]}
+        return {**_ADMIN_CARD, "isometrik_id": "6abdf6ad9126be00010e596f"}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_listing_admin",

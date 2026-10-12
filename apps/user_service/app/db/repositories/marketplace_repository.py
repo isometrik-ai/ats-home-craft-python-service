@@ -99,6 +99,7 @@ LEFT JOIN LATERAL (
 
 _ADMIN_LISTING_COLUMNS = f"""
     {_LISTING_COLUMNS},
+    seller.isometrik_user_id AS seller_isometrik_user_id,
     remover_staff.first_name AS removed_by_staff_first_name,
     remover_staff.last_name AS removed_by_staff_last_name,
     remover_contact.first_name AS removed_by_contact_first_name,
