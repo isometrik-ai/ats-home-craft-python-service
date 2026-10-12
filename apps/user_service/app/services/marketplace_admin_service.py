@@ -9,6 +9,7 @@ import asyncpg
 from apps.user_service.app.db.repositories.marketplace_repository import (
     MarketplaceRepository,
 )
+from apps.user_service.app.schemas.enums.marketplace import MarketplaceReportDecision
 from apps.user_service.app.schemas.marketplace import (
     AdminMarketplaceListQuery,
     AdminMarketplaceReportListQuery,
@@ -85,6 +86,88 @@ class MarketplaceAdminService:
         )
         return {"items": [self._admin_report_row(row) for row in rows], "total": total}
 
+    def _staff_user_id(self) -> str:
+        """Authenticated staff user id for report review audit fields."""
+        user_id = self.user_context.user_id
+        if not user_id:
+            raise ValidationException(
+                message_key="auth.errors.session_not_found",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            )
+        return str(user_id)
+
+    async def _open_admin_report(self, *, report_id: str, project_id: str | None) -> dict[str, Any]:
+        """Load one open report for moderation, scoped to org and optional project."""
+        row = await self.repo.get_admin_report(
+            organization_id=self._org(),
+            report_id=report_id,
+            project_id=project_id,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="marketplace.errors.report_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if row["status"] != "open":
+            raise ValidationException(
+                message_key="marketplace.errors.report_closed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return row
+
+    async def dismiss_report(
+        self, *, report_id: str, project_id: str | None = None
+    ) -> dict[str, Any]:
+        """False reporting: close one open report; listing unchanged."""
+        await self._open_admin_report(report_id=report_id, project_id=project_id)
+        reviewed_at = _now()
+        await self.repo.review_report(
+            organization_id=self._org(),
+            report_id=report_id,
+            status="dismissed",
+            reviewed_by_user_id=self._staff_user_id(),
+            reviewed_at=reviewed_at,
+        )
+        updated = await self.repo.get_admin_report(
+            organization_id=self._org(),
+            report_id=report_id,
+            project_id=project_id,
+        )
+        assert updated
+        return self._admin_report_row(updated)
+
+    async def review_report_admin(
+        self,
+        *,
+        report_id: str,
+        decision: MarketplaceReportDecision,
+        removal_note: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Reported tab: dismiss (false report) or uphold (soft-remove listing + close reports)."""
+        if decision == MarketplaceReportDecision.DISMISS:
+            return {"report": await self.dismiss_report(report_id=report_id, project_id=project_id)}
+        report = await self._open_admin_report(report_id=report_id, project_id=project_id)
+        note = (removal_note or "").strip()
+        if not note:
+            raise ValidationException(
+                message_key="marketplace.errors.removal_note_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        listing = await self.remove_listing_admin(
+            listing_id=str(report["listing_id"]),
+            removal_note=note,
+            project_id=project_id or report.get("project_id"),
+            report_id=report_id,
+        )
+        updated = await self.repo.get_admin_report(
+            organization_id=self._org(),
+            report_id=report_id,
+            project_id=project_id,
+        )
+        assert updated
+        return {"report": self._admin_report_row(updated), "listing": listing}
+
     async def get_listing_admin(
         self, *, listing_id: str, project_id: str | None = None
     ) -> dict[str, Any]:
@@ -107,31 +190,139 @@ class MarketplaceAdminService:
         )
         return self._admin_detail(listing, stats)
 
-    async def remove_listing_admin(
-        self,
-        *,
-        listing_id: str,
-        removal_note: str,
-        project_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Draft: hard-delete. Live: status removed (same as seller take-down)."""
+    @staticmethod
+    def _require_removal_note(removal_note: str) -> str:
+        """Non-empty staff note for take-down."""
         note = removal_note.strip()
         if not note:
             raise ValidationException(
                 message_key="marketplace.errors.removal_note_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        actor_user_id = self.user_context.user_id
-        if not actor_user_id:
-            raise ValidationException(
-                message_key="auth.errors.session_not_found",
-                custom_code=CustomStatusCode.UNAUTHORIZED,
+        return note
+
+    async def _scope_project_for_reported_remove(
+        self,
+        *,
+        listing_id: str,
+        project_id: str | None,
+        report_id: str | None,
+    ) -> str | None:
+        """Resolve project scope when remove is driven from an open report (uphold)."""
+        if not report_id:
+            return project_id
+        report = await self._open_admin_report(
+            report_id=report_id,
+            project_id=project_id,
+        )
+        if str(report["listing_id"]) != str(listing_id):
+            raise NotFoundException(
+                message_key="marketplace.errors.report_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
             )
+        return project_id or report.get("project_id")
+
+    async def _uphold_open_reports_if_needed(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        report_id: str | None,
+    ) -> None:
+        """After staff remove from Reported tab, close all open reports as upheld."""
+        if not report_id:
+            return
+        await self.repo.review_open_reports_for_listing(
+            organization_id=organization_id,
+            listing_id=listing_id,
+            status="upheld",
+            reviewed_by_user_id=self._staff_user_id(),
+            reviewed_at=_now(),
+        )
+
+    async def _admin_remove_draft_listing(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        listing: dict[str, Any],
+        scope_project: str | None,
+        report_id: str | None,
+    ) -> dict[str, Any]:
+        """Hard-delete a draft from the staff console."""
+        deleted = await self.repo.delete_draft_listing_admin(
+            organization_id=organization_id,
+            listing_id=listing_id,
+            project_id=scope_project,
+        )
+        if not deleted:
+            raise NotFoundException(
+                message_key="marketplace.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        await self._uphold_open_reports_if_needed(
+            organization_id=organization_id,
+            listing_id=listing_id,
+            report_id=report_id,
+        )
+        return {
+            "id": listing_id,
+            "status": "deleted",
+            "project_id": listing.get("project_id"),
+            "title": listing.get("title"),
+        }
+
+    async def _admin_remove_live_listing(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+        removal_note: str,
+        removed_by_user_id: str,
+        scope_project: str | None,
+        report_id: str | None,
+    ) -> dict[str, Any]:
+        """Soft-remove a live listing from the staff console."""
+        updated = await self.repo.remove_live_listing_admin(
+            organization_id=organization_id,
+            listing_id=listing_id,
+            removal_note=removal_note,
+            removed_by_user_id=removed_by_user_id,
+            removed_at=_now(),
+            project_id=scope_project,
+        )
+        if not updated:
+            raise ValidationException(
+                message_key="marketplace.errors.not_live",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        await self._uphold_open_reports_if_needed(
+            organization_id=organization_id,
+            listing_id=listing_id,
+            report_id=report_id,
+        )
+        return await self.get_listing_admin(listing_id=listing_id, project_id=scope_project)
+
+    async def remove_listing_admin(
+        self,
+        *,
+        listing_id: str,
+        removal_note: str,
+        project_id: str | None = None,
+        report_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Draft: hard-delete. Live: status removed (same as seller take-down)."""
+        note = self._require_removal_note(removal_note)
+        scope_project = await self._scope_project_for_reported_remove(
+            listing_id=listing_id,
+            project_id=project_id,
+            report_id=report_id,
+        )
         org_id = self._org()
         listing = await self.repo.get_admin_listing(
             organization_id=org_id,
             listing_id=listing_id,
-            project_id=project_id,
+            project_id=scope_project,
         )
         if not listing:
             raise NotFoundException(
@@ -139,41 +330,26 @@ class MarketplaceAdminService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         if listing["status"] == "draft":
-            deleted = await self.repo.delete_draft_listing_admin(
+            return await self._admin_remove_draft_listing(
                 organization_id=org_id,
                 listing_id=listing_id,
-                project_id=project_id,
+                listing=listing,
+                scope_project=scope_project,
+                report_id=report_id,
             )
-            if not deleted:
-                raise NotFoundException(
-                    message_key="marketplace.errors.not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
-            return {
-                "id": listing_id,
-                "status": "deleted",
-                "project_id": listing.get("project_id"),
-                "title": listing.get("title"),
-            }
         if listing["status"] != "live":
             raise ValidationException(
                 message_key="marketplace.errors.not_live",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        updated = await self.repo.remove_live_listing_admin(
+        return await self._admin_remove_live_listing(
             organization_id=org_id,
             listing_id=listing_id,
             removal_note=note,
-            removed_by_user_id=actor_user_id,
-            removed_at=_now(),
-            project_id=project_id,
+            removed_by_user_id=self._staff_user_id(),
+            scope_project=scope_project,
+            report_id=report_id,
         )
-        if not updated:
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return await self.get_listing_admin(listing_id=listing_id, project_id=project_id)
 
     def _admin_report_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a joined report row to the staff table shape."""

@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceListingKind,
     MarketplaceMediaKind,
     MarketplacePriceBand,
+    MarketplaceReportDecision,
     MarketplaceReportReason,
     MarketplaceReportStatus,
     MarketplaceSaleRating,
@@ -358,6 +359,42 @@ class AdminRemoveListingRequest(BaseModel):
         max_length=500,
         description="Note the seller will see. Removal is permanent.",
     )
+
+
+class AdminReviewMarketplaceReportRequest(BaseModel):
+    """Staff decision on one open report (Reported tab: dismiss or remove listing)."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {"decision": "dismiss"},
+                {
+                    "decision": "uphold",
+                    "removal_note": "Not allowed in the society",
+                },
+            ]
+        },
+    )
+
+    decision: MarketplaceReportDecision = Field(
+        ...,
+        description="dismiss = false report; uphold = soft-remove the listing.",
+    )
+    removal_note: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Required when decision is uphold. Shown to the seller.",
+    )
+
+    @model_validator(mode="after")
+    def uphold_requires_removal_note(self) -> AdminReviewMarketplaceReportRequest:
+        """Uphold removes the listing and needs a staff note."""
+        if self.decision == MarketplaceReportDecision.UPHOLD:
+            note = (self.removal_note or "").strip()
+            if not note:
+                raise ValueError("removal_note is required when decision is uphold")
+        return self
 
 
 class MarketplaceCatalogSubtype(BaseModel):
@@ -761,6 +798,64 @@ class MarketplaceAdminReportListApiResponse(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+class MarketplaceAdminReportDismissApiResponse(BaseModel):
+    """API envelope for POST /marketplace/admin/reports/{id}/review (dismiss)."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Report dismissed.",
+                "statusCode": 200,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": {**_EXAMPLE_ADMIN_REPORT_ROW, "status": "dismissed"},
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarketplaceAdminReportRow
+
+
+class MarketplaceAdminReportReviewResult(BaseModel):
+    """Report row plus listing after uphold (remove listing from Reported tab)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    report: MarketplaceAdminReportRow
+    listing: MarketplaceAdminListingDetail
+
+
+class MarketplaceAdminReportReviewApiResponse(BaseModel):
+    """API envelope for POST /marketplace/admin/reports/{id}/review (uphold)."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Listing taken down.",
+                "statusCode": 200,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": {
+                    "report": {**_EXAMPLE_ADMIN_REPORT_ROW, "status": "upheld"},
+                    "listing": {"id": _EXAMPLE_LISTING_ID, "status": "removed"},
+                },
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarketplaceAdminReportReviewResult
 
 
 class MarketplaceAdminRemovedApiResponse(BaseModel):

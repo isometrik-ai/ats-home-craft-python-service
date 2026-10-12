@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from apps.user_service.app.schemas.enums.marketplace import MarketplaceAdminStatus
+from apps.user_service.app.schemas.enums.marketplace import (
+    MarketplaceAdminStatus,
+    MarketplaceReportDecision,
+)
 from apps.user_service.app.schemas.marketplace import AdminMarketplaceListQuery
 from apps.user_service.app.services.marketplace_admin_service import (
     MarketplaceAdminService,
@@ -299,3 +302,110 @@ async def test_remove_listing_admin_passes_project_id():
         project_id="project-1",
     )
     assert svc.repo.remove_live_listing_admin.await_args.kwargs["project_id"] == "project-1"
+
+
+def _report_row(**overrides):
+    base = {
+        "id": "report-1",
+        "listing_id": "listing-1",
+        "project_id": "project-1",
+        "title": "Desk lamp",
+        "category": "furniture",
+        "media": [],
+        "listing_unit_label": "F-0204",
+        "listing_unit_code": "F-0204",
+        "reporter_first_name": "Sneha",
+        "reporter_last_name": "Varma",
+        "reporter_unit_label": "F-0204",
+        "reporter_unit_code": "F-0204",
+        "reason": "sold_but_listed",
+        "status": "open",
+        "created_at": None,
+        "listing_report_count": 1,
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_dismiss_report_closes_open_report_only():
+    svc = _admin_service()
+    svc.user_context.user_id = "staff-1"
+    svc.repo.get_admin_report = AsyncMock(
+        side_effect=[
+            _report_row(),
+            _report_row(status="dismissed"),
+        ]
+    )
+    svc.repo.review_report = AsyncMock()
+    data = await svc.dismiss_report(report_id="report-1")
+    assert data["status"] == "dismissed"
+    svc.repo.review_report.assert_awaited_once()
+    assert svc.repo.review_report.await_args.kwargs["status"] == "dismissed"
+
+
+@pytest.mark.asyncio
+async def test_remove_listing_admin_with_report_id_upholds_open_reports():
+    svc = _admin_service()
+    svc.user_context.user_id = "staff-1"
+    svc.repo.get_admin_report = AsyncMock(return_value=_report_row())
+    svc.repo.remove_live_listing_admin = AsyncMock(return_value=True)
+    svc.repo.get_admin_listing = AsyncMock(
+        side_effect=[
+            _listing(status="live"),
+            _listing(status="removed", removal_note="Not allowed"),
+        ]
+    )
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.count_unit_listing_stats = AsyncMock(
+        return_value={
+            "listings_from_unit_total": 1,
+            "listings_from_unit_active": 0,
+            "removed_before_count": 0,
+        }
+    )
+    svc.repo.review_open_reports_for_listing = AsyncMock()
+    data = await svc.remove_listing_admin(
+        listing_id="listing-1",
+        removal_note="Not allowed",
+        report_id="report-1",
+    )
+    assert data["status"] == "removed"
+    svc.repo.review_open_reports_for_listing.assert_awaited_once()
+    assert svc.repo.review_open_reports_for_listing.await_args.kwargs["status"] == "upheld"
+
+
+@pytest.mark.asyncio
+async def test_review_report_admin_uphold_returns_report_and_listing():
+    svc = _admin_service()
+    svc.user_context.user_id = "staff-1"
+    svc.repo.get_admin_report = AsyncMock(
+        side_effect=[
+            _report_row(),
+            _report_row(),
+            _report_row(status="upheld"),
+        ]
+    )
+    svc.repo.remove_live_listing_admin = AsyncMock(return_value=True)
+    svc.repo.get_admin_listing = AsyncMock(
+        side_effect=[
+            _listing(status="live"),
+            _listing(status="removed", removal_note="Policy"),
+        ]
+    )
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.count_unit_listing_stats = AsyncMock(
+        return_value={
+            "listings_from_unit_total": 1,
+            "listings_from_unit_active": 0,
+            "removed_before_count": 0,
+        }
+    )
+    svc.repo.review_open_reports_for_listing = AsyncMock()
+    data = await svc.review_report_admin(
+        report_id="report-1",
+        decision=MarketplaceReportDecision.UPHOLD,
+        removal_note="Policy",
+    )
+    assert data["report"]["status"] == "upheld"
+    assert data["listing"]["status"] == "removed"
