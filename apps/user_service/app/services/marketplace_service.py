@@ -8,6 +8,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import asyncpg
+from asyncpg import UniqueViolationError
 
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
@@ -16,11 +17,11 @@ from apps.user_service.app.db.repositories.marketplace_repository import (
     MarketplaceRepository,
 )
 from apps.user_service.app.schemas.marketplace import (
-    AdminMarketplaceListQuery,
     BrowseListingsQuery,
     CreateListingRequest,
     ListingMediaInput,
     MarkSoldRequest,
+    ReportListingRequest,
     UpdateListingRequest,
 )
 from apps.user_service.app.services.marketplace_catalog_service import (
@@ -31,7 +32,11 @@ from apps.user_service.app.services.marketplace_geo import (
     haversine_km,
 )
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import (
+    ConflictException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 LIVE_WINDOW = timedelta(days=30)
@@ -39,6 +44,7 @@ SOLD_HISTORY = timedelta(days=365)
 MAX_MEDIA = 8
 MIN_PUBLISH_MEDIA = 1
 PURCHASE_YEAR_MIN = 1980
+REPORT_AUTO_HIDE_THRESHOLD = 3
 _KOLKATA = ZoneInfo("Asia/Kolkata")
 _EDITABLE = frozenset({"draft", "live"})
 _MEDIA_MIMES = {
@@ -137,7 +143,7 @@ def _now() -> datetime:
 
 
 class MarketplaceService:
-    """Listings, saves, and sale feedback."""
+    """Resident listings, saves, reports, and sale feedback."""
 
     def __init__(self, *, db_connection: asyncpg.Connection, user_context: UserContext) -> None:
         self.db_connection = db_connection
@@ -176,6 +182,25 @@ class MarketplaceService:
             )
         return dict(unit)
 
+    async def _ensure_listing_visible_on_board(
+        self,
+        *,
+        listing: dict[str, Any],
+        viewer_contact_id: str,
+    ) -> None:
+        """Non-sellers cannot open listings hidden after three reports."""
+        if str(listing.get("seller_contact_id")) == str(viewer_contact_id):
+            return
+        count = await self.repo.count_reports_for_listing(
+            organization_id=self._org(),
+            listing_id=str(listing["id"]),
+        )
+        if count >= REPORT_AUTO_HIDE_THRESHOLD:
+            raise NotFoundException(
+                message_key="marketplace.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
     async def _require_poster(self, *, contact_id: str, unit_id: str) -> dict[str, Any]:
         """Unit the contact may post from. Owner, tenant, or family."""
         unit = await self._require_unit(contact_id=contact_id, unit_id=unit_id)
@@ -204,6 +229,10 @@ class MarketplaceService:
     async def get_catalog(self) -> dict[str, Any]:
         """Static categories."""
         return MarketplaceCatalogService.get_catalog()
+
+    async def get_report_reason_catalog(self) -> dict[str, Any]:
+        """Static report reasons for the resident report sheet."""
+        return MarketplaceCatalogService.get_report_reasons()
 
     async def create_listing(
         self, *, contact_id: str, body: CreateListingRequest
@@ -608,9 +637,63 @@ class MarketplaceService:
                 message_key="marketplace.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await self._ensure_listing_visible_on_board(
+            listing=listing,
+            viewer_contact_id=contact_id,
+        )
         await self.repo.save_item(
             organization_id=self._org(), contact_id=contact_id, listing_id=listing_id
         )
+
+    async def report_listing(
+        self,
+        *,
+        contact_id: str,
+        listing_id: str,
+        body: ReportListingRequest,
+    ) -> dict[str, Any]:
+        """Send one report to the committee. Three reports hide the listing from browse."""
+        await self._require_unit(contact_id=contact_id, unit_id=body.unit_id)
+        await self.repo.expire_due(organization_id=self._org())
+        listing = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
+        if not listing or listing["status"] != "live":
+            raise NotFoundException(
+                message_key="marketplace.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if str(listing["seller_contact_id"]) == str(contact_id):
+            raise ValidationException(
+                message_key="marketplace.errors.cannot_report_own",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        reason_slug = MarketplaceCatalogService.resolve_report_reason(body.reason.value)
+        try:
+            row = await self.repo.insert_report(
+                organization_id=self._org(),
+                project_id=listing["project_id"],
+                listing_id=listing_id,
+                reporter_contact_id=contact_id,
+                reason=reason_slug,
+            )
+        except UniqueViolationError as exc:
+            raise ConflictException(
+                message_key="marketplace.errors.report_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            ) from exc
+        report_count = await self.repo.count_reports_for_listing(
+            organization_id=self._org(),
+            listing_id=listing_id,
+        )
+        reason_text = MarketplaceCatalogService.report_reason_label(reason_slug)
+        if not reason_text:
+            reason_text = reason_slug.replace("_", " ").strip().title()
+        return {
+            "id": row["id"],
+            "listing_id": listing_id,
+            "reason": reason_text,
+            "listing_report_count": report_count,
+            "listing_hidden": report_count >= REPORT_AUTO_HIDE_THRESHOLD,
+        }
 
     async def unsave(self, *, contact_id: str, listing_id: str, unit_id: str) -> None:
         """Remove a bookmark."""
@@ -655,6 +738,11 @@ class MarketplaceService:
                 message_key="marketplace.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        if not seller:
+            await self._ensure_listing_visible_on_board(
+                listing=listing,
+                viewer_contact_id=contact_id,
+            )
         return await self._detail(listing, viewer_contact_id=contact_id, viewer_project_id=None)
 
     async def list_listings(
@@ -697,226 +785,6 @@ class MarketplaceService:
         )
         items = [self._mine_card(row, len(listing_media(row))) for row in rows]
         return {"items": items, "total": total}
-
-    async def get_admin_summary(self, *, project_id: str | None = None) -> dict[str, int]:
-        """Active, sold, past, and removed counts for the staff header."""
-        await self.repo.expire_due(organization_id=self._org())
-        return await self.repo.get_admin_summary(
-            organization_id=self._org(),
-            project_id=project_id,
-        )
-
-    async def list_listings_admin(
-        self,
-        *,
-        query: AdminMarketplaceListQuery,
-    ) -> dict[str, Any]:
-        """Flat staff list: search, status, and category. Optional society filter."""
-        await self.repo.expire_due(organization_id=self._org())
-        category_slug = MarketplaceCatalogService.parse_filter(query.category, None)[0]
-        rows, total = await self.repo.list_admin_listings(
-            organization_id=self._org(),
-            query=query,
-            category=category_slug,
-        )
-        return {"items": [self._admin_card(row) for row in rows], "total": total}
-
-    async def get_listing_admin(
-        self, *, listing_id: str, project_id: str | None = None
-    ) -> dict[str, Any]:
-        """Staff drawer for one posted listing in the organization."""
-        await self.repo.expire_due(organization_id=self._org())
-        listing = await self.repo.get_admin_listing(
-            organization_id=self._org(),
-            listing_id=listing_id,
-            project_id=project_id,
-        )
-        if not listing:
-            raise NotFoundException(
-                message_key="marketplace.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        stats = await self.repo.count_unit_listing_stats(
-            organization_id=self._org(),
-            unit_id=listing["unit_id"],
-            exclude_listing_id=listing_id,
-        )
-        return self._admin_detail(listing, stats)
-
-    async def remove_listing_admin(
-        self,
-        *,
-        listing_id: str,
-        removal_note: str,
-        project_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Draft: hard-delete. Live: status removed (same as seller take-down)."""
-        note = removal_note.strip()
-        if not note:
-            raise ValidationException(
-                message_key="marketplace.errors.removal_note_required",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        actor_user_id = self.user_context.user_id
-        if not actor_user_id:
-            raise ValidationException(
-                message_key="auth.errors.session_not_found",
-                custom_code=CustomStatusCode.UNAUTHORIZED,
-            )
-        org_id = self._org()
-        listing = await self.repo.get_admin_listing(
-            organization_id=org_id,
-            listing_id=listing_id,
-            project_id=project_id,
-        )
-        if not listing:
-            raise NotFoundException(
-                message_key="marketplace.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        if listing["status"] == "draft":
-            deleted = await self.repo.delete_draft_listing_admin(
-                organization_id=org_id,
-                listing_id=listing_id,
-                project_id=project_id,
-            )
-            if not deleted:
-                raise NotFoundException(
-                    message_key="marketplace.errors.not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
-            return {
-                "id": listing_id,
-                "status": "deleted",
-                "project_id": listing.get("project_id"),
-                "title": listing.get("title"),
-            }
-        if listing["status"] != "live":
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        updated = await self.repo.remove_live_listing_admin(
-            organization_id=org_id,
-            listing_id=listing_id,
-            removal_note=note,
-            removed_by_user_id=actor_user_id,
-            removed_at=_now(),
-            project_id=project_id,
-        )
-        if not updated:
-            raise ValidationException(
-                message_key="marketplace.errors.not_live",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        return await self.get_listing_admin(listing_id=listing_id, project_id=project_id)
-
-    def _admin_card(self, row: dict[str, Any]) -> dict[str, Any]:
-        """One row on the staff listings table."""
-        media = listing_media(row)
-        category_name, subtype_name = MarketplaceCatalogService.labels(
-            str(row["category"]), row.get("subtype")
-        )
-        days_left = None
-        if row["status"] == "live" and row.get("expires_at"):
-            remaining = _as_utc(row["expires_at"]) - _now()
-            days_left = max(0, remaining.days)
-        return {
-            "id": row["id"],
-            "title": row.get("title"),
-            "status": row["status"],
-            "kind": row["kind"],
-            "price_amount": _money(row.get("price_amount")),
-            "category": row["category"],
-            "category_name": category_name,
-            "subtype": row.get("subtype"),
-            "subtype_name": subtype_name,
-            "cover_path": cover_path(media),
-            "resident_name": public_name(row.get("seller_first_name"), row.get("seller_last_name")),
-            "seller_photo_url": row.get("seller_photo_url"),
-            "project_id": row.get("project_id"),
-            "project_name": row.get("project_name"),
-            "unit_label": flat_label(row.get("unit_label"), row.get("unit_code")),
-            "tower_name": row.get("tower_name"),
-            "published_at": row.get("published_at"),
-            "expires_at": row.get("expires_at"),
-            "days_left": days_left,
-            "sold_at": row.get("sold_at"),
-            "removed_at": row.get("removed_at"),
-            "can_remove": row["status"] in ("live", "draft"),
-        }
-
-    def _admin_detail(self, row: dict[str, Any], stats: dict[str, int]) -> dict[str, Any]:
-        """Staff drawer payload, including unit stats and derived history."""
-        card = self._admin_card(row)
-        year = row.get("purchase_year")
-        age_years = None
-        if year is not None:
-            age_years = max(0, _now().year - int(year))
-        card.update(
-            {
-                "description": row.get("description"),
-                "purchase_year": year,
-                "age_years": age_years,
-                "negotiable": row.get("negotiable"),
-                "brand": row.get("brand"),
-                "condition": row.get("condition"),
-                "product_url": row.get("product_url"),
-                "original_price_amount": _money(row.get("original_price_amount")),
-                "original_bill_available": row.get("original_bill_available"),
-                "show_flat_number": row.get("show_flat_number"),
-                "seller_role": row.get("seller_role"),
-                "member_since_year": _year(row.get("seller_role_started_at")),
-                "collection_latitude": _float_or_none(row.get("tower_latitude")),
-                "collection_longitude": _float_or_none(row.get("tower_longitude")),
-                "media": listing_media(row),
-                "removal_note": row.get("removal_note"),
-                "listings_from_unit_total": stats["listings_from_unit_total"],
-                "listings_from_unit_active": stats["listings_from_unit_active"],
-                "removed_before_count": stats["removed_before_count"],
-                "history": self._admin_history(row),
-            }
-        )
-        return card
-
-    @staticmethod
-    def _removed_by_name(row: dict[str, Any]) -> str | None:
-        """Staff member name, otherwise the resident who took the listing down."""
-        staff = public_name(
-            row.get("removed_by_staff_first_name"),
-            row.get("removed_by_staff_last_name"),
-        )
-        if staff:
-            return staff
-        contact = public_name(
-            row.get("removed_by_contact_first_name"),
-            row.get("removed_by_contact_last_name"),
-        )
-        return contact or None
-
-    def _admin_history(self, row: dict[str, Any]) -> list[dict[str, Any]]:
-        """Lifecycle events derived from listing timestamps. No event table."""
-        seller = public_name(row.get("seller_first_name"), row.get("seller_last_name"))
-        events: list[dict[str, Any]] = []
-        posted_at = row.get("published_at") or row.get("created_at")
-        if posted_at:
-            events.append({"event": "posted", "at": posted_at, "actor_name": seller})
-        if row.get("published_at"):
-            events.append({"event": "live", "at": row["published_at"]})
-        if row.get("sold_at"):
-            events.append({"event": "sold", "at": row["sold_at"]})
-        if row["status"] == "expired" and row.get("expires_at"):
-            events.append({"event": "expired", "at": row["expires_at"]})
-        if row.get("removed_at"):
-            events.append(
-                {
-                    "event": "removed",
-                    "at": row["removed_at"],
-                    "actor_name": self._removed_by_name(row) or seller,
-                    "note": row.get("removal_note"),
-                }
-            )
-        return events
 
     async def _assert_publishable(self, listing: dict[str, Any]) -> None:
         """Raise when a listing is not ready to go live."""
