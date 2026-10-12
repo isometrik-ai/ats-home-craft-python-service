@@ -9,12 +9,15 @@ from apps.user_service.app.api import marketplace_admin as marketplace_admin_api
 from apps.user_service.app.schemas.enums.marketplace import MarketplaceAdminStatus
 from apps.user_service.app.schemas.marketplace import (
     AdminMarketplaceListQuery,
+    AdminMarketplaceReportListQuery,
     AdminRemoveListingRequest,
     MarketplaceAdminListApiResponse,
     MarketplaceAdminListingApiResponse,
     MarketplaceAdminListingCard,
     MarketplaceAdminListingDetail,
     MarketplaceAdminRemovedApiResponse,
+    MarketplaceAdminReportListApiResponse,
+    MarketplaceAdminReportRow,
     MarketplaceAdminSummary,
     MarketplaceAdminSummaryApiResponse,
     MarketplaceCatalogApiResponse,
@@ -93,6 +96,13 @@ def test_marketplace_admin_response_schemas_are_typed():
     remove_example = AdminRemoveListingRequest.model_config["json_schema_extra"]["example"]
     assert remove_example["removal_note"]
 
+    assert "reason" in MarketplaceAdminReportRow.model_fields
+    assert "reason_slug" not in MarketplaceAdminReportRow.model_fields
+    report_example = MarketplaceAdminReportListApiResponse.model_config["json_schema_extra"][
+        "example"
+    ]
+    assert report_example["data"][0]["reason"] == "Looks like a business or broker"
+
 
 def test_marketplace_admin_routes_declare_response_models():
     """Admin routes register typed envelopes so related schemas appear in OpenAPI."""
@@ -118,6 +128,11 @@ def test_marketplace_admin_routes_declare_response_models():
         is MarketplaceAdminRemovedApiResponse
     )
 
+    assert (
+        by_path["/marketplace/admin/reports"].responses[200]["model"]
+        is MarketplaceAdminReportListApiResponse
+    )
+
 
 @pytest.mark.asyncio
 async def test_get_marketplace_admin_summary(monkeypatch, client):
@@ -137,7 +152,7 @@ async def test_get_marketplace_admin_summary(monkeypatch, client):
         }
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.get_admin_summary",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_admin_summary",
         fake_summary,
     )
 
@@ -165,7 +180,7 @@ async def test_get_marketplace_admin_summary_filters_project(monkeypatch, client
         }
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.get_admin_summary",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_admin_summary",
         fake_summary,
     )
 
@@ -175,6 +190,60 @@ async def test_get_marketplace_admin_summary_filters_project(monkeypatch, client
     )
     payload = assert_success(response)
     assert payload["data"]["active_count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_list_marketplace_admin_reports(monkeypatch, client):
+    """GET /marketplace/admin/reports returns reason labels, not slugs."""
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+
+    async def fake_reports(_self, *, query):
+        del _self
+        assert query.project_id == PROJECT_ID
+        assert query.status is None
+        assert query.page == 1
+        return {
+            "items": [
+                {
+                    "id": "report-1",
+                    "listing_id": LISTING_ID,
+                    "project_id": PROJECT_ID,
+                    "title": "Maruti Baleno 2019, petrol",
+                    "item_subtitle": "Vehicles - BS-1021",
+                    "cover_path": "org/cover.jpg",
+                    "reason": "Looks like a business or broker",
+                    "reporter_name": "Sneha Varma",
+                    "reporter_unit_label": "F-0204",
+                    "reported_at": "2026-10-07T10:00:00+00:00",
+                    "listing_report_count": 1,
+                    "status": "open",
+                }
+            ],
+            "total": 1,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.list_reports_admin",
+        fake_reports,
+    )
+
+    response = await client.get(
+        "/v1/marketplace/admin/reports",
+        params={"project_id": PROJECT_ID},
+    )
+    payload = assert_success(response)
+    row = payload["data"][0]
+    assert row["reason"] == "Looks like a business or broker"
+    assert "business_or_broker" not in row["reason"]
+    assert payload["total"] == 1
+
+
+def test_admin_report_list_query_accepts_status_filter():
+    """Staff can filter the Reported tab by report status."""
+    query = AdminMarketplaceReportListQuery(status="open")
+    assert query.status.value == "open"
 
 
 @pytest.mark.asyncio
@@ -193,7 +262,7 @@ async def test_list_marketplace_admin_listings(monkeypatch, client):
         return {"items": [_ADMIN_CARD], "total": 1}
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_listings_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.list_listings_admin",
         fake_list,
     )
 
@@ -225,7 +294,7 @@ async def test_get_marketplace_admin_listing(monkeypatch, client):
         return {**_ADMIN_CARD, "history": [{"event": "posted"}]}
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.get_listing_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_listing_admin",
         fake_detail,
     )
 
@@ -249,7 +318,7 @@ async def test_get_marketplace_admin_listing_filters_project(monkeypatch, client
         return {**_ADMIN_CARD, "history": [{"event": "posted"}]}
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.get_listing_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_listing_admin",
         fake_detail,
     )
     response = await client.get(
@@ -275,7 +344,7 @@ async def test_get_marketplace_admin_listing_missing(monkeypatch, client):
         )
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.get_listing_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_listing_admin",
         fake_detail,
     )
 
@@ -298,7 +367,7 @@ async def test_remove_marketplace_admin_listing(monkeypatch, client):
         return {"id": LISTING_ID, "status": "removed", "removal_note": removal_note}
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.remove_listing_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.remove_listing_admin",
         fake_remove,
     )
 
@@ -330,7 +399,7 @@ async def test_remove_marketplace_admin_listing_with_project_id(monkeypatch, cli
         }
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.remove_listing_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.remove_listing_admin",
         fake_remove,
     )
     response = await client.post(
@@ -358,7 +427,7 @@ async def test_remove_marketplace_admin_listing_not_live(monkeypatch, client):
         )
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.remove_listing_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.remove_listing_admin",
         fake_remove,
     )
 
@@ -395,7 +464,7 @@ async def test_list_marketplace_admin_listings_org_wide(monkeypatch, client):
         return {"items": [_ADMIN_CARD], "total": 1}
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_listings_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.list_listings_admin",
         fake_list,
     )
     response = await client.get("/v1/marketplace/admin/listings")
@@ -432,7 +501,7 @@ async def test_list_marketplace_admin_listings_rejects_unknown_category(monkeypa
         )
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_listings_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.list_listings_admin",
         fake_list,
     )
     response = await client.get(
@@ -470,7 +539,7 @@ async def test_remove_marketplace_admin_listing_missing(monkeypatch, client):
         )
 
     monkeypatch.setattr(
-        "apps.user_service.app.services.marketplace_service.MarketplaceService.remove_listing_admin",
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.remove_listing_admin",
         fake_remove,
     )
     response = await client.post(

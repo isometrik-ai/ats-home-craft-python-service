@@ -9,11 +9,21 @@ from typing import Any
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.marketplace import (
     AdminMarketplaceListQuery,
+    AdminMarketplaceReportListQuery,
     BrowseListingsQuery,
 )
 from apps.user_service.app.utils.common_utils import serialize_jsonb_param
 
 _LISTING_JSONB = frozenset({"media"})
+
+_REPORT_AUTO_HIDE_THRESHOLD = 3
+
+_LISTING_VISIBLE_ON_RESIDENT_BOARD = f"""
+    (SELECT count(*)::int
+       FROM marketplace_reports mr
+      WHERE mr.organization_id = l.organization_id
+        AND mr.listing_id = l.id) < {_REPORT_AUTO_HIDE_THRESHOLD}
+"""
 
 _LISTING_COLUMNS = """
     l.id::text AS id,
@@ -472,6 +482,7 @@ class MarketplaceRepository(BaseRepository):
         where = [
             "l.organization_id = $1::uuid",
             "l.status = 'live'::marketplace_listing_status",
+            _LISTING_VISIBLE_ON_RESIDENT_BOARD,
         ]
         params: list[Any] = [organization_id]
         if category:
@@ -589,6 +600,7 @@ class MarketplaceRepository(BaseRepository):
                AND s.contact_id = $2::uuid
              WHERE l.organization_id = $1::uuid
                AND l.status = 'live'::marketplace_listing_status
+               AND {_LISTING_VISIBLE_ON_RESIDENT_BOARD}
             """,
             organization_id,
             contact_id,
@@ -603,6 +615,7 @@ class MarketplaceRepository(BaseRepository):
              AND s.contact_id = $2::uuid
             WHERE l.organization_id = $1::uuid
               AND l.status = 'live'::marketplace_listing_status
+              AND {_LISTING_VISIBLE_ON_RESIDENT_BOARD}
             ORDER BY s.created_at DESC
             LIMIT $3 OFFSET $4
             """,
@@ -863,6 +876,20 @@ class MarketplaceRepository(BaseRepository):
             "removed_before_count": int(row["removed_before_count"] or 0),
         }
 
+    async def count_reports_for_listing(self, *, organization_id: str, listing_id: str) -> int:
+        """Total reports on one listing (used for the resident auto-hide threshold)."""
+        value = await self.db_connection.fetchval(
+            """
+            SELECT count(*)::int
+              FROM marketplace_reports
+             WHERE organization_id = $1::uuid
+               AND listing_id = $2::uuid
+            """,
+            organization_id,
+            listing_id,
+        )
+        return int(value or 0)
+
     async def insert_report(self, **fields: Any) -> dict[str, Any]:
         """Open a report. The partial unique index blocks a second open report."""
         row = await self.db_connection.fetchrow(
@@ -935,6 +962,93 @@ class MarketplaceRepository(BaseRepository):
             *params,
         )
         return [dict(row) for row in rows]
+
+    async def list_admin_reports(
+        self,
+        *,
+        organization_id: str,
+        query: AdminMarketplaceReportListQuery,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Paginated staff Reported tab rows with listing and reporter context."""
+        where = ["r.organization_id = $1::uuid"]
+        params: list[Any] = [organization_id]
+        if query.project_id:
+            params.append(query.project_id)
+            where.append(f"r.project_id = ${len(params)}::uuid")
+        if query.status is not None:
+            params.append(query.status.value)
+            where.append(f"r.status = ${len(params)}::marketplace_report_status")
+        where_sql = " AND ".join(where)
+        joins = """
+            FROM marketplace_reports r
+            JOIN marketplace_listings l
+              ON l.id = r.listing_id
+             AND l.organization_id = r.organization_id
+            JOIN units listing_unit
+              ON listing_unit.id = l.unit_id
+             AND listing_unit.organization_id = l.organization_id
+            JOIN contacts reporter
+              ON reporter.id = r.reporter_contact_id
+             AND reporter.organization_id = r.organization_id
+            LEFT JOIN LATERAL (
+                SELECT u.unit_label, u.code
+                  FROM contact_units cu
+                  JOIN units u
+                    ON u.id = cu.unit_id
+                   AND u.organization_id = cu.organization_id
+                 WHERE cu.organization_id = r.organization_id
+                   AND cu.contact_id = r.reporter_contact_id
+                   AND cu.status = 'active'::contact_unit_status
+                 ORDER BY cu.is_default_login DESC,
+                          cu.is_primary DESC,
+                          cu.sort_order ASC
+                 LIMIT 1
+            ) reporter_unit ON true
+        """
+        total = await self.db_connection.fetchval(
+            f"SELECT count(*)::int {joins} WHERE {where_sql}",
+            *params,
+        )
+        params.append(query.page_size)
+        limit_idx = len(params)
+        params.append((query.page - 1) * query.page_size)
+        offset_idx = len(params)
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT r.id::text AS id,
+                   r.project_id::text AS project_id,
+                   r.listing_id::text AS listing_id,
+                   r.reason::text AS reason,
+                   r.status::text AS status,
+                   r.created_at,
+                   l.title,
+                   l.category,
+                   l.media,
+                   listing_unit.unit_label AS listing_unit_label,
+                   listing_unit.code AS listing_unit_code,
+                   reporter.first_name AS reporter_first_name,
+                   reporter.last_name AS reporter_last_name,
+                   reporter_unit.unit_label AS reporter_unit_label,
+                   reporter_unit.code AS reporter_unit_code,
+                   (
+                       SELECT count(*)::int
+                         FROM marketplace_reports r2
+                        WHERE r2.organization_id = r.organization_id
+                          AND r2.listing_id = r.listing_id
+                   ) AS listing_report_count
+            {joins}
+            WHERE {where_sql}
+            ORDER BY r.created_at DESC
+            LIMIT ${limit_idx} OFFSET ${offset_idx}
+            """,
+            *params,
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            item["media"] = _decode_media(item.pop("media", None))
+            out.append(item)
+        return out, int(total or 0)
 
     async def review_report(
         self,
