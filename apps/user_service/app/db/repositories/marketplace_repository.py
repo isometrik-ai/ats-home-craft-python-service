@@ -592,7 +592,7 @@ class MarketplaceRepository(BaseRepository):
     ) -> tuple[list[dict[str, Any]], int]:
         """Live bookmarks, newest save first."""
         total = await self.db_connection.fetchval(
-            """
+            f"""
             SELECT count(*)::int
               FROM marketplace_listings l
               JOIN marketplace_saved_items s
