@@ -90,6 +90,36 @@ class VisitorLogsService:
             user_context=user_context,
         )
 
+    async def _merge_unit_display_fields(
+        self,
+        *,
+        row: dict[str, Any],
+        project_id: str,
+    ) -> dict[str, Any]:
+        """Load tower/flat labels when unit_id is set but pass join left them empty."""
+        unit_id = self._optional_id(row.get("unit_id"))
+        if not unit_id or (row.get("unit_label") and row.get("tower_name")):
+            return row
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit_row = await self.units_repo.get_unit_detail_base(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        if not unit_row:
+            return row
+        enriched = dict(row)
+        if not enriched.get("unit_label"):
+            enriched["unit_label"] = unit_row.get("unit_label") or unit_row.get("code")
+        if not enriched.get("unit_code"):
+            enriched["unit_code"] = unit_row.get("code")
+        if not enriched.get("tower_name"):
+            enriched["tower_name"] = unit_row.get("tower_name")
+        if not enriched.get("floor_name"):
+            enriched["floor_name"] = unit_row.get("floor_display_name")
+        return enriched
+
     async def _daily_help_pass_context(
         self,
         *,
@@ -100,18 +130,37 @@ class VisitorLogsService:
         profile_id = self._optional_id(row.get("daily_help_id"))
         if not profile_id:
             return row, None
-        if row.get("created_by_contact_id") and row.get("unit_id"):
-            return row, None
 
-        ctx = await self._daily_help_service.resolve_primary_household_context(
-            project_id=project_id,
-            profile_id=profile_id,
-        )
         enriched = dict(row)
-        for field in ("created_by_contact_id", "unit_id", "unit_label"):
-            if not enriched.get(field) and ctx.get(field):
-                enriched[field] = ctx[field]
-        return enriched, ctx.get("requester_name")
+        contact_id = self._optional_id(enriched.get("created_by_contact_id"))
+        unit_id = self._optional_id(enriched.get("unit_id"))
+        requester_name: str | None = None
+
+        if contact_id and unit_id:
+            requester_name = await self._daily_help_service.resolve_requester_display_name(
+                contact_id=contact_id,
+            )
+        else:
+            ctx = await self._daily_help_service.resolve_primary_household_context(
+                project_id=project_id,
+                profile_id=profile_id,
+            )
+            for field in ("created_by_contact_id", "unit_id", "unit_label"):
+                if not enriched.get(field) and ctx.get(field):
+                    enriched[field] = ctx[field]
+            requester_name = ctx.get("requester_name")
+
+        if not requester_name:
+            contact_id = self._optional_id(enriched.get("created_by_contact_id"))
+            requester_name = await self._daily_help_service.resolve_requester_display_name(
+                contact_id=contact_id,
+            )
+
+        enriched = await self._merge_unit_display_fields(
+            row=enriched,
+            project_id=project_id,
+        )
+        return enriched, requester_name
 
     @staticmethod
     def _format_person_name(

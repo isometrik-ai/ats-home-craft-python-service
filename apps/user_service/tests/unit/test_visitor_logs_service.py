@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -134,6 +134,21 @@ class _FakeUnitsRepo:
             contact_id: self.names_by_id[contact_id]
             for contact_id in contact_ids
             if contact_id in self.names_by_id
+        }
+
+    async def get_unit_detail_base(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ):
+        del organization_id, project_id, unit_id
+        return {
+            "code": "3101",
+            "unit_label": "3101",
+            "tower_name": "Tower A",
+            "floor_display_name": "Floor 31",
         }
 
 
@@ -694,12 +709,13 @@ async def test_get_log_detail_shows_creator_without_unit_role():
 
 @pytest.mark.asyncio
 async def test_get_log_detail_daily_help_pass_null_unit_id():
-    """Daily help pass detail must not query residents with literal 'None' unit_id."""
+    """Daily help detail resolves flat/resident from profile household context."""
     now = datetime(2026, 6, 9, tzinfo=timezone.utc)
     pass_row = {
         "id": "pass-dh-1",
         "organization_id": "org-1",
         "project_id": "project-1",
+        "daily_help_id": "profile-dh-1",
         "unit_id": None,
         "host_contact_id": None,
         "created_by_contact_id": None,
@@ -740,7 +756,14 @@ async def test_get_log_detail_daily_help_pass_null_unit_id():
             del organization_id
             for _, unit_id in contact_unit_pairs:
                 assert unit_id != "None"
-            return {}
+            key = UnitsRepository._resident_pair_key("contact-1", "unit-1")
+            return {
+                key: {
+                    "contact_id": "contact-1",
+                    "person_name": "Swati Waghmare",
+                    "role": "Owner",
+                }
+            }
 
     passes_repo = _FakePassesRepo(row=pass_row)
     events_repo = _FakeEventsRepo(events=[])
@@ -753,12 +776,78 @@ async def test_get_log_detail_daily_help_pass_null_unit_id():
         db_connection=MagicMock(),
         user_context=_user_context(),
     )
+    svc._daily_help_service.resolve_primary_household_context = AsyncMock(
+        return_value={
+            "created_by_contact_id": "contact-1",
+            "unit_id": "unit-1",
+            "unit_label": "3101",
+            "requester_name": "Swati Waghmare",
+        }
+    )
 
     detail = await svc.get_log_detail(pass_id="pass-dh-1", project_id="project-1")
     assert detail["source"] == "pass"
-    assert detail["unit_id"] is None
-    assert detail["resident"] is None
+    assert detail["unit_id"] == "unit-1"
+    assert detail["unit_label"] == "3101"
+    assert detail["tower_name"] == "Tower A"
+    assert detail["resident"]["person_name"] == "Swati Waghmare"
+    assert detail["created_by"] == "Swati Waghmare"
     assert detail["visitor_type"] == VisitorType.VISITOR.value
+
+
+@pytest.mark.asyncio
+async def test_get_log_detail_daily_help_pass_with_ids_resolves_created_by():
+    """When pass stores contact/unit ids, still resolve created_by without creator join."""
+    now = datetime(2026, 6, 9, tzinfo=timezone.utc)
+    pass_row = {
+        "id": "pass-dh-2",
+        "organization_id": "org-1",
+        "project_id": "project-1",
+        "daily_help_id": "profile-dh-1",
+        "unit_id": "unit-1",
+        "created_by_contact_id": "contact-1",
+        "pass_type": PassType.DAILY_HELP.value,
+        "guest_name": "Maid",
+        "status": "active",
+        "valid_from": now,
+        "valid_until": now,
+        "validity_type": "recurring",
+        "allow_multiple_entries": True,
+        "is_private": False,
+        "entry_count": 0,
+        "code": "1234",
+        "unit_label": None,
+        "tower_name": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    svc = _service(
+        passes_repo=_FakePassesRepo(row=pass_row),
+        events_repo=_FakeEventsRepo(events=[]),
+        units_repo=_FakeUnitsRepo(
+            residents={
+                UnitsRepository._resident_pair_key("contact-1", "unit-1"): {
+                    "contact_id": "contact-1",
+                    "person_name": "Swati Waghmare",
+                    "role": "Owner",
+                }
+            }
+        ),
+    )
+    svc._passes_service = PassesService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+    )
+    svc._daily_help_service.resolve_requester_display_name = AsyncMock(
+        return_value="Swati Waghmare"
+    )
+    svc._daily_help_service.resolve_primary_household_context = AsyncMock()
+
+    detail = await svc.get_log_detail(pass_id="pass-dh-2", project_id="project-1")
+
+    assert detail["created_by"] == "Swati Waghmare"
+    assert detail["tower_name"] == "Tower A"
+    svc._daily_help_service.resolve_primary_household_context.assert_not_awaited()
 
 
 @pytest.mark.asyncio

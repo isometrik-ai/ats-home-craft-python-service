@@ -418,6 +418,12 @@ class DailyHelpService:
             "requester_name": requester_name,
         }
 
+    async def resolve_requester_display_name(self, *, contact_id: str | None) -> str | None:
+        """Resolve a flat resident contact display name for visitor log surfaces."""
+        if not contact_id:
+            return None
+        return await self._resolve_contact_name(str(contact_id))
+
     async def _get_active_category_or_raise(
         self,
         *,
