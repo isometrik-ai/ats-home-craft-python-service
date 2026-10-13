@@ -449,6 +449,21 @@ async def test_list_listings_passes_browse_query():
 
 
 @pytest.mark.asyncio
+async def test_get_listing_detail_includes_seller_isometrik_id():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_listing = AsyncMock(
+        return_value=_listing(
+            seller_isometrik_user_id="6abdf6ad9126be00010e596f",
+        )
+    )
+    svc.repo.count_other_live = AsyncMock(return_value=1)
+    data = await svc.get_listing(contact_id="seller-1", listing_id="listing-1")
+    assert data["isometrik_id"] == "6abdf6ad9126be00010e596f"
+    assert data["more_from_seller_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_report_listing_maps_reason_to_display_text():
     svc = _service()
     svc.repo.expire_due = AsyncMock()

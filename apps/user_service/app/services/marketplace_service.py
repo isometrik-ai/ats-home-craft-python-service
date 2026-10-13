@@ -89,6 +89,15 @@ def visible_flat(
     return None
 
 
+def seller_isometrik_id(row: dict[str, Any]) -> str | None:
+    """Seller chat id from contacts.isometrik_user_id (listing detail only)."""
+    raw = row.get("seller_isometrik_user_id")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
 def listing_media(listing: dict[str, Any]) -> list[dict[str, Any]]:
     """Ordered media documents from the listing jsonb column."""
     items = listing.get("media") or []
@@ -941,6 +950,7 @@ class MarketplaceService:
                 "removal_note": row.get("removal_note")
                 if str(row["seller_contact_id"]) == str(viewer_contact_id)
                 else None,
+                "isometrik_id": seller_isometrik_id(row),
             }
         )
         return card
