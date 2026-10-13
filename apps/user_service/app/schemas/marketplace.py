@@ -138,6 +138,18 @@ class BrowseListingsQuery(BaseModel):
         default=None,
         description="Repeatable. lightly_used, well_used, needs_repair.",
     )
+    project_id: str | None = Field(
+        default=None,
+        description="Limit to one society (project). Society-only browse and similar listings.",
+    )
+    exclude_listing_id: str | None = Field(
+        default=None,
+        description="Omit one listing (e.g. current detail row).",
+    )
+    exclude_seller_contact_id: str | None = Field(
+        default=None,
+        description="Omit listings from this seller contact (similar-in-society on detail).",
+    )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1)
 

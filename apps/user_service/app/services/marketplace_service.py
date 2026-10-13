@@ -760,7 +760,17 @@ class MarketplaceService:
         contact_id: str,
         query: BrowseListingsQuery,
     ) -> dict[str, Any]:
-        """Browse live listings org-wide."""
+        """Browse live listings org-wide or scoped to one society via project_id."""
+        items, total = await self._browse_listing_rows(contact_id=contact_id, query=query)
+        return {"items": items, "total": total, "nearby_project_count": 0}
+
+    async def _browse_listing_rows(
+        self,
+        *,
+        contact_id: str,
+        query: BrowseListingsQuery,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Shared browse path for GET /listings and detail carousels."""
         await self.repo.expire_due(organization_id=self._org())
         category, subtype = MarketplaceCatalogService.parse_filter(query.category, query.subtype)
         rows, total = await self.repo.list_listings(
@@ -769,11 +779,16 @@ class MarketplaceService:
             category=category,
             subtype=subtype,
         )
+        viewer_project_id = query.project_id if query.project_id else None
         items = [
-            await self._card(row, viewer_contact_id=contact_id, viewer_project_id=None)
+            await self._card(
+                row,
+                viewer_contact_id=contact_id,
+                viewer_project_id=viewer_project_id,
+            )
             for row in rows
         ]
-        return {"items": items, "total": total, "nearby_project_count": 0}
+        return items, total
 
     async def my_listings(
         self,
@@ -911,13 +926,16 @@ class MarketplaceService:
         card = await self._card(
             row, viewer_contact_id=viewer_contact_id, viewer_project_id=viewer_project_id
         )
-        others = 0
+        more_from_seller: list[dict[str, Any]] = []
+        similar_in_society: list[dict[str, Any]] = []
         if row["status"] == "live":
-            others = await self.repo.count_other_live(
-                organization_id=self._org(),
-                seller_contact_id=row["seller_contact_id"],
-                project_id=row["project_id"],
-                exclude_listing_id=row["id"],
+            more_from_seller = await self._more_from_seller_cards(
+                row,
+                viewer_contact_id=viewer_contact_id,
+            )
+            similar_in_society = await self._similar_in_society_cards(
+                row,
+                viewer_contact_id=viewer_contact_id,
             )
         year = row.get("purchase_year")
         age_years = None
@@ -946,7 +964,10 @@ class MarketplaceService:
                 "collection_latitude": _float_or_none(row.get("tower_latitude")),
                 "collection_longitude": _float_or_none(row.get("tower_longitude")),
                 "media": listing_media(row),
-                "more_from_seller_count": others,
+                "more_from_seller": more_from_seller,
+                "more_from_seller_count": len(more_from_seller),
+                "similar_in_society": similar_in_society,
+                "similar_in_society_count": len(similar_in_society),
                 "removal_note": row.get("removal_note")
                 if str(row["seller_contact_id"]) == str(viewer_contact_id)
                 else None,
@@ -954,6 +975,58 @@ class MarketplaceService:
             }
         )
         return card
+
+    async def _more_from_seller_cards(
+        self,
+        row: dict[str, Any],
+        *,
+        viewer_contact_id: str,
+    ) -> list[dict[str, Any]]:
+        """Live sibling listings in the same society (More from {seller} on detail)."""
+        viewer_is_seller = str(row["seller_contact_id"]) == str(viewer_contact_id)
+        rows = await self.repo.list_other_live_by_seller(
+            organization_id=self._org(),
+            seller_contact_id=str(row["seller_contact_id"]),
+            project_id=str(row["project_id"]),
+            exclude_listing_id=str(row["id"]),
+            apply_board_visibility=not viewer_is_seller,
+        )
+        project_id = str(row["project_id"])
+        items: list[dict[str, Any]] = []
+        for sibling in rows:
+            items.append(
+                await self._card(
+                    sibling,
+                    viewer_contact_id=viewer_contact_id,
+                    viewer_project_id=project_id,
+                )
+            )
+        return items
+
+    _SIMILAR_IN_SOCIETY_PAGE_SIZE = 20
+
+    async def _similar_in_society_cards(
+        self,
+        row: dict[str, Any],
+        *,
+        viewer_contact_id: str,
+    ) -> list[dict[str, Any]]:
+        """Same category/subtype in the listing's society, excluding this seller and row."""
+        subtype = row.get("subtype")
+        query = BrowseListingsQuery(
+            category=str(row["category"]),
+            subtype=str(subtype) if subtype else None,
+            project_id=str(row["project_id"]),
+            exclude_listing_id=str(row["id"]),
+            exclude_seller_contact_id=str(row["seller_contact_id"]),
+            page=1,
+            page_size=self._SIMILAR_IN_SOCIETY_PAGE_SIZE,
+        )
+        items, _ = await self._browse_listing_rows(
+            contact_id=viewer_contact_id,
+            query=query,
+        )
+        return items
 
     def _mine_card(self, row: dict[str, Any], media_count: int) -> dict[str, Any]:
         """One row on the seller's own list."""

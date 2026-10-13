@@ -511,6 +511,15 @@ class MarketplaceRepository(BaseRepository):
             )
         elif price_band == "above_20000":
             where.append("l.kind = 'sale'::marketplace_listing_kind AND l.price_amount > 20000")
+        if query.project_id:
+            params.append(query.project_id)
+            where.append(f"l.project_id = ${len(params)}::uuid")
+        if query.exclude_listing_id:
+            params.append(query.exclude_listing_id)
+            where.append(f"l.id <> ${len(params)}::uuid")
+        if query.exclude_seller_contact_id:
+            params.append(query.exclude_seller_contact_id)
+            where.append(f"l.seller_contact_id <> ${len(params)}::uuid")
 
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(
@@ -704,6 +713,38 @@ class MarketplaceRepository(BaseRepository):
             exclude_listing_id,
         )
         return int(value or 0)
+
+    async def list_other_live_by_seller(
+        self,
+        *,
+        organization_id: str,
+        seller_contact_id: str,
+        project_id: str,
+        exclude_listing_id: str,
+        apply_board_visibility: bool,
+    ) -> list[dict[str, Any]]:
+        """Other live listings by the same seller in one society (listing detail carousel)."""
+        visibility_sql = (
+            f"AND {_LISTING_VISIBLE_ON_RESIDENT_BOARD}" if apply_board_visibility else ""
+        )
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT {_LISTING_COLUMNS}
+            {_LISTING_JOINS}
+            WHERE l.organization_id = $1::uuid
+              AND l.seller_contact_id = $2::uuid
+              AND l.project_id = $3::uuid
+              AND l.status = 'live'::marketplace_listing_status
+              AND l.id <> $4::uuid
+              {visibility_sql}
+            ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC
+            """,
+            organization_id,
+            seller_contact_id,
+            project_id,
+            exclude_listing_id,
+        )
+        return [_as_listing(row) for row in rows]
 
     async def get_admin_summary(
         self, *, organization_id: str, project_id: str | None
