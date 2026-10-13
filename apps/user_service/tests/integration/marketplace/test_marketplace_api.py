@@ -403,6 +403,127 @@ async def test_browse_listings_fails_for_unknown_category(monkeypatch, client):
     assert_error(response, 422)
 
 
+PROJECT_ID = "project-1"
+
+
+@pytest.mark.asyncio
+async def test_browse_listings_society_scope_success(monkeypatch, client):
+    """GET /listings?project_id= returns 200 when the resident belongs to that society."""
+    _resident(monkeypatch)
+
+    async def fake_membership(_self, *, organization_id, contact_id, project_id):
+        del organization_id, contact_id
+        return project_id == PROJECT_ID
+
+    async def fake_list_listings(_self, *, organization_id, query, category, subtype):
+        del organization_id, category, subtype
+        assert query.project_id == PROJECT_ID
+        return (
+            [],
+            0,
+        )
+
+    async def fake_expire(_self, *, organization_id):
+        del _self, organization_id
+
+    async def fake_saved_ids(_self, *, organization_id, contact_id, listing_ids):
+        del organization_id, contact_id, listing_ids
+        return frozenset()
+
+    from apps.user_service.app.db.repositories.contact_units_repository import (
+        ContactUnitsRepository,
+    )
+    from apps.user_service.app.db.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    monkeypatch.setattr(
+        ContactUnitsRepository,
+        "contact_has_active_project_membership",
+        fake_membership,
+    )
+    monkeypatch.setattr(MarketplaceRepository, "list_listings", fake_list_listings)
+    monkeypatch.setattr(MarketplaceRepository, "expire_due", fake_expire)
+    monkeypatch.setattr(MarketplaceRepository, "saved_listing_ids", fake_saved_ids)
+
+    response = await client.get(
+        "/v1/marketplace/listings",
+        params={"category": "furniture", "project_id": PROJECT_ID},
+    )
+    payload = assert_success(response)
+    assert payload["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_browse_listings_society_scope_fails_without_membership(monkeypatch, client):
+    """GET /listings?project_id= returns 404 when the resident is not in that society."""
+    _resident(monkeypatch)
+
+    async def fake_membership(_self, *, organization_id, contact_id, project_id):
+        del organization_id, contact_id, project_id
+        return False
+
+    async def fake_list_listings(_self, *, organization_id, query, category, subtype):
+        del _self, organization_id, query, category, subtype
+        return ([], 0)
+
+    async def fake_expire(_self, *, organization_id):
+        del _self, organization_id
+
+    from apps.user_service.app.db.repositories.contact_units_repository import (
+        ContactUnitsRepository,
+    )
+    from apps.user_service.app.db.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    monkeypatch.setattr(
+        ContactUnitsRepository,
+        "contact_has_active_project_membership",
+        fake_membership,
+    )
+    monkeypatch.setattr(MarketplaceRepository, "list_listings", fake_list_listings)
+    monkeypatch.setattr(MarketplaceRepository, "expire_due", fake_expire)
+
+    response = await client.get(
+        "/v1/marketplace/listings",
+        params={"category": "furniture", "project_id": "project-other"},
+    )
+    assert_error(response, status_code=404, message_fragment="could not be found")
+
+
+@pytest.mark.asyncio
+async def test_listing_detail_success_includes_carousels(monkeypatch, client):
+    """GET /listings/{id} returns more_from_seller and similar_in_society on live detail."""
+    _resident(monkeypatch)
+
+    async def fake_get(_self, *, contact_id, listing_id):
+        assert contact_id == CONTACT_ID
+        assert listing_id == LISTING_ID
+        return {
+            "id": LISTING_ID,
+            "title": "Study table",
+            "status": "live",
+            "seller_name": "Rohan",
+            "more_from_seller": [{"id": "listing-2", "title": "Desk lamp"}],
+            "more_from_seller_count": 1,
+            "similar_in_society": [{"id": "listing-3", "title": "Kids study desk"}],
+            "similar_in_society_count": 1,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.get_listing",
+        fake_get,
+    )
+    response = await client.get(f"/v1/marketplace/listings/{LISTING_ID}")
+    payload = assert_success(response)
+    data = payload["data"]
+    assert data["more_from_seller_count"] == 1
+    assert data["similar_in_society_count"] == 1
+    assert data["more_from_seller"][0]["title"] == "Desk lamp"
+    assert data["similar_in_society"][0]["title"] == "Kids study desk"
+
+
 @pytest.mark.asyncio
 async def test_listing_detail_success(monkeypatch, client):
     """GET /marketplace/listings/{id} returns the listing drawer."""

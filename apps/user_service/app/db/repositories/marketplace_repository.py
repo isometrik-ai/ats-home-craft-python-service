@@ -564,6 +564,30 @@ class MarketplaceRepository(BaseRepository):
         )
         return found is not None
 
+    async def saved_listing_ids(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        listing_ids: list[str],
+    ) -> frozenset[str]:
+        """Listing ids bookmarked by this contact (batch lookup for browse carousels)."""
+        if not listing_ids:
+            return frozenset()
+        rows = await self.db_connection.fetch(
+            """
+            SELECT listing_id::text AS listing_id
+              FROM marketplace_saved_items
+             WHERE organization_id = $1::uuid
+               AND contact_id = $2::uuid
+               AND listing_id = ANY($3::uuid[])
+            """,
+            organization_id,
+            contact_id,
+            listing_ids,
+        )
+        return frozenset(str(row["listing_id"]) for row in rows)
+
     async def save_item(self, *, organization_id: str, contact_id: str, listing_id: str) -> None:
         """Bookmark. A second save is a no-op."""
         await self.db_connection.execute(
@@ -722,6 +746,7 @@ class MarketplaceRepository(BaseRepository):
         project_id: str,
         exclude_listing_id: str,
         apply_board_visibility: bool,
+        limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Other live listings by the same seller in one society (listing detail carousel)."""
         visibility_sql = (
@@ -738,11 +763,13 @@ class MarketplaceRepository(BaseRepository):
               AND l.id <> $4::uuid
               {visibility_sql}
             ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC
+            LIMIT $5
             """,
             organization_id,
             seller_contact_id,
             project_id,
             exclude_listing_id,
+            limit,
         )
         return [_as_listing(row) for row in rows]
 

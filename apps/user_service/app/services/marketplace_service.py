@@ -45,6 +45,7 @@ MAX_MEDIA = 8
 MIN_PUBLISH_MEDIA = 2
 PURCHASE_YEAR_MIN = 1980
 REPORT_AUTO_HIDE_THRESHOLD = 3
+_CAROUSEL_LISTING_LIMIT = 20
 _KOLKATA = ZoneInfo("Asia/Kolkata")
 _EDITABLE = frozenset({"draft", "live"})
 _MEDIA_MIMES = {
@@ -764,11 +765,36 @@ class MarketplaceService:
         items, total = await self._browse_listing_rows(contact_id=contact_id, query=query)
         return {"items": items, "total": total, "nearby_project_count": 0}
 
+    async def _viewer_project_id_for_flats(
+        self,
+        *,
+        contact_id: str,
+        project_id: str | None,
+        strict_membership: bool,
+    ) -> str | None:
+        """Project id passed to visible_flat only when the viewer belongs to that society."""
+        if not project_id:
+            return None
+        has_membership = await self.contact_units_repo.contact_has_active_project_membership(
+            organization_id=self._org(),
+            contact_id=contact_id,
+            project_id=project_id,
+        )
+        if has_membership:
+            return project_id
+        if strict_membership:
+            raise NotFoundException(
+                message_key="marketplace.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        return None
+
     async def _browse_listing_rows(
         self,
         *,
         contact_id: str,
         query: BrowseListingsQuery,
+        strict_project_scope: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
         """Shared browse path for GET /listings and detail carousels."""
         await self.repo.expire_due(organization_id=self._org())
@@ -779,15 +805,16 @@ class MarketplaceService:
             category=category,
             subtype=subtype,
         )
-        viewer_project_id = query.project_id if query.project_id else None
-        items = [
-            await self._card(
-                row,
-                viewer_contact_id=contact_id,
-                viewer_project_id=viewer_project_id,
-            )
-            for row in rows
-        ]
+        viewer_project_id = await self._viewer_project_id_for_flats(
+            contact_id=contact_id,
+            project_id=query.project_id,
+            strict_membership=strict_project_scope,
+        )
+        items = await self._cards_from_rows(
+            rows,
+            viewer_contact_id=contact_id,
+            viewer_project_id=viewer_project_id,
+        )
         return items, total
 
     async def my_listings(
@@ -884,16 +911,48 @@ class MarketplaceService:
                 nearby.append(project["id"])
         return nearby
 
+    async def _cards_from_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        viewer_contact_id: str,
+        viewer_project_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Browse-style cards with one batched saved-state query."""
+        listing_ids = [str(row["id"]) for row in rows]
+        saved_ids = await self.repo.saved_listing_ids(
+            organization_id=self._org(),
+            contact_id=viewer_contact_id,
+            listing_ids=listing_ids,
+        )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            items.append(
+                await self._card(
+                    row,
+                    viewer_contact_id=viewer_contact_id,
+                    viewer_project_id=viewer_project_id,
+                    saved=str(row["id"]) in saved_ids,
+                )
+            )
+        return items
+
     async def _card(
-        self, row: dict[str, Any], *, viewer_contact_id: str, viewer_project_id: str | None
+        self,
+        row: dict[str, Any],
+        *,
+        viewer_contact_id: str,
+        viewer_project_id: str | None,
+        saved: bool | None = None,
     ) -> dict[str, Any]:
         """Card fields shared by the home strip, browse, and saved list."""
         media = listing_media(row)
-        saved = await self.repo.is_saved(
-            organization_id=self._org(),
-            contact_id=viewer_contact_id,
-            listing_id=row["id"],
-        )
+        if saved is None:
+            saved = await self.repo.is_saved(
+                organization_id=self._org(),
+                contact_id=viewer_contact_id,
+                listing_id=row["id"],
+            )
         category_name, subtype_name = MarketplaceCatalogService.labels(
             str(row["category"]), row.get("subtype")
         )
@@ -990,20 +1049,20 @@ class MarketplaceService:
             project_id=str(row["project_id"]),
             exclude_listing_id=str(row["id"]),
             apply_board_visibility=not viewer_is_seller,
+            limit=_CAROUSEL_LISTING_LIMIT,
         )
-        project_id = str(row["project_id"])
-        items: list[dict[str, Any]] = []
-        for sibling in rows:
-            items.append(
-                await self._card(
-                    sibling,
-                    viewer_contact_id=viewer_contact_id,
-                    viewer_project_id=project_id,
-                )
-            )
-        return items
+        viewer_project_id = await self._viewer_project_id_for_flats(
+            contact_id=viewer_contact_id,
+            project_id=str(row["project_id"]),
+            strict_membership=False,
+        )
+        return await self._cards_from_rows(
+            rows,
+            viewer_contact_id=viewer_contact_id,
+            viewer_project_id=viewer_project_id,
+        )
 
-    _SIMILAR_IN_SOCIETY_PAGE_SIZE = 20
+    _SIMILAR_IN_SOCIETY_PAGE_SIZE = _CAROUSEL_LISTING_LIMIT
 
     async def _similar_in_society_cards(
         self,
@@ -1025,6 +1084,7 @@ class MarketplaceService:
         items, _ = await self._browse_listing_rows(
             contact_id=viewer_contact_id,
             query=query,
+            strict_project_scope=False,
         )
         return items
 
