@@ -27,6 +27,7 @@ from apps.user_service.app.services.marketplace_service import (
     flat_label,
     listing_media,
     public_name,
+    seller_isometrik_id,
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
@@ -446,16 +447,7 @@ class MarketplaceAdminService:
                 "listings_from_unit_total": stats["listings_from_unit_total"],
                 "listings_from_unit_active": stats["listings_from_unit_active"],
                 "removed_before_count": stats["removed_before_count"],
-                "isometrik_id": self._seller_isometrik_id(row),
+                "isometrik_id": seller_isometrik_id(row),
             }
         )
         return card
-
-    @staticmethod
-    def _seller_isometrik_id(row: dict[str, Any]) -> str | None:
-        """Seller chat id from contacts.isometrik_user_id (staff drawer only)."""
-        raw = row.get("seller_isometrik_user_id")
-        if raw is None:
-            return None
-        text = str(raw).strip()
-        return text or None

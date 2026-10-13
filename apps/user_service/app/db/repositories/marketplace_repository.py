@@ -67,6 +67,7 @@ _LISTING_COLUMNS = """
     seller.first_name AS seller_first_name,
     seller.last_name AS seller_last_name,
     seller.profile_photo_url AS seller_photo_url,
+    seller.isometrik_user_id AS seller_isometrik_user_id,
     role.role_type::text AS seller_role,
     role.started_at AS seller_role_started_at
 """
@@ -99,7 +100,6 @@ LEFT JOIN LATERAL (
 
 _ADMIN_LISTING_COLUMNS = f"""
     {_LISTING_COLUMNS},
-    seller.isometrik_user_id AS seller_isometrik_user_id,
     remover_staff.first_name AS removed_by_staff_first_name,
     remover_staff.last_name AS removed_by_staff_last_name,
     remover_contact.first_name AS removed_by_contact_first_name,
