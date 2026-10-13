@@ -485,8 +485,7 @@ async def test_get_listing_detail_includes_seller_isometrik_id():
     assert data["similar_in_society"][0]["title"] == "Kids study desk"
     browse_query = svc.repo.list_listings.await_args.kwargs["query"]
     assert browse_query.project_id is not None
-    assert browse_query.exclude_listing_id == "listing-1"
-    assert browse_query.exclude_seller_contact_id == "seller-1"
+    assert browse_query.contact_id is None
 
 
 @pytest.mark.asyncio
@@ -509,14 +508,12 @@ async def test_list_listings_society_scope_filters():
         category="furniture",
         subtype="tables_desks",
         project_id="proj-1",
-        exclude_listing_id="listing-1",
-        exclude_seller_contact_id="seller-1",
+        contact_id="seller-2",
     )
     await svc.list_listings(contact_id="buyer-1", query=query)
     passed = svc.repo.list_listings.await_args.kwargs["query"]
     assert passed.project_id == "proj-1"
-    assert passed.exclude_listing_id == "listing-1"
-    assert passed.exclude_seller_contact_id == "seller-1"
+    assert passed.contact_id == "seller-2"
 
 
 @pytest.mark.asyncio

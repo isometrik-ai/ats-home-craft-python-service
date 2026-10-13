@@ -1070,23 +1070,41 @@ class MarketplaceService:
         *,
         viewer_contact_id: str,
     ) -> list[dict[str, Any]]:
-        """Same category/subtype in the listing's society, excluding this seller and row."""
+        """Same category/subtype in the listing's society, other sellers (detail carousel)."""
         subtype = row.get("subtype")
         query = BrowseListingsQuery(
             category=str(row["category"]),
             subtype=str(subtype) if subtype else None,
             project_id=str(row["project_id"]),
-            exclude_listing_id=str(row["id"]),
-            exclude_seller_contact_id=str(row["seller_contact_id"]),
             page=1,
             page_size=self._SIMILAR_IN_SOCIETY_PAGE_SIZE,
         )
-        items, _ = await self._browse_listing_rows(
-            contact_id=viewer_contact_id,
+        await self.repo.expire_due(organization_id=self._org())
+        category, subtype = MarketplaceCatalogService.parse_filter(query.category, query.subtype)
+        rows, _ = await self.repo.list_listings(
+            organization_id=self._org(),
             query=query,
-            strict_project_scope=False,
+            category=category,
+            subtype=subtype,
         )
-        return items
+        current_id = str(row["id"])
+        current_seller = str(row["seller_contact_id"])
+        rows = [
+            sibling
+            for sibling in rows
+            if str(sibling["id"]) != current_id
+            and str(sibling["seller_contact_id"]) != current_seller
+        ][: self._SIMILAR_IN_SOCIETY_PAGE_SIZE]
+        viewer_project_id = await self._viewer_project_id_for_flats(
+            contact_id=viewer_contact_id,
+            project_id=str(row["project_id"]),
+            strict_membership=False,
+        )
+        return await self._cards_from_rows(
+            rows,
+            viewer_contact_id=viewer_contact_id,
+            viewer_project_id=viewer_project_id,
+        )
 
     def _mine_card(self, row: dict[str, Any], media_count: int) -> dict[str, Any]:
         """One row on the seller's own list."""

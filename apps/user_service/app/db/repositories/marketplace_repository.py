@@ -514,12 +514,9 @@ class MarketplaceRepository(BaseRepository):
         if query.project_id:
             params.append(query.project_id)
             where.append(f"l.project_id = ${len(params)}::uuid")
-        if query.exclude_listing_id:
-            params.append(query.exclude_listing_id)
-            where.append(f"l.id <> ${len(params)}::uuid")
-        if query.exclude_seller_contact_id:
-            params.append(query.exclude_seller_contact_id)
-            where.append(f"l.seller_contact_id <> ${len(params)}::uuid")
+        if query.contact_id:
+            params.append(query.contact_id)
+            where.append(f"l.seller_contact_id = ${len(params)}::uuid")
 
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(

@@ -142,13 +142,9 @@ class BrowseListingsQuery(BaseModel):
         default=None,
         description="Limit to one society (project). Society-only browse and similar listings.",
     )
-    exclude_listing_id: str | None = Field(
+    contact_id: str | None = Field(
         default=None,
-        description="Omit one listing (e.g. current detail row).",
-    )
-    exclude_seller_contact_id: str | None = Field(
-        default=None,
-        description="Omit listings from this seller contact (similar-in-society on detail).",
+        description="Limit to listings posted by this seller contact.",
     )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1)
