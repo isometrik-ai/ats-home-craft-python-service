@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -703,6 +703,7 @@ async def test_get_log_detail_daily_help_pass_null_unit_id():
         "unit_id": None,
         "host_contact_id": None,
         "created_by_contact_id": None,
+        "daily_help_id": "profile-1",
         "pass_type": PassType.DAILY_HELP.value,
         "guest_name": "Maid",
         "guest_phone_isd_code": "+91",
@@ -754,11 +755,102 @@ async def test_get_log_detail_daily_help_pass_null_unit_id():
         user_context=_user_context(),
     )
 
+    svc.daily_help_repo = MagicMock()
+    svc.daily_help_repo.get_profile = AsyncMock(return_value={"category_name": "Maid"})
+    svc.daily_help_repo.list_active_links_for_profile = AsyncMock(return_value=[])
+
     detail = await svc.get_log_detail(pass_id="pass-dh-1", project_id="project-1")
     assert detail["source"] == "pass"
     assert detail["unit_id"] is None
     assert detail["resident"] is None
+    assert detail["household_links"] == []
+    assert detail["daily_help_profile_id"] == "profile-1"
     assert detail["visitor_type"] == VisitorType.VISITOR.value
+
+
+@pytest.mark.asyncio
+async def test_get_log_detail_daily_help_includes_household_resident():
+    """Daily help detail resolves resident from active household links."""
+    now = datetime(2026, 6, 9, tzinfo=timezone.utc)
+    pass_row = {
+        "id": "pass-dh-2",
+        "organization_id": "org-1",
+        "project_id": "project-1",
+        "unit_id": None,
+        "host_contact_id": None,
+        "created_by_contact_id": None,
+        "daily_help_id": "profile-2",
+        "pass_type": PassType.DAILY_HELP.value,
+        "guest_name": "Rashmikaa K",
+        "guest_phone_isd_code": "+91",
+        "guest_phone_number": "9545454646",
+        "visitor_count": 1,
+        "vehicle_number": None,
+        "purpose": None,
+        "valid_from": now,
+        "valid_until": now,
+        "validity_type": "recurring",
+        "allow_multiple_entries": True,
+        "is_private": False,
+        "max_entries": None,
+        "entry_count": 1,
+        "status": "active",
+        "code": "2139",
+        "pass_image_path": None,
+        "notes": None,
+        "unit_code": None,
+        "unit_label": None,
+        "tower_name": None,
+        "floor_name": None,
+        "config_label": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    resident = {
+        "contact_id": "owner-1",
+        "person_name": "Mr. Resident One",
+        "role": "Owner",
+    }
+    units_repo = _FakeUnitsRepo(
+        residents={
+            UnitsRepository._resident_pair_key("owner-1", "unit-1"): resident,
+        }
+    )
+    passes_repo = _FakePassesRepo(row=pass_row)
+    events_repo = _FakeEventsRepo(events=[])
+    svc = _service(
+        passes_repo=passes_repo,
+        events_repo=events_repo,
+        units_repo=units_repo,
+    )
+    svc._passes_service = PassesService(
+        db_connection=MagicMock(),
+        user_context=_user_context(),
+    )
+    svc.daily_help_repo = MagicMock()
+    svc.daily_help_repo.get_profile = AsyncMock(return_value={"category_name": "Cook"})
+    svc.daily_help_repo.list_active_links_for_profile = AsyncMock(
+        return_value=[
+            {
+                "id": "link-1",
+                "unit_id": "unit-1",
+                "linked_by_contact_id": "owner-1",
+                "status": "active",
+                "started_at": now,
+                "unit_code": "LUX-A11106",
+                "unit_label": "LUX-A11106",
+            }
+        ]
+    )
+
+    detail = await svc.get_log_detail(pass_id="pass-dh-2", project_id="project-1")
+
+    assert detail["created_by_contact_id"] == "owner-1"
+    assert detail["resident"] == resident
+    assert detail["created_by"] == "Mr. Resident One"
+    assert detail["household_links"][0]["resident"] == resident
+    assert detail["daily_help_category_name"] == "Cook"
+    assert detail["unit_label"] == "LUX-A11106"
 
 
 @pytest.mark.asyncio
