@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 from asyncpg import UniqueViolationError
@@ -472,14 +473,20 @@ async def test_list_listings_contact_id_filter():
     svc = _service()
     svc.repo.expire_due = AsyncMock()
     svc.repo.list_listings = AsyncMock(return_value=([], 0))
+    seller_id = UUID("22222222-2222-2222-2222-222222222222")
     query = BrowseListingsQuery(
         category="furniture",
         subtype="tables_desks",
-        contact_id="seller-2",
+        contact_id=seller_id,
     )
     await svc.list_listings(contact_id="buyer-1", query=query)
     passed = svc.repo.list_listings.await_args.kwargs["query"]
-    assert passed.contact_id == "seller-2"
+    assert passed.contact_id == seller_id
+
+
+def test_browse_listings_query_rejects_invalid_contact_id():
+    with pytest.raises(ValidationError):
+        BrowseListingsQuery(contact_id="not-a-uuid")
 
 
 @pytest.mark.asyncio

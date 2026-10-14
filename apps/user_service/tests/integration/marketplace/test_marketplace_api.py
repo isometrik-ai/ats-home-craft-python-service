@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 
 from apps.user_service.tests.integration.helpers import (
@@ -19,6 +21,7 @@ from libs.shared_utils.status_codes import CustomStatusCode
 CONTACT_ID = "contact-1"
 UNIT_ID = "unit-1"
 LISTING_ID = "listing-1"
+SELLER_CONTACT_ID = "22222222-2222-2222-2222-222222222222"
 
 
 def _resident(monkeypatch) -> None:
@@ -378,6 +381,51 @@ async def test_browse_listings_success(monkeypatch, client):
     payload = assert_success(response)
     assert payload["total"] == 1
     assert payload["data"][0]["title"] == "Study table"
+
+
+@pytest.mark.asyncio
+async def test_browse_listings_with_valid_seller_contact_id(monkeypatch, client):
+    """GET /listings accepts a seller contact_id UUID and forwards it to the service."""
+    _resident(monkeypatch)
+
+    async def fake_list(_self, **kwargs):
+        assert kwargs["query"].contact_id == UUID(SELLER_CONTACT_ID)
+        return {"items": [{"id": LISTING_ID, "title": "Desk lamp"}], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_listings",
+        fake_list,
+    )
+    response = await client.get(
+        "/v1/marketplace/listings",
+        params={"contact_id": SELLER_CONTACT_ID},
+    )
+    payload = assert_success(response)
+    assert payload["total"] == 1
+    assert payload["data"][0]["title"] == "Desk lamp"
+
+
+@pytest.mark.asyncio
+async def test_browse_listings_rejects_invalid_seller_contact_id(monkeypatch, client):
+    """GET /listings returns 422 when contact_id is not a UUID (no service call)."""
+    _resident(monkeypatch)
+    called: list[str] = []
+
+    async def fake_list(_self, **kwargs):
+        del _self, kwargs
+        called.append("service")
+        return {"items": [], "total": 0}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_listings",
+        fake_list,
+    )
+    response = await client.get(
+        "/v1/marketplace/listings",
+        params={"contact_id": "not-a-uuid"},
+    )
+    assert response.status_code == 422
+    assert called == []
 
 
 @pytest.mark.asyncio

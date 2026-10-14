@@ -511,8 +511,8 @@ class MarketplaceRepository(BaseRepository):
             )
         elif price_band == "above_20000":
             where.append("l.kind = 'sale'::marketplace_listing_kind AND l.price_amount > 20000")
-        if query.contact_id:
-            params.append(query.contact_id)
+        if query.contact_id is not None:
+            params.append(str(query.contact_id))
             where.append(f"l.seller_contact_id = ${len(params)}::uuid")
 
         where_sql = " AND ".join(where)

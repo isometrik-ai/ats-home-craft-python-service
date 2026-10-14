@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -138,9 +139,9 @@ class BrowseListingsQuery(BaseModel):
         default=None,
         description="Repeatable. lightly_used, well_used, needs_repair.",
     )
-    contact_id: str | None = Field(
+    contact_id: UUID | None = Field(
         default=None,
-        description="Limit to listings posted by this seller contact.",
+        description="Seller contact UUID. Limits listings to that poster (org-wide).",
     )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1)
