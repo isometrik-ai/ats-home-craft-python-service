@@ -213,6 +213,21 @@ class VisitorLogResidentResponse(BaseModel):
     )
 
 
+class VisitorLogDailyHelpHouseholdLinkResponse(BaseModel):
+    """Daily help profile linked to a flat (informational on visitor log detail)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    unit_id: str
+    linked_by_contact_id: str | None = None
+    status: str
+    started_at: str | None = None
+    unit_code: str | None = None
+    unit_label: str | None = None
+    resident: VisitorLogResidentResponse | None = None
+
+
 class VisitorLogItemResponse(BaseModel):
     """Single row in the Visitor Logs table."""
 
@@ -483,7 +498,29 @@ class VisitorLogPassDetailData(PassResponse):
     )
     resident: VisitorLogResidentResponse | None = Field(
         None,
-        description="Flat resident who requested the pass.",
+        description=(
+            "Flat resident who requested the pass, or the first household link "
+            "for daily help passes."
+        ),
+    )
+    created_by_contact_id: str | None = Field(
+        None,
+        description=(
+            "Resident contact who created the pass when set on the pass row; "
+            "for daily help, the first linked household contact when applicable."
+        ),
+    )
+    daily_help_profile_id: str | None = Field(
+        None,
+        description="Daily help profile id when pass_type is daily_help.",
+    )
+    daily_help_category_name: str | None = Field(
+        None,
+        description="Daily help category label when pass_type is daily_help.",
+    )
+    household_links: list[VisitorLogDailyHelpHouseholdLinkResponse] = Field(
+        default_factory=list,
+        description="Active flats linked to a daily help profile.",
     )
     pass_image_url: str | None = Field(None, description="Public URL for the pass QR/image.")
     image_urls: list[str] = Field(

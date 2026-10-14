@@ -10,6 +10,9 @@ from typing import Any
 import asyncpg
 
 from apps.user_service.app.config.app_settings import shared_settings
+from apps.user_service.app.db.repositories.daily_help_repository import (
+    DailyHelpRepository,
+)
 from apps.user_service.app.db.repositories.organization_member_repository import (
     OrganizationMemberRepository,
 )
@@ -39,7 +42,7 @@ from apps.user_service.app.schemas.visitor_logs import (
 )
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.walk_in_service import WalkInService
-from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.pass_event_actor_labels import (
     enrich_pass_event_actor_labels,
 )
@@ -84,6 +87,7 @@ class VisitorLogsService:
             user_context=user_context,
         )
         self._members_repo = OrganizationMemberRepository(db_connection)
+        self.daily_help_repo = DailyHelpRepository(db_connection)
 
     @staticmethod
     def _format_person_name(
@@ -366,6 +370,111 @@ class VisitorLogsService:
         )
         return detail
 
+    async def _attach_daily_help_context_to_pass_detail(
+        self,
+        *,
+        detail: dict[str, Any],
+        pass_row: dict[str, Any],
+        organization_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        """Enrich daily help pass detail with linked flats and resident context."""
+        # pylint:disable=too-complex
+        if str(pass_row.get("pass_type") or "") != PassType.DAILY_HELP.value:
+            return detail
+        profile_id = self._optional_id(pass_row.get("daily_help_id"))
+        if not profile_id:
+            return detail
+
+        profile = await self.daily_help_repo.get_profile(
+            organization_id=organization_id,
+            profile_id=profile_id,
+            project_id=project_id,
+        )
+        link_rows = await self.daily_help_repo.list_active_links_for_profile(
+            organization_id=organization_id,
+            profile_id=profile_id,
+        )
+
+        pairs = [
+            (str(row["linked_by_contact_id"]), str(row["unit_id"]))
+            for row in link_rows
+            if row.get("linked_by_contact_id") and row.get("unit_id")
+        ]
+        residents_by_pair = await self.units_repo.get_contact_residents_batch(
+            organization_id=organization_id,
+            contact_unit_pairs=pairs,
+        )
+        linked_contact_ids = sorted(
+            {
+                str(row["linked_by_contact_id"])
+                for row in link_rows
+                if row.get("linked_by_contact_id")
+            }
+        )
+        names_by_id = await self.units_repo.get_contact_person_names_batch(
+            organization_id=organization_id,
+            contact_ids=linked_contact_ids,
+        )
+
+        household_links: list[dict[str, Any]] = []
+        for link in link_rows:
+            contact_id = self._optional_id(link.get("linked_by_contact_id"))
+            unit_id = self._optional_id(link.get("unit_id"))
+            resident: dict[str, Any] | None = None
+            if contact_id and unit_id:
+                key = UnitsRepository._resident_pair_key(contact_id, unit_id)
+                resident = residents_by_pair.get(key)
+            if resident is None and contact_id:
+                resident = self._build_resident(
+                    contact_id=contact_id,
+                    person_name=names_by_id.get(contact_id),
+                    role=None,
+                )
+            household_links.append(
+                {
+                    "id": str(link["id"]),
+                    "unit_id": str(link["unit_id"]),
+                    "linked_by_contact_id": contact_id,
+                    "status": str(link.get("status") or ""),
+                    "started_at": format_iso_datetime(link.get("started_at")),
+                    "unit_code": link.get("unit_code"),
+                    "unit_label": link.get("unit_label"),
+                    "resident": resident,
+                }
+            )
+
+        payload = dict(detail)
+        payload["daily_help_profile_id"] = profile_id
+        payload["daily_help_category_name"] = profile.get("category_name") if profile else None
+        payload["household_links"] = household_links
+
+        if not payload.get("resident"):
+            for item in household_links:
+                if item.get("resident"):
+                    payload["resident"] = item["resident"]
+                    break
+
+        if not self._optional_id(payload.get("created_by_contact_id")):
+            for item in household_links:
+                linked_by = self._optional_id(item.get("linked_by_contact_id"))
+                if linked_by:
+                    payload["created_by_contact_id"] = linked_by
+                    break
+
+        if not payload.get("unit_label") and household_links:
+            labels = [
+                str(item.get("unit_label") or item.get("unit_code") or "").strip()
+                for item in household_links
+                if str(item.get("unit_label") or item.get("unit_code") or "").strip()
+            ]
+            if len(labels) == 1:
+                payload["unit_label"] = labels[0]
+            elif len(labels) > 1:
+                payload["unit_label"] = f"{labels[0]} (+{len(labels) - 1} more)"
+
+        return payload
+
     @staticmethod
     def _visitor_phone_fields(row: dict[str, Any]) -> dict[str, str | None]:
         """Normalize visitor phone fields across pass and walk-in rows."""
@@ -622,8 +731,6 @@ class VisitorLogsService:
 
     def _normalize_list_item(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a repository row to the visitor log list item shape."""
-        from apps.user_service.app.utils.common_utils import format_iso_datetime
-
         in_time = row.get("in_time")
         out_time = row.get("out_time")
         created_by = (row.get("created_by") or "").strip() or None
@@ -894,8 +1001,6 @@ class VisitorLogsService:
         unit_id: str | None = None,
     ) -> dict[str, Any]:
         """Return overview card metrics."""
-        from apps.user_service.app.utils.common_utils import format_iso_datetime
-
         org_id = self.user_context.organization_id
         assert org_id
         result = await self.logs_repo.get_overview(
@@ -964,9 +1069,18 @@ class VisitorLogsService:
                 },
                 organization_id=org_id,
             )
+            detail = await self._attach_daily_help_context_to_pass_detail(
+                detail=detail,
+                pass_row=row,
+                organization_id=org_id,
+                project_id=project_id,
+            )
+            created_by = self._contact_created_by(row)
+            if not created_by and detail.get("resident"):
+                created_by = str(detail["resident"].get("person_name") or "").strip() or None
             return self._enrich_detail_fields(
                 detail=detail,
-                created_by=self._contact_created_by(row),
+                created_by=created_by,
                 guard_user_id=guard_user_id,
                 guard_name=guard_name,
                 pass_image_url=image_fields["pass_image_url"],
