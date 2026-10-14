@@ -1,0 +1,22 @@
+{
+  "sheet_title": "Report this listing",
+  "sheet_subtitle": "It goes to the society committee, not to the seller.",
+  "reasons": [
+    {
+      "slug": "not_allowed",
+      "name": "Not allowed in the society"
+    },
+    {
+      "slug": "business_or_broker",
+      "name": "Looks like a business or broker"
+    },
+    {
+      "slug": "sold_but_listed",
+      "name": "Sold but still listed"
+    },
+    {
+      "slug": "something_else",
+      "name": "Something else"
+    }
+  ]
+}

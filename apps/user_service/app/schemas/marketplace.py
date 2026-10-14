@@ -13,12 +13,16 @@ from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceListingKind,
     MarketplaceMediaKind,
     MarketplacePriceBand,
+    MarketplaceReportDecision,
+    MarketplaceReportReason,
+    MarketplaceReportStatus,
     MarketplaceSaleRating,
     MarketplaceSort,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
 
 _EXAMPLE_PROJECT_ID = "11111111-1111-1111-1111-111111111111"
+_EXAMPLE_UNIT_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 _EXAMPLE_LISTING_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 _EXAMPLE_PUBLISHED_AT = "2026-10-01T08:30:00+00:00"
 _EXAMPLE_EXPIRES_AT = "2026-10-31T08:30:00+00:00"
@@ -89,14 +93,7 @@ _EXAMPLE_ADMIN_DETAIL = {
     "listings_from_unit_total": 3,
     "listings_from_unit_active": 2,
     "removed_before_count": 1,
-    "history": [
-        {
-            "event": "posted",
-            "at": _EXAMPLE_PUBLISHED_AT,
-            "actor_name": "Rohan B.",
-        },
-        {"event": "live", "at": _EXAMPLE_PUBLISHED_AT},
-    ],
+    "isometrik_id": "6a4fb3e2f96daa0001281d6c",
 }
 
 _EXAMPLE_ADMIN_REMOVED = {
@@ -106,20 +103,6 @@ _EXAMPLE_ADMIN_REMOVED = {
     "days_left": None,
     "removed_at": _EXAMPLE_REMOVED_AT,
     "removal_note": "Photos didn't show the actual item",
-    "history": [
-        {
-            "event": "posted",
-            "at": _EXAMPLE_PUBLISHED_AT,
-            "actor_name": "Rohan B.",
-        },
-        {"event": "live", "at": _EXAMPLE_PUBLISHED_AT},
-        {
-            "event": "removed",
-            "at": _EXAMPLE_REMOVED_AT,
-            "actor_name": "Priya K.",
-            "note": "Photos didn't show the actual item",
-        },
-    ],
 }
 
 
@@ -215,6 +198,75 @@ class SaveListingRequest(BaseModel):
     saved: bool
 
 
+class ReportListingRequest(BaseModel):
+    """Send a listing to the committee."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "unit_id": _EXAMPLE_UNIT_ID,
+                "reason": "business_or_broker",
+            }
+        },
+    )
+
+    unit_id: str
+    reason: MarketplaceReportReason = Field(
+        ...,
+        description="Slug from GET /marketplace/report-reasons.",
+    )
+
+
+class MarketplaceReportCreated(BaseModel):
+    """Payload after a resident reports a listing."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "id": "323d45d8-ba1b-4bf9-988c-ede6043fe566",
+                "listing_id": _EXAMPLE_LISTING_ID,
+                "reason": "Looks like a business or broker",
+                "listing_report_count": 1,
+                "listing_hidden": False,
+            }
+        },
+    )
+
+    id: str
+    listing_id: str
+    reason: str = Field(..., description="Resident-facing reason label, not the stored slug.")
+    listing_report_count: int = Field(..., ge=1)
+    listing_hidden: bool = Field(
+        ...,
+        description="True when three reports hide the listing from the resident board.",
+    )
+
+
+class MarketplaceReportCreatedApiResponse(BaseModel):
+    """API envelope for POST /marketplace/listings/{id}/report."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Report sent to the committee.",
+                "statusCode": 201,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": MarketplaceReportCreated.model_config["json_schema_extra"]["example"],
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarketplaceReportCreated
+
+
 class MarkSoldRequest(BaseModel):
     """Record the buyer and an optional private rating."""
 
@@ -254,6 +306,23 @@ class AdminMarketplaceListQuery(BaseModel):
     page_size: int = Field(default=20, ge=1, le=100)
 
 
+class AdminMarketplaceReportListQuery(BaseModel):
+    """Query params for GET /marketplace/admin/reports."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str | None = Field(
+        default=None,
+        description="Optional society filter (UUID). Omit for the whole organization.",
+    )
+    status: MarketplaceReportStatus | None = Field(
+        default=None,
+        description="Filter by report status. Omit for all.",
+    )
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=20, ge=1, le=100)
+
+
 class AdminRemoveListingRequest(BaseModel):
     """Staff take-down of a live listing. Removal is permanent."""
 
@@ -269,6 +338,42 @@ class AdminRemoveListingRequest(BaseModel):
         max_length=500,
         description="Note the seller will see. Removal is permanent.",
     )
+
+
+class AdminReviewMarketplaceReportRequest(BaseModel):
+    """Staff decision on one open report (Reported tab: dismiss or remove listing)."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {"decision": "dismiss"},
+                {
+                    "decision": "uphold",
+                    "removal_note": "Not allowed in the society",
+                },
+            ]
+        },
+    )
+
+    decision: MarketplaceReportDecision = Field(
+        ...,
+        description="dismiss = false report; uphold = soft-remove the listing.",
+    )
+    removal_note: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Required when decision is uphold. Shown to the seller.",
+    )
+
+    @model_validator(mode="after")
+    def uphold_requires_removal_note(self) -> AdminReviewMarketplaceReportRequest:
+        """Uphold removes the listing and needs a staff note."""
+        if self.decision == MarketplaceReportDecision.UPHOLD:
+            note = (self.removal_note or "").strip()
+            if not note:
+                raise ValueError("removal_note is required when decision is uphold")
+        return self
 
 
 class MarketplaceCatalogSubtype(BaseModel):
@@ -323,6 +428,68 @@ class MarketplaceCatalogApiResponse(BaseModel):
     statusCode: int
     code: str
     data: MarketplaceCatalogData
+
+
+_EXAMPLE_REPORT_REASON = {
+    "slug": "not_allowed",
+    "name": "Not allowed in the society",
+}
+
+_EXAMPLE_REPORT_REASON_CATALOG = {
+    "sheet_title": "Report this listing",
+    "sheet_subtitle": "It goes to the society committee, not to the seller.",
+    "reasons": [
+        _EXAMPLE_REPORT_REASON,
+        {"slug": "business_or_broker", "name": "Looks like a business or broker"},
+        {"slug": "sold_but_listed", "name": "Sold but still listed"},
+        {"slug": "something_else", "name": "Something else"},
+    ],
+}
+
+
+class MarketplaceReportReasonOption(BaseModel):
+    """One selectable reason on the report sheet."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    slug: str = Field(..., description="Stored on marketplace_reports.reason.")
+    name: str = Field(..., description="Resident-facing label.")
+
+
+class MarketplaceReportReasonCatalogData(BaseModel):
+    """Copy and options for the report listing sheet."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={"example": _EXAMPLE_REPORT_REASON_CATALOG},
+    )
+
+    sheet_title: str | None = None
+    sheet_subtitle: str | None = None
+    reasons: list[MarketplaceReportReasonOption] = Field(default_factory=list)
+
+
+class MarketplaceReportReasonCatalogApiResponse(BaseModel):
+    """API envelope for GET /marketplace/report-reasons."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Report reasons retrieved successfully.",
+                "statusCode": 200,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": _EXAMPLE_REPORT_REASON_CATALOG,
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarketplaceReportReasonCatalogData
 
 
 class MarketplaceListingApiResponse(BaseModel):
@@ -409,17 +576,6 @@ class MarketplaceListingMediaItem(BaseModel):
     order: int | None = None
 
 
-class MarketplaceAdminHistoryEvent(BaseModel):
-    """One derived lifecycle event on the staff drawer."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    event: str = Field(..., description="posted, live, sold, expired, or removed.")
-    at: str
-    actor_name: str | None = None
-    note: str | None = None
-
-
 class MarketplaceAdminListingCard(BaseModel):
     """One row on the staff listings table."""
 
@@ -479,7 +635,10 @@ class MarketplaceAdminListingDetail(MarketplaceAdminListingCard):
     listings_from_unit_total: int = 0
     listings_from_unit_active: int = 0
     removed_before_count: int = 0
-    history: list[MarketplaceAdminHistoryEvent] = Field(default_factory=list)
+    isometrik_id: str | None = Field(
+        default=None,
+        description="Seller Isometrik user id (contacts.isometrik_user_id). Detail API only.",
+    )
 
 
 class MarketplaceAdminListApiResponse(BaseModel):
@@ -534,6 +693,140 @@ class MarketplaceAdminListingApiResponse(BaseModel):
     statusCode: int
     code: str
     data: MarketplaceAdminListingDetail
+
+
+_EXAMPLE_ADMIN_REPORT_ROW = {
+    "id": "323d45d8-ba1b-4bf9-988c-ede6043fe566",
+    "listing_id": _EXAMPLE_LISTING_ID,
+    "project_id": _EXAMPLE_PROJECT_ID,
+    "title": "Maruti Baleno 2019, petrol",
+    "item_subtitle": "Vehicles - BS-1021",
+    "cover_path": "org/listings/table.jpg",
+    "reason": "Looks like a business or broker",
+    "reporter_name": "Sneha Varma",
+    "reporter_unit_label": "F-0204",
+    "reported_at": _EXAMPLE_PUBLISHED_AT,
+    "listing_report_count": 1,
+    "status": "open",
+}
+
+
+class MarketplaceAdminReportRow(BaseModel):
+    """One row on the staff Reported tab."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={"example": _EXAMPLE_ADMIN_REPORT_ROW},
+    )
+
+    id: str
+    listing_id: str
+    project_id: str
+    title: str | None = None
+    item_subtitle: str | None = Field(
+        default=None,
+        description="Category name and listing unit, e.g. Vehicles - BS-1021.",
+    )
+    cover_path: str | None = None
+    reason: str = Field(..., description="Resident-facing reason label, not the stored slug.")
+    reporter_name: str | None = None
+    reporter_unit_label: str | None = None
+    reported_at: str | None = None
+    listing_report_count: int = Field(
+        ...,
+        ge=1,
+        description="Total reports on this listing in the organization.",
+    )
+    status: str
+
+
+class MarketplaceAdminReportListApiResponse(BaseModel):
+    """API envelope for GET /marketplace/admin/reports."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Reports retrieved successfully.",
+                "statusCode": 200,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": [_EXAMPLE_ADMIN_REPORT_ROW],
+                "total": 1,
+                "page": 1,
+                "page_size": 20,
+                "total_pages": 1,
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: list[MarketplaceAdminReportRow]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class MarketplaceAdminReportDismissApiResponse(BaseModel):
+    """API envelope for POST /marketplace/admin/reports/{id}/review (dismiss)."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Report dismissed.",
+                "statusCode": 200,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": {**_EXAMPLE_ADMIN_REPORT_ROW, "status": "dismissed"},
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarketplaceAdminReportRow
+
+
+class MarketplaceAdminReportReviewResult(BaseModel):
+    """Report row plus listing after uphold (remove listing from Reported tab)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    report: MarketplaceAdminReportRow
+    listing: MarketplaceAdminListingDetail
+
+
+class MarketplaceAdminReportReviewApiResponse(BaseModel):
+    """API envelope for POST /marketplace/admin/reports/{id}/review (uphold)."""
+
+    model_config = ConfigDict(
+        extra="ignore",
+        json_schema_extra={
+            "example": {
+                "status": "success",
+                "message": "Listing taken down.",
+                "statusCode": 200,
+                "code": CustomStatusCode.SUCCESS.value,
+                "data": {
+                    "report": {**_EXAMPLE_ADMIN_REPORT_ROW, "status": "upheld"},
+                    "listing": {"id": _EXAMPLE_LISTING_ID, "status": "removed"},
+                },
+            }
+        },
+    )
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: MarketplaceAdminReportReviewResult
 
 
 class MarketplaceAdminRemovedApiResponse(BaseModel):
