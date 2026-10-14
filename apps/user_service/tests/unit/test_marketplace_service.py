@@ -43,6 +43,10 @@ def _service() -> MarketplaceService:
     svc.contact_units_repo = AsyncMock()
     svc.contact_units_repo.contact_has_active_unit = AsyncMock(return_value=True)
     svc.repo.get_posting_role = AsyncMock(return_value={"role_type": "Owner", "started_at": None})
+    svc.repo.count_other_live = AsyncMock(return_value=0)
+    svc.repo.list_listings = AsyncMock(return_value=([], 0))
+    svc.repo.saved_listing_ids = AsyncMock(return_value=frozenset())
+    svc.repo.is_saved = AsyncMock(return_value=False)
     svc.repo.get_unit_context = AsyncMock(
         return_value={
             "id": "unit-1",
@@ -223,7 +227,6 @@ async def test_live_edit_keeps_the_post_live():
     updated = _listing(title="Study table")
     svc.repo.get_listing = AsyncMock(side_effect=[_listing(), updated])
     svc.repo.is_saved = AsyncMock(return_value=False)
-    svc.repo.count_other_live = AsyncMock(return_value=0)
     body = UpdateListingRequest(unit_id="unit-1", title="Study table")
     result = await svc.update_listing(contact_id="seller-1", listing_id="listing-1", body=body)
     fields = svc.repo.update_listing.await_args.kwargs["fields"]
@@ -341,7 +344,6 @@ async def test_create_listing_writes_media_on_the_listing():
     svc.repo.update_listing = AsyncMock()
     svc.repo.get_listing = AsyncMock(return_value=created)
     svc.repo.is_saved = AsyncMock(return_value=False)
-    svc.repo.count_other_live = AsyncMock(return_value=0)
     body = CreateListingRequest(
         unit_id="unit-1",
         category="electronics",
@@ -458,9 +460,42 @@ async def test_get_listing_detail_includes_seller_isometrik_id():
         )
     )
     svc.repo.count_other_live = AsyncMock(return_value=1)
+    svc.repo.is_saved = AsyncMock(return_value=False)
     data = await svc.get_listing(contact_id="seller-1", listing_id="listing-1")
     assert data["isometrik_id"] == "6abdf6ad9126be00010e596f"
     assert data["more_from_seller_count"] == 1
+    svc.repo.count_other_live.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_listings_contact_id_filter():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.list_listings = AsyncMock(return_value=([], 0))
+    query = BrowseListingsQuery(
+        category="furniture",
+        subtype="tables_desks",
+        contact_id="seller-2",
+    )
+    await svc.list_listings(contact_id="buyer-1", query=query)
+    passed = svc.repo.list_listings.await_args.kwargs["query"]
+    assert passed.contact_id == "seller-2"
+
+
+@pytest.mark.asyncio
+async def test_cards_from_rows_batches_saved_state():
+    svc = _service()
+    rows = [_listing(id="listing-2"), _listing(id="listing-3")]
+    svc.repo.saved_listing_ids = AsyncMock(return_value=frozenset(["listing-3"]))
+    cards = await svc._cards_from_rows(
+        rows,
+        viewer_contact_id="buyer-1",
+        viewer_project_id="project-1",
+    )
+    assert cards[0]["saved"] is False
+    assert cards[1]["saved"] is True
+    svc.repo.saved_listing_ids.assert_awaited_once()
+    svc.repo.is_saved.assert_not_called()
 
 
 @pytest.mark.asyncio

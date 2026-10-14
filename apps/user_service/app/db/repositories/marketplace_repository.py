@@ -511,6 +511,9 @@ class MarketplaceRepository(BaseRepository):
             )
         elif price_band == "above_20000":
             where.append("l.kind = 'sale'::marketplace_listing_kind AND l.price_amount > 20000")
+        if query.contact_id:
+            params.append(query.contact_id)
+            where.append(f"l.seller_contact_id = ${len(params)}::uuid")
 
         where_sql = " AND ".join(where)
         total = await self.db_connection.fetchval(
@@ -554,6 +557,30 @@ class MarketplaceRepository(BaseRepository):
             listing_id,
         )
         return found is not None
+
+    async def saved_listing_ids(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        listing_ids: list[str],
+    ) -> frozenset[str]:
+        """Listing ids bookmarked by this contact (batch lookup for browse carousels)."""
+        if not listing_ids:
+            return frozenset()
+        rows = await self.db_connection.fetch(
+            """
+            SELECT listing_id::text AS listing_id
+              FROM marketplace_saved_items
+             WHERE organization_id = $1::uuid
+               AND contact_id = $2::uuid
+               AND listing_id = ANY($3::uuid[])
+            """,
+            organization_id,
+            contact_id,
+            listing_ids,
+        )
+        return frozenset(str(row["listing_id"]) for row in rows)
 
     async def save_item(self, *, organization_id: str, contact_id: str, listing_id: str) -> None:
         """Bookmark. A second save is a no-op."""
@@ -684,23 +711,21 @@ class MarketplaceRepository(BaseRepository):
         *,
         organization_id: str,
         seller_contact_id: str,
-        project_id: str,
         exclude_listing_id: str,
     ) -> int:
-        """Other live posts by the same seller in the same society."""
+        """Other live posts by the same seller (org-wide). Client loads cards via contact_id filter."""
         value = await self.db_connection.fetchval(
-            """
+            f"""
             SELECT count(*)::int
-              FROM marketplace_listings
-             WHERE organization_id = $1::uuid
-               AND seller_contact_id = $2::uuid
-               AND project_id = $3::uuid
-               AND status = 'live'::marketplace_listing_status
-               AND id <> $4::uuid
+              FROM marketplace_listings l
+             WHERE l.organization_id = $1::uuid
+               AND l.seller_contact_id = $2::uuid
+               AND l.status = 'live'::marketplace_listing_status
+               AND l.id <> $3::uuid
+               AND {_LISTING_VISIBLE_ON_RESIDENT_BOARD}
             """,
             organization_id,
             seller_contact_id,
-            project_id,
             exclude_listing_id,
         )
         return int(value or 0)

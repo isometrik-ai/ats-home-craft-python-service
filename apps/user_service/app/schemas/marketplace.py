@@ -138,6 +138,10 @@ class BrowseListingsQuery(BaseModel):
         default=None,
         description="Repeatable. lightly_used, well_used, needs_repair.",
     )
+    contact_id: str | None = Field(
+        default=None,
+        description="Limit to listings posted by this seller contact.",
+    )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1)
 

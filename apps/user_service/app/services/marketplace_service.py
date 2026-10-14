@@ -27,10 +27,6 @@ from apps.user_service.app.schemas.marketplace import (
 from apps.user_service.app.services.marketplace_catalog_service import (
     MarketplaceCatalogService,
 )
-from apps.user_service.app.services.marketplace_geo import (
-    MARKETPLACE_NEARBY_RADIUS_KM,
-    haversine_km,
-)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -268,9 +264,7 @@ class MarketplaceService:
             )
         listing = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
         assert listing
-        return await self._detail(
-            listing, viewer_contact_id=contact_id, viewer_project_id=str(unit["project_id"])
-        )
+        return await self._detail(listing, viewer_contact_id=contact_id, viewer_project_id=None)
 
     def _create_fields(self, body: CreateListingRequest, unit: dict[str, Any]) -> dict[str, Any]:
         """Listing columns sent on create (excluding category handled at insert)."""
@@ -380,11 +374,7 @@ class MarketplaceService:
         )
         updated = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
         assert updated
-        return await self._detail(
-            updated,
-            viewer_contact_id=contact_id,
-            viewer_project_id=str(unit["project_id"]),
-        )
+        return await self._detail(updated, viewer_contact_id=contact_id, viewer_project_id=None)
 
     def _patch_fields(
         self,
@@ -760,7 +750,7 @@ class MarketplaceService:
         contact_id: str,
         query: BrowseListingsQuery,
     ) -> dict[str, Any]:
-        """Browse live listings org-wide."""
+        """Browse live listings org-wide (optional seller filter via query.contact_id)."""
         await self.repo.expire_due(organization_id=self._org())
         category, subtype = MarketplaceCatalogService.parse_filter(query.category, query.subtype)
         rows, total = await self.repo.list_listings(
@@ -769,10 +759,11 @@ class MarketplaceService:
             category=category,
             subtype=subtype,
         )
-        items = [
-            await self._card(row, viewer_contact_id=contact_id, viewer_project_id=None)
-            for row in rows
-        ]
+        items = await self._cards_from_rows(
+            rows,
+            viewer_contact_id=contact_id,
+            viewer_project_id=None,
+        )
         return {"items": items, "total": total, "nearby_project_count": 0}
 
     async def my_listings(
@@ -834,51 +825,48 @@ class MarketplaceService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-    async def _visible_listing(self, *, listing_id: str, unit: dict[str, Any]) -> dict[str, Any]:
-        """Listing the viewer may open: own society or a nearby one."""
-        listing = await self.repo.get_listing(organization_id=self._org(), listing_id=listing_id)
-        if not listing:
-            raise NotFoundException(
-                message_key="marketplace.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
+    async def _cards_from_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        viewer_contact_id: str,
+        viewer_project_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Browse-style cards with one batched saved-state query."""
+        listing_ids = [str(row["id"]) for row in rows]
+        saved_ids = await self.repo.saved_listing_ids(
+            organization_id=self._org(),
+            contact_id=viewer_contact_id,
+            listing_ids=listing_ids,
+        )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            items.append(
+                await self._card(
+                    row,
+                    viewer_contact_id=viewer_contact_id,
+                    viewer_project_id=viewer_project_id,
+                    saved=str(row["id"]) in saved_ids,
+                )
             )
-        nearby = await self._nearby_project_ids(unit)
-        allowed = {unit["project_id"], *nearby}
-        if listing["project_id"] not in allowed and listing["status"] == "live":
-            raise NotFoundException(
-                message_key="marketplace.errors.not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
-            )
-        return listing
-
-    async def _nearby_project_ids(self, unit: dict[str, Any]) -> list[str]:
-        """Other societies within the nearby radius."""
-        origin_lat = unit.get("project_latitude")
-        origin_lng = unit.get("project_longitude")
-        if origin_lat is None or origin_lng is None:
-            return []
-        projects = await self.repo.list_active_project_coords(organization_id=self._org())
-        nearby: list[str] = []
-        for project in projects:
-            if project["id"] == unit["project_id"]:
-                continue
-            distance = haversine_km(
-                origin_lat, origin_lng, project["latitude"], project["longitude"]
-            )
-            if distance is not None and distance <= MARKETPLACE_NEARBY_RADIUS_KM:
-                nearby.append(project["id"])
-        return nearby
+        return items
 
     async def _card(
-        self, row: dict[str, Any], *, viewer_contact_id: str, viewer_project_id: str | None
+        self,
+        row: dict[str, Any],
+        *,
+        viewer_contact_id: str,
+        viewer_project_id: str | None,
+        saved: bool | None = None,
     ) -> dict[str, Any]:
         """Card fields shared by the home strip, browse, and saved list."""
         media = listing_media(row)
-        saved = await self.repo.is_saved(
-            organization_id=self._org(),
-            contact_id=viewer_contact_id,
-            listing_id=row["id"],
-        )
+        if saved is None:
+            saved = await self.repo.is_saved(
+                organization_id=self._org(),
+                contact_id=viewer_contact_id,
+                listing_id=row["id"],
+            )
         category_name, subtype_name = MarketplaceCatalogService.labels(
             str(row["category"]), row.get("subtype")
         )
@@ -915,9 +903,8 @@ class MarketplaceService:
         if row["status"] == "live":
             others = await self.repo.count_other_live(
                 organization_id=self._org(),
-                seller_contact_id=row["seller_contact_id"],
-                project_id=row["project_id"],
-                exclude_listing_id=row["id"],
+                seller_contact_id=str(row["seller_contact_id"]),
+                exclude_listing_id=str(row["id"]),
             )
         year = row.get("purchase_year")
         age_years = None
