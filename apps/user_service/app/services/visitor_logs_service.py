@@ -986,7 +986,7 @@ class VisitorLogsService:
             "awaiting_approval",
             "walk_ins",
             "exited",
-            "denied_expired",
+            "cancelled_expired",
         ):
             value = overview.get(key)
             writer.writerow([key, value if value is not None else ""])
