@@ -578,8 +578,9 @@ async def test_mark_sold_success(monkeypatch, client):
         assert contact_id == CONTACT_ID
         assert listing_id == LISTING_ID
         assert body.unit_id == UNIT_ID
-        assert body.buyer_contact_id == "buyer-1"
-        return {"id": LISTING_ID, "buyer_name": "Asha K."}
+        assert body.sold_type.value == "inside"
+        assert str(body.buyer_contact_id) == "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        return {"id": LISTING_ID, "buyer_name": "Asha K.", "sold_type": "inside"}
 
     monkeypatch.setattr(
         "apps.user_service.app.services.marketplace_service.MarketplaceService.mark_sold",
@@ -587,7 +588,11 @@ async def test_mark_sold_success(monkeypatch, client):
     )
     response = await client.post(
         f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
-        json={"unit_id": UNIT_ID, "buyer_contact_id": "buyer-1"},
+        json={
+            "unit_id": UNIT_ID,
+            "sold_type": "inside",
+            "buyer_contact_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        },
     )
     payload = assert_success(response)
     assert payload["data"]["buyer_name"] == "Asha K."
@@ -612,9 +617,47 @@ async def test_mark_sold_fails_when_buyer_is_the_seller(monkeypatch, client):
     )
     response = await client.post(
         f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
-        json={"unit_id": UNIT_ID, "buyer_contact_id": CONTACT_ID},
+        json={
+            "unit_id": UNIT_ID,
+            "sold_type": "inside",
+            "buyer_contact_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        },
     )
     assert_error(response, 422)
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_outside_success(monkeypatch, client):
+    """POST /mark-sold with sold_type outside needs no buyer contact."""
+    _resident(monkeypatch)
+
+    async def fake_sold(_self, *, contact_id, listing_id, body):
+        assert contact_id == CONTACT_ID
+        assert body.sold_type.value == "outside"
+        assert body.buyer_contact_id is None
+        return {"id": LISTING_ID, "sold_type": "outside", "buyer_name": None}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.mark_sold",
+        fake_sold,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
+        json={"unit_id": UNIT_ID, "sold_type": "outside"},
+    )
+    payload = assert_success(response)
+    assert payload["data"]["sold_type"] == "outside"
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_inside_missing_buyer_returns_422(monkeypatch, client):
+    """POST /mark-sold returns 422 when inside is chosen without buyer_contact_id."""
+    _resident(monkeypatch)
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
+        json={"unit_id": UNIT_ID, "sold_type": "inside"},
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

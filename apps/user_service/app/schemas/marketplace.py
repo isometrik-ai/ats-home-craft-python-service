@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -17,6 +18,7 @@ from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceReportReason,
     MarketplaceReportStatus,
     MarketplaceSaleRating,
+    MarketplaceSoldType,
     MarketplaceSort,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -268,11 +270,32 @@ class MarketplaceReportCreatedApiResponse(BaseModel):
 
 
 class MarkSoldRequest(BaseModel):
-    """Record the buyer and an optional private rating."""
+    """Mark a live listing sold to a MyNest resident or someone outside the app."""
+
+    model_config = ConfigDict(extra="forbid")
 
     unit_id: str
-    buyer_contact_id: str
-    rating: MarketplaceSaleRating | None = None
+    sold_type: MarketplaceSoldType = MarketplaceSoldType.INSIDE
+    buyer_contact_id: UUID | None = Field(
+        default=None,
+        description="Required when sold_type is inside (MyNest buyer contact UUID).",
+    )
+    rating: MarketplaceSaleRating | None = Field(
+        default=None,
+        description="Optional private rating; only when sold_type is inside.",
+    )
+
+    @model_validator(mode="after")
+    def buyer_matches_sold_type(self) -> MarkSoldRequest:
+        """Inside requires a buyer contact; outside must not send one."""
+        if self.sold_type == MarketplaceSoldType.INSIDE:
+            if self.buyer_contact_id is None:
+                raise ValueError("buyer_contact_id is required when sold_type is inside")
+        elif self.buyer_contact_id is not None:
+            raise ValueError("buyer_contact_id must be omitted when sold_type is outside")
+        if self.sold_type == MarketplaceSoldType.OUTSIDE and self.rating is not None:
+            raise ValueError("rating must be omitted when sold_type is outside")
+        return self
 
 
 class AdminMarketplaceListQuery(BaseModel):

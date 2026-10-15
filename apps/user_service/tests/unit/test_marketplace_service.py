@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 from asyncpg import UniqueViolationError
@@ -13,6 +14,7 @@ from pydantic import ValidationError
 from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceReportReason,
     MarketplaceSaleRating,
+    MarketplaceSoldType,
 )
 from apps.user_service.app.schemas.marketplace import (
     BrowseListingsQuery,
@@ -287,15 +289,50 @@ async def test_seller_remove_soft_deletes_a_live_post():
 @pytest.mark.asyncio
 async def test_mark_sold_rejects_the_seller_as_buyer():
     svc = _service()
-    svc.repo.get_listing = AsyncMock(return_value=_listing())
+    seller_uuid = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    svc.repo.get_listing = AsyncMock(
+        return_value=_listing(status="live", seller_contact_id=str(seller_uuid))
+    )
     body = MarkSoldRequest(
-        unit_id="unit-1", buyer_contact_id="seller-1", rating=MarketplaceSaleRating.SMOOTH
+        unit_id="unit-1",
+        sold_type=MarketplaceSoldType.INSIDE,
+        buyer_contact_id=seller_uuid,
+        rating=MarketplaceSaleRating.SMOOTH,
     )
     with pytest.raises(ValidationException) as raised:
-        await svc.mark_sold(contact_id="seller-1", listing_id="listing-1", body=body)
+        await svc.mark_sold(contact_id=str(seller_uuid), listing_id="listing-1", body=body)
     assert raised.value.message_key == "marketplace.errors.buyer_is_seller"
     svc.repo.update_listing.assert_not_called()
     svc.repo.insert_feedback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_outside_clears_buyer():
+    svc = _service()
+    svc.repo.get_listing = AsyncMock(return_value=_listing(status="live"))
+    svc.repo.contact_in_organization = AsyncMock(return_value=True)
+    body = MarkSoldRequest(unit_id="unit-1", sold_type=MarketplaceSoldType.OUTSIDE)
+    result = await svc.mark_sold(contact_id="seller-1", listing_id="listing-1", body=body)
+    fields = svc.repo.update_listing.await_args.kwargs["fields"]
+    assert fields["status"] == "sold"
+    assert fields["buyer_contact_id"] is None
+    assert result["sold_type"] == "outside"
+    assert result["buyer_name"] is None
+    svc.repo.insert_feedback.assert_not_called()
+
+
+def test_mark_sold_request_inside_requires_buyer():
+    with pytest.raises(ValidationError):
+        MarkSoldRequest(unit_id="unit-1", sold_type=MarketplaceSoldType.INSIDE)
+
+
+def test_mark_sold_request_outside_rejects_buyer():
+    with pytest.raises(ValidationError):
+        MarkSoldRequest(
+            unit_id="unit-1",
+            sold_type=MarketplaceSoldType.OUTSIDE,
+            buyer_contact_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        )
 
 
 def test_cover_path_prefers_the_first_image():
