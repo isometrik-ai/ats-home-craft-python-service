@@ -146,10 +146,17 @@ async def test_get_resident_walk_in(monkeypatch, client):
 
     _patch_resident_context(monkeypatch)
 
-    async def fake_get_resident_walk_in(_self, *, contact_id: str, walk_in_entry_id: str):
+    async def fake_get_resident_walk_in(
+        _self,
+        *,
+        contact_id: str,
+        walk_in_entry_id: str,
+        unit_id: str | None = None,
+    ):
         del _self
         assert contact_id == CONTACT_ID
         assert walk_in_entry_id == ENTRY_ID
+        assert unit_id is None
         return _fake_detail()
 
     monkeypatch.setattr(f"{_SERVICE}.get_resident_walk_in", fake_get_resident_walk_in)

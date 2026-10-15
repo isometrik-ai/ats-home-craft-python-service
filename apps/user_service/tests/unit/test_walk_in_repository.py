@@ -481,3 +481,19 @@ async def test_list_resident_visit_units():
     assert args[1] == "awaiting"
     assert "contact_type" not in query
     assert args[2] == CONTACT_ID
+
+
+@pytest.mark.asyncio
+async def test_list_resident_visit_units_filters_by_unit_id():
+    conn = _FakeConn(rows=[{"visit_unit_id": VISIT_UNIT_ID, "status": "awaiting"}])
+    repo = WalkInRepository(db_connection=conn)
+
+    await repo.list_resident_visit_units(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        unit_id=UNIT_ID,
+    )
+
+    query, args = conn.fetch_calls[0]
+    assert "vu.unit_id = $4::uuid" in query
+    assert args[3] == UNIT_ID

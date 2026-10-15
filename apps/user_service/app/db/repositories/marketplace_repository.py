@@ -545,6 +545,9 @@ class MarketplaceRepository(BaseRepository):
         if query.q and query.q.strip():
             params.append(f"%{query.q.strip()}%")
             where.append(f"l.title ILIKE ${len(params)}")
+        if query.contact_id is not None:
+            params.append(str(query.contact_id))
+            where.append(f"l.seller_contact_id = ${len(params)}::uuid")
         conditions = [item.value for item in query.condition] if query.condition else []
         if conditions:
             params.append(conditions)

@@ -494,6 +494,48 @@ async def test_list_resident_visit_units():
 
 
 @pytest.mark.asyncio
+async def test_list_resident_visit_units_filters_by_unit_id():
+    """Resident list passes unit_id through to the repository."""
+    repo = _FakeWalkInRepo()
+    repo.list_resident_visit_units = AsyncMock(return_value=[])  # type: ignore[method-assign]
+    repo.resident_can_act_on_unit = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    await service.list_resident_visit_units(
+        contact_id=CONTACT_ID,
+        query=ResidentWalkInVisitUnitListQuery(unit_id=UNIT_ID),
+    )
+
+    repo.resident_can_act_on_unit.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        unit_id=UNIT_ID,
+    )
+    repo.list_resident_visit_units.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        contact_id=CONTACT_ID,
+        status=None,
+        unit_id=UNIT_ID,
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_resident_visit_units_rejects_inaccessible_unit():
+    """Resident list rejects unit_id the contact is not linked to."""
+    repo = _FakeWalkInRepo()
+    repo.resident_can_act_on_unit = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    from libs.shared_utils.http_exceptions import ValidationException
+
+    with pytest.raises(ValidationException):
+        await service.list_resident_visit_units(
+            contact_id=CONTACT_ID,
+            query=ResidentWalkInVisitUnitListQuery(unit_id="other-unit"),
+        )
+
+
+@pytest.mark.asyncio
 async def test_get_resident_walk_in_success():
     """Resident detail succeeds when contact can act on a visit unit."""
     repo = _FakeWalkInRepo()
@@ -520,6 +562,51 @@ async def test_get_resident_walk_in_not_accessible():
             contact_id=CONTACT_ID,
             walk_in_entry_id=ENTRY_ID,
         )
+
+
+@pytest.mark.asyncio
+async def test_get_resident_walk_in_scopes_visit_units_to_accessible_flats():
+    """Resident detail omits visit units on flats they do not occupy."""
+    repo = _FakeWalkInRepo()
+    repo.visit_units = [
+        _visit_unit_row(id="vu-mine", unit_id=UNIT_ID),
+        _visit_unit_row(id="vu-other", unit_id="other-unit"),
+    ]
+
+    async def can_act(**kwargs):
+        return str(kwargs.get("unit_id")) == UNIT_ID
+
+    repo.resident_can_act_on_unit = can_act  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    detail = await service.get_resident_walk_in(
+        contact_id=CONTACT_ID,
+        walk_in_entry_id=ENTRY_ID,
+    )
+
+    assert len(detail["visit_units"]) == 1
+    assert detail["visit_units"][0]["id"] == "vu-mine"
+
+
+@pytest.mark.asyncio
+async def test_get_resident_walk_in_filters_by_unit_id():
+    """Resident detail returns one flat when unit_id query is set."""
+    repo = _FakeWalkInRepo()
+    repo.visit_units = [
+        _visit_unit_row(id="vu-1", unit_id=UNIT_ID),
+        _visit_unit_row(id="vu-2", unit_id="unit-2"),
+    ]
+    repo.resident_can_act_on_unit = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+
+    detail = await service.get_resident_walk_in(
+        contact_id=CONTACT_ID,
+        walk_in_entry_id=ENTRY_ID,
+        unit_id=UNIT_ID,
+    )
+
+    assert len(detail["visit_units"]) == 1
+    assert detail["visit_units"][0]["unit_id"] == UNIT_ID
 
 
 @pytest.mark.asyncio

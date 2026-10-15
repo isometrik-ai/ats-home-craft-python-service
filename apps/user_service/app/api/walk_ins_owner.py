@@ -11,6 +11,7 @@ from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.walk_in import (
     RejectWalkInVisitUnitRequest,
+    ResidentWalkInDetailQuery,
     ResidentWalkInVisitUnitListQuery,
 )
 from apps.user_service.app.services.walk_in_service import WalkInService
@@ -39,7 +40,7 @@ COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
 @router.get(
     "/visit-units",
     status_code=http_status.HTTP_200_OK,
-    summary="List walk-in visit units for my flats",
+    summary="List walk-in visit units for my flats (optional unit_id filter)",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("60/minute")
@@ -74,13 +75,14 @@ async def list_resident_visit_units(
 @router.get(
     "/{walk_in_id}",
     status_code=http_status.HTTP_200_OK,
-    summary="Get walk-in visit details for resident",
+    summary="Get walk-in visit details for resident (optional unit_id scope)",
     responses=COMMON_ERROR_RESPONSES,
 )
 @limiter.limit("60/minute")
 async def get_resident_walk_in(
     request: Request,
     walk_in_id: str = Path(..., description="Walk-in entry identifier (UUID string)."),
+    query: ResidentWalkInDetailQuery = Depends(),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -92,6 +94,7 @@ async def get_resident_walk_in(
     data = await service.get_resident_walk_in(
         contact_id=str(contact["id"]),
         walk_in_entry_id=walk_in_id,
+        unit_id=query.unit_id,
     )
     return success_response(
         request=request,

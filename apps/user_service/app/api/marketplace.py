@@ -142,7 +142,7 @@ async def list_marketplace_listings(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Paginated live listings for the organization."""
+    """Paginated live listings for the organization; optional ``contact_id`` filters by seller."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )

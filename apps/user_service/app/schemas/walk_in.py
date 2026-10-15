@@ -97,6 +97,21 @@ class ResidentWalkInVisitUnitListQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     status: WalkInVisitUnitStatus | None = None
+    unit_id: str | None = Field(
+        default=None,
+        description="When set, return visit units for this flat only.",
+    )
+
+
+class ResidentWalkInDetailQuery(BaseModel):
+    """Resident walk-in detail scoped to a flat when the app has a selected unit."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    unit_id: str | None = Field(
+        default=None,
+        description="When set, return detail for this flat only.",
+    )
 
 
 class WalkInVisitUnitResponse(BaseModel):
