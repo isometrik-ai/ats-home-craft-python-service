@@ -199,6 +199,47 @@ def _create_body(**overrides) -> CreateProjectRequest:
     return CreateProjectRequest(**defaults)
 
 
+def test_create_project_request_allows_null_gstin():
+    """GSTIN may be omitted when the client workbook has no tax number."""
+    body = _create_body(gstin=None)
+    assert body.gstin is None
+
+
+def test_create_project_request_blank_gstin_becomes_none():
+    """Blank GSTIN strings are stored as null."""
+    body = _create_body(gstin="   ")
+    assert body.gstin is None
+
+
+def test_project_details_response_allows_null_gstin():
+    """GET /projects/{id} must accept imported rows with no GSTIN."""
+    from apps.user_service.app.schemas.project_setup import ProjectDetailsResponse
+
+    details = ProjectDetailsResponse.model_validate(
+        {
+            "id": PROJECT_ID,
+            "organization_id": "org-1",
+            "code": "happy-trails",
+            "name": "Happy Trails",
+            "developer_name": "ATS",
+            "community_admin_user_id": ADMIN_ID,
+            "gstin": None,
+            "address_line_1": "Line 1",
+            "pin_code": "203207",
+            "city": "Noida",
+            "state": "UP",
+            "country": "India",
+            "property_types": ["residential"],
+            "primary_measurement_unit": "sq_ft",
+            "status": "onboarding",
+            "setup_current_step": "project_basics",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    assert details.gstin is None
+
+
 @pytest.mark.parametrize(
     ("name", "expected"),
     [

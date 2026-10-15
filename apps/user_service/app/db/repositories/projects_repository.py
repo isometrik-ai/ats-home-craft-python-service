@@ -75,6 +75,25 @@ class ProjectsRepository(BaseRepository):
         )
         return bool(exists)
 
+    async def get_project_by_name(
+        self, *, organization_id: str, name: str
+    ) -> dict[str, Any] | None:
+        """Return the earliest project whose name matches, ignoring case and extra spaces."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT *
+            FROM projects
+            WHERE organization_id = $1::uuid
+              AND lower(btrim(regexp_replace(name, '\\s+', ' ', 'g')))
+                = lower(btrim(regexp_replace($2, '\\s+', ' ', 'g')))
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            organization_id,
+            name,
+        )
+        return dict(row) if row else None
+
     async def get_project(self, *, organization_id: str, project_id: str) -> dict[str, Any] | None:
         """Fetch a single project scoped to the organization."""
         row = await self.db_connection.fetchrow(

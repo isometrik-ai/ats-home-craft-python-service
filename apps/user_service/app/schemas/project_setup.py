@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.enums import (
     GateStatus,
@@ -46,7 +46,12 @@ class CreateProjectRequest(BaseModel):
         max_length=36,
         description="Supabase auth user id of the community admin (must be an org member)",
     )
-    gstin: str = Field(..., min_length=15, max_length=15)
+    gstin: str | None = Field(
+        default=None,
+        min_length=15,
+        max_length=15,
+        description="Optional 15-character GSTIN. Empty values are stored as null.",
+    )
     possession_date: date | None = None
     address_line_1: str = Field(..., min_length=1)
     address_line_2: str | None = None
@@ -59,6 +64,16 @@ class CreateProjectRequest(BaseModel):
     property_types: list[PropertyType] = Field(default_factory=list)
     primary_measurement_unit: MeasurementUnit
     units_count: int | None = Field(default=None, ge=0)
+
+    @field_validator("gstin", mode="before")
+    @classmethod
+    def empty_gstin_to_none(cls, value: object) -> object:
+        """Treat blank GSTIN as omitted."""
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class UpdateProjectRequest(BaseModel):
@@ -88,6 +103,16 @@ class UpdateProjectRequest(BaseModel):
     property_types: list[PropertyType] | None = None
     primary_measurement_unit: MeasurementUnit | None = None
     status: PropertyProjectStatus | None = None
+
+    @field_validator("gstin", mode="before")
+    @classmethod
+    def empty_gstin_to_none(cls, value: object) -> object:
+        """Treat blank GSTIN as omitted."""
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class ListProjectsRequest(BaseModel):
@@ -174,7 +199,7 @@ class ProjectDetailsResponse(BaseModel):
     name: str
     developer_name: str
     community_admin_user_id: str
-    gstin: str
+    gstin: str | None = None
     possession_date: str | None = None
     address_line_1: str
     address_line_2: str | None = None
@@ -192,6 +217,16 @@ class ProjectDetailsResponse(BaseModel):
     created_at: str
     updated_at: str
     community_admin: CommunityAdminSummary | None = None
+
+    @field_validator("gstin", mode="before")
+    @classmethod
+    def empty_gstin_to_none(cls, value: object) -> object:
+        """Imported projects may have a null GSTIN."""
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 # ---------------------------------------------------------------------------

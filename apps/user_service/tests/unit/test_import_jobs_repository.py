@@ -63,8 +63,41 @@ async def test_create_job():
     )
 
     assert job["job_id"] == "imp_1"
-    query, _ = conn.fetch_calls[0]
+    query, args = conn.fetch_calls[0]
     assert "INSERT INTO import_jobs" in query
+    assert "contacts" in args
+
+
+@pytest.mark.asyncio
+async def test_create_job_projects_import_type():
+    """create_job can persist import_type=projects."""
+    conn = _FakeConn(
+        rows=[
+            {
+                "job_key": "imp_2",
+                "organization_id": "org-1",
+                "status": "queued",
+                "import_type": "projects",
+            }
+        ]
+    )
+    repo = ImportJobsRepository(db_connection=conn)
+
+    job = await repo.create_job(
+        job_id="imp_2",
+        organization_id="org-1",
+        status="queued",
+        file_url="https://example.com/project.xlsx",
+        file_type="xlsx",
+        schema_version=1,
+        mapping=None,
+        options={"community_admin_user_id": "770e8400-e29b-41d4-a716-446655440002"},
+        import_type="projects",
+    )
+
+    assert job["job_id"] == "imp_2"
+    _query, args = conn.fetch_calls[0]
+    assert "projects" in args
 
 
 @pytest.mark.asyncio
