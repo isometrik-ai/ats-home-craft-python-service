@@ -665,6 +665,7 @@ class WalkInRepository(BaseRepository):
         organization_id: str,
         contact_id: str,
         status: str | None = None,
+        unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """List visit units pending action for flats the contact occupies."""
         rows = await self.db_connection.fetch(
@@ -700,6 +701,7 @@ class WalkInRepository(BaseRepository):
              AND u.organization_id = vu.organization_id
             WHERE vu.organization_id = $1::uuid
               AND ($2::walk_in_visit_unit_status IS NULL OR vu.status = $2::walk_in_visit_unit_status)
+              AND ($4::uuid IS NULL OR vu.unit_id = $4::uuid)
               AND EXISTS (
                 SELECT 1
                 FROM contact_units cu
@@ -713,5 +715,6 @@ class WalkInRepository(BaseRepository):
             organization_id,
             status,
             contact_id,
+            unit_id,
         )
         return [dict(row) for row in rows]

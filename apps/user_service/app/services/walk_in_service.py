@@ -909,10 +909,22 @@ class WalkInService:
         """List visit units for flats the resident occupies."""
         org_id = self.user_context.organization_id
         assert org_id
+        unit_id = str(query.unit_id).strip() if query.unit_id else None
+        if unit_id:
+            if not await self.repo.resident_can_act_on_unit(
+                organization_id=org_id,
+                contact_id=contact_id,
+                unit_id=unit_id,
+            ):
+                raise ValidationException(
+                    message_key="walk_in.errors.unit_not_accessible",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
         rows = await self.repo.list_resident_visit_units(
             organization_id=org_id,
             contact_id=contact_id,
             status=query.status.value if query.status else None,
+            unit_id=unit_id,
         )
         items: list[dict[str, Any]] = []
         for row in rows:
@@ -945,26 +957,53 @@ class WalkInService:
         *,
         contact_id: str,
         walk_in_entry_id: str,
+        unit_id: str | None = None,
     ) -> dict[str, Any]:
         """Resident detail for a walk-in affecting one of their flats."""
         row = await self._get_entry_or_raise(walk_in_entry_id=walk_in_entry_id)
         detail = await self._serialize_detail(row)
         org_id = self.user_context.organization_id
         assert org_id
-        accessible = False
-        for unit in detail.get("visit_units") or []:
-            if await self.repo.resident_can_act_on_unit(
+        scoped_unit_id = str(unit_id).strip() if unit_id else None
+        if scoped_unit_id:
+            if not await self.repo.resident_can_act_on_unit(
                 organization_id=org_id,
                 contact_id=contact_id,
-                unit_id=str(unit["unit_id"]),
+                unit_id=scoped_unit_id,
             ):
-                accessible = True
-                break
-        if not accessible:
+                raise ValidationException(
+                    message_key="walk_in.errors.unit_not_accessible",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+
+        access_cache: dict[str, bool] = {}
+
+        async def resident_can_act(flat_id: str) -> bool:
+            if flat_id not in access_cache:
+                access_cache[flat_id] = await self.repo.resident_can_act_on_unit(
+                    organization_id=org_id,
+                    contact_id=contact_id,
+                    unit_id=flat_id,
+                )
+            return access_cache[flat_id]
+
+        visit_units: list[dict[str, Any]] = []
+        for unit in detail.get("visit_units") or []:
+            flat_id = str(unit.get("unit_id") or "")
+            if scoped_unit_id and flat_id != scoped_unit_id:
+                continue
+            if flat_id and await resident_can_act(flat_id):
+                visit_units.append(unit)
+
+        if not visit_units:
             raise NotFoundException(
                 message_key="walk_in.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+
+        detail["visit_units"] = visit_units
+        first = visit_units[0]
+        detail["primary_unit_label"] = first.get("unit_label") or first.get("unit_code")
         return detail
 
     async def approve_visit_unit(
