@@ -14,6 +14,9 @@ from apps.user_service.app.db.repositories.contacts_repository import ContactsRe
 from apps.user_service.app.db.repositories.household_invitations_repository import (
     HouseholdInvitationsRepository,
 )
+from apps.user_service.app.db.repositories.marketplace_repository import (
+    MarketplaceRepository,
+)
 from apps.user_service.app.db.repositories.pass_events_repository import (
     PassEventsRepository,
 )
@@ -55,6 +58,7 @@ class ContactDeleteCascadeService:
         self.user_context = user_context
         self.contacts_repo = ContactsRepository(db_connection)
         self.contact_units_repo = ContactUnitsRepository(db_connection)
+        self.marketplace_repo = MarketplaceRepository(db_connection)
         self.passes_repo = PassesRepository(db_connection)
         self.pass_events_repo = PassEventsRepository(db_connection)
         self.tenant_requests_repo = TenantRequestsRepository(db_connection)
@@ -84,6 +88,11 @@ class ContactDeleteCascadeService:
         org_id = self.user_context.organization_id
         assert org_id
         del contact
+
+        await self._release_marketplace_listings(
+            organization_id=org_id,
+            contact_id=contact_id,
+        )
 
         open_links = await self.contact_units_repo.list_open_links_for_contact(
             organization_id=org_id,
@@ -401,6 +410,10 @@ class ContactDeleteCascadeService:
                 contact_id=household_contact_id,
                 organization_id=organization_id,
             )
+            await self._release_marketplace_listings(
+                organization_id=organization_id,
+                contact_id=household_contact_id,
+            )
             await purge_contact_notice_likes(
                 db_connection=self.db_connection,
                 organization_id=organization_id,
@@ -411,6 +424,21 @@ class ContactDeleteCascadeService:
                 organization_id=organization_id,
                 user_id=contact.get("user_id"),
             )
+
+    async def _release_marketplace_listings(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+    ) -> None:
+        """Remove drafts and live listings, and clear saved items for a contact."""
+        actor_user_id = str(self.user_context.user_id) if self.user_context.user_id else None
+        await self.marketplace_repo.release_for_contact_delete(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            removed_by_user_id=actor_user_id,
+            removal_note="Removed because the seller contact was deleted.",
+        )
 
     async def _cancel_household_invitations(
         self,

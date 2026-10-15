@@ -38,26 +38,27 @@ The prototype flow map, adjusted for this scope:
 
 ### Business rules (must enforce)
 
-| Rule                                               | Enforcement                                                                                                                                                                                        |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Org-scoped resident API**                        | Resident queries filter `organization_id` from auth. Resident URLs never use `project_id`                                                                                                          |
-| **Org-scoped staff API**                           | Staff routes are `/v1/marketplace/admin/*` with `ensure_staff_project_access_optional`. `project_id` is an optional query filter                                                                   |
-| **Global browse**                                  | GET listing feeds are org-wide. No `unit_id` on read routes; flat numbers follow §6 (seller always sees own flat)                                                                                  |
-| **Unit on writes**                                 | `unit_id` in the body on create, save, patch, remove, renew, relist, and mark-sold. Publish uses the listing's stored pickup unit. Active `contact_units`; seller actions need Owner/Tenant/Family |
-| **Media immutable**                                | Set only on create. No `/listings/{id}/media` routes                                                                                                                                               |
-| **Owner, Tenant, or Family**                       | Role read from `contact_roles`. Guest / Vendor / Staff cannot post                                                                                                                                 |
-| **Sale needs a price; giveaway must not have one** | Check constraint + service validation                                                                                                                                                              |
-| **At least 2 media items to publish**              | Service count on `marketplace_listings.media` jsonb                                                                                                                                                |
-| **Live for 30 days**                               | `expires_at` set at publish. Job flips `live` → `expired`                                                                                                                                          |
-| **Flat only inside the listing's society**         | Response builder drops `unit_label` for other projects, and when `show_flat_number` is false                                                                                                       |
-| **Phone never returned**                           | Repository select list omits `contacts.phones`                                                                                                                                                     |
-| **Mark sold**                                      | `buyer_contact_id` must be an active resident (`contact_units`) in the **same project** as the listing. No thread prerequisite                                                                     |
-| **Feedback stays off the public listing**          | Stored in `marketplace_sale_feedback`, never joined into browse or detail                                                                                                                          |
-| **Seller can edit a live post**                    | `PATCH` while `draft`, `live`, or `removed`. A live row stays `live` and must remain publish-valid. Category and subtype stay as posted                                                            |
-| **Seller can take their own post down**            | `POST .../remove` on a live listing                                                                                                                                                                |
-| **Sold hidden from the seller after 1 year**       | My listings filters `sold_at >= now() - interval '1 year'`                                                                                                                                         |
-| **Media are paths**                                | Presigned upload, then metadata in `listings.media` jsonb. No blob                                                                                                                                 |
-| **Categories from JSON**                           | `GET /marketplace/catalog`. Not Postgres                                                                                                                                                           |
+| Rule                                               | Enforcement                                                                                                                                                                                                                  |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Org-scoped resident API**                        | Resident queries filter `organization_id` from auth. Resident URLs never use `project_id`                                                                                                                                    |
+| **Org-scoped staff API**                           | Staff routes are `/v1/marketplace/admin/*` with `ensure_staff_project_access_optional`. `project_id` is an optional query filter                                                                                             |
+| **Global browse**                                  | GET listing feeds are org-wide. No `unit_id` on read routes; flat numbers follow §6 (seller always sees own flat)                                                                                                            |
+| **Unit on writes**                                 | `unit_id` in the body on create, save, patch, remove, renew, relist, and mark-sold. Publish uses the listing's stored pickup unit. Active `contact_units`; seller actions need Owner/Tenant/Family                           |
+| **Media immutable**                                | Set only on create. No `/listings/{id}/media` routes                                                                                                                                                                         |
+| **Owner, Tenant, or Family**                       | Role read from `contact_roles`. Guest / Vendor / Staff cannot post                                                                                                                                                           |
+| **Sale needs a price; giveaway must not have one** | Check constraint + service validation                                                                                                                                                                                        |
+| **At least 2 media items to publish**              | Service count on `marketplace_listings.media` jsonb                                                                                                                                                                          |
+| **Live for 30 days**                               | `expires_at` set at publish. Job flips `live` → `expired`                                                                                                                                                                    |
+| **Flat only inside the listing's society**         | Response builder drops `unit_label` for other projects, and when `show_flat_number` is false                                                                                                                                 |
+| **Phone never returned**                           | Repository select list omits `contacts.phones`                                                                                                                                                                               |
+| **Mark sold**                                      | `buyer_contact_id` must be an active resident (`contact_units`) in the **same project** as the listing. No thread prerequisite                                                                                               |
+| **Feedback stays off the public listing**          | Stored in `marketplace_sale_feedback`, never joined into browse or detail                                                                                                                                                    |
+| **Seller can edit a live post**                    | `PATCH` while `draft`, `live`, or `removed`. A live row stays `live` and must remain publish-valid. Category and subtype stay as posted                                                                                      |
+| **Seller can take their own post down**            | `POST .../remove` on a live listing                                                                                                                                                                                          |
+| **Contact delete takes listings off the board**    | `ContactDeleteCascadeService` → `MarketplaceRepository.release_for_contact_delete`: hard-delete **drafts**, mark **live** as `removed`, clear that contact's **saved** bookmarks. Sold/expired/removed rows stay for history |
+| **Sold hidden from the seller after 1 year**       | My listings filters `sold_at >= now() - interval '1 year'`                                                                                                                                                                   |
+| **Media are paths**                                | Presigned upload, then metadata in `listings.media` jsonb. No blob                                                                                                                                                           |
+| **Categories from JSON**                           | `GET /marketplace/catalog`. Not Postgres                                                                                                                                                                                     |
 
 ______________________________________________________________________
 
@@ -414,16 +415,17 @@ ______________________________________________________________________
 
 ## 10. How to make common changes
 
-| I want to…                | Change here                                             |
-| ------------------------- | ------------------------------------------------------- |
-| Add a category            | `app/data/marketplace_catalog.json`                     |
-| Change 30-day live window | `marketplace_service.py` and the expiry job             |
-| Change the nearby radius  | `MARKETPLACE_NEARBY_RADIUS_KM` in `marketplace_geo.py`  |
-| Change who may post       | `contact_roles` check in `marketplace_service.py`       |
-| Change flat visibility    | `visible_flat` only                                     |
-| Change copy               | `app/locales/en.json` under `marketplace.*`             |
-| Change staff filters      | `AdminMarketplaceListQuery` + `list_admin_listings` SQL |
-| Change staff header cards | `get_admin_summary` in the repository                   |
+| I want to…                            | Change here                                                                                                                                  |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Add a category                        | `app/data/marketplace_catalog.json`                                                                                                          |
+| Change 30-day live window             | `marketplace_service.py` and the expiry job                                                                                                  |
+| Change the nearby radius              | `MARKETPLACE_NEARBY_RADIUS_KM` in `marketplace_geo.py`                                                                                       |
+| Change who may post                   | `contact_roles` check in `marketplace_service.py`                                                                                            |
+| Change flat visibility                | `visible_flat` only                                                                                                                          |
+| Change copy                           | `app/locales/en.json` under `marketplace.*`                                                                                                  |
+| Change staff filters                  | `AdminMarketplaceListQuery` + `list_admin_listings` SQL                                                                                      |
+| Change staff header cards             | `get_admin_summary` in the repository                                                                                                        |
+| Change contact-delete listing cleanup | `MarketplaceRepository.release_for_contact_delete` + callers in `contact_delete_cascade_service.py` and `unit_occupancy_turnover_service.py` |
 
 ______________________________________________________________________
 

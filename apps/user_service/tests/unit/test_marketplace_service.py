@@ -524,3 +524,55 @@ async def test_report_listing_maps_duplicate_to_conflict():
     with pytest.raises(ConflictException) as raised:
         await svc.report_listing(contact_id="buyer-1", listing_id="listing-1", body=body)
     assert raised.value.message_key == "marketplace.errors.report_exists"
+
+
+@pytest.mark.asyncio
+async def test_release_for_contact_delete_drops_drafts_removes_live_and_clears_saves():
+    """Contact delete hard-deletes drafts, marks live listings removed, and clears bookmarks."""
+    from apps.user_service.app.db.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    repo = MarketplaceRepository(db_connection=conn)
+
+    await repo.release_for_contact_delete(
+        organization_id="org-1",
+        contact_id="seller-1",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
+    )
+
+    assert conn.execute.await_count == 3
+    draft_sql, *_ = conn.execute.await_args_list[0].args
+    live_sql, *_ = conn.execute.await_args_list[1].args
+    saved_sql, *_ = conn.execute.await_args_list[2].args
+    assert "DELETE FROM marketplace_listings" in draft_sql
+    assert "status = 'draft'" in draft_sql
+    assert "status = 'removed'" in live_sql
+    assert "status = 'live'" in live_sql
+    assert "DELETE FROM marketplace_saved_items" in saved_sql
+
+
+@pytest.mark.asyncio
+async def test_release_for_contact_delete_skips_live_remove_without_actor():
+    """Live listings stay unless an actor user id can satisfy the removed-row check."""
+    from apps.user_service.app.db.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    repo = MarketplaceRepository(db_connection=conn)
+
+    await repo.release_for_contact_delete(
+        organization_id="org-1",
+        contact_id="seller-1",
+        removed_by_user_id=None,
+        removal_note="Removed because the seller contact was deleted.",
+    )
+
+    assert conn.execute.await_count == 2
+    assert "DELETE FROM marketplace_listings" in conn.execute.await_args_list[0].args[0]
+    assert "DELETE FROM marketplace_saved_items" in conn.execute.await_args_list[1].args[0]

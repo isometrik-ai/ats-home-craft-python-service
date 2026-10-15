@@ -20,6 +20,9 @@ from apps.user_service.app.db.repositories.daily_help_repository import (
 from apps.user_service.app.db.repositories.household_invitations_repository import (
     HouseholdInvitationsRepository,
 )
+from apps.user_service.app.db.repositories.marketplace_repository import (
+    MarketplaceRepository,
+)
 from apps.user_service.app.db.repositories.pass_events_repository import (
     PassEventsRepository,
 )
@@ -71,6 +74,7 @@ class UnitOccupancyTurnoverService:
         self.household_invitations_repo = HouseholdInvitationsRepository(db_connection)
         self.daily_help_repo = DailyHelpRepository(db_connection)
         self.tenant_requests_repo = TenantRequestsRepository(db_connection)
+        self.marketplace_repo = MarketplaceRepository(db_connection)
 
     async def vacate_unit_completely(
         self,
@@ -506,6 +510,13 @@ class UnitOccupancyTurnoverService:
             await self.contacts_repo.soft_delete_contact(
                 contact_id=household_contact_id,
                 organization_id=organization_id,
+            )
+            actor_user_id = str(self.user_context.user_id) if self.user_context.user_id else None
+            await self.marketplace_repo.release_for_contact_delete(
+                organization_id=organization_id,
+                contact_id=household_contact_id,
+                removed_by_user_id=actor_user_id,
+                removal_note="Removed because the seller contact was deleted.",
             )
             await purge_contact_notice_likes(
                 db_connection=self.db_connection,

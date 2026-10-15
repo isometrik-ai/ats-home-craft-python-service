@@ -45,7 +45,29 @@ def _service() -> ContactDeleteCascadeService:
     svc.contacts_repo = MagicMock()
     svc.contacts_repo.get_contact_for_update = AsyncMock(return_value=None)
     svc.contacts_repo.soft_delete_contact = AsyncMock()
+    svc.marketplace_repo = MagicMock()
+    svc.marketplace_repo.release_for_contact_delete = AsyncMock()
     return svc
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.services.contact_delete_cascade_service.VehiclesService")
+async def test_cascade_releases_marketplace_listings_for_deleted_contact(mock_vehicles_cls):
+    """Any contact delete takes the seller's drafts/live listings off the board."""
+    mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    svc = _service()
+
+    await svc.cascade_before_soft_delete(
+        contact_id="seller-1",
+        contact={},
+    )
+
+    svc.marketplace_repo.release_for_contact_delete.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="seller-1",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
+    )
 
 
 @pytest.mark.asyncio
@@ -251,6 +273,19 @@ async def test_primary_occupant_delete_soft_deletes_household_without_remaining_
     svc.contacts_repo.soft_delete_contact.assert_awaited_once_with(
         contact_id="family-abc",
         organization_id="org-1",
+    )
+    assert svc.marketplace_repo.release_for_contact_delete.await_count == 2
+    svc.marketplace_repo.release_for_contact_delete.assert_any_await(
+        organization_id="org-1",
+        contact_id="owner-1",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
+    )
+    svc.marketplace_repo.release_for_contact_delete.assert_any_await(
+        organization_id="org-1",
+        contact_id="family-abc",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
     )
     purge_notice_likes.assert_awaited_once_with(
         db_connection=svc.db_connection,
@@ -461,6 +496,7 @@ def _cascade_with_turnover_repo_mocks() -> tuple[ContactDeleteCascadeService, di
     "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
     new_callable=AsyncMock,
 )
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.MarketplaceRepository")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.PetsService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.WalkInService")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.ContactsRepository")
@@ -491,12 +527,14 @@ async def test_tenant_delete_executes_real_turnover_household_cleanup(
     mock_contacts_repo_cls: MagicMock,
     mock_walk_in_cls: MagicMock,
     mock_pets_cls: MagicMock,
+    mock_marketplace_repo_cls: MagicMock,
     _mock_purge_likes: AsyncMock,
 ) -> None:
     """Tenant delete runs the real turnover service and clears unit household artifacts."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
     mock_walk_in_cls.return_value.release_open_visit_units_for_unit_turnover = AsyncMock()
     mock_pets_cls.return_value.release_for_move_out = AsyncMock()
+    mock_marketplace_repo_cls.return_value.release_for_contact_delete = AsyncMock()
     cascade, turnover_repos = _cascade_with_turnover_repo_mocks()
     mock_contact_units_repo_cls.return_value = turnover_repos["contact_units"]
     mock_contact_roles_repo_cls.return_value = turnover_repos["contact_roles"]
@@ -548,6 +586,12 @@ async def test_tenant_delete_executes_real_turnover_household_cleanup(
         contact_id="family-1",
         organization_id="org-1",
     )
+    mock_marketplace_repo_cls.return_value.release_for_contact_delete.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="family-1",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
+    )
     cascade.tenant_requests_repo.update_request_status.assert_awaited_once()
 
 
@@ -556,6 +600,7 @@ async def test_tenant_delete_executes_real_turnover_household_cleanup(
     "apps.user_service.app.services.unit_occupancy_turnover_service.purge_contact_notice_likes",
     new_callable=AsyncMock,
 )
+@patch("apps.user_service.app.services.unit_occupancy_turnover_service.MarketplaceRepository")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.ContactsRepository")
 @patch("apps.user_service.app.services.unit_occupancy_turnover_service.DailyHelpRepository")
 @patch(
@@ -582,10 +627,12 @@ async def test_household_delete_executes_real_turnover_single_occupant_cleanup(
     mock_household_invitations_repo_cls: MagicMock,
     mock_daily_help_repo_cls: MagicMock,
     mock_contacts_repo_cls: MagicMock,
+    mock_marketplace_repo_cls: MagicMock,
     _mock_purge_likes: AsyncMock,
 ) -> None:
     """Household delete runs the real turnover service for a single occupant move-out."""
     mock_vehicles_cls.return_value.release_for_move_out = AsyncMock()
+    mock_marketplace_repo_cls.return_value.release_for_contact_delete = AsyncMock()
     cascade, turnover_repos = _cascade_with_turnover_repo_mocks()
     mock_contact_units_repo_cls.return_value = turnover_repos["contact_units"]
     mock_contact_roles_repo_cls.return_value = turnover_repos["contact_roles"]
@@ -628,6 +675,18 @@ async def test_household_delete_executes_real_turnover_single_occupant_cleanup(
         organization_id="org-1",
         project_id="project-1",
         unit_id="unit-1",
+    )
+    cascade.marketplace_repo.release_for_contact_delete.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="family-abc",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
+    )
+    mock_marketplace_repo_cls.return_value.release_for_contact_delete.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="family-abc",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
     )
 
 

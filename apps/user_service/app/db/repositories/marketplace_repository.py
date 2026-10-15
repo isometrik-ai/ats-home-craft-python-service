@@ -445,6 +445,53 @@ class MarketplaceRepository(BaseRepository):
         )
         return row is not None
 
+    async def release_for_contact_delete(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        removed_by_user_id: str | None,
+        removal_note: str,
+    ) -> None:
+        """Take a deleted contact off the board: drop drafts, remove live posts, clear saves."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM marketplace_listings
+             WHERE organization_id = $1::uuid
+               AND seller_contact_id = $2::uuid
+               AND status = 'draft'::marketplace_listing_status
+            """,
+            organization_id,
+            contact_id,
+        )
+        if removed_by_user_id:
+            await self.db_connection.execute(
+                """
+                UPDATE marketplace_listings
+                   SET status = 'removed'::marketplace_listing_status,
+                       removed_at = now(),
+                       removal_note = $3,
+                       removed_by_user_id = $4::uuid,
+                       updated_at = now()
+                 WHERE organization_id = $1::uuid
+                   AND seller_contact_id = $2::uuid
+                   AND status = 'live'::marketplace_listing_status
+                """,
+                organization_id,
+                contact_id,
+                removal_note,
+                removed_by_user_id,
+            )
+        await self.db_connection.execute(
+            """
+            DELETE FROM marketplace_saved_items
+             WHERE organization_id = $1::uuid
+               AND contact_id = $2::uuid
+            """,
+            organization_id,
+            contact_id,
+        )
+
     async def delete_draft_listing(
         self,
         *,

@@ -1236,7 +1236,8 @@ async def external_delete_company(
         "and revokes portal sessions.\n"
         "Family: single-occupant move-out turnover (roles, vehicles, passes for that member).\n"
         "Tenant: outgoing household turnover (clears tenant household while preserving owner).\n\n"
-        "Side effects also purge notice likes for deleted contacts."
+        "Side effects also purge notice likes and take marketplace listings off the board "
+        "(drafts deleted, live listings removed) for deleted contacts."
     ),
     responses={
         http_status.HTTP_200_OK: {"description": "Contact deleted successfully"},

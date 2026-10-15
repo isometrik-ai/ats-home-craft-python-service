@@ -67,6 +67,8 @@ def _service() -> UnitOccupancyTurnoverService:
         return_value={"user_id": "user-family-1", "status": "active"}
     )
     svc.contacts_repo.soft_delete_contact = AsyncMock()
+    svc.marketplace_repo = MagicMock()
+    svc.marketplace_repo.release_for_contact_delete = AsyncMock()
     return svc
 
 
@@ -166,6 +168,12 @@ async def test_release_outgoing_tenant_household_clears_unit_artifacts(
     svc.contacts_repo.soft_delete_contact.assert_awaited_once_with(
         contact_id="family-1",
         organization_id="org-1",
+    )
+    svc.marketplace_repo.release_for_contact_delete.assert_awaited_once_with(
+        organization_id="org-1",
+        contact_id="family-1",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
     )
     svc.units_repo.reconcile_unit_inventory_status.assert_awaited_once()
 
