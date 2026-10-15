@@ -2430,6 +2430,62 @@ async def test_resolve_contact_and_submitted_by_name():
 
 
 @pytest.mark.asyncio
+async def test_resolve_created_by_display_name_falls_back_to_submitter():
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.members_repo = MagicMock()
+    svc.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
+    svc.contacts_repo = MagicMock()
+    svc.contacts_repo.get_contact_details = AsyncMock(
+        return_value={"first_name": "Prerna", "last_name": "M"}
+    )
+
+    row = {
+        "created_by_user_id": "resident-auth-user",
+        "submitted_by_contact_id": "contact-1",
+    }
+    assert await svc._resolve_created_by_display_name(row) == "Prerna M"
+
+    svc.members_repo.get_user_profile_by_id = AsyncMock(
+        return_value={"first_name": "Admin", "last_name": "User"}
+    )
+    row_staff = {
+        "created_by_user_id": "staff-1",
+        "submitted_by_contact_id": "contact-1",
+    }
+    assert await svc._resolve_created_by_display_name(row_staff) == "Admin User"
+
+
+@pytest.mark.asyncio
+async def test_serialize_detail_created_by_name_for_resident_submission():
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    svc.repo = MagicMock()
+    svc.repo.list_documents = AsyncMock(return_value=[])
+    svc.repo.list_events = AsyncMock(return_value=[])
+    svc.repo.list_active_links_for_profile = AsyncMock(return_value=[])
+    svc.repo.list_slots = AsyncMock(return_value=[])
+    svc.repo.get_rating_summary = AsyncMock(return_value={"rating_count": 0})
+    svc.repo.list_ratings_for_profile = AsyncMock(return_value=[])
+    svc.members_repo = MagicMock()
+    svc.members_repo.get_user_profile_by_id = AsyncMock(return_value=None)
+    svc.contacts_repo = MagicMock()
+    svc.contacts_repo.get_contact_details = AsyncMock(
+        return_value={"first_name": "Prerna", "last_name": "M"}
+    )
+
+    detail = await svc._serialize_detail(
+        row=_detail_row(
+            status=DailyHelpStatus.PENDING_APPROVAL.value,
+            created_by_user_id="resident-auth-user",
+            submitted_by_user_id="resident-auth-user",
+            submitted_by_contact_id="contact-1",
+        ),
+    )
+    assert detail.created_by_name == "Prerna M"
+    assert detail.submitted_by_name == "Prerna M"
+    assert detail.submission_source == "resident"
+
+
+@pytest.mark.asyncio
 async def test_ensure_project_unit_rejects_mismatch():
     svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
     svc.setup_service = MagicMock()
