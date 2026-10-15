@@ -200,7 +200,7 @@ async def test_get_overview_aggregates():
             "awaiting_approval": 2,
             "walk_ins": 4,
             "exited": 3,
-            "denied_expired": 1,
+            "cancelled_expired": 1,
         }
     )
     repo = VisitorLogsRepository(db_connection=conn)
@@ -218,7 +218,7 @@ async def test_get_overview_aggregates():
     assert result["awaiting_approval"] == 2
     assert result["walk_ins"] == 4
     assert result["exited"] == 3
-    assert result["denied_expired"] == 1
+    assert result["cancelled_expired"] == 1
     overview_query = conn.fetchrow_calls[0][0]
     assert "UNION ALL" in overview_query
     assert VisitorLogVisitStatus.INSIDE.value in overview_query
@@ -258,7 +258,7 @@ async def test_get_overview_unit_scope():
             "awaiting_approval": 0,
             "walk_ins": 1,
             "exited": 0,
-            "denied_expired": 0,
+            "cancelled_expired": 0,
         }
     )
     repo = VisitorLogsRepository(db_connection=conn)
