@@ -140,7 +140,7 @@ class BrowseListingsQuery(BaseModel):
         default=None,
         description="Repeatable. lightly_used, well_used, needs_repair.",
     )
-    contact_id: str | None = Field(
+    contact_id: UUID | None = Field(
         default=None,
         description="Optional seller contact UUID. Limits results to that contact's live listings.",
     )
