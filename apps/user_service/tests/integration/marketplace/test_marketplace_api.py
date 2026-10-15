@@ -661,6 +661,47 @@ async def test_mark_sold_inside_missing_buyer_returns_422(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_mark_sold_outside_with_buyer_returns_422(monkeypatch, client):
+    """POST /mark-sold returns 422 when outside is sent with a buyer contact."""
+    _resident(monkeypatch)
+    called: list[str] = []
+
+    async def fake_sold(_self, **kwargs):
+        del _self, kwargs
+        called.append("service")
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.mark_sold",
+        fake_sold,
+    )
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
+        json={
+            "unit_id": UNIT_ID,
+            "sold_type": "outside",
+            "buyer_contact_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        },
+    )
+    assert response.status_code == 422
+    assert called == []
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_inside_invalid_buyer_uuid_returns_422(monkeypatch, client):
+    """POST /mark-sold returns 422 when buyer_contact_id is not a UUID."""
+    _resident(monkeypatch)
+    response = await client.post(
+        f"/v1/marketplace/listings/{LISTING_ID}/mark-sold",
+        json={
+            "unit_id": UNIT_ID,
+            "sold_type": "inside",
+            "buyer_contact_id": "not-a-uuid",
+        },
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_resident_lifecycle_then_admin_remove(monkeypatch, client):
     """Resident create → publish → browse, then staff take the listing down."""
     _resident(monkeypatch)

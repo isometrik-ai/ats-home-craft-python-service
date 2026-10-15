@@ -597,7 +597,12 @@ class MarketplaceService:
             )
         now = _now()
         sold_type = body.sold_type
-        fields: dict[str, Any] = {"status": "sold", "sold_at": now, "buyer_contact_id": None}
+        fields: dict[str, Any] = {
+            "status": "sold",
+            "sold_at": now,
+            "sold_type": sold_type.value,
+            "buyer_contact_id": None,
+        }
         buyer_name: str | None = None
         buyer_flat: str | None = None
 
@@ -948,6 +953,8 @@ class MarketplaceService:
                 "show_flat_number": row.get("show_flat_number"),
                 "published_at": row.get("published_at"),
                 "expires_at": row.get("expires_at"),
+                "sold_at": row.get("sold_at"),
+                "sold_type": row.get("sold_type"),
                 "seller_name": public_name(
                     row.get("seller_first_name"), row.get("seller_last_name")
                 ),
@@ -982,6 +989,7 @@ class MarketplaceService:
             "missing": publish_gaps(row, media_count) if row["status"] == "draft" else [],
             "published_at": row.get("published_at"),
             "sold_at": row.get("sold_at"),
+            "sold_type": row.get("sold_type"),
             "removal_note": row.get("removal_note"),
         }
 

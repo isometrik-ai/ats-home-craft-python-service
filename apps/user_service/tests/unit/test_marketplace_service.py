@@ -316,9 +316,37 @@ async def test_mark_sold_outside_clears_buyer():
     fields = svc.repo.update_listing.await_args.kwargs["fields"]
     assert fields["status"] == "sold"
     assert fields["buyer_contact_id"] is None
+    assert fields["sold_type"] == "outside"
     assert result["sold_type"] == "outside"
     assert result["buyer_name"] is None
     svc.repo.insert_feedback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_inside_persists_sold_type_and_buyer():
+    svc = _service()
+    buyer_uuid = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    svc.repo.get_listing = AsyncMock(return_value=_listing(status="live"))
+    svc.repo.contact_in_organization = AsyncMock(return_value=True)
+    svc.repo.get_contact_card = AsyncMock(
+        return_value={
+            "first_name": "Ananya",
+            "last_name": "M",
+            "unit_label": "1503",
+            "unit_code": "1503",
+        }
+    )
+    body = MarkSoldRequest(
+        unit_id="unit-1",
+        sold_type=MarketplaceSoldType.INSIDE,
+        buyer_contact_id=buyer_uuid,
+    )
+    result = await svc.mark_sold(contact_id="seller-1", listing_id="listing-1", body=body)
+    fields = svc.repo.update_listing.await_args.kwargs["fields"]
+    assert fields["sold_type"] == "inside"
+    assert fields["buyer_contact_id"] == str(buyer_uuid)
+    assert result["sold_type"] == "inside"
+    assert result["buyer_name"] == "Ananya M."
 
 
 def test_mark_sold_request_inside_requires_buyer():
