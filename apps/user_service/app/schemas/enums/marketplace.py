@@ -60,6 +60,13 @@ class MarketplaceSaleRating(str, Enum):
     HAD_TROUBLE = "had_trouble"
 
 
+class MarketplaceSoldType(str, Enum):
+    """Who bought the item when the seller marks it sold."""
+
+    INSIDE = "inside"
+    OUTSIDE = "outside"
+
+
 class MarketplaceSort(str, Enum):
     """Listing feed sort."""
 
