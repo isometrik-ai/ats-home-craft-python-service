@@ -54,6 +54,20 @@ async def test_project_code_exists_lookup():
 
 
 @pytest.mark.asyncio
+async def test_get_project_by_name_normalizes_whitespace():
+    """Name lookup matches case-insensitively after collapsing spaces."""
+    conn = _FakeConn(row={"id": "p1", "name": "Happy Trails"})
+    repo = ProjectsRepository(db_connection=conn)
+
+    found = await repo.get_project_by_name(organization_id="org-1", name="  Happy   Trails")
+
+    assert found["id"] == "p1"
+    query, args = conn.fetchrow_calls[0]
+    assert "lower(btrim(regexp_replace(name" in query
+    assert args == ("org-1", "  Happy   Trails")
+
+
+@pytest.mark.asyncio
 async def test_insert_project_only_includes_present_columns():
     """Insert builds column list from provided keys and casts enum columns."""
     conn = _FakeConn(row={"id": "p1"})

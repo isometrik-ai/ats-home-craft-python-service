@@ -45,7 +45,7 @@ class _FakeLogsRepo:
             "inside_now": 0,
             "awaiting_approval": 0,
             "walk_ins": 0,
-            "denied_expired": 0,
+            "cancelled_expired": 0,
         }
 
     async def list_logs(self, **_kwargs):
@@ -317,7 +317,7 @@ async def test_get_overview():
         "awaiting_approval": 1,
         "walk_ins": 6,
         "exited": 5,
-        "denied_expired": 3,
+        "cancelled_expired": 3,
     }
     svc = _service(logs_repo=logs_repo)
     result = await svc.get_overview(
@@ -326,7 +326,7 @@ async def test_get_overview():
     )
     assert result["total_entries"] == 28
     assert result["walk_ins"] == 6
-    assert result["denied_expired"] == 3
+    assert result["cancelled_expired"] == 3
     assert result["start_at"].startswith("2026-06-01T00:00:00")
     assert result["end_at"].startswith("2026-06-30T00:00:00")
 
@@ -983,7 +983,7 @@ async def test_export_monthly_report_csv_writes_summary():
         "awaiting_approval": 1,
         "walk_ins": 1,
         "exited": 1,
-        "denied_expired": 3,
+        "cancelled_expired": 3,
     }
 
     csv_text = await svc.export_monthly_report_csv(
@@ -992,7 +992,7 @@ async def test_export_monthly_report_csv_writes_summary():
     assert "metric,value" in csv_text
     assert "month,2026-09" in csv_text
     assert "total_entries,5" in csv_text
-    assert "denied_expired,3" in csv_text
+    assert "cancelled_expired,3" in csv_text
 
 
 @pytest.mark.asyncio

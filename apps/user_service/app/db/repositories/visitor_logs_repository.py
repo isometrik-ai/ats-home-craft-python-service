@@ -330,7 +330,7 @@ class VisitorLogsRepository(BaseRepository):
                 clauses.append(f"combined.visit_status = ${idx}")
                 args.append(VisitorLogVisitStatus.EXITED.value)
                 idx += 1
-            elif bucket == VisitorLogBucket.DENIED_EXPIRED.value:
+            elif bucket == VisitorLogBucket.CANCELLED_EXPIRED.value:
                 clauses.append(f"combined.visit_status IN (${idx}, ${idx + 1})")
                 args.extend(
                     [
@@ -863,7 +863,7 @@ TRIM(
                 "awaiting_approval": 0,
                 "walk_ins": 0,
                 "exited": 0,
-                "denied_expired": 0,
+                "cancelled_expired": 0,
             }
 
         awaiting = VisitorLogVisitStatus.AWAITING_APPROVAL.value
@@ -890,7 +890,7 @@ TRIM(
               )::int AS exited,
               COUNT(*) FILTER (
                 WHERE visit_status IN ('{cancelled}', '{expired}')
-              )::int AS denied_expired
+              )::int AS cancelled_expired
             FROM ({union_sql}) combined
             """,
             *args,
@@ -904,5 +904,5 @@ TRIM(
             "awaiting_approval": int(payload.get("awaiting_approval") or 0),
             "walk_ins": int(payload.get("walk_ins") or 0),
             "exited": int(payload.get("exited") or 0),
-            "denied_expired": int(payload.get("denied_expired") or 0),
+            "cancelled_expired": int(payload.get("cancelled_expired") or 0),
         }

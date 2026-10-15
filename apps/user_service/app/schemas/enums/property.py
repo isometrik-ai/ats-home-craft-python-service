@@ -384,7 +384,7 @@ class VisitorLogBucket(str, Enum):
     AWAITING_APPROVAL = "awaiting_approval"
     INSIDE_NOW = "inside_now"
     COMPLETED = "completed"
-    DENIED_EXPIRED = "denied_expired"
+    CANCELLED_EXPIRED = "cancelled_expired"
 
 
 class VisitorType(str, Enum):

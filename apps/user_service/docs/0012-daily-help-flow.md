@@ -764,6 +764,8 @@ PATCH /v1/daily-help/{profile_id}/submission
 
 Admin list/detail for pending rows includes **`submission_source`** (`resident` | `security`),
 **`submitted_unit_label`**, and resident **`submitted_by_name`** (from contact, not staff profile).
+When the creator is a resident auth user (not org staff), **`created_by_name`** uses the same
+submitter contact fallback so admin “Created by” labels stay populated.
 
 ______________________________________________________________________
 

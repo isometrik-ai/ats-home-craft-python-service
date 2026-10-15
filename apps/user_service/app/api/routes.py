@@ -74,6 +74,7 @@ from apps.user_service.app.api.pets import router as pets_router
 from apps.user_service.app.api.pets_admin import router as pets_admin_router
 from apps.user_service.app.api.presigned_url import router as presigned_url_router
 from apps.user_service.app.api.projects import router as projects_router
+from apps.user_service.app.api.projects_imports import router as projects_imports_router
 from apps.user_service.app.api.roles import router as roles_router
 from apps.user_service.app.api.sessions import router as sessions_router
 from apps.user_service.app.api.superadmin_organizations import (
@@ -143,6 +144,7 @@ router.include_router(walk_ins_owner_router)
 router.include_router(visitor_logs_router)
 router.include_router(move_events_router)
 router.include_router(custom_fields_router)
+router.include_router(projects_imports_router)
 router.include_router(projects_router)
 router.include_router(parking_allotment_router)
 router.include_router(external_clients_router)

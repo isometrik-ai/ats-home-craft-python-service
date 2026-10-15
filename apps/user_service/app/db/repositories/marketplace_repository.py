@@ -51,6 +51,7 @@ _LISTING_COLUMNS = """
     l.expires_at,
     l.renewal_count,
     l.sold_at,
+    l.sold_type::text AS sold_type,
     l.buyer_contact_id::text AS buyer_contact_id,
     l.removed_at,
     l.removal_note,
@@ -346,6 +347,7 @@ class MarketplaceRepository(BaseRepository):
             "expires_at",
             "renewal_count",
             "sold_at",
+            "sold_type",
             "buyer_contact_id",
             "removed_at",
             "removal_note",
@@ -361,6 +363,7 @@ class MarketplaceRepository(BaseRepository):
             "kind": "::marketplace_listing_kind",
             "status": "::marketplace_listing_status",
             "condition": "::marketplace_item_condition",
+            "sold_type": "::marketplace_sold_type",
             "buyer_contact_id": "::uuid",
             "removed_by_user_id": "::uuid",
             "published_at": "::timestamptz",
@@ -444,6 +447,53 @@ class MarketplaceRepository(BaseRepository):
             project_id,
         )
         return row is not None
+
+    async def release_for_contact_delete(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        removed_by_user_id: str | None,
+        removal_note: str,
+    ) -> None:
+        """Take a deleted contact off the board: drop drafts, remove live posts, clear saves."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM marketplace_listings
+             WHERE organization_id = $1::uuid
+               AND seller_contact_id = $2::uuid
+               AND status = 'draft'::marketplace_listing_status
+            """,
+            organization_id,
+            contact_id,
+        )
+        if removed_by_user_id:
+            await self.db_connection.execute(
+                """
+                UPDATE marketplace_listings
+                   SET status = 'removed'::marketplace_listing_status,
+                       removed_at = now(),
+                       removal_note = $3,
+                       removed_by_user_id = $4::uuid,
+                       updated_at = now()
+                 WHERE organization_id = $1::uuid
+                   AND seller_contact_id = $2::uuid
+                   AND status = 'live'::marketplace_listing_status
+                """,
+                organization_id,
+                contact_id,
+                removal_note,
+                removed_by_user_id,
+            )
+        await self.db_connection.execute(
+            """
+            DELETE FROM marketplace_saved_items
+             WHERE organization_id = $1::uuid
+               AND contact_id = $2::uuid
+            """,
+            organization_id,
+            contact_id,
+        )
 
     async def delete_draft_listing(
         self,

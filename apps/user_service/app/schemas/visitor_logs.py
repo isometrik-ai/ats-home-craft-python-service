@@ -129,7 +129,7 @@ class VisitorLogQuery(VisitorLogDateRangeQuery):
     search: str | None = Field(None, max_length=200)
     bucket: VisitorLogBucket = Field(
         default=VisitorLogBucket.ALL,
-        description="Tab filter: all, awaiting_approval, inside_now, completed, denied_expired.",
+        description="Tab filter: all, awaiting_approval, inside_now, completed, cancelled_expired.",
     )
     visitor_type: VisitorType | None = Field(
         None,
@@ -167,7 +167,7 @@ class VisitorLogExportQuery(VisitorLogDateRangeQuery):
     search: str | None = Field(None, max_length=200)
     bucket: VisitorLogBucket = Field(
         default=VisitorLogBucket.ALL,
-        description="Tab filter: all, awaiting_approval, inside_now, completed, denied_expired.",
+        description="Tab filter: all, awaiting_approval, inside_now, completed, cancelled_expired.",
     )
     visitor_type: VisitorType | None = Field(
         None,
@@ -345,7 +345,7 @@ class VisitorLogOverviewResponse(BaseModel):
                 "awaiting_approval": 1,
                 "walk_ins": 6,
                 "exited": 2,
-                "denied_expired": 3,
+                "cancelled_expired": 3,
             }
         },
     )
@@ -360,7 +360,7 @@ class VisitorLogOverviewResponse(BaseModel):
         ...,
         description="Visits marked exit (visit_status=exited; matches the Completed tab filter).",
     )
-    denied_expired: int = Field(
+    cancelled_expired: int = Field(
         ...,
         description="Expired passes and cancelled visits with no entry.",
     )
@@ -384,7 +384,7 @@ class VisitorLogOverviewApiResponse(BaseModel):
                     "awaiting_approval": 1,
                     "walk_ins": 6,
                     "exited": 2,
-                    "denied_expired": 3,
+                    "cancelled_expired": 3,
                 },
             }
         }

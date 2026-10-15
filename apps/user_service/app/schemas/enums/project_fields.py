@@ -373,6 +373,7 @@ class ContactsImportType(str, Enum):
     """``import_type`` / ``import_jobs.import_type`` for this pipeline."""
 
     CONTACTS = "contacts"
+    PROJECTS = "projects"
 
 
 class ContactsImportEventAction(str, Enum):

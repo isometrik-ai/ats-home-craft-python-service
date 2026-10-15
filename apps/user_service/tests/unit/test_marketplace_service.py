@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 from asyncpg import UniqueViolationError
@@ -13,6 +14,7 @@ from pydantic import ValidationError
 from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceReportReason,
     MarketplaceSaleRating,
+    MarketplaceSoldType,
 )
 from apps.user_service.app.schemas.marketplace import (
     BrowseListingsQuery,
@@ -287,15 +289,78 @@ async def test_seller_remove_soft_deletes_a_live_post():
 @pytest.mark.asyncio
 async def test_mark_sold_rejects_the_seller_as_buyer():
     svc = _service()
-    svc.repo.get_listing = AsyncMock(return_value=_listing())
+    seller_uuid = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    svc.repo.get_listing = AsyncMock(
+        return_value=_listing(status="live", seller_contact_id=str(seller_uuid))
+    )
     body = MarkSoldRequest(
-        unit_id="unit-1", buyer_contact_id="seller-1", rating=MarketplaceSaleRating.SMOOTH
+        unit_id="unit-1",
+        sold_type=MarketplaceSoldType.INSIDE,
+        buyer_contact_id=seller_uuid,
+        rating=MarketplaceSaleRating.SMOOTH,
     )
     with pytest.raises(ValidationException) as raised:
-        await svc.mark_sold(contact_id="seller-1", listing_id="listing-1", body=body)
+        await svc.mark_sold(contact_id=str(seller_uuid), listing_id="listing-1", body=body)
     assert raised.value.message_key == "marketplace.errors.buyer_is_seller"
     svc.repo.update_listing.assert_not_called()
     svc.repo.insert_feedback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_outside_clears_buyer():
+    svc = _service()
+    svc.repo.get_listing = AsyncMock(return_value=_listing(status="live"))
+    svc.repo.contact_in_organization = AsyncMock(return_value=True)
+    body = MarkSoldRequest(unit_id="unit-1", sold_type=MarketplaceSoldType.OUTSIDE)
+    result = await svc.mark_sold(contact_id="seller-1", listing_id="listing-1", body=body)
+    fields = svc.repo.update_listing.await_args.kwargs["fields"]
+    assert fields["status"] == "sold"
+    assert fields["buyer_contact_id"] is None
+    assert fields["sold_type"] == "outside"
+    assert result["sold_type"] == "outside"
+    assert result["buyer_name"] is None
+    svc.repo.insert_feedback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_mark_sold_inside_persists_sold_type_and_buyer():
+    svc = _service()
+    buyer_uuid = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    svc.repo.get_listing = AsyncMock(return_value=_listing(status="live"))
+    svc.repo.contact_in_organization = AsyncMock(return_value=True)
+    svc.repo.get_contact_card = AsyncMock(
+        return_value={
+            "first_name": "Ananya",
+            "last_name": "M",
+            "unit_label": "1503",
+            "unit_code": "1503",
+        }
+    )
+    body = MarkSoldRequest(
+        unit_id="unit-1",
+        sold_type=MarketplaceSoldType.INSIDE,
+        buyer_contact_id=buyer_uuid,
+    )
+    result = await svc.mark_sold(contact_id="seller-1", listing_id="listing-1", body=body)
+    fields = svc.repo.update_listing.await_args.kwargs["fields"]
+    assert fields["sold_type"] == "inside"
+    assert fields["buyer_contact_id"] == str(buyer_uuid)
+    assert result["sold_type"] == "inside"
+    assert result["buyer_name"] == "Ananya M."
+
+
+def test_mark_sold_request_inside_requires_buyer():
+    with pytest.raises(ValidationError):
+        MarkSoldRequest(unit_id="unit-1", sold_type=MarketplaceSoldType.INSIDE)
+
+
+def test_mark_sold_request_outside_rejects_buyer():
+    with pytest.raises(ValidationError):
+        MarkSoldRequest(
+            unit_id="unit-1",
+            sold_type=MarketplaceSoldType.OUTSIDE,
+            buyer_contact_id=UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+        )
 
 
 def test_cover_path_prefers_the_first_image():
@@ -524,3 +589,55 @@ async def test_report_listing_maps_duplicate_to_conflict():
     with pytest.raises(ConflictException) as raised:
         await svc.report_listing(contact_id="buyer-1", listing_id="listing-1", body=body)
     assert raised.value.message_key == "marketplace.errors.report_exists"
+
+
+@pytest.mark.asyncio
+async def test_release_for_contact_delete_drops_drafts_removes_live_and_clears_saves():
+    """Contact delete hard-deletes drafts, marks live listings removed, and clears bookmarks."""
+    from apps.user_service.app.db.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    repo = MarketplaceRepository(db_connection=conn)
+
+    await repo.release_for_contact_delete(
+        organization_id="org-1",
+        contact_id="seller-1",
+        removed_by_user_id="admin-1",
+        removal_note="Removed because the seller contact was deleted.",
+    )
+
+    assert conn.execute.await_count == 3
+    draft_sql, *_ = conn.execute.await_args_list[0].args
+    live_sql, *_ = conn.execute.await_args_list[1].args
+    saved_sql, *_ = conn.execute.await_args_list[2].args
+    assert "DELETE FROM marketplace_listings" in draft_sql
+    assert "status = 'draft'" in draft_sql
+    assert "status = 'removed'" in live_sql
+    assert "status = 'live'" in live_sql
+    assert "DELETE FROM marketplace_saved_items" in saved_sql
+
+
+@pytest.mark.asyncio
+async def test_release_for_contact_delete_skips_live_remove_without_actor():
+    """Live listings stay unless an actor user id can satisfy the removed-row check."""
+    from apps.user_service.app.db.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    repo = MarketplaceRepository(db_connection=conn)
+
+    await repo.release_for_contact_delete(
+        organization_id="org-1",
+        contact_id="seller-1",
+        removed_by_user_id=None,
+        removal_note="Removed because the seller contact was deleted.",
+    )
+
+    assert conn.execute.await_count == 2
+    assert "DELETE FROM marketplace_listings" in conn.execute.await_args_list[0].args[0]
+    assert "DELETE FROM marketplace_saved_items" in conn.execute.await_args_list[1].args[0]

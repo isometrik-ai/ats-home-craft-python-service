@@ -32,7 +32,7 @@ class ResidentVisitorActivityListQuery(VisitorLogDateRangeQuery):
 
     bucket: VisitorLogBucket = Field(
         default=VisitorLogBucket.ALL,
-        description="Tab filter: all, awaiting_approval, inside_now, completed, denied_expired.",
+        description="Tab filter: all, awaiting_approval, inside_now, completed, cancelled_expired.",
     )
     type: PassType | None = Field(
         None,

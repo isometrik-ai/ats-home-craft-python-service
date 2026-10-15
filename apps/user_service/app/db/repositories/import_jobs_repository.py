@@ -44,13 +44,14 @@ class ImportJobsRepository(BaseRepository):
         schema_version: int,
         mapping: dict[str, Any] | None,
         options: dict[str, Any] | None,
+        import_type: str | None = None,
     ) -> dict[str, Any]:
         """Insert a new import job row and return its normalized representation."""
         rows = [
             {
                 "organization_id": organization_id,
                 "job_key": job_id,
-                "import_type": ContactsImportType.CONTACTS.value,
+                "import_type": import_type or ContactsImportType.CONTACTS.value,
                 "status": status,
                 "file_url": file_url,
                 "file_type": file_type,

@@ -651,6 +651,20 @@
       "errors_retrieved": "Contacts import errors retrieved successfully."
     }
   },
+  "projects_imports": {
+    "errors": {
+      "job_not_found": "Projects import job not found.",
+      "xlsx_required": "Project import requires an xlsx workbook.",
+      "invalid_file_url": "The file URL is invalid or not allowed.",
+      "empty_file": "The workbook download was empty.",
+      "file_too_large": "The workbook is larger than the 20 MB import limit."
+    },
+    "success": {
+      "job_created": "Projects import job created. Poll the job to track progress.",
+      "job_retrieved": "Projects import job retrieved successfully.",
+      "errors_retrieved": "Projects import errors retrieved successfully."
+    }
+  },
   "entity_lists": {
     "errors": {
       "list_not_found": "The list you are trying to access does not exist or has been deleted.",

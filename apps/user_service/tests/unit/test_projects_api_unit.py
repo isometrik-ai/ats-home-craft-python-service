@@ -1639,6 +1639,23 @@ async def test_vehicle_request_handlers(mock_vehicles_cls, mock_access):
 @pytest.mark.asyncio
 @patch("apps.user_service.app.api.projects._staff_project_access", new_callable=AsyncMock)
 @patch("apps.user_service.app.api.projects.ProjectsService")
+async def test_get_project_details_allows_null_gstin(mock_projects_cls, mock_access):
+    mock_access.return_value = _user_context()
+    mock_projects_cls.return_value.get_project_details = AsyncMock(
+        return_value=_project_details(gstin=None)
+    )
+    response = await get_project_details(
+        request=_request(),
+        project_id=PROJECT_ID,
+        db_connection=MagicMock(),
+        current_user={"sub": "staff-1"},
+    )
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+@patch("apps.user_service.app.api.projects._staff_project_access", new_callable=AsyncMock)
+@patch("apps.user_service.app.api.projects.ProjectsService")
 async def test_get_project_details_not_found_propagates(mock_projects_cls, mock_access):
     mock_access.return_value = _user_context()
     mock_projects_cls.return_value.get_project_details = AsyncMock(

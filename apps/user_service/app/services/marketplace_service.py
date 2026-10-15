@@ -16,6 +16,7 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.db.repositories.marketplace_repository import (
     MarketplaceRepository,
 )
+from apps.user_service.app.schemas.enums.marketplace import MarketplaceSoldType
 from apps.user_service.app.schemas.marketplace import (
     BrowseListingsQuery,
     CreateListingRequest,
@@ -586,7 +587,7 @@ class MarketplaceService:
     async def mark_sold(
         self, *, contact_id: str, listing_id: str, body: MarkSoldRequest
     ) -> dict[str, Any]:
-        """Record the buyer. The rating stays off the public listing."""
+        """Record sold inside MyNest (buyer contact) or to someone outside (no buyer row)."""
         await self._require_poster(contact_id=contact_id, unit_id=body.unit_id)
         listing = await self._listing_for_seller(contact_id=contact_id, listing_id=listing_id)
         if listing["status"] != "live":
@@ -594,45 +595,60 @@ class MarketplaceService:
                 message_key="marketplace.errors.not_live",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        if str(body.buyer_contact_id) == str(contact_id):
-            raise ValidationException(
-                message_key="marketplace.errors.buyer_is_seller",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
-        buyer_ok = await self.repo.contact_in_organization(
-            organization_id=self._org(), contact_id=body.buyer_contact_id
-        )
-        if not buyer_ok:
-            raise ValidationException(
-                message_key="marketplace.errors.buyer_not_resident",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
         now = _now()
+        sold_type = body.sold_type
+        fields: dict[str, Any] = {
+            "status": "sold",
+            "sold_at": now,
+            "sold_type": sold_type.value,
+            "buyer_contact_id": None,
+        }
+        buyer_name: str | None = None
+        buyer_flat: str | None = None
+
+        if sold_type == MarketplaceSoldType.INSIDE:
+            buyer_id = str(body.buyer_contact_id)
+            if buyer_id == str(contact_id):
+                raise ValidationException(
+                    message_key="marketplace.errors.buyer_is_seller",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            buyer_ok = await self.repo.contact_in_organization(
+                organization_id=self._org(), contact_id=buyer_id
+            )
+            if not buyer_ok:
+                raise ValidationException(
+                    message_key="marketplace.errors.buyer_not_resident",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            fields["buyer_contact_id"] = buyer_id
+            buyer = await self.repo.get_contact_card(
+                organization_id=self._org(), contact_id=buyer_id
+            )
+            buyer_name = public_name(
+                (buyer or {}).get("first_name"), (buyer or {}).get("last_name")
+            )
+            buyer_flat = flat_label((buyer or {}).get("unit_label"), (buyer or {}).get("unit_code"))
+
         await self.repo.update_listing(
             organization_id=self._org(),
             listing_id=listing_id,
-            fields={"status": "sold", "sold_at": now, "buyer_contact_id": body.buyer_contact_id},
+            fields=fields,
         )
-        if body.rating is not None:
+        if sold_type == MarketplaceSoldType.INSIDE and body.rating is not None:
             await self.repo.insert_feedback(
                 organization_id=self._org(),
                 listing_id=listing_id,
                 seller_contact_id=contact_id,
-                buyer_contact_id=body.buyer_contact_id,
+                buyer_contact_id=str(body.buyer_contact_id),
                 rating=body.rating.value,
             )
-        buyer = await self.repo.get_contact_card(
-            organization_id=self._org(), contact_id=body.buyer_contact_id
-        )
         return {
             "id": listing_id,
             "title": listing.get("title"),
-            "buyer_name": public_name(
-                (buyer or {}).get("first_name"), (buyer or {}).get("last_name")
-            ),
-            "buyer_flat": flat_label(
-                (buyer or {}).get("unit_label"), (buyer or {}).get("unit_code")
-            ),
+            "sold_type": sold_type.value,
+            "buyer_name": buyer_name,
+            "buyer_flat": buyer_flat,
             "price_amount": _money(listing.get("price_amount")),
         }
 
@@ -937,6 +953,8 @@ class MarketplaceService:
                 "show_flat_number": row.get("show_flat_number"),
                 "published_at": row.get("published_at"),
                 "expires_at": row.get("expires_at"),
+                "sold_at": row.get("sold_at"),
+                "sold_type": row.get("sold_type"),
                 "seller_name": public_name(
                     row.get("seller_first_name"), row.get("seller_last_name")
                 ),
@@ -971,6 +989,7 @@ class MarketplaceService:
             "missing": publish_gaps(row, media_count) if row["status"] == "draft" else [],
             "published_at": row.get("published_at"),
             "sold_at": row.get("sold_at"),
+            "sold_type": row.get("sold_type"),
             "removal_note": row.get("removal_note"),
         }
 

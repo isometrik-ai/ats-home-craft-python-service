@@ -495,7 +495,7 @@ async def mark_listing_sold(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Record the buyer and an optional private rating."""
+    """Mark sold: inside (buyer contact UUID required) or outside (no buyer)."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )

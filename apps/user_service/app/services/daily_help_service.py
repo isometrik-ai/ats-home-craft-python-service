@@ -361,6 +361,20 @@ class DailyHelpService:
             return await self._resolve_contact_name(str(row["submitted_by_contact_id"]))
         return await self._resolve_created_by_name(row.get("submitted_by_user_id"))
 
+    async def _resolve_created_by_display_name(
+        self,
+        row: dict[str, Any],
+        *,
+        submitted_by_name: str | None = None,
+    ) -> str | None:
+        """Resolve creator label for admin UI; falls back to submitter when not staff."""
+        name = await self._resolve_created_by_name(row.get("created_by_user_id"))
+        if name:
+            return name
+        if submitted_by_name is not None:
+            return submitted_by_name
+        return await self._resolve_submitted_by_name(row)
+
     async def _get_active_category_or_raise(
         self,
         *,
@@ -1154,7 +1168,11 @@ class DailyHelpService:
         else:
             phone = self._format_phone(isd_code=phone_isd, phone_number=phone_number)
 
-        created_by_name = await self._resolve_created_by_name(row.get("created_by_user_id"))
+        submitted_by_name = await self._resolve_submitted_by_name(row)
+        created_by_name = await self._resolve_created_by_display_name(
+            row,
+            submitted_by_name=submitted_by_name,
+        )
 
         return DailyHelpDetailResponse(
             id=profile_id,
@@ -1190,7 +1208,7 @@ class DailyHelpService:
             created_by_user_id=row.get("created_by_user_id"),
             created_by_name=created_by_name,
             submitted_by_user_id=row.get("submitted_by_user_id"),
-            submitted_by_name=await self._resolve_submitted_by_name(row),
+            submitted_by_name=submitted_by_name,
             submitted_by_contact_id=row.get("submitted_by_contact_id"),
             submitted_unit_id=row.get("submitted_unit_id"),
             submitted_unit_label=row.get("submitted_unit_label"),

@@ -47,7 +47,7 @@ _FAKE_OVERVIEW = {
     "awaiting_approval": 1,
     "walk_ins": 6,
     "exited": 5,
-    "denied_expired": 3,
+    "cancelled_expired": 3,
 }
 
 _FAKE_DETAIL = {
