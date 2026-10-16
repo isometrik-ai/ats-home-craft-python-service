@@ -76,6 +76,9 @@ def _service() -> CommunityEventsService:
     svc.repo = MagicMock()
     svc.setup_service = MagicMock()
     svc.setup_service.ensure_project = AsyncMock()
+    svc.facility_hold = MagicMock()
+    svc.facility_hold.ensure = AsyncMock()
+    svc.facility_hold.release = AsyncMock()
     return svc
 
 
@@ -323,6 +326,7 @@ async def test_create_event_draft_and_publish_validation():
         ),
     )
     assert draft.title == "Summer fest"
+    svc.facility_hold.ensure.assert_not_awaited()
 
     with pytest.raises(ValidationException):
         await svc.create_event(
@@ -362,6 +366,7 @@ async def test_publish_event_success_and_conflict():
 
     published = await svc.publish_event(project_id=PROJECT_ID, event_id=EVENT_ID)
     assert published.title == "Summer fest"
+    svc.facility_hold.ensure.assert_awaited_once()
 
     svc.repo.fetch_event_by_id = AsyncMock(
         return_value=_event_row(publish_status=CommunityEventPublishStatus.PUBLISHED.value)
@@ -398,6 +403,7 @@ async def test_cancel_and_delete_event():
         body=CancelCommunityEventRequest(reason="Rain"),
     )
     assert cancelled.title == "Summer fest"
+    svc.facility_hold.release.assert_awaited()
     assert svc.notifications.notify_event_cancelled.await_count == 2
     notified_contacts = {
         call.kwargs["contact_id"]
@@ -809,3 +815,4 @@ async def test_create_event_publish_mode_success():
     detail = await svc.create_event(project_id=PROJECT_ID, body=body)
     assert detail.title == "Summer fest"
     svc._dispatch_publish_push.assert_awaited_once()
+    svc.facility_hold.ensure.assert_awaited_once()

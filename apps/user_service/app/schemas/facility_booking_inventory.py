@@ -139,6 +139,7 @@ class CreateSlotBlockRequest(_Request):
     to_min: int = Field(MINUTES_PER_DAY, ge=0, le=MINUTES_PER_DAY)
     reason: str = Field(..., min_length=1, max_length=200)
     category: str | None = Field(None, max_length=80)
+    community_event_id: str | None = None
 
     @model_validator(mode="after")
     def validate_window(self) -> CreateSlotBlockRequest:
@@ -161,6 +162,7 @@ class SlotBlockResponse(BaseModel):
     to_min: int
     reason: str
     category: str | None = None
+    community_event_id: str | None = None
     created_at: datetime | None = None
 
 

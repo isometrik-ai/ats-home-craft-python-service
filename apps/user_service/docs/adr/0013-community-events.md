@@ -88,6 +88,9 @@ extension) or require cancel + recreate; full immutability is a follow-up produc
 - `community_events.facility_id` → `facilities.id`.
 - Picker lists facilities where `facility_type IN ('events', 'sports', 'recreation', 'services')`,
   `status = 'active'`, `active = true` (matches UI copy: “Only bookable venues are listed”).
+- If that facility is **bookable**, publishing the event writes a `facility_slot_blocks` hold
+  (`community_event_id`, all units, event date/time window) so residents cannot book those slots.
+  Cancel and delete release the hold.
 - Resident detail **Venue** section joins facility name, location type, tower/floor/wing, subtype,
   `location_notes` — no snapshot on the event row.
 
