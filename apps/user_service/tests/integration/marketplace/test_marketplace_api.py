@@ -381,6 +381,37 @@ async def test_browse_listings_success(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_browse_listings_contact_id_filter(monkeypatch, client):
+    """GET /marketplace/listings accepts contact_id to filter by seller."""
+    _resident(monkeypatch)
+    other_seller = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+
+    async def fake_list(_self, **kwargs):
+        assert str(kwargs["query"].contact_id) == other_seller
+        return {"items": [], "total": 0}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_service.MarketplaceService.list_listings",
+        fake_list,
+    )
+    response = await client.get(
+        "/v1/marketplace/listings",
+        params={"contact_id": other_seller},
+    )
+    assert_success(response)
+
+
+@pytest.mark.asyncio
+async def test_browse_listings_invalid_contact_id_returns_422(client):
+    """GET /listings returns 422 when contact_id is not a UUID."""
+    response = await client.get(
+        "/v1/marketplace/listings",
+        params={"contact_id": "not-a-uuid"},
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_browse_listings_fails_for_unknown_category(monkeypatch, client):
     """GET /listings returns 422 when the category is not in the catalog."""
     _resident(monkeypatch)
