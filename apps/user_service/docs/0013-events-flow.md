@@ -35,25 +35,26 @@ Each event has:
 
 ### Business rules (must enforce)
 
-| Rule                               | Enforcement                                                                                                                 |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Project-scoped**                 | All queries filter `organization_id` + `project_id`                                                                         |
-| **Venue from facilities**          | `facility_id` must reference active `facilities` row with `facility_type IN ('events', 'sports', 'recreation', 'services')` |
-| **Draft not visible to residents** | List/detail resident APIs require `publish_status = published`, `record_status = active`                                    |
-| **Booking window**                 | `now() < booking_closes_at` and event not ended                                                                             |
-| **Capacity in tickets**            | `total_tickets` per booking = adult + child; sum confirmed tickets ≤ `total_capacity`                                       |
-| **Waitlist when full**             | If capacity exhausted → `booking_status = waitlisted` (Phase 1: no auto-promote)                                            |
-| **Per-resident cap**               | Sum of active tickets for `(event_id, contact_id)` ≤ `max_tickets_per_resident`                                             |
-| **Child tickets**                  | `child_tickets > 0` only when `child_ticket_mode != not_applicable`                                                         |
-| **Free events**                    | `payment_status = not_applicable`, amounts zero                                                                             |
-| **Paid events Phase 1**            | Book → `payment_status = pending`; admin `mark-paid` → `paid`                                                               |
-| **Amount immutability**            | Prices stored on booking row at create time                                                                                 |
-| **Tax**                            | When `apply_tax`, `tax_minor = round(subtotal × tax_rate / 100)`                                                            |
-| **Published edit lock**            | Structural fields locked when published and `tickets_booked > 0` → `409`                                                    |
-| **Soft delete**                    | `record_status = deleted`; retain bookings and audit                                                                        |
-| **Display codes**                  | `EVT-{n}` events, `BKG-{n}` bookings — monotonic per project                                                                |
-| **Staff project access**           | `ensure_staff_project_access(project_id)` on admin routes                                                                   |
-| **Resident project access**        | Active `contact_units` membership in the project (no `unit_id` on bookings or APIs)                                         |
+| Rule                               | Enforcement                                                                                                                                                                                                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Project-scoped**                 | All queries filter `organization_id` + `project_id`                                                                                                                                                                                             |
+| **Venue from facilities**          | `facility_id` must reference active `facilities` row with `facility_type IN ('events', 'sports', 'recreation', 'services')`                                                                                                                     |
+| **Freeze bookable venue slots**    | On publish, a `facility_slot_blocks` row (`category=community_event`) covers the event dates/times on that facility. Drafts do not hold. Cancel/delete releases the hold. Overlapping active facility reservations → `409 facility_slots_busy`. |
+| **Draft not visible to residents** | List/detail resident APIs require `publish_status = published`, `record_status = active`                                                                                                                                                        |
+| **Booking window**                 | `now() < booking_closes_at` and event not ended                                                                                                                                                                                                 |
+| **Capacity in tickets**            | `total_tickets` per booking = adult + child; sum confirmed tickets ≤ `total_capacity`                                                                                                                                                           |
+| **Waitlist when full**             | If capacity exhausted → `booking_status = waitlisted` (Phase 1: no auto-promote)                                                                                                                                                                |
+| **Per-resident cap**               | Sum of active tickets for `(event_id, contact_id)` ≤ `max_tickets_per_resident`                                                                                                                                                                 |
+| **Child tickets**                  | `child_tickets > 0` only when `child_ticket_mode != not_applicable`                                                                                                                                                                             |
+| **Free events**                    | `payment_status = not_applicable`, amounts zero                                                                                                                                                                                                 |
+| **Paid events Phase 1**            | Book → `payment_status = pending`; admin `mark-paid` → `paid`                                                                                                                                                                                   |
+| **Amount immutability**            | Prices stored on booking row at create time                                                                                                                                                                                                     |
+| **Tax**                            | When `apply_tax`, `tax_minor = round(subtotal × tax_rate / 100)`                                                                                                                                                                                |
+| **Published edit lock**            | Structural fields locked when published and `tickets_booked > 0` → `409`                                                                                                                                                                        |
+| **Soft delete**                    | `record_status = deleted`; retain bookings and audit                                                                                                                                                                                            |
+| **Display codes**                  | `EVT-{n}` events, `BKG-{n}` bookings — monotonic per project                                                                                                                                                                                    |
+| **Staff project access**           | `ensure_staff_project_access(project_id)` on admin routes                                                                                                                                                                                       |
+| **Resident project access**        | Active `contact_units` membership in the project (no `unit_id` on bookings or APIs)                                                                                                                                                             |
 
 ### Screen → capability map
 

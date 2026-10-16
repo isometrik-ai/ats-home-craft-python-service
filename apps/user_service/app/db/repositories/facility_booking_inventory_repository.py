@@ -28,6 +28,7 @@ _INVENTORY_UUID_COLUMNS: frozenset[str] = frozenset(
         "facility_id",
         "unit_id",
         "created_by_user_id",
+        "community_event_id",
     }
 )
 _INVENTORY_DATE_COLUMNS: frozenset[str] = frozenset(
@@ -61,6 +62,7 @@ _TABLES: dict[str, tuple[list[str], str]] = {
             "reason",
             "category",
             "created_by_user_id",
+            "community_event_id",
         ],
         "starts_on, from_min",
     ),
@@ -198,6 +200,33 @@ class FacilityBookingInventoryRepository(BaseRepository):
             facility_id,
         )
         return result.upper().endswith(" 1")
+
+    async def get_slot_block_for_event(
+        self, *, organization_id: str, event_id: str
+    ) -> dict[str, Any] | None:
+        """Return the calendar hold owned by a community event, if any."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT * FROM facility_slot_blocks
+            WHERE organization_id = $1::uuid AND community_event_id = $2::uuid
+            """,
+            organization_id,
+            event_id,
+        )
+        if not row:
+            return None
+        return self._serialize_row("facility_slot_blocks", dict(row))
+
+    async def delete_slot_blocks_for_event(self, *, organization_id: str, event_id: str) -> None:
+        """Remove calendar holds created for a community event."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM facility_slot_blocks
+            WHERE organization_id = $1::uuid AND community_event_id = $2::uuid
+            """,
+            organization_id,
+            event_id,
+        )
 
     async def count_units(self, *, organization_id: str, facility_id: str) -> int:
         value = await self.db_connection.fetchval(

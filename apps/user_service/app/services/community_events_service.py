@@ -48,6 +48,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.community_event_booking_service import (
     CommunityEventBookingService,
 )
+from apps.user_service.app.services.community_event_facility_hold import (
+    CommunityEventFacilityHoldService,
+)
 from apps.user_service.app.services.community_event_notification_service import (
     CommunityEventNotificationService,
 )
@@ -95,6 +98,10 @@ class CommunityEventsService:
         self.facilities_repo = FacilitiesRepository(db_connection)
         self.contacts_repo = ContactsRepository(db_connection)
         self.booking_service = CommunityEventBookingService(
+            db_connection=db_connection,
+            user_context=user_context,
+        )
+        self.facility_hold = CommunityEventFacilityHoldService(
             db_connection=db_connection,
             user_context=user_context,
         )
@@ -438,6 +445,18 @@ class CommunityEventsService:
             actor_user_id=self.user_context.user_id,
         )
         if publish:
+            await self.facility_hold.ensure(
+                project_id=project_id,
+                event={
+                    "id": row["id"],
+                    "title": body.title,
+                    "facility_id": body.facility_id,
+                    "start_date": body.start_date,
+                    "end_date": body.end_date,
+                    "start_time": body.start_time,
+                    "end_time": body.end_time,
+                },
+            )
             await self._dispatch_publish_push(project_id=project_id, event=row)
         return await self.get_event(project_id=project_id, event_id=str(row["id"]))
 
@@ -509,6 +528,10 @@ class CommunityEventsService:
                 event_id=event_id,
                 items=self._gallery_items_to_dicts(gallery),
             )
+        if str(existing.get("publish_status")) == CommunityEventPublishStatus.PUBLISHED.value:
+            await self.facility_hold.ensure(
+                project_id=project_id, event={**existing, **db_fields, "id": event_id}
+            )
         await self.repo.insert_audit_log(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -546,6 +569,7 @@ class CommunityEventsService:
                 message_key="community_events.errors.event_not_publishable",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        await self.facility_hold.ensure(project_id=project_id, event=existing)
         await self.repo.update_event_fields(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -586,6 +610,7 @@ class CommunityEventsService:
             project_id=project_id,
             event_id=event_id,
         )
+        await self.facility_hold.release(project_id=project_id, event_id=event_id)
         await self.repo.update_event_fields(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -644,6 +669,7 @@ class CommunityEventsService:
         event_id: str,
     ) -> CommunityEventDetailResponse:
         """Soft delete event."""
+        await self.facility_hold.release(project_id=project_id, event_id=event_id)
         await self.repo.update_event_fields(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -671,6 +697,11 @@ class CommunityEventsService:
         event_id: str,
     ) -> CommunityEventDetailResponse:
         """Restore soft-deleted event."""
+        existing = await self.repo.fetch_event_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
         await self.repo.update_event_fields(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -681,6 +712,11 @@ class CommunityEventsService:
                 "updated_by_user_id": self.user_context.user_id,
             },
         )
+        if (
+            existing
+            and str(existing.get("publish_status")) == CommunityEventPublishStatus.PUBLISHED.value
+        ):
+            await self.facility_hold.ensure(project_id=project_id, event=existing)
         await self.repo.insert_audit_log(
             organization_id=self.organization_id,
             project_id=project_id,

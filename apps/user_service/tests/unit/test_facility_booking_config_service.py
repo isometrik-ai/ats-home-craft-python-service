@@ -174,12 +174,15 @@ async def test_create_maintenance_and_slot_block_use_inventory_insert() -> None:
             from_min=900,
             to_min=960,
             reason="Community Tournament Preparation",
+            community_event_id="22222222-2222-2222-2222-222222222222",
         ),
     )
 
     assert svc.inventory_repo.insert.await_count == 2
     tables = [call.args[0] for call in svc.inventory_repo.insert.await_args_list]
     assert tables == ["facility_maintenance_windows", "facility_slot_blocks"]
+    slot_payload = svc.inventory_repo.insert.await_args_list[1].kwargs["data"]
+    assert slot_payload["community_event_id"] == "22222222-2222-2222-2222-222222222222"
 
 
 @pytest.mark.asyncio

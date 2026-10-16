@@ -1367,6 +1367,8 @@
       "ticket_limit_exceeded": "You have exceeded the maximum tickets allowed per resident.",
       "facility_not_eligible": "The selected facility is not eligible for events.",
       "facility_required": "A venue facility is required to publish this event.",
+      "facility_slots_busy": "This facility already has a booking in that time window.",
+      "invalid_event_hours": "Event end time must be after the start time.",
       "booking_closes_required": "Booking close date and time are required to publish.",
       "invalid_date_range": "End date must be on or after the start date.",
       "gallery_limit_exceeded": "Too many gallery images.",

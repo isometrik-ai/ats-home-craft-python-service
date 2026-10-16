@@ -17,6 +17,7 @@ PROJECT_ID = "22222222-2222-2222-2222-222222222222"
 FACILITY_ID = "33333333-3333-3333-3333-333333333333"
 USER_ID = "44444444-4444-4444-4444-444444444444"
 ROW_ID = "55555555-5555-5555-5555-555555555555"
+EVENT_ID = "88888888-8888-8888-8888-888888888888"
 
 _WEEK_HOURS = [{"open": 360, "close": 1320, "closed": False} for _ in range(7)]
 
@@ -422,3 +423,34 @@ async def test_load_all_fetches_every_inventory_table() -> None:
         or "facility_booking_units" in q
         for q, _ in conn.fetch_calls
     )
+
+
+@pytest.mark.asyncio
+async def test_get_and_delete_slot_block_for_event() -> None:
+    """Event-owned slot blocks are looked up and deleted by community_event_id."""
+    conn = _FakeConn(
+        fetchrow={
+            "id": ROW_ID,
+            "facility_id": FACILITY_ID,
+            "unit_id": None,
+            "starts_on": date(2026, 10, 22),
+            "ends_on": date(2026, 10, 22),
+            "from_min": 1080,
+            "to_min": 1260,
+            "reason": "Community event: Holi",
+            "category": "community_event",
+            "community_event_id": EVENT_ID,
+            "created_at": None,
+        }
+    )
+    repo = FacilityBookingInventoryRepository(db_connection=conn)
+
+    row = await repo.get_slot_block_for_event(organization_id=ORG_ID, event_id=EVENT_ID)
+    assert row is not None
+    assert row["community_event_id"] == EVENT_ID
+    assert "community_event_id" in conn.fetchrow_calls[0][0]
+
+    await repo.delete_slot_blocks_for_event(organization_id=ORG_ID, event_id=EVENT_ID)
+    delete_sql, delete_args = conn.execute_calls[0]
+    assert "DELETE FROM facility_slot_blocks" in delete_sql
+    assert delete_args == (ORG_ID, EVENT_ID)
