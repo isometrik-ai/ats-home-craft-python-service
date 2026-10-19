@@ -7,9 +7,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from apps.user_service.app.schemas.enums import NoticeRecipientGroup, ProjectMemberRole
+from apps.user_service.app.schemas.enums import (
+    NoticeRecipientGroup,
+    NoticeRecipientInputGroup,
+    ProjectMemberRole,
+)
 from apps.user_service.app.schemas.notices import (
     CreateNoticeRequest,
+    NoticeListQuery,
     ReachEstimateQuery,
 )
 from apps.user_service.app.services.notice_recipient_resolution_service import (
@@ -109,6 +114,39 @@ def test_create_notice_accepts_staff_recipient_group():
         recipient_groups=[NoticeRecipientGroup.STAFF],
     )
     assert body.recipient_groups == [NoticeRecipientGroup.STAFF]
+
+
+def test_create_notice_accepts_all_recipient_group():
+    """Success case: API schema accepts All as a select-all recipient shortcut."""
+    body = CreateNoticeRequest(
+        title="Maintenance update",
+        recipient_groups=["All"],
+    )
+    assert body.recipient_groups == [NoticeRecipientInputGroup.ALL]
+
+
+def test_create_notice_accepts_lowercase_all_recipient_group():
+    """Success case: API schema normalizes lowercase all to All."""
+    body = CreateNoticeRequest(
+        title="Maintenance update",
+        recipient_groups=["all"],
+    )
+    assert body.recipient_groups == [NoticeRecipientInputGroup.ALL]
+
+
+def test_create_notice_rejects_unknown_recipient_group():
+    """Failure case: API schema rejects unknown recipient groups."""
+    with pytest.raises(ValidationError):
+        CreateNoticeRequest(
+            title="Maintenance update",
+            recipient_groups=["Everyone"],
+        )
+
+
+def test_list_query_rejects_all_as_group_filter():
+    """Failure case: All is a create shortcut, not a persisted list filter."""
+    with pytest.raises(ValidationError):
+        NoticeListQuery(group="All")
 
 
 def test_reach_estimate_query_parses_staff_group():
