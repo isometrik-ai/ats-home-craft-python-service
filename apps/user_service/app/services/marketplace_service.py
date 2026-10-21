@@ -808,7 +808,7 @@ class MarketplaceService:
             page=page,
             page_size=page_size,
         )
-        items = [self._mine_card(row, len(listing_media(row))) for row in rows]
+        items = [self._mine_card(row, listing_media(row)) for row in rows]
         return {"items": items, "total": total}
 
     async def _assert_publishable(self, listing: dict[str, Any]) -> None:
@@ -974,7 +974,7 @@ class MarketplaceService:
         )
         return card
 
-    def _mine_card(self, row: dict[str, Any], media_count: int) -> dict[str, Any]:
+    def _mine_card(self, row: dict[str, Any], media: list[dict[str, Any]]) -> dict[str, Any]:
         """One row on the seller's own list."""
         days_left = None
         if row["status"] == "live" and row.get("expires_at"):
@@ -986,8 +986,9 @@ class MarketplaceService:
             "status": row["status"],
             "kind": row["kind"],
             "price_amount": _money(row.get("price_amount")),
+            "cover_path": cover_path(media),
             "days_left": days_left,
-            "missing": publish_gaps(row, media_count) if row["status"] == "draft" else [],
+            "missing": publish_gaps(row, len(media)) if row["status"] == "draft" else [],
             "published_at": row.get("published_at"),
             "sold_at": row.get("sold_at"),
             "sold_type": row.get("sold_type"),
