@@ -514,6 +514,20 @@ async def test_list_listings_passes_browse_query():
 
 
 @pytest.mark.asyncio
+async def test_my_listings_includes_cover_path():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.list_mine = AsyncMock(return_value=([_listing(status="sold")], 1))
+    data = await svc.my_listings(
+        contact_id="seller-1",
+        status="all",
+        page=1,
+        page_size=20,
+    )
+    assert data["items"][0]["cover_path"] == "org/a.jpg"
+
+
+@pytest.mark.asyncio
 async def test_get_listing_detail_includes_seller_isometrik_id():
     svc = _service()
     svc.repo.expire_due = AsyncMock()

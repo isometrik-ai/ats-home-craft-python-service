@@ -64,7 +64,6 @@ from libs.shared_utils.common_query import (
     PROJECT_MEMBERS_MANAGE_ASSIGNED,
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_VIEW,
-    SETTINGS_MANAGEMENT_VIEW,
     VISITOR_MANAGEMENT_VIEW,
 )
 from libs.shared_utils.http_exceptions import (
@@ -715,7 +714,7 @@ async def test_require_permission_ceiling_codes():
         "apps.user_service.app.utils.common_utils.require_any_permission",
         mock_any,
     ):
-        await require_permission(SETTINGS_MANAGEMENT_VIEW, ctx, MagicMock(), "org-1")
+        await require_permission(CONTACTS_MANAGEMENT_VIEW, ctx, MagicMock(), "org-1")
     mock_any.assert_awaited_once()
 
 
