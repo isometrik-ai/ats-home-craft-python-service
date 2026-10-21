@@ -17,8 +17,13 @@ from apps.user_service.app.schemas.enums import (
     NoticePinDuration,
     NoticePublishMode,
     NoticeRecipientGroup,
+    NoticeRecipientInputGroup,
     NoticeScopeType,
     NoticeStatus,
+)
+from apps.user_service.app.utils.notice_targeting_utils import (
+    NOTICE_TARGETING_ALL,
+    normalize_recipient_groups_input,
 )
 
 
@@ -55,7 +60,12 @@ class CreateNoticeRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=NOTICE_MAX_TITLE_LENGTH)
     description: str = Field("", max_length=NOTICE_MAX_DESCRIPTION_LENGTH)
     category: NoticeCategory = NoticeCategory.GENERAL
-    recipient_groups: list[NoticeRecipientGroup] | None = None
+    recipient_groups: list[NoticeRecipientInputGroup] | None = Field(
+        None,
+        description=(
+            "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
+        ),
+    )
     scope_type: NoticeScopeType = NoticeScopeType.WHOLE_SOCIETY
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode = NoticePublishMode.DRAFT
@@ -65,6 +75,12 @@ class CreateNoticeRequest(BaseModel):
     pin_duration: NoticePinDuration = NoticePinDuration.MANUAL
     confirm_pin_replace: bool = False
     attachments: list[NoticeAttachmentInput] | None = None
+
+    @field_validator("recipient_groups", mode="before")
+    @classmethod
+    def normalize_all_recipient_shortcut(cls, recipient_groups: object) -> object:
+        """Accept All/all as a select-all recipient shortcut."""
+        return normalize_recipient_groups_input(recipient_groups)
 
     @field_validator("attachments")
     @classmethod
@@ -86,12 +102,23 @@ class UpdateNoticeRequest(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=NOTICE_MAX_TITLE_LENGTH)
     description: str | None = Field(None, max_length=NOTICE_MAX_DESCRIPTION_LENGTH)
     category: NoticeCategory | None = None
-    recipient_groups: list[NoticeRecipientGroup] | None = None
+    recipient_groups: list[NoticeRecipientInputGroup] | None = Field(
+        None,
+        description=(
+            "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
+        ),
+    )
     scope_type: NoticeScopeType | None = None
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode | None = None
     publish_at: datetime | None = None
     attachments: list[NoticeAttachmentInput] | None = None
+
+    @field_validator("recipient_groups", mode="before")
+    @classmethod
+    def normalize_all_recipient_shortcut(cls, recipient_groups: object) -> object:
+        """Accept All/all as a select-all recipient shortcut."""
+        return normalize_recipient_groups_input(recipient_groups)
 
     @field_validator("attachments")
     @classmethod
@@ -140,7 +167,14 @@ class ReachEstimateQuery(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    groups: str = Field(..., min_length=1, description="Comma-separated recipient groups")
+    groups: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Comma-separated recipient groups. "
+            "Use All to include Owner, Tenant, Staff, and Security."
+        ),
+    )
     scope_type: NoticeScopeType = NoticeScopeType.WHOLE_SOCIETY
     tower_ids: str | None = Field(None, description="Comma-separated tower UUIDs")
 
@@ -150,8 +184,14 @@ class ReachEstimateQuery(BaseModel):
 
     def invalid_recipient_groups(self) -> list[str]:
         """Return unsupported group names from the parsed query string."""
-        allowed = {group.value for group in NoticeRecipientGroup}
-        return sorted({group for group in self.parsed_groups() if group not in allowed})
+        allowed = {group.value for group in NoticeRecipientInputGroup}
+        invalid: set[str] = set()
+        for group in self.parsed_groups():
+            if group.strip().lower() == NOTICE_TARGETING_ALL.lower():
+                continue
+            if group not in allowed:
+                invalid.add(group)
+        return sorted(invalid)
 
     def parsed_tower_ids(self) -> list[str]:
         """Parse comma-separated tower ids."""

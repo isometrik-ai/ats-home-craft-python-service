@@ -61,6 +61,7 @@ __all__ = [
     "NoticeCategory",
     "NoticeScopeType",
     "NoticeRecipientGroup",
+    "NoticeRecipientInputGroup",
     "NoticePinDuration",
     "NoticePublishMode",
     "NoticeListStatus",

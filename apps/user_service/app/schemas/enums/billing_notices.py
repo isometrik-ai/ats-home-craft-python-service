@@ -52,6 +52,16 @@ class NoticeRecipientGroup(str, Enum):
     SECURITY = "Security"
 
 
+class NoticeRecipientInputGroup(str, Enum):
+    """Create/update recipient selection, including the All shortcut."""
+
+    ALL = "All"
+    OWNER = "Owner"
+    TENANT = "Tenant"
+    STAFF = "Staff"
+    SECURITY = "Security"
+
+
 class NoticePinDuration(str, Enum):
     """Banner pin duration (Postgres notice_pin_duration enum)."""
 
