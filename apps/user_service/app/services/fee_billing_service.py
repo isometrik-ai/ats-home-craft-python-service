@@ -683,6 +683,11 @@ class FeeBillingService:
         run_date: date,
     ) -> str | None:
         """Insert one merged invoice and its lines, or return None when it exists."""
+        await self.repo.lock_unit_for_fee_billing(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
         existing = await self.repo.find_invoice(
             project_id=project_id,
             unit_id=unit_id,
@@ -958,6 +963,11 @@ class FeeBillingService:
         )
         if invoice is None:
             raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
+        if invoice.get("status") == "cancelled":
+            raise ConflictException(
+                message_key="fee_billing.errors.invoice_cancelled",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         paid = money(amount)
         if paid <= 0:
             raise ValidationException(message_key="fee_billing.errors.invalid_payment")
@@ -1129,6 +1139,18 @@ class FeeBillingService:
         actor_user_id: str | None = None,
     ) -> dict[str, Any]:
         """Cancel an issued invoice that has not received a payment."""
+        invoice = await self.repo.get_invoice(
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+        )
+        if invoice is None:
+            raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
+        await self.repo.lock_unit_for_fee_billing(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=str(invoice["unit_id"]),
+        )
         invoice = await self.repo.get_invoice(
             organization_id=organization_id,
             project_id=project_id,
