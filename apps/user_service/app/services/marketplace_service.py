@@ -955,6 +955,7 @@ class MarketplaceService:
                 "expires_at": row.get("expires_at"),
                 "sold_at": row.get("sold_at"),
                 "sold_type": row.get("sold_type"),
+                "seller_contact_id": str(row["seller_contact_id"]),
                 "seller_name": public_name(
                     row.get("seller_first_name"), row.get("seller_last_name")
                 ),
