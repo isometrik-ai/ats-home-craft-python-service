@@ -515,6 +515,35 @@ class WalkInService:
         ).model_dump()
 
     @staticmethod
+    def _filter_events_for_resident_flats(
+        events: list[dict[str, Any]],
+        *,
+        visit_unit_ids: set[str],
+        unit_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        """Keep entry-level events and flat actions only for the resident's visit units."""
+        unit_level_types = {
+            WalkInEventType.VISIT_UNIT_APPROVED.value,
+            WalkInEventType.VISIT_UNIT_REJECTED.value,
+        }
+        filtered: list[dict[str, Any]] = []
+        for event in events:
+            event_type = str(event.get("event_type") or "")
+            if event_type not in unit_level_types:
+                filtered.append(event)
+                continue
+            visit_unit_id = str(event.get("walk_in_visit_unit_id") or "").strip()
+            if visit_unit_id and visit_unit_id in visit_unit_ids:
+                filtered.append(event)
+                continue
+            payload = event.get("payload")
+            if isinstance(payload, dict):
+                payload_unit_id = str(payload.get("unit_id") or "").strip()
+                if payload_unit_id and payload_unit_id in unit_ids:
+                    filtered.append(event)
+        return filtered
+
+    @staticmethod
     def _derive_milestones(
         *,
         row: dict[str, Any],
@@ -588,7 +617,14 @@ class WalkInService:
             )
         return row
 
-    async def _serialize_detail(self, row: dict[str, Any]) -> dict[str, Any]:
+    async def _serialize_detail(
+        self,
+        row: dict[str, Any],
+        *,
+        include_visit_unit_ids: set[str] | None = None,
+        scope_event_visit_unit_ids: set[str] | None = None,
+        scope_event_unit_ids: set[str] | None = None,
+    ) -> dict[str, Any]:
         """Build full detail payload."""
         org_id = self.user_context.organization_id
         assert org_id
@@ -597,6 +633,10 @@ class WalkInService:
             organization_id=org_id,
             walk_in_entry_id=entry_id,
         )
+        if include_visit_unit_ids is not None:
+            visit_units = [
+                unit for unit in visit_units if str(unit.get("id") or "") in include_visit_unit_ids
+            ]
         events = await self.repo.list_events(
             organization_id=org_id,
             walk_in_entry_id=entry_id,
@@ -605,6 +645,12 @@ class WalkInService:
             organization_id=org_id,
             events=events,
         )
+        if scope_event_visit_unit_ids is not None:
+            enriched_events = self._filter_events_for_resident_flats(
+                enriched_events,
+                visit_unit_ids=scope_event_visit_unit_ids,
+                unit_ids=scope_event_unit_ids or set(),
+            )
         enriched_visit_units = await self._enrich_visit_unit_actor_labels(
             organization_id=org_id,
             visit_units=visit_units,
@@ -620,7 +666,7 @@ class WalkInService:
             vehicle_photo_paths=list(row.get("vehicle_photo_paths") or []),
             visit_units=[self._serialize_visit_unit(unit) for unit in enriched_visit_units],
             events=serialized_events,
-            milestones=self._derive_milestones(row=row, events=events),
+            milestones=self._derive_milestones(row=row, events=enriched_events),
             requested_by=await self._resolve_requested_by(row.get("requested_by_user_id")),
         )
         return detail.model_dump()
@@ -961,7 +1007,6 @@ class WalkInService:
     ) -> dict[str, Any]:
         """Resident detail for a walk-in affecting one of their flats."""
         row = await self._get_entry_or_raise(walk_in_entry_id=walk_in_entry_id)
-        detail = await self._serialize_detail(row)
         org_id = self.user_context.organization_id
         assert org_id
         scoped_unit_id = str(unit_id).strip() if unit_id else None
@@ -987,24 +1032,42 @@ class WalkInService:
                 )
             return access_cache[flat_id]
 
-        visit_units: list[dict[str, Any]] = []
-        for unit in detail.get("visit_units") or []:
+        all_visit_units = await self.repo.list_visit_units(
+            organization_id=org_id,
+            walk_in_entry_id=walk_in_entry_id,
+        )
+        has_access = False
+        for unit in all_visit_units:
             flat_id = str(unit.get("unit_id") or "")
-            if scoped_unit_id and flat_id != scoped_unit_id:
-                continue
             if flat_id and await resident_can_act(flat_id):
-                visit_units.append(unit)
-
-        if not visit_units:
+                has_access = True
+                break
+        if not has_access:
             raise NotFoundException(
                 message_key="walk_in.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
 
-        detail["visit_units"] = visit_units
-        first = visit_units[0]
-        detail["primary_unit_label"] = first.get("unit_label") or first.get("unit_code")
-        return detail
+        if not scoped_unit_id:
+            return await self._serialize_detail(row)
+
+        scoped_visit_units = [
+            unit for unit in all_visit_units if str(unit.get("unit_id") or "") == scoped_unit_id
+        ]
+        if not scoped_visit_units:
+            raise NotFoundException(
+                message_key="walk_in.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        include_visit_unit_ids = {str(unit["id"]) for unit in scoped_visit_units}
+        include_unit_ids = {str(unit["unit_id"]) for unit in scoped_visit_units}
+        return await self._serialize_detail(
+            row,
+            include_visit_unit_ids=include_visit_unit_ids,
+            scope_event_visit_unit_ids=include_visit_unit_ids,
+            scope_event_unit_ids=include_unit_ids,
+        )
 
     async def approve_visit_unit(
         self,

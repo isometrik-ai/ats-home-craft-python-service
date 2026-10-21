@@ -54,7 +54,7 @@ def _json_object(value: Any) -> dict[str, Any]:
     return {"mode": "none"}
 
 
-class FeeBillingRepository(BaseRepository):
+class FeeBillingRepository(BaseRepository):  # pylint: disable=too-many-public-methods
     """SQL for due fee heads, units, invoices, and skip rows."""
 
     async def list_active_heads(self) -> list[dict[str, Any]]:
@@ -475,7 +475,18 @@ class FeeBillingRepository(BaseRepository):
                 END AS status,
                 i.total_amount,
                 COALESCE(paid.amount_paid, 0) AS amount_paid,
-                i.pdf_path
+                i.pdf_path,
+                COALESCE((
+                    SELECT json_agg(
+                        json_build_object(
+                            'kind', l.kind::text,
+                            'description', l.description
+                        )
+                        ORDER BY l.created_at, l.id
+                    )
+                    FROM fee_invoice_lines l
+                    WHERE l.invoice_id = i.id
+                ), '[]'::json) AS lines
             FROM fee_invoices i
             JOIN units u ON u.id = i.unit_id
             LEFT JOIN (
