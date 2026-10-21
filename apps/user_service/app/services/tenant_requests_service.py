@@ -64,6 +64,8 @@ from apps.user_service.app.schemas.tenant_requests import (
     UpdateTenancyRequest,
 )
 from apps.user_service.app.services.contacts_service import ContactsService
+from apps.user_service.app.services.fee_billing_service import FeeBillingService
+from apps.user_service.app.services.fee_configuration_labels import money
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
@@ -606,6 +608,8 @@ class TenantRequestsService:
             move_out_status=self._row_move_out_status(row),
             move_out_requested_at=format_iso_datetime(row.get("move_out_requested_at")),
             portal_access=bool(row.get("portal_access", False)),
+            tenant_contact_id=row.get("tenant_contact_id"),
+            contact_unit_id=row.get("contact_unit_id"),
             submitted_at=format_iso_datetime(row.get("submitted_at")),
             approved_at=format_iso_datetime(row.get("approved_at")),
             cancelled_at=format_iso_datetime(row.get("cancelled_at")),
@@ -793,6 +797,45 @@ class TenantRequestsService:
             raise ValidationException(
                 message_key="tenant_requests.errors.invalid_status_transition",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    async def _assert_no_outstanding_dues_for_move_out(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        tenant_contact_id: str,
+    ) -> None:
+        """Ensure the tenant's unit has no unpaid maintenance or club invoices."""
+        if not tenant_contact_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenancy",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        active_tenant_id = await self.contact_roles_repo.get_active_tenant_contact_for_unit(
+            organization_id=organization_id,
+            unit_id=unit_id,
+        )
+        if not active_tenant_id or str(active_tenant_id) != tenant_contact_id:
+            raise ValidationException(
+                message_key="tenant_requests.errors.no_active_tenant",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        billing = FeeBillingService(self.db_connection)
+        summary = await billing.outstanding_summary(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        if money(summary.get("total_outstanding") or "0") > 0:
+            raise ValidationException(
+                message_key="tenant_requests.errors.outstanding_dues_pending",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={
+                    "amount": summary.get("total_outstanding") or "0.00",
+                    "unpaid_count": summary.get("unpaid_count") or 0,
+                },
             )
 
     async def _assert_owner_owns_request(
@@ -998,6 +1041,12 @@ class TenantRequestsService:
                 message_key="tenant_requests.errors.inflight_request_exists",
                 custom_code=CustomStatusCode.CONFLICT,
             )
+        await self._assert_no_outstanding_dues_for_move_out(
+            organization_id=org_id,
+            project_id=str(unit["project_id"]),
+            unit_id=body.unit_id,
+            tenant_contact_id=str(active_approved.get("tenant_contact_id") or active_tenant_id),
+        )
         now = datetime.now(timezone.utc)
         try:
             await self.repo.update_move_out_fields(
@@ -2084,6 +2133,12 @@ class TenantRequestsService:
                 message_key="tenant_requests.errors.move_out_date_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        await self._assert_no_outstanding_dues_for_move_out(
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            tenant_contact_id=tenant_contact_id,
+        )
         turnover_service = UnitOccupancyTurnoverService(
             db_connection=self.db_connection,
             user_context=self.user_context,

@@ -62,6 +62,14 @@ def _mock_unit_occupancy_turnover(monkeypatch):
         "apps.user_service.app.services.tenant_requests_service.UnitOccupancyTurnoverService",
         MagicMock(return_value=turnover_mock),
     )
+    billing_mock = MagicMock()
+    billing_mock.outstanding_summary = AsyncMock(
+        return_value={"total_outstanding": "0.00", "unpaid_count": 0}
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.tenant_requests_service.FeeBillingService",
+        MagicMock(return_value=billing_mock),
+    )
 
 
 def _ctx(*, user_id: str = USER_ID) -> UserContext:
@@ -1606,6 +1614,42 @@ async def test_create_move_out_request_requires_active_tenant() -> None:
 
 
 @pytest.mark.asyncio
+async def test_approve_move_out_request_blocks_outstanding_dues() -> None:
+    """Admin approve move-out is rejected when the tenant unit has unpaid fees."""
+    repo = _FakeTenantRequestsRepo()
+    repo.row = _request_row(
+        status=TenantRequestStatus.APPROVED.value,
+        move_out_status=TenantMoveOutStatus.PENDING.value,
+        tenant_contact_id="tenant-1",
+        contact_unit_id="link-1",
+        move_out_date=date(2026, 12, 1),
+    )
+    service = _service(repo=repo)
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+
+    with patch.object(
+        service,
+        "_assert_no_outstanding_dues_for_move_out",
+        AsyncMock(
+            side_effect=ValidationException(
+                message_key="tenant_requests.errors.outstanding_dues_pending",
+                params={"amount": "500.00", "unpaid_count": 1},
+            )
+        ),
+    ):
+        with pytest.raises(ValidationException) as exc:
+            await service.approve_move_out_request(
+                project_id=PROJECT_ID,
+                tenant_request_id=REQUEST_ID,
+                body=ApproveMoveOutRequest(admin_notes="Confirmed"),
+            )
+
+    assert exc.value.message_key == "tenant_requests.errors.outstanding_dues_pending"
+
+
+@pytest.mark.asyncio
 async def test_approve_move_out_request_success() -> None:
     """Admin approve move-out releases tenant and supersedes move-in request."""
     repo = _FakeTenantRequestsRepo()
@@ -2010,6 +2054,39 @@ async def test_create_move_out_request_tenant_mismatch() -> None:
             ),
         )
     assert exc.value.message_key == "tenant_requests.errors.no_active_tenancy"
+
+
+@pytest.mark.asyncio
+async def test_assert_no_outstanding_dues_for_move_out_rejects_unpaid() -> None:
+    """Move-out guard uses tenant contact and unit fee outstanding summary."""
+    service = _service()
+    service.contact_roles_repo.get_active_tenant_contact_for_unit = AsyncMock(
+        return_value="tenant-1"
+    )
+    billing_mock = MagicMock()
+    billing_mock.outstanding_summary = AsyncMock(
+        return_value={"total_outstanding": "1200.00", "unpaid_count": 2}
+    )
+
+    with patch(
+        "apps.user_service.app.services.tenant_requests_service.FeeBillingService",
+        return_value=billing_mock,
+    ):
+        with pytest.raises(ValidationException) as exc:
+            await service._assert_no_outstanding_dues_for_move_out(
+                organization_id=ORG_ID,
+                project_id=PROJECT_ID,
+                unit_id=UNIT_ID,
+                tenant_contact_id="tenant-1",
+            )
+
+    assert exc.value.message_key == "tenant_requests.errors.outstanding_dues_pending"
+    assert exc.value.params == {"amount": "1200.00", "unpaid_count": 2}
+    billing_mock.outstanding_summary.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+    )
 
 
 @pytest.mark.asyncio

@@ -292,6 +292,8 @@ class TenantRequestListItemResponse(BaseModel):
     move_out_status: str = TenantMoveOutStatus.NONE.value
     move_out_requested_at: str | None = None
     portal_access: bool = False
+    tenant_contact_id: str | None = None
+    contact_unit_id: str | None = None
     submitted_at: str | None = None
     approved_at: str | None = None
     cancelled_at: str | None = None
