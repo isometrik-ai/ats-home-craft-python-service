@@ -368,6 +368,7 @@ class FakeFeeBillingRepository:
         as_of: date,
         limit: int,
         offset: int,
+        include_lines: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         """Filter the supplied project invoices the way the query does."""
         matched = [
@@ -384,7 +385,18 @@ class FakeFeeBillingRepository:
             and (not billing_months or invoice["billing_month"] in billing_months)
         ]
         matched.sort(key=lambda invoice: invoice["billing_month"], reverse=True)
-        return matched[offset : offset + limit], len(matched)
+        page = matched[offset : offset + limit]
+        if include_lines:
+            page = [
+                {
+                    **invoice,
+                    "lines": list(
+                        self.invoice_details.get(str(invoice["id"]), {}).get("lines") or []
+                    ),
+                }
+                for invoice in page
+            ]
+        return page, len(matched)
 
     @staticmethod
     def _skip_key(skip: dict[str, Any]) -> tuple[Any, ...]:
@@ -1004,6 +1016,49 @@ def _listed_invoice(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+async def test_list_invoices_includes_lines_when_requested():
+    """Resident-style lists attach charge lines with the same shape as invoice detail."""
+    fake = FakeFeeBillingRepository([], [])
+    fake.project_invoices = [_listed_invoice()]
+    fake.invoice_details["inv-oct"] = {
+        "id": "inv-oct",
+        "organization_id": ORG_ID,
+        "project_id": PROJECT_ID,
+        "unit_id": "unit-1",
+        "lines": [
+            {
+                "id": "line-1",
+                "kind": "maintenance",
+                "line_role": "charge",
+                "description": "Maintenance",
+                "area_or_quantity": Decimal("100.00"),
+                "rate": Decimal("3.25"),
+                "minimum_amount": Decimal("500.00"),
+                "taxable_amount": Decimal("500.00"),
+                "tax_amount": Decimal("92.50"),
+                "line_total": Decimal("592.50"),
+                "source_invoice_id": None,
+                "started_months": None,
+                "days_overdue": None,
+            }
+        ],
+    }
+    items, total = await _service(fake).list_invoices(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id="unit-1",
+        status=None,
+        billing_months=None,
+        page=1,
+        page_size=20,
+        as_of=date(2026, 10, 5),
+        include_lines=True,
+    )
+    assert total == 1
+    assert items[0]["lines"][0]["description"] == "Maintenance"
+    assert items[0]["lines"][0]["line_total"] == "592.50"
 
 
 async def test_list_invoices_filters_unit_status_and_month():

@@ -421,6 +421,7 @@ class FeeBillingRepository(BaseRepository):
         as_of: date,
         limit: int,
         offset: int,
+        include_lines: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         """Invoice headers for a project, newest billing month first."""
         filters = [
@@ -492,7 +493,12 @@ class FeeBillingRepository(BaseRepository):
             offset,
         )
         total = int(count_row["total"]) if count_row is not None else 0
-        return [dict(row) for row in rows], total
+        invoices = [dict(row) for row in rows]
+        if include_lines and invoices:
+            grouped = await self._detail_lines_batch([str(row["id"]) for row in invoices])
+            for invoice in invoices:
+                invoice["lines"] = grouped.get(str(invoice["id"]), [])
+        return invoices, total
 
     async def get_invoice(
         self,
@@ -591,6 +597,38 @@ class FeeBillingRepository(BaseRepository):
             invoice_id,
         )
         return [dict(row) for row in rows]
+
+    async def _detail_lines_batch(self, invoice_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """Charge and late-fee lines for many invoices, grouped by invoice id."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+                invoice_id,
+                id,
+                kind::text AS kind,
+                line_role,
+                description,
+                area_or_quantity,
+                rate,
+                minimum_amount,
+                taxable_amount,
+                tax_amount,
+                line_total,
+                source_invoice_id,
+                started_months,
+                days_overdue
+            FROM fee_invoice_lines
+            WHERE invoice_id = ANY($1::uuid[])
+            ORDER BY invoice_id, created_at, id
+            """,
+            invoice_ids,
+        )
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            line = dict(row)
+            invoice_id = str(line.pop("invoice_id"))
+            grouped[invoice_id].append(line)
+        return grouped
 
     async def _detail_payments(self, invoice_id: str) -> list[dict[str, Any]]:
         """Receipts applied to one invoice."""

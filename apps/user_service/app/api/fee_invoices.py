@@ -293,6 +293,7 @@ async def list_resident_fee_invoices(
         billing_months=months,
         page=page,
         page_size=page_size,
+        include_lines=True,
     )
     return list_response(
         request=request,

@@ -192,6 +192,7 @@ class FeeInvoiceListItem(BaseModel):
     amount_paid: str
     outstanding: str
     pdf_path: str | None = None
+    lines: list[FeeInvoiceLineDetail] | None = None
 
 
 class FeeInvoiceListApiResponse(BaseModel):

@@ -307,7 +307,7 @@ def _invoice_summary(row: dict[str, Any], as_of: date) -> dict[str, Any]:
     """One invoice header with the amount still outstanding."""
     total = money(row["total_amount"])
     paid = money(row["amount_paid"])
-    return {
+    summary: dict[str, Any] = {
         "id": str(row["id"]),
         "invoice_number": row["invoice_number"],
         "unit_id": str(row["unit_id"]),
@@ -321,6 +321,9 @@ def _invoice_summary(row: dict[str, Any], as_of: date) -> dict[str, Any]:
         "outstanding": money_str(_amount_still_due(row, total, paid)),
         "pdf_path": row.get("pdf_path"),
     }
+    if "lines" in row:
+        summary["lines"] = [_invoice_line_detail(line) for line in row.get("lines") or []]
+    return summary
 
 
 def _optional_money(value: Decimal | str | int | float | None) -> str | None:
@@ -1028,6 +1031,7 @@ class FeeBillingService:
         page: int,
         page_size: int,
         as_of: date | None = None,
+        include_lines: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         """List project invoices, optionally limited to a unit, status, or months."""
         if unit_ids is not None and not unit_ids:
@@ -1044,6 +1048,7 @@ class FeeBillingService:
             as_of=as_of,
             limit=page_size,
             offset=(page - 1) * page_size,
+            include_lines=include_lines,
         )
         return [_invoice_summary(row, as_of) for row in rows], total
 
