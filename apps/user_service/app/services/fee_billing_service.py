@@ -320,7 +320,18 @@ def _invoice_summary(row: dict[str, Any], as_of: date) -> dict[str, Any]:
         "amount_paid": money_str(paid),
         "outstanding": money_str(_amount_still_due(row, total, paid)),
         "pdf_path": row.get("pdf_path"),
+        "lines": _list_lines(row.get("lines")),
     }
+
+
+def _list_lines(value: Any) -> list[dict[str, str]]:
+    """Kind and description for each charge, in the order they were written."""
+    raw = value
+    if isinstance(raw, str):
+        raw = json.loads(raw)
+    if not raw:
+        return []
+    return [{"kind": str(line["kind"]), "description": str(line["description"])} for line in raw]
 
 
 def _optional_money(value: Decimal | str | int | float | None) -> str | None:

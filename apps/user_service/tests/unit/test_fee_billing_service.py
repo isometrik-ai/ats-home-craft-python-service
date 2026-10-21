@@ -1001,6 +1001,10 @@ def _listed_invoice(**overrides: Any) -> dict[str, Any]:
         "total_amount": Decimal("1770.00"),
         "amount_paid": Decimal("500.00"),
         "pdf_path": "fee-invoices/inv-oct.pdf",
+        "lines": [
+            {"kind": "maintenance", "description": "Maintenance"},
+            {"kind": "club", "description": "Club charges"},
+        ],
     }
     payload.update(overrides)
     return payload
@@ -1038,6 +1042,10 @@ async def test_list_invoices_filters_unit_status_and_month():
     assert items[0]["status"] == "partial"
     assert items[0]["outstanding"] == "1270.00"
     assert items[0]["pdf_path"] == "fee-invoices/inv-oct.pdf"
+    assert items[0]["lines"] == [
+        {"kind": "maintenance", "description": "Maintenance"},
+        {"kind": "club", "description": "Club charges"},
+    ]
 
 
 async def test_list_invoices_keeps_only_given_units():

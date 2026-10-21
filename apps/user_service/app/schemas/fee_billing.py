@@ -177,6 +177,13 @@ class FeeInvoiceDetailApiResponse(BaseModel):
     data: FeeInvoiceDetail
 
 
+class FeeInvoiceListLine(BaseModel):
+    """Kind and description of one charge on the invoice list."""
+
+    kind: str
+    description: str
+
+
 class FeeInvoiceListItem(BaseModel):
     """One invoice on the project list."""
 
@@ -192,6 +199,7 @@ class FeeInvoiceListItem(BaseModel):
     amount_paid: str
     outstanding: str
     pdf_path: str | None = None
+    lines: list[FeeInvoiceListLine] = []
 
 
 class FeeInvoiceListApiResponse(BaseModel):
