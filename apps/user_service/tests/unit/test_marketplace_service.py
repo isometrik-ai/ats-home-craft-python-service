@@ -524,6 +524,7 @@ async def test_get_listing_detail_includes_seller_isometrik_id():
     )
     svc.repo.count_other_live = AsyncMock(return_value=1)
     data = await svc.get_listing(contact_id="seller-1", listing_id="listing-1")
+    assert data["seller_contact_id"] == "seller-1"
     assert data["isometrik_id"] == "6abdf6ad9126be00010e596f"
     assert data["more_from_seller_count"] == 1
 

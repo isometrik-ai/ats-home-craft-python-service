@@ -40,6 +40,7 @@ from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
 from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.notice_targeting_utils import expand_recipient_groups
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -545,6 +546,7 @@ class NoticesService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
                 params={"groups": ", ".join(invalid_groups)},
             )
+        groups = expand_recipient_groups(groups)
         tower_ids = query.parsed_tower_ids()
         if query.scope_type == NoticeScopeType.BY_TOWER and not tower_ids:
             raise ValidationException(
@@ -940,10 +942,11 @@ class NoticesService:
 
     @staticmethod
     def _groups_to_values(groups: list | None) -> list[str]:
-        """Convert recipient group enums to string values."""
-        if not groups:
-            return []
-        return [g.value if hasattr(g, "value") else str(g) for g in groups]
+        """Convert recipient group enums to persisted string values.
+
+        ``All`` expands to Owner, Tenant, Staff, and Security.
+        """
+        return expand_recipient_groups(groups)
 
     @staticmethod
     def _pin_expires_at(pin_duration: NoticePinDuration) -> datetime | None:
