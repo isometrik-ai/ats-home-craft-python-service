@@ -401,6 +401,76 @@ async def test_is_visible_returns_false_when_no_recipient_groups():
 
 
 @pytest.mark.asyncio
+async def test_filter_valid_project_contact_ids_returns_subset_in_order():
+    """Success: only project-linked contacts are returned, preserving request order."""
+    db = MagicMock()
+    db.fetch = AsyncMock(
+        return_value=[
+            {"contact_id": "contact-2"},
+            {"contact_id": "contact-1"},
+        ]
+    )
+    service = NoticeRecipientResolutionService(db_connection=db)
+
+    valid = await service.filter_valid_project_contact_ids(
+        organization_id="org-1",
+        project_id="project-1",
+        contact_ids=["contact-1", "contact-2", "missing"],
+    )
+
+    assert valid == ["contact-1", "contact-2"]
+    assert "contact_units" in db.fetch.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_is_visible_direct_contact_recipient_without_groups():
+    """Success: contact-targeted notices are visible only to listed contacts."""
+    db = MagicMock()
+    service = NoticeRecipientResolutionService(db_connection=db)
+
+    visible = await service.is_visible_to_contact(
+        organization_id="org-1",
+        project_id="project-1",
+        notice={
+            "status": "live",
+            "recipient_groups": [],
+            "contact_recipient_ids": ["contact-1", "contact-2"],
+            "scope_type": "whole_society",
+            "tower_ids": [],
+        },
+        contact_id="contact-2",
+        contact_user_id=None,
+    )
+
+    assert visible is True
+    db.fetchrow.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_is_visible_direct_contact_recipient_not_listed():
+    """Failure: contact-targeted notice is hidden from other contacts."""
+    db = MagicMock()
+    service = NoticeRecipientResolutionService(db_connection=db)
+
+    visible = await service.is_visible_to_contact(
+        organization_id="org-1",
+        project_id="project-1",
+        notice={
+            "status": "live",
+            "recipient_groups": [],
+            "contact_recipient_ids": ["contact-1"],
+            "scope_type": "whole_society",
+            "tower_ids": [],
+        },
+        contact_id="contact-99",
+        contact_user_id=None,
+    )
+
+    assert visible is False
+    db.fetchrow.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_is_visible_owner_with_contact_id():
     db = MagicMock()
     db.fetchrow = AsyncMock(return_value={"?column?": 1})

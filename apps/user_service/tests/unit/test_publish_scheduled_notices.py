@@ -51,6 +51,7 @@ async def test_publish_scheduled_notices_dispatches_push():
         repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE])
         repo.list_notices_published_since = AsyncMock(return_value=[notice_row])
         repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+        repo.list_contact_recipient_ids = AsyncMock(return_value=[])
         repo.list_towers_for_notice = AsyncMock(return_value=[])
         repo.fetch_notice_by_id = AsyncMock(return_value=notice_row)
 

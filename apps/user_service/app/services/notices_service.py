@@ -148,12 +148,17 @@ class NoticesService:
         self._validate_attachments(body.attachments)
 
         recipient_groups = self._groups_to_values(body.recipient_groups)
+        contact_ids = await self._validate_project_contact_ids(
+            project_id=project_id,
+            contact_ids=list(body.contact_ids or []),
+        )
         tower_ids = body.tower_ids or []
 
         status, publish_at, published_at = self._resolve_publish_state(
             publish_mode=body.publish_mode,
             publish_at=body.publish_at,
             recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
             scope_type=body.scope_type,
             tower_ids=tower_ids,
         )
@@ -184,6 +189,7 @@ class NoticesService:
         await self._replace_children(
             notice_id=notice_id,
             recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
             scope_type=body.scope_type,
             tower_ids=tower_ids,
             attachments=body.attachments,
@@ -248,6 +254,17 @@ class NoticesService:
             if body.recipient_groups is not None
             else current_groups
         )
+        current_contact_ids = await self.repo.list_contact_recipient_ids(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
+        if body.contact_ids is not None:
+            contact_ids = await self._validate_project_contact_ids(
+                project_id=project_id,
+                contact_ids=list(body.contact_ids),
+            )
+        else:
+            contact_ids = current_contact_ids
         scope_type = (
             body.scope_type
             if body.scope_type is not None
@@ -273,6 +290,7 @@ class NoticesService:
                 publish_mode=publish_mode,
                 publish_at=publish_at_input,
                 recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
                 scope_type=scope_type,
                 tower_ids=tower_ids,
                 _current_status=str(existing["status"]),
@@ -284,6 +302,7 @@ class NoticesService:
             self._validate_schedule(publish_at_input)
             self._validate_publish_requirements(
                 recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
                 scope_type=scope_type,
                 tower_ids=tower_ids,
             )
@@ -303,6 +322,7 @@ class NoticesService:
 
         if (
             body.recipient_groups is not None
+            or body.contact_ids is not None
             or body.tower_ids is not None
             or body.scope_type is not None
             or body.attachments is not None
@@ -310,6 +330,7 @@ class NoticesService:
             await self._replace_children(
                 notice_id=notice_id,
                 recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
                 scope_type=scope_type,
                 tower_ids=tower_ids,
                 attachments=body.attachments
@@ -425,6 +446,10 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_id=source_notice_id,
         )
+        contact_ids = await self.repo.list_contact_recipient_ids(
+            organization_id=self.organization_id,
+            notice_id=source_notice_id,
+        )
         towers = await self.repo.list_towers_for_notice(
             organization_id=self.organization_id,
             notice_id=source_notice_id,
@@ -470,6 +495,7 @@ class NoticesService:
         await self._replace_children(
             notice_id=new_id,
             recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
             scope_type=NoticeScopeType(str(source["scope_type"])),
             tower_ids=[str(t["tower_id"]) for t in towers],
             attachments=attachment_inputs or None,
@@ -675,6 +701,7 @@ class NoticesService:
         *,
         notice_id: str,
         recipient_groups: list[str],
+        contact_ids: list[str],
         scope_type: NoticeScopeType,
         tower_ids: list[str],
         attachments: list[NoticeAttachmentInput] | None,
@@ -684,6 +711,11 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_id=notice_id,
             recipient_groups=recipient_groups,
+        )
+        await self.repo.replace_contact_recipients(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+            contact_ids=contact_ids,
         )
         scoped_towers = tower_ids if scope_type == NoticeScopeType.BY_TOWER else []
         await self.repo.replace_towers(
@@ -722,6 +754,10 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_id=notice_id,
         )
+        contact_ids = await self.repo.list_contact_recipient_ids(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
         towers = await self.repo.list_towers_for_notice(
             organization_id=self.organization_id,
             notice_id=notice_id,
@@ -745,6 +781,7 @@ class NoticesService:
             category=NoticeCategory(category),
             category_label=NOTICE_CATEGORY_LABELS.get(category, category),
             recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
             scope_type=scope_type,
             scope_label=scope_label,
             tower_ids=[str(t["tower_id"]) for t in towers],
@@ -823,6 +860,7 @@ class NoticesService:
         publish_mode: NoticePublishMode,
         publish_at: datetime | None,
         recipient_groups: list[str],
+        contact_ids: list[str],
         scope_type: NoticeScopeType,
         tower_ids: list[str],
         _current_status: str | None = None,
@@ -832,6 +870,7 @@ class NoticesService:
             return NoticeStatus.DRAFT.value, None, None
         self._validate_publish_requirements(
             recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
             scope_type=scope_type,
             tower_ids=tower_ids,
         )
@@ -892,16 +931,17 @@ class NoticesService:
         self,
         *,
         recipient_groups: list[str],
+        contact_ids: list[str],
         scope_type: NoticeScopeType,
         tower_ids: list[str],
     ) -> None:
         """Ensure recipients and tower scope are set for publish."""
-        if not recipient_groups:
+        if not recipient_groups and not contact_ids:
             raise ValidationException(
                 message_key="notices.errors.recipients_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        if scope_type == NoticeScopeType.BY_TOWER and not tower_ids:
+        if scope_type == NoticeScopeType.BY_TOWER and recipient_groups and not tower_ids:
             raise ValidationException(
                 message_key="notices.errors.towers_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
@@ -948,6 +988,30 @@ class NoticesService:
         """
         return expand_recipient_groups(groups)
 
+    async def _validate_project_contact_ids(
+        self,
+        *,
+        project_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        """Ensure contact ids belong to the project or raise validation error."""
+        if not contact_ids:
+            return []
+        valid_ids = await self.recipient_service.filter_valid_project_contact_ids(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            contact_ids=contact_ids,
+        )
+        valid_set = set(valid_ids)
+        invalid = [contact_id for contact_id in contact_ids if contact_id not in valid_set]
+        if invalid:
+            raise ValidationException(
+                message_key="notices.errors.invalid_contact_recipients",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+                params={"contact_ids": ", ".join(invalid[:10])},
+            )
+        return valid_ids
+
     @staticmethod
     def _pin_expires_at(pin_duration: NoticePinDuration) -> datetime | None:
         """Return pin expiry time for a banner pin duration."""
@@ -991,6 +1055,10 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_id=notice_id,
         )
+        contact_ids = await self.repo.list_contact_recipient_ids(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
         towers = await self.repo.list_towers_for_notice(
             organization_id=self.organization_id,
             notice_id=notice_id,
@@ -1002,14 +1070,23 @@ class NoticesService:
         )
         if notice_row is None:
             return
-        user_ids = await self.recipient_service.resolve_recipient_user_ids(
-            organization_id=self.organization_id,
-            project_id=project_id,
-            notice_id=notice_id,
-            recipient_groups=recipient_groups,
-            scope_type=str(notice_row["scope_type"]),
-            tower_ids=[str(t["tower_id"]) for t in towers],
+        user_ids: set[str] = set(
+            await self.recipient_service.resolve_recipient_user_ids(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                notice_id=notice_id,
+                recipient_groups=recipient_groups,
+                scope_type=str(notice_row["scope_type"]),
+                tower_ids=[str(t["tower_id"]) for t in towers],
+            )
         )
+        if contact_ids:
+            user_ids.update(
+                await self.recipient_service.resolve_user_ids_for_contact_ids(
+                    organization_id=self.organization_id,
+                    contact_ids=contact_ids,
+                )
+            )
         for user_id in user_ids:
             push_fields = self._notice_publish_push_fields(
                 project_id=project_id,

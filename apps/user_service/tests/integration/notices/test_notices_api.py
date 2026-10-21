@@ -189,6 +189,32 @@ async def test_create_project_notice_all_recipients_success(monkeypatch, client)
 
 
 @pytest.mark.asyncio
+async def test_create_project_notice_with_contact_ids_success(monkeypatch, client):
+    """POST create accepts contact_ids and returns them on the detail payload."""
+    _patch_admin_access(monkeypatch)
+    contact_id = "55555555-5555-5555-5555-555555555555"
+
+    async def fake_create_notice(_self, *, project_id: str, body):
+        del _self
+        assert project_id == PROJECT_ID
+        assert body.contact_ids == [contact_id]
+        return _fake_detail(contact_ids=[contact_id], status=NoticeStatus.LIVE)
+
+    monkeypatch.setattr(f"{_SERVICE}.create_notice", fake_create_notice)
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/notices",
+        json={
+            "title": "Direct notice",
+            "contact_ids": [contact_id],
+            "publish_mode": "now",
+        },
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["contact_ids"] == [contact_id]
+
+
+@pytest.mark.asyncio
 async def test_create_project_notice_invalid_recipient_group_fails(monkeypatch, client):
     """POST create rejects an unknown recipient group before the service runs."""
     _patch_admin_access(monkeypatch)

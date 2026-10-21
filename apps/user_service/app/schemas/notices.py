@@ -10,6 +10,7 @@ from apps.user_service.app.schemas.enums import (
     NOTICE_ALLOWED_ATTACHMENT_MIMES,
     NOTICE_MAX_ATTACHMENT_BYTES,
     NOTICE_MAX_ATTACHMENTS,
+    NOTICE_MAX_CONTACT_RECIPIENTS,
     NOTICE_MAX_DESCRIPTION_LENGTH,
     NOTICE_MAX_TITLE_LENGTH,
     NoticeCategory,
@@ -66,6 +67,13 @@ class CreateNoticeRequest(BaseModel):
             "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
         ),
     )
+    contact_ids: list[str] | None = Field(
+        None,
+        description=(
+            "Send the notice to specific residents by contact id (one or many). "
+            "Can be combined with recipient_groups."
+        ),
+    )
     scope_type: NoticeScopeType = NoticeScopeType.WHOLE_SOCIETY
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode = NoticePublishMode.DRAFT
@@ -81,6 +89,27 @@ class CreateNoticeRequest(BaseModel):
     def normalize_all_recipient_shortcut(cls, recipient_groups: object) -> object:
         """Accept All/all as a select-all recipient shortcut."""
         return normalize_recipient_groups_input(recipient_groups)
+
+    @field_validator("contact_ids", mode="before")
+    @classmethod
+    def normalize_contact_ids(cls, contact_ids: object) -> object:
+        """Dedupe and drop blank contact ids."""
+        if contact_ids is None:
+            return None
+        if not isinstance(contact_ids, list):
+            return contact_ids
+        normalized = list(
+            dict.fromkeys(str(item).strip() for item in contact_ids if str(item).strip())
+        )
+        return normalized or None
+
+    @field_validator("contact_ids")
+    @classmethod
+    def validate_contact_ids_count(cls, contact_ids: list[str] | None) -> list[str] | None:
+        """Enforce max direct contact recipients."""
+        if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
+            raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
+        return contact_ids
 
     @field_validator("attachments")
     @classmethod
@@ -108,6 +137,10 @@ class UpdateNoticeRequest(BaseModel):
             "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
         ),
     )
+    contact_ids: list[str] | None = Field(
+        None,
+        description="Send the notice to specific residents by contact id (one or many).",
+    )
     scope_type: NoticeScopeType | None = None
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode | None = None
@@ -119,6 +152,27 @@ class UpdateNoticeRequest(BaseModel):
     def normalize_all_recipient_shortcut(cls, recipient_groups: object) -> object:
         """Accept All/all as a select-all recipient shortcut."""
         return normalize_recipient_groups_input(recipient_groups)
+
+    @field_validator("contact_ids", mode="before")
+    @classmethod
+    def normalize_contact_ids(cls, contact_ids: object) -> object:
+        """Dedupe and drop blank contact ids."""
+        if contact_ids is None:
+            return None
+        if not isinstance(contact_ids, list):
+            return contact_ids
+        normalized = list(
+            dict.fromkeys(str(item).strip() for item in contact_ids if str(item).strip())
+        )
+        return normalized or None
+
+    @field_validator("contact_ids")
+    @classmethod
+    def validate_contact_ids_count(cls, contact_ids: list[str] | None) -> list[str] | None:
+        """Enforce max direct contact recipients."""
+        if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
+            raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
+        return contact_ids
 
     @field_validator("attachments")
     @classmethod
@@ -248,6 +302,7 @@ class NoticeDetailResponse(BaseModel):
     category: NoticeCategory
     category_label: str
     recipient_groups: list[str]
+    contact_ids: list[str] = Field(default_factory=list)
     scope_type: NoticeScopeType
     scope_label: str | None = None
     tower_ids: list[str] = Field(default_factory=list)
