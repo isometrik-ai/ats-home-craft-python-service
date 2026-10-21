@@ -9,6 +9,7 @@ import pytest
 from apps.user_service.app.schemas.enums import (
     NoticeCategory,
     NoticePublishMode,
+    NoticeRecipientInputGroup,
     NoticeScopeType,
     NoticeStatus,
 )
@@ -156,6 +157,60 @@ async def test_create_project_notice(monkeypatch, client):
     )
     body = assert_success(res, 201)
     assert body["data"]["display_code"] == "NTC-1"
+
+
+@pytest.mark.asyncio
+async def test_create_project_notice_all_recipients_success(monkeypatch, client):
+    """POST create accepts All and forwards the select-all shortcut."""
+    _patch_admin_access(monkeypatch)
+
+    async def fake_create_notice(_self, *, project_id: str, body):
+        del _self
+        assert project_id == PROJECT_ID
+        assert body.recipient_groups == [NoticeRecipientInputGroup.ALL]
+        return _fake_detail(
+            recipient_groups=["Owner", "Tenant", "Staff", "Security"],
+            status=NoticeStatus.LIVE,
+        )
+
+    monkeypatch.setattr(f"{_SERVICE}.create_notice", fake_create_notice)
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/notices",
+        json={
+            "title": "Society notice",
+            "description": "Body",
+            "recipient_groups": ["All"],
+            "publish_mode": "now",
+        },
+    )
+    body = assert_success(res, 201)
+    assert body["data"]["recipient_groups"] == ["Owner", "Tenant", "Staff", "Security"]
+
+
+@pytest.mark.asyncio
+async def test_create_project_notice_invalid_recipient_group_fails(monkeypatch, client):
+    """POST create rejects an unknown recipient group before the service runs."""
+    _patch_admin_access(monkeypatch)
+    called = {"create": False}
+
+    async def fake_create_notice(_self, *, project_id: str, body):
+        del _self, project_id, body
+        called["create"] = True
+        return _fake_detail()
+
+    monkeypatch.setattr(f"{_SERVICE}.create_notice", fake_create_notice)
+
+    res = await client.post(
+        f"/v1/projects/{PROJECT_ID}/notices",
+        json={
+            "title": "Society notice",
+            "recipient_groups": ["Everyone"],
+            "publish_mode": "now",
+        },
+    )
+    assert res.status_code == 422
+    assert called["create"] is False
 
 
 @pytest.mark.asyncio

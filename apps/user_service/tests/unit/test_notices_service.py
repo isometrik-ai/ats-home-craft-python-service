@@ -12,6 +12,7 @@ from apps.user_service.app.schemas.enums import (
     NoticePinDuration,
     NoticePublishMode,
     NoticeRecipientGroup,
+    NoticeRecipientInputGroup,
     NoticeScopeType,
     NoticeStatus,
 )
@@ -260,6 +261,13 @@ def test_is_valid_notice_attachment_path():
 def test_groups_to_values():
     assert NoticesService._groups_to_values(None) == []
     assert NoticesService._groups_to_values(["Owner"]) == ["Owner"]
+    assert NoticesService._groups_to_values(["All"]) == ["Owner", "Tenant", "Staff", "Security"]
+    assert NoticesService._groups_to_values([NoticeRecipientInputGroup.ALL]) == [
+        "Owner",
+        "Tenant",
+        "Staff",
+        "Security",
+    ]
 
 
 def test_scope_label():
@@ -751,6 +759,40 @@ async def test_get_reach_estimate_rejects_invalid_group_name():
 
 
 @pytest.mark.asyncio
+async def test_get_reach_estimate_all_expands_to_every_group():
+    """Success: reach estimate All expands to every persisted recipient group."""
+    from apps.user_service.app.schemas.notices import ReachEstimateQuery
+
+    svc = _service()
+    svc.recipient_service = MagicMock()
+    svc.recipient_service.estimate_reach = AsyncMock(
+        return_value=(40, {"Owner": 10, "Tenant": 10, "Staff": 10, "Security": 10})
+    )
+
+    result = await svc.get_reach_estimate(
+        project_id=PROJECT_ID,
+        query=ReachEstimateQuery(groups="All"),
+    )
+    assert result.estimated_recipients == 40
+    kwargs = svc.recipient_service.estimate_reach.await_args.kwargs
+    assert kwargs["recipient_groups"] == ["Owner", "Tenant", "Staff", "Security"]
+
+
+@pytest.mark.asyncio
+async def test_get_reach_estimate_all_with_invalid_group_fails():
+    """Failure: All plus an unknown group is still rejected."""
+    from apps.user_service.app.schemas.notices import ReachEstimateQuery
+
+    svc = _service()
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.get_reach_estimate(
+            project_id=PROJECT_ID,
+            query=ReachEstimateQuery(groups="All,Everyone"),
+        )
+    assert exc_info.value.message_key == "notices.errors.invalid_recipient_groups"
+
+
+@pytest.mark.asyncio
 async def test_pin_notice_replaces_occupied_slot():
     from apps.user_service.app.schemas.notices import PinNoticeRequest
 
@@ -815,3 +857,115 @@ async def test_create_notice_live_with_pin():
     detail = await svc.create_notice(project_id=PROJECT_ID, body=body)
     assert detail.display_code == "NTC-1"
     svc.repo.insert_pin.assert_awaited_once()
+
+
+def _stub_create_repo(svc: NoticesService, *, recipient_groups: list[str]) -> None:
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo.allocate_sequence_number = AsyncMock(return_value=4)
+    svc.repo.insert_notice = AsyncMock(
+        return_value=_notice_detail_row(status=NoticeStatus.LIVE.value)
+    )
+    svc.repo.replace_recipients = AsyncMock()
+    svc.repo.replace_towers = AsyncMock()
+    svc.repo.replace_attachments = AsyncMock()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=recipient_groups)
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.repo.fetch_notice_by_id = AsyncMock(
+        return_value=_notice_detail_row(
+            status=NoticeStatus.LIVE.value,
+            recipient_groups=recipient_groups,
+        )
+    )
+    svc.recipient_service = MagicMock()
+    svc.recipient_service.resolve_recipient_user_ids = AsyncMock(return_value=[])
+    svc.push_dispatcher = MagicMock()
+    svc.push_dispatcher.send_to_user = AsyncMock()
+
+
+@pytest.mark.asyncio
+async def test_create_notice_all_recipients_expands_to_every_group():
+    """Success: All selects Owner, Tenant, Staff, and Security in one step."""
+    all_groups = ["Owner", "Tenant", "Staff", "Security"]
+    svc = _service()
+    _stub_create_repo(svc, recipient_groups=all_groups)
+
+    body = CreateNoticeRequest(
+        title="Pool closure",
+        description="Closed tomorrow",
+        recipient_groups=[NoticeRecipientInputGroup.ALL],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    detail = await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert detail.display_code == "NTC-1"
+    assert svc.repo.replace_recipients.await_args.kwargs["recipient_groups"] == all_groups
+
+
+@pytest.mark.asyncio
+async def test_create_notice_lowercase_all_recipients_expands():
+    """Success: lowercase all is accepted as the select-all shortcut."""
+    all_groups = ["Owner", "Tenant", "Staff", "Security"]
+    svc = _service()
+    _stub_create_repo(svc, recipient_groups=all_groups)
+
+    body = CreateNoticeRequest(
+        title="Pool closure",
+        recipient_groups=["all"],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert svc.repo.replace_recipients.await_args.kwargs["recipient_groups"] == all_groups
+
+
+@pytest.mark.asyncio
+async def test_create_notice_publish_now_without_recipients_fails():
+    """Failure: publish now still requires at least one recipient group."""
+    svc = _service()
+    body = CreateNoticeRequest(
+        title="Pool closure",
+        publish_mode=NoticePublishMode.NOW,
+    )
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert exc_info.value.message_key == "notices.errors.recipients_required"
+    svc.repo.insert_notice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_notice_all_recipients_still_requires_towers_for_by_tower():
+    """Failure: All recipients does not skip by-tower scope validation."""
+    svc = _service()
+    body = CreateNoticeRequest(
+        title="Pool closure",
+        recipient_groups=[NoticeRecipientInputGroup.ALL],
+        scope_type=NoticeScopeType.BY_TOWER,
+        tower_ids=[],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert exc_info.value.message_key == "notices.errors.towers_required"
+    svc.repo.insert_notice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_notice_all_recipients_expands_to_every_group():
+    """Success: updating recipients to All expands to every persisted group."""
+    all_groups = ["Owner", "Tenant", "Staff", "Security"]
+    svc = _service()
+    svc.repo.fetch_notice_by_id = AsyncMock(return_value=_notice_detail_row())
+    svc.repo.update_notice_fields = AsyncMock()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=all_groups)
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.repo.replace_recipients = AsyncMock()
+    svc.repo.replace_towers = AsyncMock()
+    svc.repo.replace_attachments = AsyncMock()
+
+    await svc.update_notice(
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        body=UpdateNoticeRequest(recipient_groups=[NoticeRecipientInputGroup.ALL]),
+    )
+    assert svc.repo.replace_recipients.await_args.kwargs["recipient_groups"] == all_groups

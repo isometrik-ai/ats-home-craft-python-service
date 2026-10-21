@@ -282,6 +282,8 @@ def _service(
     service.contact_roles_repo.list_active_roles_for_contact = AsyncMock(return_value=[])
     service.contact_roles_repo.end_active_roles_for_unit = AsyncMock(return_value=[])
     service.contact_roles_repo.insert_tenant_role = AsyncMock(return_value={"id": "role-1"})
+    service.fee_billing_repo = MagicMock()
+    service.fee_billing_repo.unit_has_due_invoice = AsyncMock(return_value=False)
     service._push_dispatcher = _FakePushDispatcher()
     return service
 
@@ -410,6 +412,25 @@ async def test_create_move_out_requires_active_occupancy():
             )
         )
     assert exc_info.value.message_key == "move_events.errors.not_currently_occupying"
+
+
+@pytest.mark.asyncio
+async def test_create_move_out_rejects_due_invoice():
+    """Move-out rejected when the unit has an unpaid invoice that is due."""
+    contact_units_repo = _FakeContactUnitsRepo()
+    service = _service(_FakeMoveEventsRepo(), contact_units_repo)
+    service.fee_billing_repo.unit_has_due_invoice = AsyncMock(return_value=True)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.create_move_event(
+            CreateMoveEventRequest(
+                unit_id="unit-1",
+                contact_id="contact-1",
+                move_type=MoveEventType.MOVE_OUT,
+                event_date=date(2026, 5, 8),
+            )
+        )
+    assert exc_info.value.message_key == "move_events.errors.invoice_due"
 
 
 @pytest.mark.asyncio
@@ -959,3 +980,28 @@ async def test_create_owner_move_out_does_not_change_allotment():
     assert contact_units_repo.sync_move_in_calls == []
     assert contact_units_repo.sync_move_out_calls == []
     service.contact_roles_repo.get_active_tenant_contact_for_unit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_owner_move_out_rejects_due_invoice():
+    """Owner move-out rejected when the unit has an unpaid invoice that is due."""
+    service = _service()
+    service.units_repo.get_unit_owner_contact = AsyncMock(
+        return_value={
+            "contact_id": "owner-1",
+            "contact_unit_id": "cu-owner",
+            "status": "active",
+        }
+    )
+    service.fee_billing_repo.unit_has_due_invoice = AsyncMock(return_value=True)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.create_move_event(
+            CreateMoveEventRequest(
+                unit_id="unit-1",
+                contact_id="owner-1",
+                move_type=MoveEventType.MOVE_OUT,
+                event_date=date(2026, 6, 1),
+            )
+        )
+    assert exc_info.value.message_key == "move_events.errors.invoice_due"
