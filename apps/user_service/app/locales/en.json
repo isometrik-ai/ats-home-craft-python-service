@@ -1431,6 +1431,7 @@
       "reservation_not_accessible": "You do not have access to this reservation.",
       "reschedule_not_allowed": "This reservation can no longer be rescheduled.",
       "invalid_charge_amount": "Charge amount must be greater than zero.",
+      "invalid_charge_description": "Charge description cannot be blank.",
       "invalid_topup_method": "Wallet top-up must be collected as cash or online.",
       "payment_method_disabled": "This payment method is currently disabled.",
       "wallet_credit_exceeded": "This payment would exceed the wallet credit limit.",

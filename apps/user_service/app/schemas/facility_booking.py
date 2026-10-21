@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.enums import (
     FACILITY_BOOKING_MAX_PARTICIPANTS,
@@ -33,6 +33,8 @@ from apps.user_service.app.schemas.facility_booking_inventory import (
     SlotBlockResponse,
     StaffAssignmentResponse,
 )
+
+RESERVATION_MAX_ADDITIONAL_CHARGES = 50
 
 # ---------------------------------------------------------------------------
 # Engine outputs
@@ -292,13 +294,32 @@ class ReservationAdditionalChargeItem(BaseModel):
     amount: float = Field(..., gt=0)
     description: str = Field("Additional charge", min_length=1, max_length=240)
 
+    @field_validator("description", mode="before")
+    @classmethod
+    def strip_description(cls, description: object) -> object:
+        """Trim whitespace before length validation."""
+        if description is None:
+            return description
+        return str(description).strip()
+
+    @field_validator("description")
+    @classmethod
+    def validate_description_not_blank(cls, description: str) -> str:
+        """Reject whitespace-only descriptions."""
+        if not description:
+            raise ValueError("description cannot be blank")
+        return description
+
 
 class CompleteReservationRequest(BaseModel):
     """Optional charges when marking a reservation completed."""
 
     model_config = ConfigDict(extra="forbid")
 
-    additional_charges: list[ReservationAdditionalChargeItem] = Field(default_factory=list)
+    additional_charges: list[ReservationAdditionalChargeItem] = Field(
+        default_factory=list,
+        max_length=RESERVATION_MAX_ADDITIONAL_CHARGES,
+    )
 
 
 # ---------------------------------------------------------------------------

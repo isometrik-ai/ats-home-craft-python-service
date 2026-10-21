@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from pydantic import ValidationError
 
 from apps.user_service.app.schemas.enums import (
     FacilityBookingArchetype,
@@ -327,6 +328,37 @@ async def test_apply_additional_charge_updates_quote_and_timeline():
     assert update["lines"][-1]["amount"] == 500
     event = svc.reservations_repo.insert_event.await_args.kwargs
     assert event["event_type"] == FacilityReservationEventType.CHARGE_ADDED.value
+
+
+@pytest.mark.asyncio
+async def test_apply_additional_charge_rejects_blank_description():
+    svc = _service()
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.apply_additional_charge(
+            project_id=PROJECT_ID,
+            reservation_id=RESERVATION_ID,
+            contact_id="c1",
+            description="   ",
+            amount=100,
+        )
+    assert exc_info.value.message_key == "facility_booking.errors.invalid_charge_description"
+
+
+def test_complete_reservation_rejects_whitespace_only_charge_description():
+    with pytest.raises(ValidationError):
+        CompleteReservationRequest(
+            additional_charges=[ReservationAdditionalChargeItem(amount=10.0, description="   ")]
+        )
+
+
+def test_complete_reservation_rejects_too_many_additional_charges():
+    with pytest.raises(ValidationError):
+        CompleteReservationRequest(
+            additional_charges=[
+                ReservationAdditionalChargeItem(amount=1.0, description=f"Charge {index}")
+                for index in range(51)
+            ]
+        )
 
 
 @pytest.mark.asyncio

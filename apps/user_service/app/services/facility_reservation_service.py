@@ -549,6 +549,11 @@ class FacilityReservationService:
                 message_key="facility_booking.errors.invalid_charge_amount",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        if not description.strip():
+            raise ValidationException(
+                message_key="facility_booking.errors.invalid_charge_description",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         row = await self.reservations_repo.get_reservation(
             organization_id=self._org_id,
             project_id=project_id,
