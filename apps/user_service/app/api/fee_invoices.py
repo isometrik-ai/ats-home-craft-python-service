@@ -275,6 +275,10 @@ async def list_resident_fee_invoices(
     ),
     page: int = Query(default=1, ge=1, description="Page number."),
     page_size: int = Query(default=20, ge=1, le=100, description="Invoices per page."),
+    include_lines: bool = Query(
+        default=False,
+        description="Include charge and late-fee line details on each invoice.",
+    ),
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -293,7 +297,7 @@ async def list_resident_fee_invoices(
         billing_months=months,
         page=page,
         page_size=page_size,
-        include_lines=True,
+        include_lines=include_lines,
     )
     return list_response(
         request=request,
