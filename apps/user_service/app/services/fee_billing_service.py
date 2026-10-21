@@ -946,6 +946,18 @@ class FeeBillingService:
                 message_key="fee_billing.errors.invoice_cancelled",
                 custom_code=CustomStatusCode.CONFLICT,
             )
+        await self.repo.lock_unit_for_fee_billing(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=str(invoice["unit_id"]),
+        )
+        invoice = await self.repo.get_invoice(
+            organization_id=organization_id,
+            project_id=project_id,
+            invoice_id=invoice_id,
+        )
+        if invoice is None:
+            raise NotFoundException(message_key="fee_billing.errors.invoice_not_found")
         paid = money(amount)
         if paid <= 0:
             raise ValidationException(message_key="fee_billing.errors.invalid_payment")

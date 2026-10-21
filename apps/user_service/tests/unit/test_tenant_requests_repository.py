@@ -136,6 +136,15 @@ async def test_get_request_by_id_found_and_not_found():
     )
     assert missing is None
 
+    conn.row = {"id": REQUEST_ID}
+    await repo.get_request_by_id(
+        organization_id=ORG_ID,
+        tenant_request_id=REQUEST_ID,
+        for_update=True,
+    )
+    locked_query, _ = conn.fetchrow_calls[-1]
+    assert "FOR UPDATE OF tr" in locked_query
+
 
 @pytest.mark.asyncio
 async def test_list_documents_and_events():

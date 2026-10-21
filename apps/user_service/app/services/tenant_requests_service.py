@@ -23,6 +23,9 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.db.repositories.contacts_repository import (
     ContactsRepository,
 )
+from apps.user_service.app.db.repositories.fee_billing_repository import (
+    FeeBillingRepository,
+)
 from apps.user_service.app.db.repositories.move_events_repository import (
     MoveEventsRepository,
 )
@@ -202,10 +205,14 @@ class TenantRequestsService:
         *,
         project_id: str,
         tenant_request_id: str,
+        for_update: bool = False,
     ) -> dict[str, Any]:
         """Fetch a tenant request scoped to a project or raise not found."""
         await self._ensure_project(project_id=project_id)
-        row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
+        row = await self._get_request_or_raise(
+            tenant_request_id=tenant_request_id,
+            for_update=for_update,
+        )
         if str(row["project_id"]) != project_id:
             raise NotFoundException(
                 message_key="tenant_requests.errors.request_not_found",
@@ -712,6 +719,7 @@ class TenantRequestsService:
         self,
         *,
         tenant_request_id: str,
+        for_update: bool = False,
     ) -> dict[str, Any]:
         """Fetch a tenant request header or raise not found."""
         org_id = self.user_context.organization_id
@@ -719,6 +727,7 @@ class TenantRequestsService:
         row = await self.repo.get_request_by_id(
             organization_id=org_id,
             tenant_request_id=tenant_request_id,
+            for_update=for_update,
         )
         if not row:
             raise NotFoundException(
@@ -822,6 +831,11 @@ class TenantRequestsService:
                 message_key="tenant_requests.errors.no_active_tenant",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        await FeeBillingRepository(self.db_connection).lock_unit_for_fee_billing(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
         billing = FeeBillingService(self.db_connection)
         summary = await billing.outstanding_summary(
             organization_id=organization_id,
@@ -2105,6 +2119,7 @@ class TenantRequestsService:
         row = await self._get_admin_request_or_raise(
             project_id=project_id,
             tenant_request_id=tenant_request_id,
+            for_update=True,
         )
         self._assert_move_out_pending_row(row)
         org_id = self.user_context.organization_id

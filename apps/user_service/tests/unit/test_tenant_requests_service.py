@@ -62,6 +62,12 @@ def _mock_unit_occupancy_turnover(monkeypatch):
         "apps.user_service.app.services.tenant_requests_service.UnitOccupancyTurnoverService",
         MagicMock(return_value=turnover_mock),
     )
+    billing_repo_mock = MagicMock()
+    billing_repo_mock.lock_unit_for_fee_billing = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.tenant_requests_service.FeeBillingRepository",
+        MagicMock(return_value=billing_repo_mock),
+    )
     billing_mock = MagicMock()
     billing_mock.outstanding_summary = AsyncMock(
         return_value={"total_outstanding": "0.00", "unpaid_count": 0}
@@ -260,9 +266,15 @@ class _FakeTenantRequestsRepo:
             }
         )
 
-    async def get_request_by_id(self, *, organization_id: str, tenant_request_id: str):
+    async def get_request_by_id(
+        self,
+        *,
+        organization_id: str,
+        tenant_request_id: str,
+        for_update: bool = False,
+    ):
         """Return configured request row."""
-        del organization_id
+        del organization_id, for_update
         if tenant_request_id == "missing":
             return None
         return dict(self.row)
@@ -2068,9 +2080,16 @@ async def test_assert_no_outstanding_dues_for_move_out_rejects_unpaid() -> None:
         return_value={"total_outstanding": "1200.00", "unpaid_count": 2}
     )
 
-    with patch(
-        "apps.user_service.app.services.tenant_requests_service.FeeBillingService",
-        return_value=billing_mock,
+    lock_mock = AsyncMock()
+    with (
+        patch(
+            "apps.user_service.app.services.tenant_requests_service.FeeBillingRepository",
+            return_value=MagicMock(lock_unit_for_fee_billing=lock_mock),
+        ),
+        patch(
+            "apps.user_service.app.services.tenant_requests_service.FeeBillingService",
+            return_value=billing_mock,
+        ),
     ):
         with pytest.raises(ValidationException) as exc:
             await service._assert_no_outstanding_dues_for_move_out(

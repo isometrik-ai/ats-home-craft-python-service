@@ -267,13 +267,16 @@ class TenantRequestsRepository(BaseRepository):
         *,
         organization_id: str,
         tenant_request_id: str,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
         """Fetch one tenant request header with unit and owner display fields."""
+        lock = " FOR UPDATE OF tr" if for_update else ""
         row = await self.db_connection.fetchrow(
             f"""
             {_TENANT_REQUEST_SELECT_SQL}
               AND tr.id = $2::uuid
             LIMIT 1
+            {lock}
             """,
             organization_id,
             tenant_request_id,

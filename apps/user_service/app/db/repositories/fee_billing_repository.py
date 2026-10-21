@@ -364,6 +364,29 @@ class FeeBillingRepository(BaseRepository):
         )
         return await self._with_children(invoices, include_late_fee_rule=True)
 
+    async def lock_unit_for_fee_billing(
+        self, *, organization_id: str, project_id: str, unit_id: str
+    ) -> None:
+        """Serialize fee billing reads/writes for one unit within the current transaction."""
+        await self.db_connection.execute(
+            "SELECT pg_advisory_xact_lock(hashtext($1))",
+            f"unit_fee_billing:{organization_id}:{project_id}:{unit_id}",
+        )
+        await self.db_connection.fetch(
+            """
+            SELECT id
+            FROM fee_invoices
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND unit_id = $3::uuid
+              AND status IN ('issued', 'partial')
+            FOR UPDATE
+            """,
+            organization_id,
+            project_id,
+            unit_id,
+        )
+
     async def list_unit_invoices(
         self, *, organization_id: str, project_id: str, unit_id: str
     ) -> list[dict[str, Any]]:

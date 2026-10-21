@@ -131,6 +131,9 @@ class FakeFeeBillingRepository:
         self.project_invoices: list[dict[str, Any]] = []
         self.invoice_details: dict[str, dict[str, Any]] = {}
 
+    async def lock_unit_for_fee_billing(self, **kwargs) -> None:
+        """No-op lock for unit tests."""
+
     async def list_active_heads(self) -> list[dict[str, Any]]:
         """Return the heads supplied to the fake."""
         return self.heads
