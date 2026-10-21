@@ -32,7 +32,7 @@ from apps.user_service.app.services.facility_booking.money import ts_round
 from apps.user_service.app.services.facility_booking.pricing import net_paid
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -226,27 +226,30 @@ class FacilityBookingLedgerService:
                 message_key="facility_booking.errors.host_not_in_project",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
-        if body.reservation_id:
-            reservation = await self.reservations_repo.get_reservation(
-                organization_id=self._org_id,
-                project_id=project_id,
-                reservation_id=body.reservation_id,
-            )
-            if not reservation:
-                raise NotFoundException(
-                    message_key="facility_booking.errors.reservation_not_found",
-                    custom_code=CustomStatusCode.NOT_FOUND,
-                )
         amount = ts_round(body.amount)
         if amount <= 0:
             raise ValidationException(
                 message_key="facility_booking.errors.invalid_charge_amount",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        if body.reservation_id:
+            from apps.user_service.app.services.facility_reservation_service import (
+                FacilityReservationService,
+            )
+
+            return await FacilityReservationService(
+                db_connection=self.db_connection, user_context=self.user_context
+            ).apply_additional_charge(
+                project_id=project_id,
+                reservation_id=body.reservation_id,
+                contact_id=body.contact_id,
+                description=body.description.strip(),
+                amount=amount,
+            )
         row = await self.post(
             project_id=project_id,
             contact_id=body.contact_id,
-            reservation_id=body.reservation_id,
+            reservation_id=None,
             entry_type=FacilityBookingLedgerType.MANUAL_CHARGE.value,
             description=body.description.strip(),
             amount=amount,

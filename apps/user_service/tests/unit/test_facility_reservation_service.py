@@ -12,17 +12,20 @@ import pytest
 from apps.user_service.app.schemas.enums import (
     FacilityBookingArchetype,
     FacilityParticipantKind,
+    FacilityReservationEventType,
     FacilityReservationListTab,
     FacilityReservationStatus,
 )
 from apps.user_service.app.schemas.facility_booking import (
     CancelReservationRequest,
+    CompleteReservationRequest,
     CreateResidentReservationRequest,
     CreateStaffReservationRequest,
     ParticipantInput,
     PriceQuote,
     RejectReservationRequest,
     RescheduleReservationRequest,
+    ReservationAdditionalChargeItem,
     ReservationNoteRequest,
 )
 from apps.user_service.app.services.facility_availability_service import (
@@ -278,6 +281,86 @@ async def test_check_in_and_complete():
     row["status"] = FacilityReservationStatus.CHECKED_IN.value
     _mock_get_reservation_flow(svc, row)
     await svc.complete(project_id=PROJECT_ID, reservation_id=RESERVATION_ID)
+
+
+@pytest.mark.asyncio
+async def test_apply_additional_charge_updates_quote_and_timeline():
+    svc = _service()
+    row = _reservation_row(status=FacilityReservationStatus.CHECKED_IN.value)
+    row["quote"] = {
+        "lines": [{"label": "Booking", "detail": None, "amount": 6005}],
+        "total": 6005,
+        "deposit": 0,
+        "due_now": 6005,
+        "due_later": 0,
+    }
+    svc.reservations_repo.get_reservation = AsyncMock(return_value=row)
+    svc.reservations_repo.update_reservation = AsyncMock(return_value=True)
+    svc.reservations_repo.insert_event = AsyncMock()
+    posted_at = datetime(2026, 10, 14, 21, 0, tzinfo=timezone.utc)
+    ledger_row = {
+        "id": "le-1",
+        "contact_id": "c1",
+        "reservation_id": RESERVATION_ID,
+        "invoice_id": None,
+        "entry_type": "manual_charge",
+        "description": "Hall — Overtime",
+        "amount": 500,
+        "method": None,
+        "posted_at": posted_at,
+    }
+    svc.ledger.post = AsyncMock(return_value=ledger_row)
+    svc.ledger.serialize = MagicMock(return_value={**ledger_row, "activity_label": "Manual charge"})
+
+    result = await svc.apply_additional_charge(
+        project_id=PROJECT_ID,
+        reservation_id=RESERVATION_ID,
+        contact_id="c1",
+        description="Overtime",
+        amount=500,
+    )
+
+    assert result["amount"] == 500
+    update = svc.reservations_repo.update_reservation.await_args.kwargs["update_data"]["quote"]
+    assert update["total"] == 6505
+    assert update["lines"][-1]["label"] == "Overtime"
+    assert update["lines"][-1]["amount"] == 500
+    event = svc.reservations_repo.insert_event.await_args.kwargs
+    assert event["event_type"] == FacilityReservationEventType.CHARGE_ADDED.value
+
+
+@pytest.mark.asyncio
+async def test_complete_applies_additional_charges_before_transition():
+    svc = _service()
+    row = _reservation_row(status=FacilityReservationStatus.CHECKED_IN.value)
+    row["quote"] = {"lines": [], "total": 1000, "deposit": 0, "due_now": 1000, "due_later": 0}
+    _mock_get_reservation_flow(svc, row)
+    svc.reservations_repo.update_reservation = AsyncMock(return_value=True)
+    svc.reservations_repo.insert_event = AsyncMock()
+    svc.ledger.post = AsyncMock(
+        return_value={
+            "id": "le-1",
+            "contact_id": "c1",
+            "reservation_id": RESERVATION_ID,
+            "invoice_id": None,
+            "entry_type": "manual_charge",
+            "description": "Hall — Cleanup",
+            "amount": 200,
+            "method": None,
+            "posted_at": datetime(2026, 10, 14, 21, 0, tzinfo=timezone.utc),
+        }
+    )
+
+    body = CompleteReservationRequest(
+        additional_charges=[ReservationAdditionalChargeItem(amount=200.0, description="Cleanup")]
+    )
+    await svc.complete(project_id=PROJECT_ID, reservation_id=RESERVATION_ID, body=body)
+
+    assert svc.ledger.post.await_count == 1
+    quote = svc.reservations_repo.update_reservation.await_args_list[0].kwargs["update_data"][
+        "quote"
+    ]
+    assert quote["total"] == 1200
 
 
 @pytest.mark.asyncio

@@ -41,6 +41,7 @@ class FacilityReservationEventType(str, Enum):
     COMPLETED = "completed"
     NO_SHOW = "no_show"
     NOTE = "note"
+    CHARGE_ADDED = "charge_added"
 
 
 class FacilityReservationActorType(str, Enum):

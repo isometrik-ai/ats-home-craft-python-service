@@ -284,6 +284,23 @@ class ReservationNoteRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000)
 
 
+class ReservationAdditionalChargeItem(BaseModel):
+    """Extra charge applied at check-out or via staff billing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    amount: float = Field(..., gt=0)
+    description: str = Field("Additional charge", min_length=1, max_length=240)
+
+
+class CompleteReservationRequest(BaseModel):
+    """Optional charges when marking a reservation completed."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    additional_charges: list[ReservationAdditionalChargeItem] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Responses
 # ---------------------------------------------------------------------------

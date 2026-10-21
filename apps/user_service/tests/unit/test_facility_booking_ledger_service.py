@@ -201,18 +201,27 @@ async def test_raise_charge_reservation_not_found():
     from libs.shared_utils.http_exceptions import NotFoundException
 
     svc = _service()
-    svc.reservations_repo.get_reservation = AsyncMock(return_value=None)
-
-    with pytest.raises(NotFoundException):
-        await svc.raise_charge(
-            project_id=PROJECT_ID,
-            body=RaiseChargeRequest(
-                contact_id=CONTACT_ID,
-                description="Late fee",
-                amount=100,
-                reservation_id="missing-reservation",
-            ),
+    reservation_svc = AsyncMock()
+    reservation_svc.apply_additional_charge = AsyncMock(
+        side_effect=NotFoundException(
+            message_key="facility_booking.errors.reservation_not_found",
         )
+    )
+
+    with patch(
+        "apps.user_service.app.services.facility_reservation_service.FacilityReservationService",
+        return_value=reservation_svc,
+    ):
+        with pytest.raises(NotFoundException):
+            await svc.raise_charge(
+                project_id=PROJECT_ID,
+                body=RaiseChargeRequest(
+                    contact_id=CONTACT_ID,
+                    description="Late fee",
+                    amount=100,
+                    reservation_id="missing-reservation",
+                ),
+            )
 
 
 @pytest.mark.asyncio

@@ -49,7 +49,9 @@ HOURS_PER_DAY = 8
 DAYS_PER_MONTH = 30
 
 # Ledger entry types that count towards what a resident has paid for a reservation.
-PAID_ENTRY_TYPES: frozenset[str] = frozenset({"charge", "deposit", "balance", "adjustment"})
+PAID_ENTRY_TYPES: frozenset[str] = frozenset(
+    {"charge", "deposit", "balance", "adjustment", "manual_charge"}
+)
 
 
 class _Money:

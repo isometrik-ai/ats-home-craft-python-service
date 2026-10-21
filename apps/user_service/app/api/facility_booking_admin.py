@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.facility_booking import (
     BookingUnitApiResponse,
     CancelReservationRequest,
     ClosureApiResponse,
+    CompleteReservationRequest,
     CreateStaffReservationRequest,
     DayAvailabilityApiResponse,
     DeletedResourceApiResponse,
@@ -1127,6 +1128,7 @@ async def complete_reservation(
     request: Request,
     project_id: str = Path(...),
     reservation_id: str = Path(...),
+    body: CompleteReservationRequest = Body(default_factory=CompleteReservationRequest),
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -1137,7 +1139,7 @@ async def complete_reservation(
         reservation_id,
         current_user,
         db_connection,
-        lambda svc: svc.complete(project_id=project_id, reservation_id=reservation_id),
+        lambda svc: svc.complete(project_id=project_id, reservation_id=reservation_id, body=body),
     )
     return _ok(request, "facility_booking.success.reservation_completed", data)
 

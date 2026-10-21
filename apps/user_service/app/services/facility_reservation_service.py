@@ -23,12 +23,15 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.schemas.facility_booking import (
     CancelReservationRequest,
+    CompleteReservationRequest,
     CreateResidentReservationRequest,
     CreateStaffReservationRequest,
     FacilityReservationResponse,
+    PriceLine,
     PriceQuote,
     RejectReservationRequest,
     RescheduleReservationRequest,
+    ReservationAdditionalChargeItem,
     ReservationDraftRequest,
     ReservationNoteRequest,
 )
@@ -516,6 +519,119 @@ class FacilityReservationService:
             amount=amount,
         )
 
+    @staticmethod
+    def _quote_with_additional_line(
+        quote: dict[str, Any], *, label: str, detail: str | None, amount: int
+    ) -> dict[str, Any]:
+        """Return an updated quote with one more line and a higher total."""
+        parsed = PriceQuote.model_validate(quote)
+        updated = PriceQuote(
+            lines=[*parsed.lines, PriceLine(label=label, detail=detail, amount=amount)],
+            total=ts_round(parsed.total + amount),
+            deposit=parsed.deposit,
+            due_now=parsed.due_now,
+            due_later=ts_round(parsed.due_later + amount),
+        )
+        return updated.model_dump(mode="json")
+
+    async def apply_additional_charge(
+        self,
+        *,
+        project_id: str,
+        reservation_id: str,
+        contact_id: str,
+        description: str,
+        amount: int,
+    ) -> dict[str, Any]:
+        """Post a manual charge, update the stored quote, and append a timeline event."""
+        if amount <= 0:
+            raise ValidationException(
+                message_key="facility_booking.errors.invalid_charge_amount",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        row = await self.reservations_repo.get_reservation(
+            organization_id=self._org_id,
+            project_id=project_id,
+            reservation_id=reservation_id,
+            for_update=True,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="facility_booking.errors.reservation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        host_id = str(row["host_contact_id"])
+        if contact_id != host_id:
+            raise ValidationException(
+                message_key="facility_booking.errors.host_not_in_project",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        status = str(row["status"])
+        if status not in {
+            FacilityReservationStatus.CHECKED_IN.value,
+            FacilityReservationStatus.COMPLETED.value,
+        }:
+            raise ValidationException(
+                message_key="facility_booking.errors.invalid_transition",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        label = description.strip()
+        facility_label = str(row.get("facility_name") or "Facility")
+        ledger_description = f"{facility_label} — {label}"
+        ledger_row = await self.ledger.post(
+            project_id=project_id,
+            contact_id=host_id,
+            reservation_id=reservation_id,
+            entry_type=FacilityBookingLedgerType.MANUAL_CHARGE.value,
+            description=ledger_description,
+            amount=amount,
+        )
+        quote = self._quote_with_additional_line(
+            row.get("quote") or {},
+            label=label,
+            detail=None,
+            amount=amount,
+        )
+        await self.reservations_repo.update_reservation(
+            organization_id=self._org_id,
+            reservation_id=reservation_id,
+            update_data={"quote": quote},
+        )
+        await self.reservations_repo.insert_event(
+            organization_id=self._org_id,
+            reservation_id=reservation_id,
+            event_type=FacilityReservationEventType.CHARGE_ADDED.value,
+            actor_type=_STAFF_ACTOR,
+            message=f"Additional charge {amount} — {label}",
+            actor_user_id=self.user_context.user_id,
+            payload={"amount": amount, "description": label},
+        )
+        return self.ledger.serialize(
+            {
+                **ledger_row,
+                "contact_name": row.get("host_name"),
+                "facility_name": row.get("facility_name"),
+            }
+        )
+
+    async def _apply_additional_charges(
+        self,
+        *,
+        project_id: str,
+        reservation_id: str,
+        host_contact_id: str,
+        items: list[ReservationAdditionalChargeItem],
+    ) -> None:
+        """Apply zero or more price increases before completing a reservation."""
+        for item in items:
+            await self.apply_additional_charge(
+                project_id=project_id,
+                reservation_id=reservation_id,
+                contact_id=host_contact_id,
+                description=item.description.strip(),
+                amount=ts_round(item.amount),
+            )
+
     async def _transition(
         self,
         *,
@@ -653,8 +769,34 @@ class FacilityReservationService:
         )
         return result
 
-    async def complete(self, *, project_id: str, reservation_id: str) -> dict[str, Any]:
+    async def complete(
+        self,
+        *,
+        project_id: str,
+        reservation_id: str,
+        body: CompleteReservationRequest | None = None,
+    ) -> dict[str, Any]:
         """Mark a checked-in reservation as completed."""
+        charges = (body.additional_charges if body else []) or []
+        if charges:
+            row = await self.reservations_repo.get_reservation(
+                organization_id=self._org_id,
+                project_id=project_id,
+                reservation_id=reservation_id,
+                for_update=True,
+            )
+            if not row:
+                raise NotFoundException(
+                    message_key="facility_booking.errors.reservation_not_found",
+                    custom_code=CustomStatusCode.NOT_FOUND,
+                )
+            self._assert_action(ReservationAction.COMPLETE, str(row["status"]))
+            await self._apply_additional_charges(
+                project_id=project_id,
+                reservation_id=reservation_id,
+                host_contact_id=str(row["host_contact_id"]),
+                items=charges,
+            )
         return await self._transition(
             project_id=project_id,
             reservation_id=reservation_id,
