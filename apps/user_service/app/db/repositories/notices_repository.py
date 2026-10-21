@@ -205,8 +205,9 @@ class NoticesRepository(BaseRepository):
         organization_id: str,
         notice_id: str,
         recipient_groups: list[str],
+        contact_ids: list[str] | None = None,
     ) -> None:
-        """Replace notice recipient groups."""
+        """Replace notice audience rows (recipient groups and/or contact ids)."""
         await self.db_connection.execute(
             """
             DELETE FROM notice_recipients
@@ -216,41 +217,24 @@ class NoticesRepository(BaseRepository):
             organization_id,
             notice_id,
         )
-        if not recipient_groups:
+        rows: list[tuple[str, str, str | None, str | None]] = []
+        for group in recipient_groups:
+            rows.append((organization_id, notice_id, group, None))
+        for contact_id in contact_ids or []:
+            rows.append((organization_id, notice_id, None, contact_id))
+        if not rows:
             return
         await self.db_connection.executemany(
             """
-            INSERT INTO notice_recipients (organization_id, notice_id, recipient_group)
-            VALUES ($1::uuid, $2::uuid, $3::notice_recipient_group)
+            INSERT INTO notice_recipients (
+                organization_id,
+                notice_id,
+                recipient_group,
+                contact_id
+            )
+            VALUES ($1::uuid, $2::uuid, $3::notice_recipient_group, $4::uuid)
             """,
-            [(organization_id, notice_id, group) for group in recipient_groups],
-        )
-
-    async def replace_contact_recipients(
-        self,
-        *,
-        organization_id: str,
-        notice_id: str,
-        contact_ids: list[str],
-    ) -> None:
-        """Replace notice contact-level recipients."""
-        await self.db_connection.execute(
-            """
-            DELETE FROM notice_contact_recipients
-            WHERE organization_id = $1::uuid
-              AND notice_id = $2::uuid
-            """,
-            organization_id,
-            notice_id,
-        )
-        if not contact_ids:
-            return
-        await self.db_connection.executemany(
-            """
-            INSERT INTO notice_contact_recipients (organization_id, notice_id, contact_id)
-            VALUES ($1::uuid, $2::uuid, $3::uuid)
-            """,
-            [(organization_id, notice_id, contact_id) for contact_id in contact_ids],
+            rows,
         )
 
     async def replace_towers(
@@ -339,6 +323,7 @@ class NoticesRepository(BaseRepository):
             FROM notice_recipients
             WHERE organization_id = $1::uuid
               AND notice_id = $2::uuid
+              AND recipient_group IS NOT NULL
             ORDER BY recipient_group
             """,
             organization_id,
@@ -356,9 +341,10 @@ class NoticesRepository(BaseRepository):
         rows = await self.db_connection.fetch(
             """
             SELECT contact_id::text AS contact_id
-            FROM notice_contact_recipients
+            FROM notice_recipients
             WHERE organization_id = $1::uuid
               AND notice_id = $2::uuid
+              AND contact_id IS NOT NULL
             ORDER BY contact_id
             """,
             organization_id,
@@ -446,6 +432,7 @@ class NoticesRepository(BaseRepository):
             WHERE n.organization_id = $1::uuid
               AND n.project_id = $2::uuid
               AND n.status = 'live'
+              AND nr.recipient_group IS NOT NULL
             GROUP BY nr.recipient_group
             """,
             organization_id,
@@ -541,6 +528,7 @@ class NoticesRepository(BaseRepository):
                 FROM notice_recipients nr
                 WHERE nr.notice_id = n.id
                   AND nr.organization_id = n.organization_id
+                  AND nr.recipient_group IS NOT NULL
               ),
               ARRAY[]::text[]
             ) AS recipient_groups,
@@ -1161,14 +1149,16 @@ class NoticesRepository(BaseRepository):
                   SELECT array_agg(nr.recipient_group::text)
                   FROM notice_recipients nr
                   WHERE nr.notice_id = n.id
+                    AND nr.recipient_group IS NOT NULL
                 ),
                 ARRAY[]::text[]
               ) AS recipient_groups,
               COALESCE(
                 (
-                  SELECT array_agg(ncr.contact_id::text ORDER BY ncr.contact_id)
-                  FROM notice_contact_recipients ncr
-                  WHERE ncr.notice_id = n.id
+                  SELECT array_agg(nr.contact_id::text ORDER BY nr.contact_id)
+                  FROM notice_recipients nr
+                  WHERE nr.notice_id = n.id
+                    AND nr.contact_id IS NOT NULL
                 ),
                 ARRAY[]::text[]
               ) AS contact_recipient_ids,

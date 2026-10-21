@@ -160,12 +160,14 @@ async def test_replace_recipients_towers_attachments():
     )
     assert "DELETE FROM notice_recipients" in conn.execute_calls[0][0]
 
-    await repo.replace_contact_recipients(
+    await repo.replace_recipients(
         organization_id=ORG,
         notice_id=NOTICE,
+        recipient_groups=[],
         contact_ids=["contact-1", "contact-2"],
     )
-    assert "INSERT INTO notice_contact_recipients" in conn.executemany_calls[-1][0]
+    assert "INSERT INTO notice_recipients" in conn.executemany_calls[-1][0]
+    assert "contact_id" in conn.executemany_calls[-1][0]
 
     await repo.replace_towers(
         organization_id=ORG,

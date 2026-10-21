@@ -49,7 +49,6 @@ def _service() -> NoticesService:
     svc.repo.list_attachments_for_notices = AsyncMock(return_value={})
     svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
     svc.repo.list_contact_recipient_ids = AsyncMock(return_value=[])
-    svc.repo.replace_contact_recipients = AsyncMock()
     svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
     svc.repo.list_attachments = AsyncMock(return_value=[])
     svc.recipient_service.filter_valid_project_contact_ids = AsyncMock(return_value=[])
@@ -888,7 +887,6 @@ def _stub_create_repo(svc: NoticesService, *, recipient_groups: list[str]) -> No
         return_value=_notice_detail_row(status=NoticeStatus.LIVE.value)
     )
     svc.repo.replace_recipients = AsyncMock()
-    svc.repo.replace_contact_recipients = AsyncMock()
     svc.repo.replace_towers = AsyncMock()
     svc.repo.replace_attachments = AsyncMock()
     svc.repo.list_recipient_groups = AsyncMock(return_value=recipient_groups)
@@ -959,7 +957,7 @@ async def test_create_notice_publish_now_with_contact_ids_only():
     )
     detail = await svc.create_notice(project_id=PROJECT_ID, body=body)
     assert detail.display_code == "NTC-1"
-    assert svc.repo.replace_contact_recipients.await_args.kwargs["contact_ids"] == [contact_id]
+    assert svc.repo.replace_recipients.await_args.kwargs["contact_ids"] == [contact_id]
 
 
 @pytest.mark.asyncio
@@ -976,7 +974,7 @@ async def test_create_notice_multiple_contact_ids_deduped():
         publish_mode=NoticePublishMode.NOW,
     )
     await svc.create_notice(project_id=PROJECT_ID, body=body)
-    assert svc.repo.replace_contact_recipients.await_args.kwargs["contact_ids"] == [
+    assert svc.repo.replace_recipients.await_args.kwargs["contact_ids"] == [
         contact_a,
         contact_b,
     ]
@@ -1079,7 +1077,6 @@ async def test_update_notice_clears_contact_recipients_with_empty_list():
     svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
     svc.repo.list_attachments = AsyncMock(return_value=[])
     svc.repo.replace_recipients = AsyncMock()
-    svc.repo.replace_contact_recipients = AsyncMock()
     svc.repo.replace_towers = AsyncMock()
     svc.repo.replace_attachments = AsyncMock()
 
@@ -1089,7 +1086,7 @@ async def test_update_notice_clears_contact_recipients_with_empty_list():
         body=UpdateNoticeRequest(contact_ids=[]),
     )
 
-    assert svc.repo.replace_contact_recipients.await_args.kwargs["contact_ids"] == []
+    assert svc.repo.replace_recipients.await_args.kwargs["contact_ids"] == []
 
 
 @pytest.mark.asyncio

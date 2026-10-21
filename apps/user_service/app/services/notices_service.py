@@ -711,10 +711,6 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_id=notice_id,
             recipient_groups=recipient_groups,
-        )
-        await self.repo.replace_contact_recipients(
-            organization_id=self.organization_id,
-            notice_id=notice_id,
             contact_ids=contact_ids,
         )
         scoped_towers = tower_ids if scope_type == NoticeScopeType.BY_TOWER else []

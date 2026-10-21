@@ -595,14 +595,16 @@ class NoticeRecipientResolutionService:
                   SELECT array_agg(nr.recipient_group::text)
                   FROM notice_recipients nr
                   WHERE nr.notice_id = n.id
+                    AND nr.recipient_group IS NOT NULL
                 ),
                 ARRAY[]::text[]
               ) AS recipient_groups,
               COALESCE(
                 (
-                  SELECT array_agg(ncr.contact_id::text ORDER BY ncr.contact_id)
-                  FROM notice_contact_recipients ncr
-                  WHERE ncr.notice_id = n.id
+                  SELECT array_agg(nr.contact_id::text ORDER BY nr.contact_id)
+                  FROM notice_recipients nr
+                  WHERE nr.notice_id = n.id
+                    AND nr.contact_id IS NOT NULL
                 ),
                 ARRAY[]::text[]
               ) AS contact_recipient_ids,
