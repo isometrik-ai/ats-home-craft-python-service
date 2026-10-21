@@ -264,9 +264,7 @@ def test_org_permissions_exclude_crm_entity_catalog():
     assert "companies_management.view" not in org_codes
     assert "leads_management.view" not in org_codes
     assert "email_templates_management.view" not in org_codes
-    assert "settings_management.view" not in org_codes
-    assert "settings_management.edit" not in org_codes
-    assert "settings_management.billing" not in org_codes
+    assert SETTINGS_MANAGEMENT_EDIT in org_codes
 
 
 def test_project_permissions_exclude_leads_and_email_templates_for_now():
@@ -282,8 +280,6 @@ def test_leads_view_uses_org_ceiling_without_project_catalog():
     assert PROJECTS_MANAGEMENT_VIEW_ASSIGNED in ceiling
 
 
-def test_settings_edit_uses_users_or_roles_management_ceiling():
+def test_settings_edit_is_checked_directly_on_org_role():
     ceiling = org_ceiling_permission_codes(SETTINGS_MANAGEMENT_EDIT)
-    assert "users_management.edit" in ceiling
-    assert "roles_management.edit" in ceiling
-    assert SETTINGS_MANAGEMENT_EDIT not in ceiling
+    assert ceiling == frozenset({SETTINGS_MANAGEMENT_EDIT})

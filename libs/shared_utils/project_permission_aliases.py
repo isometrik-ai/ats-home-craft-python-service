@@ -58,15 +58,8 @@ from libs.shared_utils.common_query import (
     PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
     RESIDENT_MANAGEMENT_EDIT,
     RESIDENT_MANAGEMENT_VIEW,
-    ROLES_MANAGEMENT_EDIT,
-    ROLES_MANAGEMENT_VIEW,
-    SETTINGS_MANAGEMENT_BILLING,
-    SETTINGS_MANAGEMENT_EDIT,
-    SETTINGS_MANAGEMENT_VIEW,
     TENANT_REQUESTS_MANAGEMENT_EDIT,
     TENANT_REQUESTS_MANAGEMENT_VIEW,
-    USERS_MANAGEMENT_EDIT,
-    USERS_MANAGEMENT_VIEW,
     VEHICLE_MANAGEMENT_DELETE,
     VEHICLE_MANAGEMENT_EDIT,
     VEHICLE_MANAGEMENT_VIEW,
@@ -94,9 +87,6 @@ ORG_ONLY_API_CEILING_CODES: frozenset[str] = frozenset(
         EMAIL_TEMPLATES_MANAGEMENT_CREATE,
         EMAIL_TEMPLATES_MANAGEMENT_EDIT,
         EMAIL_TEMPLATES_MANAGEMENT_DELETE,
-        SETTINGS_MANAGEMENT_VIEW,
-        SETTINGS_MANAGEMENT_EDIT,
-        SETTINGS_MANAGEMENT_BILLING,
     }
 )
 
@@ -201,12 +191,6 @@ def project_role_grants_any(
 
 def org_ceiling_permission_codes(permission_code: str) -> frozenset[str]:
     """Org-role codes that satisfy the ceiling for a project-scoped API action."""
-    if permission_code == SETTINGS_MANAGEMENT_VIEW:
-        return frozenset({USERS_MANAGEMENT_VIEW, ROLES_MANAGEMENT_VIEW})
-
-    if permission_code in {SETTINGS_MANAGEMENT_EDIT, SETTINGS_MANAGEMENT_BILLING}:
-        return frozenset({USERS_MANAGEMENT_EDIT, ROLES_MANAGEMENT_EDIT})
-
     codes = {permission_code}
     if permission_code not in API_CEILING_ENTITY_CODES:
         return frozenset(codes)

@@ -207,6 +207,25 @@ DEFAULT_PERMISSIONS = [
         "View organization-wide audit logs",
         "audit_logs",
     ),
+    # System Settings (sessions, org settings, billing)
+    (
+        SETTINGS_MANAGEMENT_VIEW,
+        "View Settings",
+        "View system settings",
+        "settings",
+    ),
+    (
+        SETTINGS_MANAGEMENT_EDIT,
+        "Edit Settings",
+        "Modify system settings and manage organization sessions",
+        "settings",
+    ),
+    (
+        SETTINGS_MANAGEMENT_BILLING,
+        "Manage Billing",
+        "Access billing and subscription",
+        "settings",
+    ),
     # Permissions Management
     (
         "permissions_management.view",
