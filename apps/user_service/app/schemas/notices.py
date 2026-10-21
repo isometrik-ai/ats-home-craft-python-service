@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -26,6 +27,34 @@ from apps.user_service.app.utils.notice_targeting_utils import (
     NOTICE_TARGETING_ALL,
     normalize_recipient_groups_input,
 )
+
+
+def _normalize_contact_ids_input(
+    contact_ids: object,
+    *,
+    empty_means_omitted: bool,
+) -> object:
+    """Dedupe contact ids; optionally treat an empty list as omitted (create only)."""
+    if contact_ids is None:
+        return None
+    if not isinstance(contact_ids, list):
+        return contact_ids
+    normalized = list(dict.fromkeys(str(item).strip() for item in contact_ids if str(item).strip()))
+    if empty_means_omitted:
+        return normalized or None
+    return normalized
+
+
+def _validate_contact_id_uuids(contact_ids: list[str] | None) -> list[str] | None:
+    """Ensure each contact id is a valid UUID string."""
+    if contact_ids is None:
+        return None
+    for contact_id in contact_ids:
+        try:
+            UUID(contact_id)
+        except ValueError as exc:
+            raise ValueError("contact_ids must contain valid UUIDs") from exc
+    return contact_ids
 
 
 class NoticeAttachmentInput(BaseModel):
@@ -94,19 +123,13 @@ class CreateNoticeRequest(BaseModel):
     @classmethod
     def normalize_contact_ids(cls, contact_ids: object) -> object:
         """Dedupe and drop blank contact ids."""
-        if contact_ids is None:
-            return None
-        if not isinstance(contact_ids, list):
-            return contact_ids
-        normalized = list(
-            dict.fromkeys(str(item).strip() for item in contact_ids if str(item).strip())
-        )
-        return normalized or None
+        return _normalize_contact_ids_input(contact_ids, empty_means_omitted=True)
 
     @field_validator("contact_ids")
     @classmethod
-    def validate_contact_ids_count(cls, contact_ids: list[str] | None) -> list[str] | None:
-        """Enforce max direct contact recipients."""
+    def validate_contact_ids(cls, contact_ids: list[str] | None) -> list[str] | None:
+        """Validate UUID shape, count, and max direct contact recipients."""
+        contact_ids = _validate_contact_id_uuids(contact_ids)
         if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
             raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
         return contact_ids
@@ -156,20 +179,14 @@ class UpdateNoticeRequest(BaseModel):
     @field_validator("contact_ids", mode="before")
     @classmethod
     def normalize_contact_ids(cls, contact_ids: object) -> object:
-        """Dedupe and drop blank contact ids."""
-        if contact_ids is None:
-            return None
-        if not isinstance(contact_ids, list):
-            return contact_ids
-        normalized = list(
-            dict.fromkeys(str(item).strip() for item in contact_ids if str(item).strip())
-        )
-        return normalized or None
+        """Dedupe and drop blank contact ids; preserve explicit empty list for PATCH."""
+        return _normalize_contact_ids_input(contact_ids, empty_means_omitted=False)
 
     @field_validator("contact_ids")
     @classmethod
-    def validate_contact_ids_count(cls, contact_ids: list[str] | None) -> list[str] | None:
-        """Enforce max direct contact recipients."""
+    def validate_contact_ids(cls, contact_ids: list[str] | None) -> list[str] | None:
+        """Validate UUID shape, count, and max direct contact recipients."""
+        contact_ids = _validate_contact_id_uuids(contact_ids)
         if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
             raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
         return contact_ids

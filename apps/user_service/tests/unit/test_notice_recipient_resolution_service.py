@@ -16,6 +16,7 @@ from apps.user_service.app.schemas.notices import (
     CreateNoticeRequest,
     NoticeListQuery,
     ReachEstimateQuery,
+    UpdateNoticeRequest,
 )
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
@@ -132,6 +133,27 @@ def test_create_notice_accepts_lowercase_all_recipient_group():
         recipient_groups=["all"],
     )
     assert body.recipient_groups == [NoticeRecipientInputGroup.ALL]
+
+
+def test_update_notice_preserves_empty_contact_ids_for_patch():
+    """Success: explicit empty contact_ids clears recipients on update (not treated as omitted)."""
+    body = UpdateNoticeRequest(contact_ids=[])
+    assert body.contact_ids == []
+
+
+def test_create_notice_empty_contact_ids_becomes_none():
+    """Success: empty contact_ids on create is equivalent to omitted."""
+    body = CreateNoticeRequest(title="Draft", contact_ids=[])
+    assert body.contact_ids is None
+
+
+def test_create_notice_rejects_invalid_contact_id_uuid():
+    """Failure: non-UUID contact ids are rejected at the schema layer."""
+    with pytest.raises(ValidationError):
+        CreateNoticeRequest(
+            title="Bad id",
+            contact_ids=["not-a-uuid"],
+        )
 
 
 def test_create_notice_rejects_unknown_recipient_group():

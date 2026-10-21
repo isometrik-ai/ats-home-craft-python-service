@@ -1026,7 +1026,10 @@ async def test_create_notice_publish_now_with_contacts_dispatches_push():
 
 def test_create_notice_schema_rejects_too_many_contact_ids():
     """Failure: schema rejects more than the configured contact id limit."""
-    too_many = [f"{index:032x}"[:36] for index in range(NOTICE_MAX_CONTACT_RECIPIENTS + 1)]
+    too_many = [
+        f"{index:08x}-0000-4000-8000-000000000000"
+        for index in range(NOTICE_MAX_CONTACT_RECIPIENTS + 1)
+    ]
     with pytest.raises(ValidationError):
         CreateNoticeRequest(
             title="Too many contacts",
@@ -1063,6 +1066,30 @@ async def test_create_notice_all_recipients_still_requires_towers_for_by_tower()
         await svc.create_notice(project_id=PROJECT_ID, body=body)
     assert exc_info.value.message_key == "notices.errors.towers_required"
     svc.repo.insert_notice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_notice_clears_contact_recipients_with_empty_list():
+    """Success: PATCH contact_ids: [] removes all direct contact recipients."""
+    svc = _service()
+    svc.repo.fetch_notice_by_id = AsyncMock(return_value=_notice_detail_row())
+    svc.repo.update_notice_fields = AsyncMock()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+    svc.repo.list_contact_recipient_ids = AsyncMock(return_value=["old-contact"])
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.repo.replace_recipients = AsyncMock()
+    svc.repo.replace_contact_recipients = AsyncMock()
+    svc.repo.replace_towers = AsyncMock()
+    svc.repo.replace_attachments = AsyncMock()
+
+    await svc.update_notice(
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        body=UpdateNoticeRequest(contact_ids=[]),
+    )
+
+    assert svc.repo.replace_contact_recipients.await_args.kwargs["contact_ids"] == []
 
 
 @pytest.mark.asyncio
