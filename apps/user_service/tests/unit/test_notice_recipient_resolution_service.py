@@ -156,6 +156,13 @@ def test_create_notice_rejects_invalid_contact_id_uuid():
         )
 
 
+def test_create_notice_normalizes_contact_ids_to_canonical_uuid():
+    """Success: uppercase UUIDs are stored in canonical lowercase form."""
+    upper = "55555555-5555-5555-5555-555555555555".upper()
+    body = CreateNoticeRequest(title="Notice", contact_ids=[upper])
+    assert body.contact_ids == ["55555555-5555-5555-5555-555555555555"]
+
+
 def test_create_notice_rejects_unknown_recipient_group():
     """Failure case: API schema rejects unknown recipient groups."""
     with pytest.raises(ValidationError):

@@ -46,15 +46,14 @@ def _normalize_contact_ids_input(
 
 
 def _validate_contact_id_uuids(contact_ids: list[str] | None) -> list[str] | None:
-    """Ensure each contact id is a valid UUID string."""
+    """Ensure each contact id is a canonical UUID string (lowercase)."""
     if contact_ids is None:
         return None
-    for contact_id in contact_ids:
-        try:
-            UUID(contact_id)
-        except ValueError as exc:
-            raise ValueError("contact_ids must contain valid UUIDs") from exc
-    return contact_ids
+    try:
+        canonical = [str(UUID(contact_id)) for contact_id in contact_ids]
+    except ValueError as exc:
+        raise ValueError("contact_ids must contain valid UUIDs") from exc
+    return list(dict.fromkeys(canonical))
 
 
 class NoticeAttachmentInput(BaseModel):
