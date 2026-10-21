@@ -364,6 +364,34 @@ class FeeBillingRepository(BaseRepository):
         )
         return await self._with_children(invoices, include_late_fee_rule=True)
 
+    async def unit_has_due_invoice(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+        as_of: date,
+    ) -> bool:
+        """True when the unit has an unpaid invoice whose due date has been reached."""
+        exists = await self.db_connection.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM fee_invoices
+                WHERE organization_id = $1::uuid
+                  AND project_id = $2::uuid
+                  AND unit_id = $3::uuid
+                  AND status IN ('issued', 'partial')
+                  AND due_date <= $4::date
+            )
+            """,
+            organization_id,
+            project_id,
+            unit_id,
+            as_of,
+        )
+        return bool(exists)
+
     async def list_unit_invoices(
         self, *, organization_id: str, project_id: str, unit_id: str
     ) -> list[dict[str, Any]]:

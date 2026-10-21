@@ -14,6 +14,9 @@ from apps.user_service.app.db.repositories.contact_roles_repository import (
 from apps.user_service.app.db.repositories.contact_units_repository import (
     ContactUnitsRepository,
 )
+from apps.user_service.app.db.repositories.fee_billing_repository import (
+    FeeBillingRepository,
+)
 from apps.user_service.app.db.repositories.move_events_repository import (
     MoveEventsRepository,
 )
@@ -30,6 +33,7 @@ from apps.user_service.app.schemas.move_events import (
     MoveEventResponse,
     UpdateMoveEventRequest,
 )
+from apps.user_service.app.services.fee_late_fee import billing_today
 from apps.user_service.app.services.inventory_service import resolve_is_sold
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
@@ -68,6 +72,7 @@ class MoveEventsService:
         self.contact_units_repo = contact_units_repository or ContactUnitsRepository(db_connection)
         self.contact_roles_repo = contact_roles_repository or ContactRolesRepository(db_connection)
         self.units_repo = UnitsRepository(db_connection)
+        self.fee_billing_repo = FeeBillingRepository(db_connection)
         self._push_dispatcher: PushNotificationDispatcher | None = None
 
     def _push(self) -> PushNotificationDispatcher:
@@ -411,6 +416,26 @@ class MoveEventsService:
             unit_id=unit_id,
         )
 
+    async def _assert_unit_has_no_due_invoices(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> None:
+        """Reject move-out when the unit has an unpaid invoice that is due."""
+        has_due = await self.fee_billing_repo.unit_has_due_invoice(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+            as_of=billing_today(),
+        )
+        if has_due:
+            raise ValidationException(
+                message_key="move_events.errors.invoice_due",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     async def _contact_is_unit_owner(
         self,
         *,
@@ -484,6 +509,11 @@ class MoveEventsService:
         send_notification: bool = True,
     ) -> dict[str, Any]:
         """Insert a move-out ledger row and run turnover + tenant-request sync."""
+        await self._assert_unit_has_no_due_invoices(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
         contact_unit_id = await self._resolve_contact_unit(
             organization_id=organization_id,
             project_id=project_id,
@@ -648,6 +678,11 @@ class MoveEventsService:
                     event_date=body.event_date,
                 )
         else:
+            await self._assert_unit_has_no_due_invoices(
+                organization_id=organization_id,
+                project_id=project_id,
+                unit_id=body.unit_id,
+            )
             inserted = await self.move_events_repo.insert(
                 {
                     "organization_id": organization_id,

@@ -818,7 +818,8 @@
       "unit_occupied_by_other_tenant": "This unit is already occupied by another tenant.",
       "contact_not_unit_owner": "The contact is not the assigned owner of this unit.",
       "documents_required": "At least one document is required for tenant move-in.",
-      "invalid_fee": "The move fee must be zero or greater."
+      "invalid_fee": "The move fee must be zero or greater.",
+      "invoice_due": "Move-out is not allowed while this unit has a due invoice."
     },
     "success": {
       "created": "Move event recorded successfully.",
