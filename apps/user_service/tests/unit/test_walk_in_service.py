@@ -565,8 +565,8 @@ async def test_get_resident_walk_in_not_accessible():
 
 
 @pytest.mark.asyncio
-async def test_get_resident_walk_in_scopes_visit_units_to_accessible_flats():
-    """Resident detail omits visit units on flats they do not occupy."""
+async def test_get_resident_walk_in_without_unit_id_returns_full_entry():
+    """Without unit_id, resident detail includes all flats on the walk-in entry."""
     repo = _FakeWalkInRepo()
     repo.visit_units = [
         _visit_unit_row(id="vu-mine", unit_id=UNIT_ID),
@@ -584,8 +584,8 @@ async def test_get_resident_walk_in_scopes_visit_units_to_accessible_flats():
         walk_in_entry_id=ENTRY_ID,
     )
 
-    assert len(detail["visit_units"]) == 1
-    assert detail["visit_units"][0]["id"] == "vu-mine"
+    assert len(detail["visit_units"]) == 2
+    assert {unit["id"] for unit in detail["visit_units"]} == {"vu-mine", "vu-other"}
 
 
 @pytest.mark.asyncio
@@ -597,6 +597,28 @@ async def test_get_resident_walk_in_filters_by_unit_id():
         _visit_unit_row(id="vu-2", unit_id="unit-2"),
     ]
     repo.resident_can_act_on_unit = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    repo.events = [
+        {
+            "id": "e1",
+            "event_type": WalkInEventType.REQUESTED.value,
+            "occurred_at": datetime.now(timezone.utc),
+            "payload": {},
+        },
+        {
+            "id": "e2",
+            "event_type": WalkInEventType.VISIT_UNIT_APPROVED.value,
+            "walk_in_visit_unit_id": "vu-1",
+            "occurred_at": datetime.now(timezone.utc),
+            "payload": {"unit_id": UNIT_ID},
+        },
+        {
+            "id": "e3",
+            "event_type": WalkInEventType.VISIT_UNIT_REJECTED.value,
+            "walk_in_visit_unit_id": "vu-2",
+            "occurred_at": datetime.now(timezone.utc),
+            "payload": {"unit_id": "unit-2"},
+        },
+    ]
     service = _service(repo=repo)
 
     detail = await service.get_resident_walk_in(
@@ -607,6 +629,9 @@ async def test_get_resident_walk_in_filters_by_unit_id():
 
     assert len(detail["visit_units"]) == 1
     assert detail["visit_units"][0]["unit_id"] == UNIT_ID
+    event_types = [event["event_type"] for event in detail["events"]]
+    assert WalkInEventType.VISIT_UNIT_REJECTED.value not in event_types
+    assert WalkInEventType.VISIT_UNIT_APPROVED.value in event_types
 
 
 @pytest.mark.asyncio
@@ -790,6 +815,35 @@ def test_derive_milestones_completed_states():
     assert by_key["approved"]["completed"] is True
     assert by_key["entered"]["completed"] is True
     assert by_key["exited"]["completed"] is True
+
+
+def test_filter_events_for_resident_flats_excludes_other_unit_actions():
+    """Resident timeline excludes approve/reject events for flats they are not viewing."""
+    events = [
+        {"event_type": WalkInEventType.REQUESTED.value},
+        {
+            "event_type": WalkInEventType.VISIT_UNIT_APPROVED.value,
+            "walk_in_visit_unit_id": "vu-mine",
+            "payload": {"unit_id": UNIT_ID},
+        },
+        {
+            "event_type": WalkInEventType.VISIT_UNIT_REJECTED.value,
+            "walk_in_visit_unit_id": "vu-other",
+            "payload": {"unit_id": "other-unit"},
+        },
+        {"event_type": WalkInEventType.ENTERED.value},
+    ]
+    filtered = WalkInService._filter_events_for_resident_flats(
+        events,
+        visit_unit_ids={"vu-mine"},
+        unit_ids={UNIT_ID},
+    )
+    types = [event["event_type"] for event in filtered]
+    assert types == [
+        WalkInEventType.REQUESTED.value,
+        WalkInEventType.VISIT_UNIT_APPROVED.value,
+        WalkInEventType.ENTERED.value,
+    ]
 
 
 def test_format_contact_name():
