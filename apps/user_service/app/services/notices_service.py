@@ -670,19 +670,15 @@ class NoticesService:
         project_id: str | None = None,
     ) -> list[str]:
         """Materialize at most one live notice per due recurring template."""
-        templates = await self.repo.lock_due_recurring_templates(
+        from apps.user_service.app.jobs.publish_scheduled_notices import (
+            materialize_due_recurring_notices,
+        )
+
+        return await materialize_due_recurring_notices(
+            self.db_connection,
             organization_id=self.organization_id,
             project_id=project_id,
-            limit=50,
         )
-        instance_ids: list[str] = []
-        for template in templates:
-            if str(template.get("organization_id")) != self.organization_id:
-                continue
-            instance_id = await self._materialize_recurring_template(template)
-            if instance_id:
-                instance_ids.append(instance_id)
-        return instance_ids
 
     async def _create_recurring_notice(
         self,

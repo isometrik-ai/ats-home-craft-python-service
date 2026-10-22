@@ -331,7 +331,7 @@ async def test_get_summary():
 async def test_publish_due_notices_and_expire_pins():
     svc = _service()
     svc.repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE_ID])
-    svc.repo.lock_due_recurring_templates = AsyncMock(return_value=[])
+    svc.materialize_due_recurring_templates = AsyncMock(return_value=[])
     svc.repo.fetch_notice_by_id_only = AsyncMock(
         return_value={
             "id": NOTICE_ID,

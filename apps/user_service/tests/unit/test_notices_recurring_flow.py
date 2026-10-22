@@ -6,6 +6,7 @@ from datetime import date, datetime, time, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from apps.user_service.app.schemas.enums import (
     NoticePublishMode,
@@ -124,7 +125,41 @@ def test_after_count_end_rule_blocks_third_materialize():
     assert exceeds_after_count(rule, occurrences_sent=2) is True
     assert exceeds_after_count(rule, occurrences_sent=1) is False
     preview = preview_recurrence(rule, timezone="Asia/Kolkata", count=4)
-    assert len(preview.upcoming_sends) >= 2
+    assert len(preview.upcoming_sends) == 2
+
+
+def test_preview_respects_after_count_max_occurrences():
+    rule = RecurrenceRule(
+        frequency=NoticeRecurrenceFrequency.WEEKLY,
+        weekly_days=(1, 3, 5),
+        monthly_day=None,
+        monthly_use_last_day=False,
+        time_of_day=time(9, 0),
+        starts_on=date(2026, 10, 22),
+        end_type=NoticeRecurrenceEndType.AFTER_COUNT,
+        end_date=None,
+        max_occurrences=1,
+    )
+    preview = preview_recurrence(rule, timezone="Asia/Kolkata", count=4)
+    assert len(preview.upcoming_sends) == 1
+
+
+def test_weekly_days_schema_rejects_invalid_iso_day():
+    with pytest.raises(ValidationError):
+        NoticeRepeatInput(
+            frequency=NoticeRecurrenceFrequency.WEEKLY,
+            weekly_days=[0, 8],
+            time_of_day=time(9, 0),
+            starts_on=date(2026, 10, 22),
+        )
+
+
+def test_recurrence_preview_schema_rejects_invalid_timezone():
+    with pytest.raises(ValidationError):
+        NoticeRecurrencePreviewRequest(
+            repeat=_weekly_repeat(),
+            timezone="not-a-zone",
+        )
 
 
 def test_exceeds_after_count_when_series_complete():

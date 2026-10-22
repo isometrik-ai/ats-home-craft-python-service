@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -80,8 +81,22 @@ class NoticeRepeatInput(BaseModel):
     frequency: NoticeRecurrenceFrequency
     weekly_days: list[int] | None = Field(
         None,
+        min_length=1,
+        max_length=7,
         description="ISO weekday 1=Mon … 7=Sun; required when frequency=weekly",
     )
+
+    @field_validator("weekly_days")
+    @classmethod
+    def validate_weekly_days(cls, value: list[int] | None) -> list[int] | None:
+        """Reject out-of-range ISO weekday integers before recurrence calculation."""
+        if value is None:
+            return None
+        for day in value:
+            if not 1 <= day <= 7:
+                raise ValueError("weekly_days must use ISO weekdays 1 (Mon) through 7 (Sun)")
+        return value
+
     monthly_day: int | None = Field(None, ge=1, le=31)
     monthly_use_last_day: bool = False
     time_of_day: time
@@ -98,6 +113,18 @@ class NoticeRecurrencePreviewRequest(BaseModel):
 
     repeat: NoticeRepeatInput
     timezone: str | None = Field(None, max_length=64)
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_recurrence_timezone(cls, value: str | None) -> str | None:
+        """Ensure preview uses a valid IANA timezone identifier."""
+        if value is None:
+            return None
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("timezone must be a valid IANA timezone") from exc
+        return value
 
 
 class NoticeRecurrencePreviewResponse(BaseModel):

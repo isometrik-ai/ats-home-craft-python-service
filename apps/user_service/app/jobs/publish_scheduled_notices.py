@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
@@ -100,19 +102,11 @@ async def publish_scheduled_notices(
     return published_ids + recurring_ids
 
 
-async def materialize_due_recurring_notices(
+async def _materialize_locked_templates(
     db_connection: asyncpg.Connection,
-    *,
-    organization_id: str | None = None,
-    project_id: str | None = None,
+    templates: list[dict[str, Any]],
 ) -> list[str]:
-    """Create live notices from due recurring templates (one per template per run)."""
-    repo = NoticesRepository(db_connection=db_connection)
-    templates = await repo.lock_due_recurring_templates(
-        organization_id=organization_id,
-        project_id=project_id,
-        limit=50,
-    )
+    """Materialize already row-locked recurring templates on the same connection."""
     instance_ids: list[str] = []
     for template in templates:
         org_id = str(template["organization_id"])
@@ -127,6 +121,42 @@ async def materialize_due_recurring_notices(
         instance_id = await service._materialize_recurring_template(template)
         if instance_id:
             instance_ids.append(instance_id)
+    return instance_ids
+
+
+async def materialize_due_recurring_notices(
+    db_connection: asyncpg.Connection,
+    *,
+    organization_id: str | None = None,
+    project_id: str | None = None,
+    batch_limit: int = 50,
+) -> list[str]:
+    """Create live notices from due recurring templates (one per template per run).
+
+    Row locks from ``FOR UPDATE SKIP LOCKED`` must cover materialization. When the
+    connection is already inside a transaction (cron ``db_uow`` / job CLI), lock and
+    materialize in that same transaction. Otherwise claim one template per transaction.
+    """
+    repo = NoticesRepository(db_connection=db_connection)
+    if db_connection.is_in_transaction():
+        templates = await repo.lock_due_recurring_templates(
+            organization_id=organization_id,
+            project_id=project_id,
+            limit=batch_limit,
+        )
+        return await _materialize_locked_templates(db_connection, templates)
+
+    instance_ids: list[str] = []
+    for _ in range(batch_limit):
+        async with db_connection.transaction():
+            templates = await repo.lock_due_recurring_templates(
+                organization_id=organization_id,
+                project_id=project_id,
+                limit=1,
+            )
+            if not templates:
+                break
+            instance_ids.extend(await _materialize_locked_templates(db_connection, templates))
     return instance_ids
 
 

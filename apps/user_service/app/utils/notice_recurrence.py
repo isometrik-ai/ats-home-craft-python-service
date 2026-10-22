@@ -153,6 +153,8 @@ def preview_recurrence(
     upcoming: list[datetime] = [first]
     cursor = first
     while len(upcoming) < count:
+        if exceeds_after_count(rule, occurrences_sent=len(upcoming)):
+            break
         nxt = next_occurrence_after(rule, after=cursor, timezone=timezone)
         if nxt is None:
             break

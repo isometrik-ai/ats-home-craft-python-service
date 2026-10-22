@@ -1337,7 +1337,8 @@
       "series_not_editable": "Pause the recurring series before editing, or the series cannot be changed.",
       "invalid_end_date": "End date must be on or after the first send date.",
       "invalid_max_occurrences": "Occurrence count must be at least 1.",
-      "invalid_publish_mode": "Invalid publish mode for this notice."
+      "invalid_publish_mode": "Invalid publish mode for this notice.",
+      "invalid_recurrence_timezone": "Timezone must be a valid IANA region (for example Asia/Kolkata)."
     },
     "success": {
       "summary_retrieved": "Notice summary retrieved successfully.",
