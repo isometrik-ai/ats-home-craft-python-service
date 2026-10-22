@@ -6,8 +6,10 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from apps.user_service.app.schemas.enums import (
+    NOTICE_MAX_CONTACT_RECIPIENTS,
     NoticeCategory,
     NoticePinDuration,
     NoticePublishMode,
@@ -46,8 +48,10 @@ def _service() -> NoticesService:
     svc.repo.list_notices = AsyncMock(return_value=([], 0))
     svc.repo.list_attachments_for_notices = AsyncMock(return_value={})
     svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+    svc.repo.list_contact_recipient_ids = AsyncMock(return_value=[])
     svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
     svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.recipient_service.filter_valid_project_contact_ids = AsyncMock(return_value=[])
     return svc
 
 
@@ -66,9 +70,20 @@ def test_validate_publish_requirements_missing_recipients():
         NoticesService._validate_publish_requirements(
             None,
             recipient_groups=[],
+            contact_ids=[],
             scope_type=NoticeScopeType.WHOLE_SOCIETY,
             tower_ids=[],
         )
+
+
+def test_validate_publish_requirements_allows_contact_ids_only():
+    NoticesService._validate_publish_requirements(
+        None,
+        recipient_groups=[],
+        contact_ids=["contact-1"],
+        scope_type=NoticeScopeType.WHOLE_SOCIETY,
+        tower_ids=[],
+    )
 
 
 def test_validate_publish_requirements_missing_towers():
@@ -76,6 +91,7 @@ def test_validate_publish_requirements_missing_towers():
         NoticesService._validate_publish_requirements(
             None,
             recipient_groups=["Owner"],
+            contact_ids=[],
             scope_type=NoticeScopeType.BY_TOWER,
             tower_ids=[],
         )
@@ -103,6 +119,7 @@ def test_resolve_publish_state_draft():
         publish_mode=NoticePublishMode.DRAFT,
         publish_at=None,
         recipient_groups=[],
+        contact_ids=[],
         scope_type=NoticeScopeType.WHOLE_SOCIETY,
         tower_ids=[],
     )
@@ -194,6 +211,7 @@ def test_resolve_publish_state_now_and_scheduled():
         publish_mode=NoticePublishMode.NOW,
         publish_at=None,
         recipient_groups=["Owner"],
+        contact_ids=[],
         scope_type=NoticeScopeType.WHOLE_SOCIETY,
         tower_ids=[],
     )
@@ -205,6 +223,7 @@ def test_resolve_publish_state_now_and_scheduled():
         publish_mode=NoticePublishMode.SCHEDULE,
         publish_at=future,
         recipient_groups=["Owner"],
+        contact_ids=[],
         scope_type=NoticeScopeType.WHOLE_SOCIETY,
         tower_ids=[],
     )
@@ -219,6 +238,7 @@ def test_resolve_publish_state_schedule_required():
             publish_mode=NoticePublishMode.SCHEDULE,
             publish_at=None,
             recipient_groups=["Owner"],
+            contact_ids=[],
             scope_type=NoticeScopeType.WHOLE_SOCIETY,
             tower_ids=[],
         )
@@ -870,6 +890,7 @@ def _stub_create_repo(svc: NoticesService, *, recipient_groups: list[str]) -> No
     svc.repo.replace_towers = AsyncMock()
     svc.repo.replace_attachments = AsyncMock()
     svc.repo.list_recipient_groups = AsyncMock(return_value=recipient_groups)
+    svc.repo.list_contact_recipient_ids = AsyncMock(return_value=[])
     svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
     svc.repo.list_attachments = AsyncMock(return_value=[])
     svc.repo.fetch_notice_by_id = AsyncMock(
@@ -879,7 +900,11 @@ def _stub_create_repo(svc: NoticesService, *, recipient_groups: list[str]) -> No
         )
     )
     svc.recipient_service = MagicMock()
+    svc.recipient_service.filter_valid_project_contact_ids = AsyncMock(
+        side_effect=lambda **_kwargs: _kwargs.get("contact_ids") or []
+    )
     svc.recipient_service.resolve_recipient_user_ids = AsyncMock(return_value=[])
+    svc.recipient_service.resolve_user_ids_for_contact_ids = AsyncMock(return_value=[])
     svc.push_dispatcher = MagicMock()
     svc.push_dispatcher.send_to_user = AsyncMock()
 
@@ -919,6 +944,98 @@ async def test_create_notice_lowercase_all_recipients_expands():
 
 
 @pytest.mark.asyncio
+async def test_create_notice_publish_now_with_contact_ids_only():
+    """Success: publish now accepts direct contact targeting without groups."""
+    contact_id = "55555555-5555-5555-5555-555555555555"
+    svc = _service()
+    _stub_create_repo(svc, recipient_groups=[])
+
+    body = CreateNoticeRequest(
+        title="Private reminder",
+        contact_ids=[contact_id],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    detail = await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert detail.display_code == "NTC-1"
+    assert svc.repo.replace_recipients.await_args.kwargs["contact_ids"] == [contact_id]
+
+
+@pytest.mark.asyncio
+async def test_create_notice_multiple_contact_ids_deduped():
+    """Success: duplicate contact ids in the request are stored once."""
+    contact_a = "55555555-5555-5555-5555-555555555555"
+    contact_b = "66666666-6666-6666-6666-666666666666"
+    svc = _service()
+    _stub_create_repo(svc, recipient_groups=[])
+
+    body = CreateNoticeRequest(
+        title="Two residents",
+        contact_ids=[contact_a, contact_b, contact_a, "  ", contact_b],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert svc.repo.replace_recipients.await_args.kwargs["contact_ids"] == [
+        contact_a,
+        contact_b,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_create_notice_invalid_contact_id_fails():
+    """Failure: contact ids not in the project are rejected before insert."""
+    valid_id = "55555555-5555-5555-5555-555555555555"
+    invalid_id = "77777777-7777-7777-7777-777777777777"
+    svc = _service()
+    svc.repo.insert_notice = AsyncMock()
+    svc.recipient_service.filter_valid_project_contact_ids = AsyncMock(return_value=[valid_id])
+
+    body = CreateNoticeRequest(
+        title="Bad targeting",
+        contact_ids=[valid_id, invalid_id],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert exc_info.value.message_key == "notices.errors.invalid_contact_recipients"
+    assert invalid_id in exc_info.value.params["contact_ids"]
+    svc.repo.insert_notice.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_create_notice_publish_now_with_contacts_dispatches_push():
+    """Success: live notice push includes users resolved from contact_ids."""
+    contact_id = "55555555-5555-5555-5555-555555555555"
+    svc = _service()
+    _stub_create_repo(svc, recipient_groups=[])
+    svc.repo.list_contact_recipient_ids = AsyncMock(return_value=[contact_id])
+    svc.recipient_service.resolve_user_ids_for_contact_ids = AsyncMock(return_value=["user-9"])
+
+    body = CreateNoticeRequest(
+        title="Direct notice",
+        contact_ids=[contact_id],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    await svc.create_notice(project_id=PROJECT_ID, body=body)
+
+    svc.recipient_service.resolve_user_ids_for_contact_ids.assert_awaited_once()
+    svc.push_dispatcher.send_to_user.assert_awaited_once()
+    assert svc.push_dispatcher.send_to_user.await_args.kwargs["recipient_user_id"] == "user-9"
+
+
+def test_create_notice_schema_rejects_too_many_contact_ids():
+    """Failure: schema rejects more than the configured contact id limit."""
+    too_many = [
+        f"{index:08x}-0000-4000-8000-000000000000"
+        for index in range(NOTICE_MAX_CONTACT_RECIPIENTS + 1)
+    ]
+    with pytest.raises(ValidationError):
+        CreateNoticeRequest(
+            title="Too many contacts",
+            contact_ids=too_many,
+        )
+
+
+@pytest.mark.asyncio
 async def test_create_notice_publish_now_without_recipients_fails():
     """Failure: publish now still requires at least one recipient group."""
     svc = _service()
@@ -947,6 +1064,29 @@ async def test_create_notice_all_recipients_still_requires_towers_for_by_tower()
         await svc.create_notice(project_id=PROJECT_ID, body=body)
     assert exc_info.value.message_key == "notices.errors.towers_required"
     svc.repo.insert_notice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_notice_clears_contact_recipients_with_empty_list():
+    """Success: PATCH contact_ids: [] removes all direct contact recipients."""
+    svc = _service()
+    svc.repo.fetch_notice_by_id = AsyncMock(return_value=_notice_detail_row())
+    svc.repo.update_notice_fields = AsyncMock()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+    svc.repo.list_contact_recipient_ids = AsyncMock(return_value=["old-contact"])
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.repo.replace_recipients = AsyncMock()
+    svc.repo.replace_towers = AsyncMock()
+    svc.repo.replace_attachments = AsyncMock()
+
+    await svc.update_notice(
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        body=UpdateNoticeRequest(contact_ids=[]),
+    )
+
+    assert svc.repo.replace_recipients.await_args.kwargs["contact_ids"] == []
 
 
 @pytest.mark.asyncio

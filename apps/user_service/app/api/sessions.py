@@ -13,14 +13,12 @@ from apps.user_service.app.services.session_service import SessionService
 from apps.user_service.app.utils.common_utils import (
     check_permissions,
     ensure_staff_project_access,
-    extract_user_context,
     handle_api_exceptions,
     require_organization_creator,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.common_query import (
-    PROJECTS_MANAGEMENT_VIEW,
-    PROJECTS_MANAGEMENT_VIEW_ASSIGNED,
+    SESSIONS_MANAGEMENT_VIEW,
     SETTINGS_SYSTEM_MANAGE,
     SETTINGS_USERS_VIEW,
 )
@@ -78,20 +76,17 @@ async def get_sessions_list(
         description="Optional project filter — limits results to project members when provided.",
     ),
 ):
-    """Get all sessions for the current organization."""
+    """Get sessions for the caller, or for a project when project_id is set."""
     if project_id:
         user_context = await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
             project_id=project_id,
-            permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+            permission_codes=SESSIONS_MANAGEMENT_VIEW,
             request=request,
         )
     else:
-        user_context = await extract_user_context(current_user, db_connection)
-
-    if user_context.organization_id:
-        await check_permissions(
+        user_context = await check_permissions(
             current_user=current_user,
             db_connection=db_connection,
             permission_codes=SETTINGS_SYSTEM_MANAGE,
@@ -177,22 +172,21 @@ async def get_organization_sessions(
         description="Optional project filter — limits results to project members when provided.",
     ),
 ):
-    """Get all sessions for all users in the current organization.
-    Intended for org-level admins with settings management permission.
-    """
+    """Get all sessions for the organization, or for one project when project_id is set."""
     if project_id:
-        await ensure_staff_project_access(
+        user_context = await ensure_staff_project_access(
             current_user=current_user,
             db_connection=db_connection,
             project_id=project_id,
-            permission_codes=[PROJECTS_MANAGEMENT_VIEW, PROJECTS_MANAGEMENT_VIEW_ASSIGNED],
+            permission_codes=SESSIONS_MANAGEMENT_VIEW,
             request=request,
         )
-    user_context = await check_permissions(
-        current_user=current_user,
-        db_connection=db_connection,
-        permission_codes=SETTINGS_USERS_VIEW,
-    )
+    else:
+        user_context = await check_permissions(
+            current_user=current_user,
+            db_connection=db_connection,
+            permission_codes=SETTINGS_USERS_VIEW,
+        )
 
     # Create SessionFilter from query params
     filters = SessionFilter(

@@ -113,6 +113,9 @@ SETTINGS_MANAGEMENT_VIEW = "settings_management.view"
 SETTINGS_MANAGEMENT_EDIT = "settings_management.edit"
 SETTINGS_MANAGEMENT_BILLING = "settings_management.billing"
 
+SESSIONS_MANAGEMENT_VIEW = "sessions_management.view"
+SESSIONS_MANAGEMENT_REVOKE = "sessions_management.revoke"
+
 # Audit Logs
 # "view_system" is intended to mean org-wide (system-level) audit logs visibility.
 AUDIT_LOGS_MANAGEMENT_VIEW_SYSTEM = "audit_logs_management.view_system"
@@ -577,6 +580,18 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "Delete Project Vendors",
         "Remove vendors within assigned projects",
         "vendor",
+    ),
+    (
+        SESSIONS_MANAGEMENT_VIEW,
+        "View Project Sessions",
+        "View user sessions for members of assigned projects",
+        "sessions",
+    ),
+    (
+        SESSIONS_MANAGEMENT_REVOKE,
+        "Revoke Project Sessions",
+        "Revoke user sessions for members of assigned projects",
+        "sessions",
     ),
     (
         VISITOR_MANAGEMENT_VIEW,
