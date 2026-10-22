@@ -64,6 +64,7 @@ from apps.user_service.app.schemas.tenant_requests import (
     UpdateTenancyRequest,
 )
 from apps.user_service.app.services.contacts_service import ContactsService
+from apps.user_service.app.services.fee_billing_service import FeeBillingService
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
@@ -1611,7 +1612,28 @@ class TenantRequestsService:
             project_id=project_id,
             tenant_request_id=tenant_request_id,
         )
-        return await self._serialize_detail(row)
+        detail = await self._serialize_detail(row)
+        due = await self._total_due_amount(
+            organization_id=str(row["organization_id"]),
+            project_id=str(row["project_id"]),
+            unit_id=str(row["unit_id"]),
+        )
+        return detail.model_copy(update={"total_due_amount": due})
+
+    async def _total_due_amount(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_id: str,
+    ) -> str:
+        """Amount the unit still owes on open fee invoices, after unused credit."""
+        summary = await FeeBillingService(self.db_connection).outstanding_summary(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        return str(summary["total_outstanding"])
 
     async def _recompute_after_document_review(
         self,

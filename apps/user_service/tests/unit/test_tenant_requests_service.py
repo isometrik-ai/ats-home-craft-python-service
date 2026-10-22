@@ -473,6 +473,7 @@ def _service(
     service.units_repo.get_unit_owner_contact = AsyncMock(return_value=None)
     service.contacts_repo = AsyncMock()
     service.contacts_repo.get_contact_details = AsyncMock(return_value=None)
+    service._total_due_amount = AsyncMock(return_value="0.00")
     return service
 
 
@@ -1004,6 +1005,7 @@ async def test_get_admin_request() -> None:
     )
     assert response.documents_total_count == 3
     assert response.move_in_fee == "0"
+    assert response.total_due_amount == "0.00"
 
 
 @pytest.mark.asyncio
@@ -1017,6 +1019,48 @@ async def test_get_admin_request_includes_move_in_fee() -> None:
         tenant_request_id=REQUEST_ID,
     )
     assert response.move_in_fee == "5000"
+
+
+@pytest.mark.asyncio
+async def test_admin_detail_includes_the_unit_total_due() -> None:
+    """The unit's unpaid fee total is the total due amount on admin detail."""
+    svc = _service()
+    svc._total_due_amount = AsyncMock(return_value="1270.00")
+
+    response = await svc.get_admin_request(
+        project_id=PROJECT_ID,
+        tenant_request_id=REQUEST_ID,
+    )
+
+    assert response.total_due_amount == "1270.00"
+    svc._total_due_amount.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+    )
+
+
+@pytest.mark.asyncio
+async def test_total_due_reads_open_invoice_balance(monkeypatch) -> None:
+    """Unused credit is already removed in the fee outstanding total."""
+    billing = MagicMock()
+    billing.outstanding_summary = AsyncMock(return_value={"total_outstanding": "480.50"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.tenant_requests_service.FeeBillingService",
+        MagicMock(return_value=billing),
+    )
+    amount = await TenantRequestsService._total_due_amount(
+        _service(),
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+    )
+    assert amount == "480.50"
+    billing.outstanding_summary.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        unit_id=UNIT_ID,
+    )
 
 
 @pytest.mark.asyncio
