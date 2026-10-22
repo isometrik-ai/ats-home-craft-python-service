@@ -78,12 +78,6 @@ async def test_get_sessions_list_without_project_id(monkeypatch, client):
     """Org-wide session list works without project_id."""
     captured: dict = {}
 
-    async def fake_extract_user_context(current_user, db_connection):
-        del current_user, db_connection
-        return UserContext(
-            user_id="u1", email="u1@example.com", organization_id="org-1", user_type="member"
-        )
-
     async def fake_check_permissions(current_user, db_connection, permission_codes):
         del current_user, db_connection, permission_codes
         return UserContext(
@@ -98,10 +92,6 @@ async def test_get_sessions_list_without_project_id(monkeypatch, client):
         captured["filters"] = filters
         return {"sessions": [], "total_count": 0}
 
-    monkeypatch.setattr(
-        "apps.user_service.app.api.sessions.extract_user_context",
-        fake_extract_user_context,
-    )
     monkeypatch.setattr(
         "apps.user_service.app.api.sessions.check_permissions",
         fake_check_permissions,
