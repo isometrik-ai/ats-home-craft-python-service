@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -10,6 +11,7 @@ from apps.user_service.app.schemas.enums import (
     NOTICE_ALLOWED_ATTACHMENT_MIMES,
     NOTICE_MAX_ATTACHMENT_BYTES,
     NOTICE_MAX_ATTACHMENTS,
+    NOTICE_MAX_CONTACT_RECIPIENTS,
     NOTICE_MAX_DESCRIPTION_LENGTH,
     NOTICE_MAX_TITLE_LENGTH,
     NoticeCategory,
@@ -25,6 +27,33 @@ from apps.user_service.app.utils.notice_targeting_utils import (
     NOTICE_TARGETING_ALL,
     normalize_recipient_groups_input,
 )
+
+
+def _normalize_contact_ids_input(
+    contact_ids: object,
+    *,
+    empty_means_omitted: bool,
+) -> object:
+    """Dedupe contact ids; optionally treat an empty list as omitted (create only)."""
+    if contact_ids is None:
+        return None
+    if not isinstance(contact_ids, list):
+        return contact_ids
+    normalized = list(dict.fromkeys(str(item).strip() for item in contact_ids if str(item).strip()))
+    if empty_means_omitted:
+        return normalized or None
+    return normalized
+
+
+def _validate_contact_id_uuids(contact_ids: list[str] | None) -> list[str] | None:
+    """Ensure each contact id is a canonical UUID string (lowercase)."""
+    if contact_ids is None:
+        return None
+    try:
+        canonical = [str(UUID(contact_id)) for contact_id in contact_ids]
+    except ValueError as exc:
+        raise ValueError("contact_ids must contain valid UUIDs") from exc
+    return list(dict.fromkeys(canonical))
 
 
 class NoticeAttachmentInput(BaseModel):
@@ -66,6 +95,13 @@ class CreateNoticeRequest(BaseModel):
             "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
         ),
     )
+    contact_ids: list[str] | None = Field(
+        None,
+        description=(
+            "Send the notice to specific residents by contact id (one or many). "
+            "Can be combined with recipient_groups."
+        ),
+    )
     scope_type: NoticeScopeType = NoticeScopeType.WHOLE_SOCIETY
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode = NoticePublishMode.DRAFT
@@ -81,6 +117,21 @@ class CreateNoticeRequest(BaseModel):
     def normalize_all_recipient_shortcut(cls, recipient_groups: object) -> object:
         """Accept All/all as a select-all recipient shortcut."""
         return normalize_recipient_groups_input(recipient_groups)
+
+    @field_validator("contact_ids", mode="before")
+    @classmethod
+    def normalize_contact_ids(cls, contact_ids: object) -> object:
+        """Dedupe and drop blank contact ids."""
+        return _normalize_contact_ids_input(contact_ids, empty_means_omitted=True)
+
+    @field_validator("contact_ids")
+    @classmethod
+    def validate_contact_ids(cls, contact_ids: list[str] | None) -> list[str] | None:
+        """Validate UUID shape, count, and max direct contact recipients."""
+        contact_ids = _validate_contact_id_uuids(contact_ids)
+        if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
+            raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
+        return contact_ids
 
     @field_validator("attachments")
     @classmethod
@@ -108,6 +159,10 @@ class UpdateNoticeRequest(BaseModel):
             "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
         ),
     )
+    contact_ids: list[str] | None = Field(
+        None,
+        description="Send the notice to specific residents by contact id (one or many).",
+    )
     scope_type: NoticeScopeType | None = None
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode | None = None
@@ -119,6 +174,21 @@ class UpdateNoticeRequest(BaseModel):
     def normalize_all_recipient_shortcut(cls, recipient_groups: object) -> object:
         """Accept All/all as a select-all recipient shortcut."""
         return normalize_recipient_groups_input(recipient_groups)
+
+    @field_validator("contact_ids", mode="before")
+    @classmethod
+    def normalize_contact_ids(cls, contact_ids: object) -> object:
+        """Dedupe and drop blank contact ids; preserve explicit empty list for PATCH."""
+        return _normalize_contact_ids_input(contact_ids, empty_means_omitted=False)
+
+    @field_validator("contact_ids")
+    @classmethod
+    def validate_contact_ids(cls, contact_ids: list[str] | None) -> list[str] | None:
+        """Validate UUID shape, count, and max direct contact recipients."""
+        contact_ids = _validate_contact_id_uuids(contact_ids)
+        if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
+            raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
+        return contact_ids
 
     @field_validator("attachments")
     @classmethod
@@ -248,6 +318,7 @@ class NoticeDetailResponse(BaseModel):
     category: NoticeCategory
     category_label: str
     recipient_groups: list[str]
+    contact_ids: list[str] = Field(default_factory=list)
     scope_type: NoticeScopeType
     scope_label: str | None = None
     tower_ids: list[str] = Field(default_factory=list)

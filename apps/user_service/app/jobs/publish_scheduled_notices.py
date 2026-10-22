@@ -43,6 +43,10 @@ async def publish_scheduled_notices(
             organization_id=org_id,
             notice_id=notice_id,
         )
+        contact_ids = await repo.list_contact_recipient_ids(
+            organization_id=org_id,
+            notice_id=notice_id,
+        )
         towers = await repo.list_towers_for_notice(
             organization_id=org_id,
             notice_id=notice_id,
@@ -54,14 +58,23 @@ async def publish_scheduled_notices(
         )
         if notice_row is None:
             continue
-        user_ids = await recipient_service.resolve_recipient_user_ids(
-            organization_id=org_id,
-            project_id=proj_id,
-            notice_id=notice_id,
-            recipient_groups=recipient_groups,
-            scope_type=str(notice_row["scope_type"]),
-            tower_ids=[str(t["tower_id"]) for t in towers],
+        user_ids: set[str] = set(
+            await recipient_service.resolve_recipient_user_ids(
+                organization_id=org_id,
+                project_id=proj_id,
+                notice_id=notice_id,
+                recipient_groups=recipient_groups,
+                scope_type=str(notice_row["scope_type"]),
+                tower_ids=[str(t["tower_id"]) for t in towers],
+            )
         )
+        if contact_ids:
+            user_ids.update(
+                await recipient_service.resolve_user_ids_for_contact_ids(
+                    organization_id=org_id,
+                    contact_ids=contact_ids,
+                )
+            )
         for user_id in user_ids:
             push_fields = NoticesService._notice_publish_push_fields(
                 project_id=proj_id,

@@ -119,6 +119,52 @@ class NoticeRecipientResolutionService:
 
         return list(user_ids)
 
+    async def filter_valid_project_contact_ids(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        """Return contact ids that exist in the org and belong to the project."""
+        if not contact_ids:
+            return []
+
+        rows = await self.db_connection.fetch(
+            """
+            SELECT DISTINCT ct.id::text AS contact_id
+            FROM contacts ct
+            INNER JOIN contact_units cu
+              ON cu.contact_id = ct.id
+             AND cu.organization_id = ct.organization_id
+            WHERE ct.organization_id = $1::uuid
+              AND ct.status <> $2
+              AND cu.project_id = $3::uuid
+              AND cu.status IN ('active', 'pending')
+              AND ct.id = ANY($4::uuid[])
+            """,
+            organization_id,
+            ClientStatus.DELETED.value,
+            project_id,
+            contact_ids,
+        )
+        found = {str(row["contact_id"]) for row in rows if row.get("contact_id")}
+        return [contact_id for contact_id in contact_ids if contact_id in found]
+
+    async def resolve_user_ids_for_contact_ids(
+        self,
+        *,
+        organization_id: str,
+        contact_ids: list[str],
+    ) -> list[str]:
+        """Map resident contact ids to portal user ids for push delivery."""
+        return list(
+            await self._user_ids_for_contacts(
+                organization_id=organization_id,
+                contact_ids=set(contact_ids),
+            )
+        )
+
     async def _count_distinct_recipients(
         self,
         *,
@@ -378,13 +424,44 @@ class NoticeRecipientResolutionService:
         if notice.get("status") != "live":
             return False
 
+        contact_recipient_ids = list(notice.get("contact_recipient_ids") or [])
+        if self._is_direct_contact_recipient(contact_id, contact_recipient_ids):
+            return True
+
         recipient_groups = list(notice.get("recipient_groups") or [])
         if not recipient_groups:
             return False
 
-        scope_type = str(notice.get("scope_type") or "whole_society")
-        tower_ids = list(notice.get("tower_ids") or [])
+        return await self._is_visible_via_recipient_groups(
+            organization_id=organization_id,
+            project_id=project_id,
+            recipient_groups=recipient_groups,
+            scope_type=str(notice.get("scope_type") or "whole_society"),
+            tower_ids=list(notice.get("tower_ids") or []),
+            contact_id=contact_id,
+            contact_user_id=contact_user_id,
+        )
 
+    @staticmethod
+    def _is_direct_contact_recipient(
+        contact_id: str | None,
+        contact_recipient_ids: list[str],
+    ) -> bool:
+        """Return whether the contact is explicitly targeted by id."""
+        return bool(contact_id and contact_recipient_ids and contact_id in contact_recipient_ids)
+
+    async def _is_visible_via_recipient_groups(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        recipient_groups: list[str],
+        scope_type: str,
+        tower_ids: list[str],
+        contact_id: str | None,
+        contact_user_id: str | None,
+    ) -> bool:
+        """Return whether the caller matches notice audience groups."""
         for group in recipient_groups:
             if group in {"Owner", "Tenant"}:
                 if contact_id and await self._contact_has_role_in_scope(
@@ -518,9 +595,19 @@ class NoticeRecipientResolutionService:
                   SELECT array_agg(nr.recipient_group::text)
                   FROM notice_recipients nr
                   WHERE nr.notice_id = n.id
+                    AND nr.recipient_group IS NOT NULL
                 ),
                 ARRAY[]::text[]
               ) AS recipient_groups,
+              COALESCE(
+                (
+                  SELECT array_agg(nr.contact_id::text ORDER BY nr.contact_id)
+                  FROM notice_recipients nr
+                  WHERE nr.notice_id = n.id
+                    AND nr.contact_id IS NOT NULL
+                ),
+                ARRAY[]::text[]
+              ) AS contact_recipient_ids,
               COALESCE(
                 (
                   SELECT array_agg(nt.tower_id::text)
