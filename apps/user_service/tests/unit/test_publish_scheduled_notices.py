@@ -19,13 +19,19 @@ NOTICE = "33333333-3333-3333-3333-333333333333"
 @pytest.mark.asyncio
 async def test_publish_scheduled_notices_empty():
     conn = MagicMock()
-    with patch(
-        "apps.user_service.app.jobs.publish_scheduled_notices.NoticesRepository"
-    ) as repo_cls:
+    materialize = AsyncMock(return_value=[])
+    with (
+        patch("apps.user_service.app.jobs.publish_scheduled_notices.NoticesRepository") as repo_cls,
+        patch(
+            "apps.user_service.app.jobs.publish_scheduled_notices.materialize_due_recurring_notices",
+            materialize,
+        ),
+    ):
         repo = repo_cls.return_value
         repo.publish_due_scheduled_notices = AsyncMock(return_value=[])
         result = await publish_scheduled_notices(conn)
     assert result == []
+    materialize.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -46,6 +52,10 @@ async def test_publish_scheduled_notices_dispatches_push():
         patch(
             "apps.user_service.app.jobs.publish_scheduled_notices.PushNotificationDispatcher"
         ) as push_cls,
+        patch(
+            "apps.user_service.app.jobs.publish_scheduled_notices.materialize_due_recurring_notices",
+            AsyncMock(return_value=[]),
+        ),
     ):
         repo = repo_cls.return_value
         repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE])
@@ -82,6 +92,10 @@ async def test_publish_scheduled_notices_skips_missing_notice_rows():
         patch(
             "apps.user_service.app.jobs.publish_scheduled_notices.PushNotificationDispatcher"
         ) as push_cls,
+        patch(
+            "apps.user_service.app.jobs.publish_scheduled_notices.materialize_due_recurring_notices",
+            AsyncMock(return_value=[]),
+        ),
     ):
         repo = repo_cls.return_value
         repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE])

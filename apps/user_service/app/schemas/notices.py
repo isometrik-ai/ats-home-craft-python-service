@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -20,7 +20,11 @@ from apps.user_service.app.schemas.enums import (
     NoticePublishMode,
     NoticeRecipientGroup,
     NoticeRecipientInputGroup,
+    NoticeRecurrenceEndType,
+    NoticeRecurrenceFrequency,
     NoticeScopeType,
+    NoticeSeriesAction,
+    NoticeSeriesStatus,
     NoticeStatus,
 )
 from apps.user_service.app.utils.notice_targeting_utils import (
@@ -68,6 +72,42 @@ class NoticeAttachmentInput(BaseModel):
     sort_order: int = Field(..., ge=0, le=3)
 
 
+class NoticeRepeatInput(BaseModel):
+    """Recurrence rule when Repeat this notice is ON."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frequency: NoticeRecurrenceFrequency
+    weekly_days: list[int] | None = Field(
+        None,
+        description="ISO weekday 1=Mon … 7=Sun; required when frequency=weekly",
+    )
+    monthly_day: int | None = Field(None, ge=1, le=31)
+    monthly_use_last_day: bool = False
+    time_of_day: time
+    starts_on: date
+    end_type: NoticeRecurrenceEndType = NoticeRecurrenceEndType.NEVER
+    end_date: date | None = None
+    max_occurrences: int | None = Field(None, ge=1)
+
+
+class NoticeRecurrencePreviewRequest(BaseModel):
+    """Preview recurrence without persisting."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repeat: NoticeRepeatInput
+    timezone: str | None = Field(None, max_length=64)
+
+
+class NoticeRecurrencePreviewResponse(BaseModel):
+    """Preview next sends for the create form."""
+
+    recurrence_summary: str
+    first_send_at: datetime
+    upcoming_sends: list[datetime]
+
+
 class NoticeAttachmentResponse(BaseModel):
     """Attachment row in notice detail."""
 
@@ -111,6 +151,7 @@ class CreateNoticeRequest(BaseModel):
     pin_duration: NoticePinDuration = NoticePinDuration.MANUAL
     confirm_pin_replace: bool = False
     attachments: list[NoticeAttachmentInput] | None = None
+    repeat: NoticeRepeatInput | None = None
 
     @field_validator("recipient_groups", mode="before")
     @classmethod
@@ -168,6 +209,8 @@ class UpdateNoticeRequest(BaseModel):
     publish_mode: NoticePublishMode | None = None
     publish_at: datetime | None = None
     attachments: list[NoticeAttachmentInput] | None = None
+    repeat: NoticeRepeatInput | None = None
+    series_action: NoticeSeriesAction | None = None
 
     @field_validator("recipient_groups", mode="before")
     @classmethod
@@ -303,6 +346,11 @@ class NoticeListItemResponse(BaseModel):
     editable: bool = False
     created_at: datetime
     attachments: list[NoticeAttachmentResponse] = Field(default_factory=list)
+    is_recurring_template: bool = False
+    series_status: NoticeSeriesStatus | None = None
+    next_occurrence_at: datetime | None = None
+    recurring_source_notice_id: str | None = None
+    series_occurrence_index: int | None = None
 
 
 class NoticeDetailResponse(BaseModel):
@@ -338,6 +386,14 @@ class NoticeDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     created_by_user_id: str | None = None
+    is_recurring_template: bool = False
+    series_status: NoticeSeriesStatus | None = None
+    next_occurrence_at: datetime | None = None
+    recurring_source_notice_id: str | None = None
+    series_occurrence_index: int | None = None
+    recurrence_summary: str | None = None
+    upcoming_sends: list[datetime] = Field(default_factory=list)
+    repeat: NoticeRepeatInput | None = None
 
 
 class ReachEstimateResponse(BaseModel):

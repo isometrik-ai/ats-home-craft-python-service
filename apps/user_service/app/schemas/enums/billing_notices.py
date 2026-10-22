@@ -76,6 +76,40 @@ class NoticePublishMode(str, Enum):
     DRAFT = "draft"
     NOW = "now"
     SCHEDULE = "schedule"
+    SERIES_START = "series_start"
+
+
+class NoticeSeriesStatus(str, Enum):
+    """Recurring template lifecycle (Postgres notice_series_status)."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class NoticeRecurrenceFrequency(str, Enum):
+    """Recurrence frequency (Postgres notice_recurrence_frequency)."""
+
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
+class NoticeRecurrenceEndType(str, Enum):
+    """Recurrence end rule (Postgres notice_recurrence_end_type)."""
+
+    NEVER = "never"
+    ON_DATE = "on_date"
+    AFTER_COUNT = "after_count"
+
+
+class NoticeSeriesAction(str, Enum):
+    """PATCH action for recurring templates."""
+
+    PAUSE = "pause"
+    RESUME = "resume"
+    CANCEL = "cancel"
 
 
 class NoticeListStatus(str, Enum):

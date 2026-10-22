@@ -1330,7 +1330,14 @@
       "project_access_denied": "You do not have access to manage notices for this project.",
       "feed_access_denied": "You do not have access to notices for this project.",
       "likes_require_contact": "Unable to like notices for this account.",
-      "not_found": "The notice could not be found."
+      "not_found": "The notice could not be found.",
+      "repeat_with_schedule": "Recurring notices cannot use publish now or one-time schedule.",
+      "weekly_days_required": "Select at least one weekday for a weekly recurring notice.",
+      "invalid_monthly_day": "Select a valid day of the month or use last day of month.",
+      "series_not_editable": "Pause the recurring series before editing, or the series cannot be changed.",
+      "invalid_end_date": "End date must be on or after the first send date.",
+      "invalid_max_occurrences": "Occurrence count must be at least 1.",
+      "invalid_publish_mode": "Invalid publish mode for this notice."
     },
     "success": {
       "summary_retrieved": "Notice summary retrieved successfully.",
@@ -1345,6 +1352,7 @@
       "pinned": "Notice pinned to banner successfully.",
       "unpinned": "Notice unpinned successfully.",
       "publish_due_completed": "Due scheduled notices published successfully.",
+      "recurrence_preview": "Recurrence preview generated successfully.",
       "expire_pins_completed": "Expired banner pins cleared successfully.",
       "banner_retrieved": "Notice banner retrieved successfully.",
       "feed_retrieved": "Notice feed retrieved successfully.",

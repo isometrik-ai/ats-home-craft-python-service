@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 import asyncpg
@@ -15,7 +15,11 @@ from apps.user_service.app.schemas.enums import (
     NoticeCategory,
     NoticePinDuration,
     NoticePublishMode,
+    NoticeRecurrenceEndType,
+    NoticeRecurrenceFrequency,
     NoticeScopeType,
+    NoticeSeriesAction,
+    NoticeSeriesStatus,
     NoticeStatus,
 )
 from apps.user_service.app.schemas.notices import (
@@ -26,6 +30,9 @@ from apps.user_service.app.schemas.notices import (
     NoticeDetailResponse,
     NoticeListItemResponse,
     NoticeListQuery,
+    NoticeRecurrencePreviewRequest,
+    NoticeRecurrencePreviewResponse,
+    NoticeRepeatInput,
     NoticeSummaryResponse,
     PinNoticeRequest,
     ReachEstimateQuery,
@@ -40,6 +47,15 @@ from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
 from apps.user_service.app.utils.common_utils import UserContext
+from apps.user_service.app.utils.notice_recurrence import (
+    RecurrenceRule,
+    exceeds_after_count,
+    exceeds_end_on_date,
+    first_occurrence,
+    next_occurrence_after,
+    preview_recurrence,
+    rule_from_notice_row,
+)
 from apps.user_service.app.utils.notice_targeting_utils import expand_recipient_groups
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -47,6 +63,8 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
+
+DEFAULT_RECURRENCE_TIMEZONE = "Asia/Kolkata"
 
 
 class NoticesService:
@@ -144,6 +162,8 @@ class NoticesService:
         body: CreateNoticeRequest,
     ) -> NoticeDetailResponse:
         """Create draft, scheduled, or live notice."""
+        if body.repeat is not None:
+            return await self._create_recurring_notice(project_id=project_id, body=body)
         self._validate_content(body.title, body.description)
         self._validate_attachments(body.attachments)
 
@@ -221,6 +241,7 @@ class NoticesService:
         body: UpdateNoticeRequest,
     ) -> NoticeDetailResponse:
         """Update draft or scheduled notice."""
+        # pylint: disable=too-complex
         existing = await self.repo.fetch_notice_by_id(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -230,6 +251,13 @@ class NoticesService:
             raise NotFoundException(
                 message_key="notices.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if existing.get("is_recurring_template"):
+            return await self._update_recurring_template(
+                project_id=project_id,
+                notice_id=notice_id,
+                existing=existing,
+                body=body,
             )
         self._assert_editable(str(existing["status"]))
 
@@ -427,6 +455,14 @@ class NoticesService:
                 message_key="notices.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        if source.get("is_recurring_template") and str(source.get("series_status")) not in {
+            NoticeSeriesStatus.DRAFT.value,
+            NoticeSeriesStatus.PAUSED.value,
+        }:
+            raise ConflictException(
+                message_key="notices.errors.series_not_editable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         self._assert_duplicatable(str(source["status"]))
         return await self._duplicate_from_source(
             project_id=project_id,
@@ -609,7 +645,513 @@ class NoticesService:
                     notice_id=notice_id,
                     title=str(row["title"]),
                 )
-        return published_ids
+        recurring_ids = await self.materialize_due_recurring_templates(project_id=project_id)
+        return published_ids + recurring_ids
+
+    async def preview_recurrence(
+        self,
+        *,
+        body: NoticeRecurrencePreviewRequest,
+    ) -> NoticeRecurrencePreviewResponse:
+        """Return human summary and upcoming sends for a repeat block."""
+        recurrence_tz = body.timezone or DEFAULT_RECURRENCE_TIMEZONE
+        rule = self._repeat_input_to_rule(body.repeat)
+        self._validate_repeat_rule(rule)
+        preview = preview_recurrence(rule, timezone=recurrence_tz, count=4)
+        return NoticeRecurrencePreviewResponse(
+            recurrence_summary=preview.recurrence_summary,
+            first_send_at=preview.first_send_at,
+            upcoming_sends=preview.upcoming_sends,
+        )
+
+    async def materialize_due_recurring_templates(
+        self,
+        *,
+        project_id: str | None = None,
+    ) -> list[str]:
+        """Materialize at most one live notice per due recurring template."""
+        templates = await self.repo.lock_due_recurring_templates(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            limit=50,
+        )
+        instance_ids: list[str] = []
+        for template in templates:
+            if str(template.get("organization_id")) != self.organization_id:
+                continue
+            instance_id = await self._materialize_recurring_template(template)
+            if instance_id:
+                instance_ids.append(instance_id)
+        return instance_ids
+
+    async def _create_recurring_notice(
+        self,
+        *,
+        project_id: str,
+        body: CreateNoticeRequest,
+    ) -> NoticeDetailResponse:
+        """Create a recurring notice template."""
+        self._validate_content(body.title, body.description)
+        self._validate_attachments(body.attachments)
+        if body.publish_mode in {NoticePublishMode.NOW, NoticePublishMode.SCHEDULE}:
+            raise ValidationException(
+                message_key="notices.errors.repeat_with_schedule",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if body.publish_mode not in {NoticePublishMode.DRAFT, NoticePublishMode.SERIES_START}:
+            raise ValidationException(
+                message_key="notices.errors.invalid_publish_mode",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        assert body.repeat is not None
+        recipient_groups = self._groups_to_values(body.recipient_groups)
+        contact_ids = await self._validate_project_contact_ids(
+            project_id=project_id,
+            contact_ids=list(body.contact_ids or []),
+        )
+        tower_ids = body.tower_ids or []
+        self._validate_publish_requirements(
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=body.scope_type,
+            tower_ids=tower_ids,
+        )
+        rule = self._repeat_input_to_rule(body.repeat)
+        self._validate_repeat_rule(rule)
+        recurrence_tz = DEFAULT_RECURRENCE_TIMEZONE
+        series_status = NoticeSeriesStatus.DRAFT.value
+        next_at: datetime | None = None
+        if body.publish_mode == NoticePublishMode.SERIES_START:
+            series_status = NoticeSeriesStatus.ACTIVE.value
+            next_at = first_occurrence(rule, timezone=recurrence_tz)
+
+        sequence_number = await self.repo.allocate_sequence_number(
+            organization_id=self.organization_id,
+            project_id=project_id,
+        )
+        display_code = f"NTC-{sequence_number}"
+        pin_duration: str | None = body.pin_duration.value if body.pin_to_banner else None
+        row = await self.repo.insert_recurring_template(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            display_code=display_code,
+            sequence_number=sequence_number,
+            title=body.title.strip(),
+            description=body.description.strip(),
+            category=body.category.value,
+            scope_type=body.scope_type.value,
+            series_status=series_status,
+            recurrence_frequency=rule.frequency.value,
+            recurrence_weekly_days=list(rule.weekly_days) if rule.weekly_days else None,
+            recurrence_monthly_day=rule.monthly_day,
+            recurrence_monthly_use_last_day=rule.monthly_use_last_day,
+            recurrence_time_of_day=rule.time_of_day,
+            recurrence_timezone=recurrence_tz,
+            recurrence_starts_on=rule.starts_on,
+            recurrence_end_type=rule.end_type.value,
+            recurrence_end_date=rule.end_date,
+            recurrence_max_occurrences=rule.max_occurrences,
+            next_occurrence_at=next_at,
+            series_pin_to_banner=body.pin_to_banner,
+            series_slot_index=body.slot_index,
+            series_pin_duration=pin_duration,
+            series_pin_confirm_replace=body.confirm_pin_replace,
+            created_by_user_id=self.user_id,
+            updated_by_user_id=self.user_id,
+        )
+        notice_id = str(row["id"])
+        await self._replace_children(
+            notice_id=notice_id,
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=body.scope_type,
+            tower_ids=tower_ids,
+            attachments=body.attachments,
+        )
+        if next_at is not None and next_at <= datetime.now(timezone.utc):
+            await self._materialize_recurring_template(
+                await self.repo.fetch_notice_by_id(
+                    organization_id=self.organization_id,
+                    project_id=project_id,
+                    notice_id=notice_id,
+                )
+                or row
+            )
+        return await self.get_notice(project_id=project_id, notice_id=notice_id)
+
+    async def _update_recurring_template(
+        self,
+        *,
+        project_id: str,
+        notice_id: str,
+        existing: dict[str, Any],
+        body: UpdateNoticeRequest,
+    ) -> NoticeDetailResponse:
+        """Update or control lifecycle of a recurring template."""
+        # pylint: disable=too-complex
+        series_status = str(existing.get("series_status") or "")
+        if body.series_action is not None:
+            return await self._apply_series_action(
+                project_id=project_id,
+                notice_id=notice_id,
+                existing=existing,
+                action=body.series_action,
+            )
+        if body.publish_mode is not None:
+            raise ValidationException(
+                message_key="notices.errors.repeat_with_schedule",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if series_status not in {
+            NoticeSeriesStatus.DRAFT.value,
+            NoticeSeriesStatus.PAUSED.value,
+        }:
+            raise ConflictException(
+                message_key="notices.errors.series_not_editable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        title = body.title.strip() if body.title is not None else existing["title"]
+        description = (
+            body.description.strip() if body.description is not None else existing["description"]
+        )
+        self._validate_content(title, description)
+        if body.attachments is not None:
+            self._validate_attachments(body.attachments)
+
+        fields: dict[str, Any] = {
+            "title": title,
+            "description": description,
+            "updated_by_user_id": self.user_id,
+        }
+        if body.category is not None:
+            fields["category"] = body.category.value
+        if body.scope_type is not None:
+            fields["scope_type"] = body.scope_type.value
+        if body.repeat is not None:
+            rule = self._repeat_input_to_rule(body.repeat)
+            self._validate_repeat_rule(rule)
+            recurrence_tz = str(existing.get("recurrence_timezone") or DEFAULT_RECURRENCE_TIMEZONE)
+            fields.update(self._recurrence_fields_from_rule(rule, timezone=recurrence_tz))
+            if series_status == NoticeSeriesStatus.PAUSED.value:
+                fields["next_occurrence_at"] = first_occurrence(rule, timezone=recurrence_tz)
+
+        await self.repo.update_notice_fields(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+            fields=fields,
+        )
+
+        current_groups = await self.repo.list_recipient_groups(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
+        current_towers = await self.repo.list_towers_for_notice(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
+        current_contact_ids = await self.repo.list_contact_recipient_ids(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
+        recipient_groups = (
+            self._groups_to_values(body.recipient_groups)
+            if body.recipient_groups is not None
+            else current_groups
+        )
+        if body.contact_ids is not None:
+            contact_ids = await self._validate_project_contact_ids(
+                project_id=project_id,
+                contact_ids=list(body.contact_ids),
+            )
+        else:
+            contact_ids = current_contact_ids
+        scope_type = (
+            body.scope_type
+            if body.scope_type is not None
+            else NoticeScopeType(str(existing["scope_type"]))
+        )
+        tower_ids = (
+            body.tower_ids
+            if body.tower_ids is not None
+            else [str(row["tower_id"]) for row in current_towers]
+        )
+        if (
+            body.recipient_groups is not None
+            or body.contact_ids is not None
+            or body.tower_ids is not None
+            or body.scope_type is not None
+            or body.attachments is not None
+        ):
+            await self._replace_children(
+                notice_id=notice_id,
+                recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
+                scope_type=scope_type,
+                tower_ids=tower_ids,
+                attachments=body.attachments
+                if body.attachments is not None
+                else await self._attachments_from_db(notice_id),
+            )
+        return await self.get_notice(project_id=project_id, notice_id=notice_id)
+
+    async def _apply_series_action(
+        self,
+        *,
+        project_id: str,
+        notice_id: str,
+        existing: dict[str, Any],
+        action: NoticeSeriesAction,
+    ) -> NoticeDetailResponse:
+        """Pause, resume, or cancel an active recurring template."""
+        recurrence_tz = str(existing.get("recurrence_timezone") or DEFAULT_RECURRENCE_TIMEZONE)
+        fields: dict[str, Any] = {"updated_by_user_id": self.user_id}
+        if action == NoticeSeriesAction.PAUSE:
+            if str(existing.get("series_status")) != NoticeSeriesStatus.ACTIVE.value:
+                raise ConflictException(
+                    message_key="notices.errors.series_not_editable",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+            fields["series_status"] = NoticeSeriesStatus.PAUSED.value
+        elif action == NoticeSeriesAction.RESUME:
+            if str(existing.get("series_status")) != NoticeSeriesStatus.PAUSED.value:
+                raise ConflictException(
+                    message_key="notices.errors.series_not_editable",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+            rule = rule_from_notice_row(existing)
+            fields["series_status"] = NoticeSeriesStatus.ACTIVE.value
+            fields["next_occurrence_at"] = first_occurrence(rule, timezone=recurrence_tz)
+        elif action == NoticeSeriesAction.CANCEL:
+            fields["series_status"] = NoticeSeriesStatus.CANCELLED.value
+            fields["next_occurrence_at"] = None
+        await self.repo.update_notice_fields(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+            fields=fields,
+        )
+        refreshed = await self.repo.fetch_notice_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+        )
+        if (
+            action == NoticeSeriesAction.RESUME
+            and refreshed
+            and refreshed.get("next_occurrence_at")
+            and refreshed["next_occurrence_at"] <= datetime.now(timezone.utc)
+        ):
+            await self._materialize_recurring_template(refreshed)
+        return await self.get_notice(project_id=project_id, notice_id=notice_id)
+
+    async def _materialize_recurring_template(self, template: dict[str, Any]) -> str | None:
+        """Create one live notice from a recurring template row."""
+        # pylint: disable=too-complex
+        template_id = str(template["id"])
+        project_id = str(template["project_id"])
+        org_id = str(template["organization_id"])
+        if str(template.get("series_status")) != NoticeSeriesStatus.ACTIVE.value:
+            return None
+        next_at = template.get("next_occurrence_at")
+        if next_at is None:
+            return None
+        recurrence_tz = str(template.get("recurrence_timezone") or DEFAULT_RECURRENCE_TIMEZONE)
+        rule = rule_from_notice_row(template)
+        sent = int(template.get("occurrences_sent") or 0)
+        if exceeds_after_count(rule, occurrences_sent=sent):
+            await self.repo.update_notice_fields(
+                organization_id=org_id,
+                project_id=project_id,
+                notice_id=template_id,
+                fields={
+                    "series_status": NoticeSeriesStatus.COMPLETED.value,
+                    "next_occurrence_at": None,
+                    "updated_by_user_id": self.user_id,
+                },
+            )
+            return None
+        if exceeds_end_on_date(rule, candidate=next_at, timezone=recurrence_tz):
+            await self.repo.update_notice_fields(
+                organization_id=org_id,
+                project_id=project_id,
+                notice_id=template_id,
+                fields={
+                    "series_status": NoticeSeriesStatus.COMPLETED.value,
+                    "next_occurrence_at": None,
+                    "updated_by_user_id": self.user_id,
+                },
+            )
+            return None
+        if (
+            rule.end_type == NoticeRecurrenceEndType.AFTER_COUNT
+            and rule.max_occurrences is not None
+            and sent + 1 > rule.max_occurrences
+        ):
+            await self.repo.update_notice_fields(
+                organization_id=org_id,
+                project_id=project_id,
+                notice_id=template_id,
+                fields={
+                    "series_status": NoticeSeriesStatus.COMPLETED.value,
+                    "next_occurrence_at": None,
+                    "updated_by_user_id": self.user_id,
+                },
+            )
+            return None
+
+        sequence_number = await self.repo.allocate_sequence_number(
+            organization_id=org_id,
+            project_id=project_id,
+        )
+        display_code = f"NTC-{sequence_number}"
+        published_at = next_at
+        if published_at.tzinfo is None:
+            published_at = published_at.replace(tzinfo=timezone.utc)
+        instance = await self.repo.insert_notice(
+            organization_id=org_id,
+            project_id=project_id,
+            display_code=display_code,
+            sequence_number=sequence_number,
+            title=str(template["title"]),
+            description=str(template["description"]),
+            category=str(template["category"]),
+            status=NoticeStatus.LIVE.value,
+            scope_type=str(template["scope_type"]),
+            publish_at=None,
+            published_at=published_at,
+            duplicate_of_id=None,
+            created_by_user_id=self.user_id,
+            updated_by_user_id=self.user_id,
+            recurring_source_notice_id=template_id,
+            series_occurrence_index=sent + 1,
+        )
+        instance_id = str(instance["id"])
+        await self.repo.copy_notice_children(
+            organization_id=org_id,
+            source_notice_id=template_id,
+            target_notice_id=instance_id,
+        )
+
+        if template.get("series_pin_to_banner"):
+            pin_duration = NoticePinDuration.MANUAL
+            raw_duration = template.get("series_pin_duration")
+            if raw_duration:
+                pin_duration = NoticePinDuration(str(raw_duration))
+            await self._pin_notice_internal(
+                project_id=project_id,
+                notice_id=instance_id,
+                slot_index=int(template["series_slot_index"])
+                if template.get("series_slot_index")
+                else None,
+                pin_duration=pin_duration,
+                confirm_pin_replace=bool(template.get("series_pin_confirm_replace")),
+            )
+
+        new_sent = sent + 1
+        following = next_occurrence_after(rule, after=published_at, timezone=recurrence_tz)
+        template_fields: dict[str, Any] = {
+            "occurrences_sent": new_sent,
+            "updated_by_user_id": self.user_id,
+        }
+        if following is None or exceeds_end_on_date(
+            rule, candidate=following, timezone=recurrence_tz
+        ):
+            template_fields["series_status"] = NoticeSeriesStatus.COMPLETED.value
+            template_fields["next_occurrence_at"] = None
+        elif exceeds_after_count(rule, occurrences_sent=new_sent):
+            template_fields["series_status"] = NoticeSeriesStatus.COMPLETED.value
+            template_fields["next_occurrence_at"] = None
+        elif (
+            rule.end_type == NoticeRecurrenceEndType.AFTER_COUNT
+            and rule.max_occurrences is not None
+            and new_sent >= rule.max_occurrences
+        ):
+            template_fields["series_status"] = NoticeSeriesStatus.COMPLETED.value
+            template_fields["next_occurrence_at"] = None
+        else:
+            template_fields["next_occurrence_at"] = following
+
+        await self.repo.update_notice_fields(
+            organization_id=org_id,
+            project_id=project_id,
+            notice_id=template_id,
+            fields=template_fields,
+        )
+        await self._dispatch_publish_push(
+            project_id=project_id,
+            notice_id=instance_id,
+            title=str(template["title"]),
+        )
+        return instance_id
+
+    @staticmethod
+    def _repeat_input_to_rule(repeat: NoticeRepeatInput) -> RecurrenceRule:
+        """Map API repeat input to a normalized recurrence rule."""
+        weekly: tuple[int, ...] | None = None
+        if repeat.weekly_days:
+            weekly = tuple(sorted(set(repeat.weekly_days)))
+        return RecurrenceRule(
+            frequency=repeat.frequency,
+            weekly_days=weekly,
+            monthly_day=repeat.monthly_day,
+            monthly_use_last_day=repeat.monthly_use_last_day,
+            time_of_day=repeat.time_of_day,
+            starts_on=repeat.starts_on,
+            end_type=repeat.end_type,
+            end_date=repeat.end_date,
+            max_occurrences=repeat.max_occurrences,
+        )
+
+    @staticmethod
+    def _recurrence_fields_from_rule(rule: RecurrenceRule, *, timezone: str) -> dict[str, Any]:
+        """Build notices-table column dict from a recurrence rule."""
+        return {
+            "recurrence_frequency": rule.frequency.value,
+            "recurrence_weekly_days": list(rule.weekly_days) if rule.weekly_days else None,
+            "recurrence_monthly_day": rule.monthly_day,
+            "recurrence_monthly_use_last_day": rule.monthly_use_last_day,
+            "recurrence_time_of_day": rule.time_of_day,
+            "recurrence_timezone": timezone,
+            "recurrence_starts_on": rule.starts_on,
+            "recurrence_end_type": rule.end_type.value,
+            "recurrence_end_date": rule.end_date,
+            "recurrence_max_occurrences": rule.max_occurrences,
+        }
+
+    def _validate_repeat_rule(self, rule: RecurrenceRule) -> None:
+        """Raise ValidationException when repeat fields are inconsistent."""
+        if rule.frequency == NoticeRecurrenceFrequency.WEEKLY and not rule.weekly_days:
+            raise ValidationException(
+                message_key="notices.errors.weekly_days_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if rule.frequency == NoticeRecurrenceFrequency.MONTHLY:
+            if not rule.monthly_use_last_day and rule.monthly_day is None:
+                raise ValidationException(
+                    message_key="notices.errors.invalid_monthly_day",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        if rule.end_type == NoticeRecurrenceEndType.ON_DATE:
+            if rule.end_date is None:
+                raise ValidationException(
+                    message_key="notices.errors.invalid_end_date",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+            first = first_occurrence(rule, timezone=DEFAULT_RECURRENCE_TIMEZONE)
+            if rule.end_date < first.date():
+                raise ValidationException(
+                    message_key="notices.errors.invalid_end_date",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                )
+        if rule.end_type == NoticeRecurrenceEndType.AFTER_COUNT and (
+            rule.max_occurrences is None or rule.max_occurrences < 1
+        ):
+            raise ValidationException(
+                message_key="notices.errors.invalid_max_occurrences",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
     async def expire_due_pins(self) -> int:
         """Deactivate expired banner pins."""
@@ -766,6 +1308,28 @@ class NoticesService:
         category = str(row["category"])
         scope_type = NoticeScopeType(str(row["scope_type"]))
         scope_label = self._scope_label(scope_type, towers)
+        is_template = bool(row.get("is_recurring_template"))
+        series_status_raw = row.get("series_status")
+        series_status = NoticeSeriesStatus(str(series_status_raw)) if series_status_raw else None
+        editable = status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED} and not is_template
+        if is_template and series_status in {
+            NoticeSeriesStatus.DRAFT,
+            NoticeSeriesStatus.PAUSED,
+        }:
+            editable = True
+        recurrence_summary: str | None = None
+        upcoming: list[datetime] = []
+        repeat_out: NoticeRepeatInput | None = None
+        if is_template and row.get("recurrence_frequency"):
+            try:
+                rule = rule_from_notice_row(row)
+                recurrence_tz = str(row.get("recurrence_timezone") or DEFAULT_RECURRENCE_TIMEZONE)
+                preview = preview_recurrence(rule, timezone=recurrence_tz, count=4)
+                recurrence_summary = preview.recurrence_summary
+                upcoming = preview.upcoming_sends
+                repeat_out = self._repeat_input_from_row(row)
+            except (ValueError, KeyError):
+                pass
         return NoticeDetailResponse(
             id=notice_id,
             organization_id=str(row["organization_id"]),
@@ -794,11 +1358,19 @@ class NoticesService:
             else None,
             view_count=int(row.get("view_count") or 0),
             like_count=int(row.get("like_count") or 0),
-            editable=status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED},
+            editable=editable,
             duplicate_of_id=row.get("duplicate_of_id"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             created_by_user_id=row.get("created_by_user_id"),
+            is_recurring_template=is_template,
+            series_status=series_status,
+            next_occurrence_at=row.get("next_occurrence_at"),
+            recurring_source_notice_id=row.get("recurring_source_notice_id"),
+            series_occurrence_index=row.get("series_occurrence_index"),
+            recurrence_summary=recurrence_summary,
+            upcoming_sends=upcoming,
+            repeat=repeat_out,
         )
 
     def _to_list_item(
@@ -815,6 +1387,15 @@ class NoticesService:
         scope_label = str(row["scope_label"]) if row.get("scope_label") else None
         if scope_type == NoticeScopeType.WHOLE_SOCIETY:
             scope_label = "Whole society"
+        is_template = bool(row.get("is_recurring_template"))
+        series_status_raw = row.get("series_status")
+        series_status = NoticeSeriesStatus(str(series_status_raw)) if series_status_raw else None
+        editable = status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED} and not is_template
+        if is_template and series_status in {
+            NoticeSeriesStatus.DRAFT,
+            NoticeSeriesStatus.PAUSED,
+        }:
+            editable = True
         return NoticeListItemResponse(
             id=str(row["id"]),
             display_code=str(row["display_code"]),
@@ -833,9 +1414,40 @@ class NoticesService:
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
             view_count=int(row.get("view_count") or 0),
             like_count=int(row.get("like_count") or 0),
-            editable=status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED},
+            editable=editable,
             created_at=row["created_at"],
             attachments=[NoticeAttachmentResponse(**item) for item in (attachments or [])],
+            is_recurring_template=is_template,
+            series_status=series_status,
+            next_occurrence_at=row.get("next_occurrence_at"),
+            recurring_source_notice_id=row.get("recurring_source_notice_id"),
+            series_occurrence_index=row.get("series_occurrence_index"),
+        )
+
+    @staticmethod
+    def _repeat_input_from_row(row: dict[str, Any]) -> NoticeRepeatInput | None:
+        """Reconstruct repeat input from a template row for detail responses."""
+        freq = row.get("recurrence_frequency")
+        if not freq:
+            return None
+        weekly = row.get("recurrence_weekly_days")
+        tod = row.get("recurrence_time_of_day")
+        if not isinstance(tod, time):
+            tod = time(9, 0)
+        starts = row.get("recurrence_starts_on")
+        if not isinstance(starts, date):
+            return None
+        end_type = row.get("recurrence_end_type") or NoticeRecurrenceEndType.NEVER.value
+        return NoticeRepeatInput(
+            frequency=NoticeRecurrenceFrequency(str(freq)),
+            weekly_days=list(weekly) if weekly else None,
+            monthly_day=row.get("recurrence_monthly_day"),
+            monthly_use_last_day=bool(row.get("recurrence_monthly_use_last_day")),
+            time_of_day=tod,
+            starts_on=starts,
+            end_type=NoticeRecurrenceEndType(str(end_type)),
+            end_date=row.get("recurrence_end_date"),
+            max_occurrences=row.get("recurrence_max_occurrences"),
         )
 
     def _scope_label(

@@ -1,13 +1,13 @@
 # ADR 0011: Notice board — admin publish, resident feed
 
-|                  |                                                                                                                                                                |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                                       |
-| **Date**         | 2026-08-10                                                                                                                                                     |
-| **Authors**      | Home Craft platform team                                                                                                                                       |
-| **Depends on**   | [ADR 0010](./0010-project-membership.md) (project scoping), [ADR 0009](./0009-contact-roles.md), [ADR 0008](./0008-push-notifications-grpc.md) (push, Phase 2) |
-| **Related docs** | [0011-notice-board-flow.md](../0011-notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md)        |
-| **Migrations**   | `20260810120000_notice_board_enums.sql`, `20260810121000_notice_board_tables.sql`, `20260810122000_notice_board_rls_deferred.sql`                              |
+|                  |                                                                                                                                                                                                                                                    |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Proposed                                                                                                                                                                                                                                           |
+| **Date**         | 2026-08-10                                                                                                                                                                                                                                         |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                           |
+| **Depends on**   | [ADR 0010](./0010-project-membership.md) (project scoping), [ADR 0009](./0009-contact-roles.md), [ADR 0008](./0008-push-notifications-grpc.md) (push, Phase 2)                                                                                     |
+| **Related docs** | [0011-notice-board-flow.md](../0011-notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md)                                                                                            |
+| **Migrations**   | `20260810120000_notice_board_enums.sql`, `20260810121000_notice_board_tables.sql`, `20260810122000_notice_board_rls_deferred.sql`; recurring follow-up: `20261022120000_notice_recurring_enums.sql`, `20261022121000_notice_recurring_columns.sql` |
 
 ______________________________________________________________________
 
@@ -18,16 +18,16 @@ Community admins publish notices for a **project** (`projects` = gated community
 
 ### Product rules (confirmed)
 
-| Area                  | Behaviour                                                                                           |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| **Content**           | Title ≤70, description ≤600, category, up to 4 images (JPG/PNG, ≤5 MB)                              |
-| **Recipients**        | Multi-select Owner, Tenant, Staff, Security — recipients never see other groups                     |
-| **Scope**             | Whole society or by tower                                                                           |
-| **Publishing**        | Draft, publish now → `live`, schedule → `scheduled` (**≤2 months** ahead)                           |
-| **Live immutability** | Published notices **cannot be edited** — delete or copy via Create Notice                           |
-| **Duplicate live**    | UI prefills Create Notice; **`POST /notices`**, not duplicate API                                   |
-| **Banner pins**       | **6 generic slots**; **only live** notices; slot header = notice **category label**; click → detail |
-| **Soft delete**       | Audit retained; restore creates new draft copy (duplicate semantics)                                |
+| Area                  | Behaviour                                                                                                                               |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Content**           | Title ≤70, description ≤600, category, up to 4 images (JPG/PNG, ≤5 MB)                                                                  |
+| **Recipients**        | Multi-select Owner, Tenant, Staff, Security — recipients never see other groups                                                         |
+| **Scope**             | Whole society or by tower                                                                                                               |
+| **Publishing**        | Draft, publish now → `live`, schedule → `scheduled` (**≤2 months** ahead); **Repeat** → recurring template on same `POST /notices` (§6) |
+| **Live immutability** | Published notices **cannot be edited** — delete or copy via Create Notice                                                               |
+| **Duplicate live**    | UI prefills Create Notice; **`POST /notices`**, not duplicate API                                                                       |
+| **Banner pins**       | **6 generic slots**; **only live** notices; slot header = notice **category label**; click → detail                                     |
+| **Soft delete**       | Audit retained; restore creates new draft copy (duplicate semantics)                                                                    |
 
 ### Membership alignment ([ADR 0010](./0010-project-membership.md))
 
@@ -78,7 +78,10 @@ Staff access: permission (e.g. `projects_management.*` or dedicated `notices_man
 
 Key endpoints: summary, list, CRUD, pin/unpin, reach-estimate, duplicate (draft/scheduled only).
 
-Resident Phase 2: **`/v1/notices`** — feed + banner + like.
+**Recurring (§6):** extend the same prefix — optional `repeat` on `POST`/`PATCH`; optional
+`POST .../notices/recurrence-preview`. No separate `/notice-series` router.
+
+Resident Phase 2: **`/v1/notices`** — feed + banner + like (exclude recurring **templates**).
 
 ### 5. Display code
 
@@ -101,6 +104,48 @@ See [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-
 
 Partial uniques: `(project_id, slot_index) WHERE is_active`; `(notice_id) WHERE is_active`.
 
+### Recurring columns on `notices` (follow-up migration)
+
+Same six tables — no parallel series tables. Template rows: `is_recurring_template = true` plus
+`series_status`, recurrence rule columns, `next_occurrence_at`, `occurrences_sent`. Instance rows:
+`recurring_source_notice_id`, `series_occurrence_index`. Junction tables unchanged; copied per send.
+Full column list: [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md).
+
+______________________________________________________________________
+
+## 6. Recurring series (repeat on publish)
+
+Product **Repeat this notice** uses the **same** admin API and `notices` table as one-time notices.
+
+### 6.1 API (extend existing)
+
+| UI action                        | Endpoint                                                     |
+| -------------------------------- | ------------------------------------------------------------ |
+| Save as Draft / **Start Series** | `POST /v1/projects/{project_id}/notices` + optional `repeat` |
+| Edit template                    | `PATCH .../notices/{template_id}`                            |
+| Pause / resume / cancel          | `PATCH .../notices/{template_id}` with `series_action`       |
+| List / detail / summary          | Existing `GET .../notices*`                                  |
+| Preview next sends               | Optional `POST .../notices/recurrence-preview` (same router) |
+
+Extend **`NoticePublishMode`**: when `repeat` is present, use `draft` or `series_start` only — not
+`now` or `schedule`.
+
+### 6.2 Behaviour
+
+Each send materializes a **new** live `notices` row (new `display_code`); instances stay immutable.
+Template lifecycle: `series_status` ∈ `draft`, `active`, `paused`, `completed`, `cancelled` on the
+template row. Job selects `is_recurring_template AND series_status = active AND next_occurrence_at <= now()`.
+
+Weekly/monthly rules, end conditions, and UI examples: [0011-notice-board-flow.md §4.3 & §7.3](../0011-notice-board-flow.md).
+
+### 6.3 Alternatives rejected (recurring)
+
+| Alternative                         | Rejected because                                |
+| ----------------------------------- | ----------------------------------------------- |
+| `POST /notice-series`               | Same Create Notice drawer; extend `/notices`    |
+| Separate `notice_series*` tables    | Duplicates junction tables already on `notices` |
+| Materialize all occurrences upfront | Breaks immutability; row explosion              |
+
 ______________________________________________________________________
 
 ## Consequences
@@ -117,6 +162,7 @@ ______________________________________________________________________
 1. Admin API + service in `user_service`.
 1. Scheduled publish + pin expiry jobs.
 1. Phase 2 resident feed + push ([ADR 0008](./0008-push-notifications-grpc.md)).
+1. Recurring columns + extend create/PATCH + materialize job (§6).
 
 ______________________________________________________________________
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
@@ -32,7 +32,27 @@ _NOTICE_SELECT_COLUMNS = """
   n.updated_at,
   np.slot_index AS pin_slot_index,
   np.pin_duration::text AS pin_duration,
-  (np.id IS NOT NULL) AS pinned
+  (np.id IS NOT NULL) AS pinned,
+  COALESCE(n.is_recurring_template, false) AS is_recurring_template,
+  n.series_status::text AS series_status,
+  n.recurrence_frequency::text AS recurrence_frequency,
+  n.recurrence_weekly_days,
+  n.recurrence_monthly_day,
+  n.recurrence_monthly_use_last_day,
+  n.recurrence_time_of_day,
+  n.recurrence_timezone,
+  n.recurrence_starts_on,
+  n.recurrence_end_type::text AS recurrence_end_type,
+  n.recurrence_end_date,
+  n.recurrence_max_occurrences,
+  n.occurrences_sent,
+  n.next_occurrence_at,
+  n.recurring_source_notice_id::text AS recurring_source_notice_id,
+  n.series_occurrence_index,
+  n.series_pin_to_banner,
+  n.series_slot_index,
+  n.series_pin_duration::text AS series_pin_duration,
+  n.series_pin_confirm_replace
 """
 
 
@@ -75,6 +95,8 @@ class NoticesRepository(BaseRepository):
         duplicate_of_id: str | None,
         created_by_user_id: str | None,
         updated_by_user_id: str | None,
+        recurring_source_notice_id: str | None = None,
+        series_occurrence_index: int | None = None,
     ) -> dict[str, Any]:
         """Insert notices header row."""
         row = await self.db_connection.fetchrow(
@@ -93,12 +115,15 @@ class NoticesRepository(BaseRepository):
                 published_at,
                 duplicate_of_id,
                 created_by_user_id,
-                updated_by_user_id
+                updated_by_user_id,
+                recurring_source_notice_id,
+                series_occurrence_index
             )
             VALUES (
                 $1::uuid, $2::uuid, $3, $4, $5, $6,
                 $7::notice_category, $8::notice_status, $9::notice_scope_type,
-                $10, $11, $12::uuid, $13::uuid, $14::uuid
+                $10, $11, $12::uuid, $13::uuid, $14::uuid,
+                $15::uuid, $16
             )
             RETURNING id::text AS id
             """,
@@ -114,6 +139,102 @@ class NoticesRepository(BaseRepository):
             publish_at,
             published_at,
             duplicate_of_id,
+            created_by_user_id,
+            updated_by_user_id,
+            recurring_source_notice_id,
+            series_occurrence_index,
+        )
+        return await self.fetch_notice_by_id(
+            organization_id=organization_id,
+            project_id=project_id,
+            notice_id=str(row["id"]),
+        )
+
+    async def insert_recurring_template(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        display_code: str,
+        sequence_number: int,
+        title: str,
+        description: str,
+        category: str,
+        scope_type: str,
+        series_status: str,
+        recurrence_frequency: str,
+        recurrence_weekly_days: list[int] | None,
+        recurrence_monthly_day: int | None,
+        recurrence_monthly_use_last_day: bool,
+        recurrence_time_of_day: time,
+        recurrence_timezone: str,
+        recurrence_starts_on: date,
+        recurrence_end_type: str,
+        recurrence_end_date: date | None,
+        recurrence_max_occurrences: int | None,
+        next_occurrence_at: datetime | None,
+        series_pin_to_banner: bool,
+        series_slot_index: int | None,
+        series_pin_duration: str | None,
+        series_pin_confirm_replace: bool,
+        created_by_user_id: str | None,
+        updated_by_user_id: str | None,
+    ) -> dict[str, Any]:
+        """Insert a recurring notice template row (status always draft)."""
+        row = await self.db_connection.fetchrow(
+            """
+            INSERT INTO notices (
+                organization_id, project_id, display_code, sequence_number,
+                title, description, category, status, scope_type,
+                is_recurring_template, series_status,
+                recurrence_frequency, recurrence_weekly_days,
+                recurrence_monthly_day, recurrence_monthly_use_last_day,
+                recurrence_time_of_day, recurrence_timezone, recurrence_starts_on,
+                recurrence_end_type, recurrence_end_date, recurrence_max_occurrences,
+                occurrences_sent, next_occurrence_at,
+                series_pin_to_banner, series_slot_index, series_pin_duration,
+                series_pin_confirm_replace,
+                created_by_user_id, updated_by_user_id
+            )
+            VALUES (
+                $1::uuid, $2::uuid, $3, $4, $5, $6,
+                $7::notice_category, 'draft'::notice_status, $8::notice_scope_type,
+                true, $9::notice_series_status,
+                $10::notice_recurrence_frequency, $11,
+                $12, $13,
+                $14, $15, $16,
+                $17::notice_recurrence_end_type, $18, $19,
+                0, $20,
+                $21, $22, $23::notice_pin_duration,
+                $24,
+                $25::uuid, $26::uuid
+            )
+            RETURNING id::text AS id
+            """,
+            organization_id,
+            project_id,
+            display_code,
+            sequence_number,
+            title,
+            description,
+            category,
+            scope_type,
+            series_status,
+            recurrence_frequency,
+            recurrence_weekly_days,
+            recurrence_monthly_day,
+            recurrence_monthly_use_last_day,
+            recurrence_time_of_day,
+            recurrence_timezone,
+            recurrence_starts_on,
+            recurrence_end_type,
+            recurrence_end_date,
+            recurrence_max_occurrences,
+            next_occurrence_at,
+            series_pin_to_banner,
+            series_slot_index,
+            series_pin_duration,
+            series_pin_confirm_replace,
             created_by_user_id,
             updated_by_user_id,
         )
@@ -146,10 +267,17 @@ class NoticesRepository(BaseRepository):
             "category": "::notice_category",
             "status": "::notice_status",
             "scope_type": "::notice_scope_type",
+            "series_status": "::notice_series_status",
+            "recurrence_frequency": "::notice_recurrence_frequency",
+            "recurrence_end_type": "::notice_recurrence_end_type",
+            "series_pin_duration": "::notice_pin_duration",
         }
         for key, value in fields.items():
-            cast = casts.get(key, "")
-            set_parts.append(f"{key} = ${idx}{cast}")
+            if key == "recurrence_weekly_days":
+                set_parts.append(f"{key} = ${idx}::smallint[]")
+            else:
+                cast = casts.get(key, "")
+                set_parts.append(f"{key} = ${idx}{cast}")
             values.append(value)
             idx += 1
         set_parts.append("updated_at = now()")
@@ -411,9 +539,29 @@ class NoticesRepository(BaseRepository):
         status_row = await self.db_connection.fetchrow(
             """
             SELECT
-              COUNT(*) FILTER (WHERE status <> 'deleted')::int AS all_count,
-              COUNT(*) FILTER (WHERE status = 'live')::int AS live_count,
-              COUNT(*) FILTER (WHERE status = 'scheduled')::int AS scheduled_count,
+              COUNT(*) FILTER (
+                WHERE status <> 'deleted'
+                  AND (
+                    NOT COALESCE(is_recurring_template, false)
+                    OR (
+                      COALESCE(is_recurring_template, false)
+                      AND series_status = 'draft'::notice_series_status
+                    )
+                  )
+              )::int AS all_count,
+              COUNT(*) FILTER (
+                WHERE status = 'live' AND NOT COALESCE(is_recurring_template, false)
+              )::int AS live_count,
+              COUNT(*) FILTER (
+                WHERE status = 'scheduled'
+                  OR (
+                    COALESCE(is_recurring_template, false)
+                    AND series_status IN (
+                      'active'::notice_series_status,
+                      'paused'::notice_series_status
+                    )
+                  )
+              )::int AS scheduled_count,
               COUNT(*) FILTER (WHERE status = 'deleted')::int AS deleted_count
             FROM notices
             WHERE organization_id = $1::uuid
@@ -432,6 +580,7 @@ class NoticesRepository(BaseRepository):
             WHERE n.organization_id = $1::uuid
               AND n.project_id = $2::uuid
               AND n.status = 'live'
+              AND NOT COALESCE(n.is_recurring_template, false)
               AND nr.recipient_group IS NOT NULL
             GROUP BY nr.recipient_group
             """,
@@ -465,10 +614,35 @@ class NoticesRepository(BaseRepository):
 
         if status == NoticeListStatus.ALL:
             conditions.append("n.status <> 'deleted'")
+            conditions.append(
+                """
+                (
+                  NOT COALESCE(n.is_recurring_template, false)
+                  OR (
+                    COALESCE(n.is_recurring_template, false)
+                    AND n.series_status = 'draft'::notice_series_status
+                  )
+                )
+                """
+            )
         elif status == NoticeListStatus.LIVE:
             conditions.append("n.status = 'live'")
+            conditions.append("NOT COALESCE(n.is_recurring_template, false)")
         elif status == NoticeListStatus.SCHEDULED:
-            conditions.append("n.status = 'scheduled'")
+            conditions.append(
+                """
+                (
+                  n.status = 'scheduled'
+                  OR (
+                    COALESCE(n.is_recurring_template, false)
+                    AND n.series_status IN (
+                      'active'::notice_series_status,
+                      'paused'::notice_series_status
+                    )
+                  )
+                )
+                """
+            )
         elif status == NoticeListStatus.DELETED:
             conditions.append("n.status = 'deleted'")
 
@@ -502,7 +676,11 @@ class NoticesRepository(BaseRepository):
               n.created_at DESC
             """
         elif status == NoticeListStatus.SCHEDULED:
-            order_sql = "ORDER BY n.publish_at ASC NULLS LAST, n.created_at DESC"
+            order_sql = """
+            ORDER BY
+              COALESCE(n.publish_at, n.next_occurrence_at) ASC NULLS LAST,
+              n.created_at DESC
+            """
         elif status == NoticeListStatus.DELETED:
             order_sql = "ORDER BY n.deleted_at DESC NULLS LAST, n.created_at DESC"
         else:
@@ -802,6 +980,89 @@ class NoticesRepository(BaseRepository):
                 return slot
         return None
 
+    async def lock_due_recurring_templates(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Lock recurring templates due for materialization."""
+        conditions = [
+            "n.is_recurring_template = true",
+            "n.series_status = 'active'::notice_series_status",
+            "n.next_occurrence_at IS NOT NULL",
+            "n.next_occurrence_at <= now()",
+        ]
+        values: list[Any] = []
+        idx = 1
+        if organization_id:
+            conditions.append(f"n.organization_id = ${idx}::uuid")
+            values.append(organization_id)
+            idx += 1
+        if project_id:
+            conditions.append(f"n.project_id = ${idx}::uuid")
+            values.append(project_id)
+            idx += 1
+        values.append(limit)
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+            {_NOTICE_SELECT_COLUMNS}
+            FROM notices n
+            LEFT JOIN notice_pins np
+              ON np.notice_id = n.id AND np.is_active = true
+            WHERE {" AND ".join(conditions)}
+            ORDER BY n.next_occurrence_at ASC
+            FOR UPDATE OF n SKIP LOCKED
+            LIMIT ${idx}
+            """,
+            *values,
+        )
+        return [dict(row) for row in rows]
+
+    async def copy_notice_children(
+        self,
+        *,
+        organization_id: str,
+        source_notice_id: str,
+        target_notice_id: str,
+    ) -> None:
+        """Copy recipients, towers, attachments, and contact recipients to another notice."""
+        groups = await self.list_recipient_groups(
+            organization_id=organization_id,
+            notice_id=source_notice_id,
+        )
+        contact_ids = await self.list_contact_recipient_ids(
+            organization_id=organization_id,
+            notice_id=source_notice_id,
+        )
+        towers = await self.list_towers_for_notice(
+            organization_id=organization_id,
+            notice_id=source_notice_id,
+        )
+        attachments = await self.list_attachments(
+            organization_id=organization_id,
+            notice_id=source_notice_id,
+        )
+        await self.replace_recipients(
+            organization_id=organization_id,
+            notice_id=target_notice_id,
+            recipient_groups=groups,
+            contact_ids=contact_ids,
+        )
+        await self.replace_towers(
+            organization_id=organization_id,
+            notice_id=target_notice_id,
+            tower_ids=[str(t["tower_id"]) for t in towers],
+        )
+        if attachments:
+            await self.replace_attachments(
+                organization_id=organization_id,
+                notice_id=target_notice_id,
+                attachments=attachments,
+            )
+
     async def publish_due_scheduled_notices(
         self,
         *,
@@ -1057,6 +1318,7 @@ class NoticesRepository(BaseRepository):
             "n.organization_id = $1::uuid",
             "n.project_id = $2::uuid",
             "n.status = 'live'",
+            "NOT COALESCE(n.is_recurring_template, false)",
         ]
         values: list[Any] = [organization_id, project_id]
         idx = 3
@@ -1124,6 +1386,7 @@ class NoticesRepository(BaseRepository):
             WHERE n.organization_id = $1::uuid
               AND n.id = $2::uuid
               AND n.status = 'live'
+              AND NOT COALESCE(n.is_recurring_template, false)
             """,
             organization_id,
             notice_id,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,12 +15,18 @@ from apps.user_service.app.schemas.enums import (
     NoticePublishMode,
     NoticeRecipientGroup,
     NoticeRecipientInputGroup,
+    NoticeRecurrenceEndType,
+    NoticeRecurrenceFrequency,
     NoticeScopeType,
+    NoticeSeriesAction,
+    NoticeSeriesStatus,
     NoticeStatus,
 )
 from apps.user_service.app.schemas.notices import (
     CreateNoticeRequest,
     NoticeListQuery,
+    NoticeRecurrencePreviewRequest,
+    NoticeRepeatInput,
     UpdateNoticeRequest,
 )
 from apps.user_service.app.services.notices_service import NoticesService
@@ -325,6 +331,7 @@ async def test_get_summary():
 async def test_publish_due_notices_and_expire_pins():
     svc = _service()
     svc.repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE_ID])
+    svc.repo.lock_due_recurring_templates = AsyncMock(return_value=[])
     svc.repo.fetch_notice_by_id_only = AsyncMock(
         return_value={
             "id": NOTICE_ID,
@@ -1109,3 +1116,120 @@ async def test_update_notice_all_recipients_expands_to_every_group():
         body=UpdateNoticeRequest(recipient_groups=[NoticeRecipientInputGroup.ALL]),
     )
     assert svc.repo.replace_recipients.await_args.kwargs["recipient_groups"] == all_groups
+
+
+def _weekly_repeat() -> NoticeRepeatInput:
+    return NoticeRepeatInput(
+        frequency=NoticeRecurrenceFrequency.WEEKLY,
+        weekly_days=[1, 3, 5],
+        time_of_day=time(9, 0),
+        starts_on=date(2026, 10, 22),
+        end_type=NoticeRecurrenceEndType.NEVER,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_recurring_rejects_publish_now():
+    svc = _service()
+    body = CreateNoticeRequest(
+        title="Weekly update",
+        description="Body",
+        recipient_groups=[NoticeRecipientGroup.OWNER],
+        publish_mode=NoticePublishMode.NOW,
+        repeat=_weekly_repeat(),
+    )
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert exc_info.value.message_key == "notices.errors.repeat_with_schedule"
+    svc.repo.insert_recurring_template.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_recurring_draft_uses_insert_recurring_template():
+    svc = _service()
+    svc.repo.allocate_sequence_number = AsyncMock(return_value=3)
+    template_row = _notice_detail_row(
+        is_recurring_template=True,
+        series_status=NoticeSeriesStatus.DRAFT.value,
+    )
+    svc.repo.insert_recurring_template = AsyncMock(return_value=template_row)
+    svc.repo.replace_recipients = AsyncMock()
+    svc.repo.replace_towers = AsyncMock()
+    svc.repo.replace_attachments = AsyncMock()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.repo.fetch_notice_by_id = AsyncMock(return_value=template_row)
+
+    body = CreateNoticeRequest(
+        title="Weekly update",
+        description="Body",
+        recipient_groups=[NoticeRecipientGroup.OWNER],
+        publish_mode=NoticePublishMode.DRAFT,
+        repeat=_weekly_repeat(),
+    )
+    detail = await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert detail.title == "Pool closure"
+    svc.repo.insert_recurring_template.assert_awaited_once()
+    svc.repo.insert_notice.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_preview_recurrence_returns_upcoming_sends():
+    svc = _service()
+    response = await svc.preview_recurrence(
+        body=NoticeRecurrencePreviewRequest(repeat=_weekly_repeat()),
+    )
+    assert len(response.upcoming_sends) == 4
+    assert response.recurrence_summary
+
+
+@pytest.mark.asyncio
+async def test_update_recurring_active_template_not_editable():
+    svc = _service()
+    svc.repo.fetch_notice_by_id = AsyncMock(
+        return_value=_notice_detail_row(
+            is_recurring_template=True,
+            series_status=NoticeSeriesStatus.ACTIVE.value,
+        )
+    )
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.update_notice(
+            project_id=PROJECT_ID,
+            notice_id=NOTICE_ID,
+            body=UpdateNoticeRequest(title="Changed"),
+        )
+    assert exc_info.value.message_key == "notices.errors.series_not_editable"
+
+
+@pytest.mark.asyncio
+async def test_update_recurring_pause_series_action():
+    svc = _service()
+    active_template = _notice_detail_row(
+        is_recurring_template=True,
+        series_status=NoticeSeriesStatus.ACTIVE.value,
+        recurrence_timezone="Asia/Kolkata",
+        recurrence_frequency=NoticeRecurrenceFrequency.WEEKLY.value,
+        recurrence_weekly_days=[1, 3, 5],
+        recurrence_time_of_day=time(9, 0),
+        recurrence_starts_on=date(2026, 10, 22),
+        recurrence_end_type=NoticeRecurrenceEndType.NEVER.value,
+    )
+    paused_template = {**active_template, "series_status": NoticeSeriesStatus.PAUSED.value}
+    svc.repo.fetch_notice_by_id = AsyncMock(
+        side_effect=[active_template, paused_template, paused_template]
+    )
+    svc.repo.update_notice_fields = AsyncMock()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+
+    await svc.update_notice(
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        body=UpdateNoticeRequest(series_action=NoticeSeriesAction.PAUSE),
+    )
+    assert (
+        svc.repo.update_notice_fields.await_args.kwargs["fields"]["series_status"]
+        == NoticeSeriesStatus.PAUSED.value
+    )

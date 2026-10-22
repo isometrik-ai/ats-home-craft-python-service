@@ -12,6 +12,7 @@ from apps.user_service.app.services.notices_service import NoticesService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
+from apps.user_service.app.utils.common_utils import UserContext
 
 
 async def publish_scheduled_notices(
@@ -26,11 +27,10 @@ async def publish_scheduled_notices(
         organization_id=organization_id,
         project_id=project_id,
     )
-    if not published_ids:
-        return []
 
-    recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
-    push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
+    if published_ids:
+        recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
+        push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
 
     for notice_id in published_ids:
         rows = await repo.list_notices_published_since(notice_ids=[notice_id])
@@ -92,7 +92,42 @@ async def publish_scheduled_notices(
                 entity=push_fields["entity"],
                 options=push_fields["options"],
             )
-    return published_ids
+    recurring_ids = await materialize_due_recurring_notices(
+        db_connection,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
+    return published_ids + recurring_ids
+
+
+async def materialize_due_recurring_notices(
+    db_connection: asyncpg.Connection,
+    *,
+    organization_id: str | None = None,
+    project_id: str | None = None,
+) -> list[str]:
+    """Create live notices from due recurring templates (one per template per run)."""
+    repo = NoticesRepository(db_connection=db_connection)
+    templates = await repo.lock_due_recurring_templates(
+        organization_id=organization_id,
+        project_id=project_id,
+        limit=50,
+    )
+    instance_ids: list[str] = []
+    for template in templates:
+        org_id = str(template["organization_id"])
+        service = NoticesService(
+            db_connection=db_connection,
+            user_context=UserContext(
+                user_id="system",
+                email="",
+                organization_id=org_id,
+            ),
+        )
+        instance_id = await service._materialize_recurring_template(template)
+        if instance_id:
+            instance_ids.append(instance_id)
+    return instance_ids
 
 
 async def expire_notice_pins(db_connection: asyncpg.Connection) -> int:

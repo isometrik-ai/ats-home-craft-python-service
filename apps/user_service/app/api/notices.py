@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.notices import (
     CreateNoticeRequest,
     DeleteNoticeRequest,
     NoticeListQuery,
+    NoticeRecurrencePreviewRequest,
     PinNoticeRequest,
     ReachEstimateQuery,
     UpdateNoticeRequest,
@@ -142,6 +143,39 @@ async def get_project_notice_reach_estimate(
         message_key="notices.success.reach_estimate_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("preview notice recurrence")
+@router.post(
+    "/{project_id}/notices/recurrence-preview",
+    status_code=http_status.HTTP_200_OK,
+    summary="Preview recurring notice send schedule",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def preview_project_notice_recurrence(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    body: NoticeRecurrencePreviewRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return summary and upcoming sends for a repeat block (no persist)."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=NOTICES_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = NoticesService(db_connection=db_connection, user_context=user_context)
+    data = await service.preview_recurrence(body=body)
+    return success_response(
+        request=request,
+        message_key="notices.success.recurrence_preview",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(mode="json"),
     )
 
 
