@@ -346,6 +346,7 @@ class TenantRequestResponse(BaseModel):
     documents_total_count: int = 3
     owner: TenantRequestOwnerSummary | None = None
     unit: TenantRequestUnitSummary | None = None
+    total_due_amount: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
