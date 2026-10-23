@@ -47,6 +47,8 @@ def _service() -> NoticesService:
     svc.repo = MagicMock()
     svc.repo.list_notices = AsyncMock(return_value=([], 0))
     svc.repo.list_attachments_for_notices = AsyncMock(return_value={})
+    svc.repo.list_series_weekly_days_for_notices = AsyncMock(return_value={})
+    svc.repo.fetch_project_timezone = AsyncMock(return_value="UTC")
     svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
     svc.repo.list_contact_recipient_ids = AsyncMock(return_value=[])
     svc.repo.list_towers_for_notice = AsyncMock(return_value=[])

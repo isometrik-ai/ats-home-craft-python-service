@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
-from apps.user_service.app.services import notice_recurring_support as recurring
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
@@ -134,33 +133,10 @@ async def process_recurring_notices(
         org_id = str(row["organization_id"])
         if row.get("series_repeat_ended_at") is not None:
             continue
-        planned = row.get("series_next_send_at")
-        if planned is None:
-            continue
-
-        sends_before = int(row.get("series_sends_completed") or 0)
-        occurrence_index = sends_before + 1
-        sends_after = occurrence_index
-        next_at, ended = await recurring.compute_next_after_delivery(
-            repo,
+        ok = await repo.deliver_due_recurring_notice(
             organization_id=org_id,
             notice_id=notice_id,
-            row=row,
-            after_planned_at=planned,
-            sends_completed=sends_after,
-        )
-        if row.get("series_end_type") == "after_count":
-            cap = row.get("series_end_after_sends")
-            if cap is not None and sends_after >= int(cap):
-                ended = True
-                next_at = None
-
-        ok = await repo.deliver_recurring_notice(
-            organization_id=org_id,
-            notice_id=notice_id,
-            occurrence_index=occurrence_index,
-            next_send_at=next_at,
-            repeat_ended=ended,
+            project_id=str(row["project_id"]),
         )
         if not ok:
             continue

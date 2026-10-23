@@ -64,7 +64,7 @@ async def test_create_start_series_persists_series_and_next_send():
     svc.repo.replace_recipients = AsyncMock()
     svc.repo.replace_towers = AsyncMock()
     svc.repo.replace_attachments = AsyncMock()
-    svc.repo.fetch_organization_timezone = AsyncMock(return_value="Asia/Kolkata")
+    svc.repo.fetch_project_timezone = AsyncMock(return_value="Asia/Kolkata")
     svc.repo.notice_has_series = AsyncMock(return_value=False)
     svc.repo.insert_notice_series = AsyncMock()
     svc.repo.replace_series_weekly_days = AsyncMock()
@@ -126,12 +126,10 @@ async def test_process_recurring_delivers_final_send_and_ends_series():
     repo = MagicMock()
     repo.list_due_recurring_notice_ids = AsyncMock(return_value=[notice_id])
     repo.fetch_notice_by_id_only = AsyncMock(return_value=job_row)
-    repo.list_series_weekly_days = AsyncMock(return_value=[1])
-    repo.deliver_recurring_notice = AsyncMock(return_value=True)
+    repo.deliver_due_recurring_notice = AsyncMock(return_value=True)
     repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
     repo.list_contact_recipient_ids = AsyncMock(return_value=[])
     repo.list_towers_for_notice = AsyncMock(return_value=[])
-    repo.fetch_organization_timezone = AsyncMock(return_value="Asia/Kolkata")
 
     push = MagicMock()
     push.send_to_user = AsyncMock()
@@ -159,10 +157,11 @@ async def test_process_recurring_delivers_final_send_and_ends_series():
         )
 
     assert delivered == [notice_id]
-    deliver_kwargs = repo.deliver_recurring_notice.await_args.kwargs
-    assert deliver_kwargs["occurrence_index"] == 1
-    assert deliver_kwargs["repeat_ended"] is True
-    assert deliver_kwargs["next_send_at"] is None
+    repo.deliver_due_recurring_notice.assert_awaited_once_with(
+        organization_id=ORG_ID,
+        notice_id=notice_id,
+        project_id=PROJECT_ID,
+    )
     push.send_to_user.assert_awaited()
 
 
@@ -179,7 +178,7 @@ async def test_update_end_series_stops_recurrence():
     svc.repo.end_notice_series = AsyncMock()
     svc.repo.list_series_occurrences = AsyncMock(return_value=[])
     svc.repo.list_series_weekly_days = AsyncMock(return_value=[1, 3])
-    svc.repo.fetch_organization_timezone = AsyncMock(return_value="Asia/Kolkata")
+    svc.repo.fetch_project_timezone = AsyncMock(return_value="Asia/Kolkata")
     _stub_detail_repo(svc)
 
     await svc.update_notice(
@@ -212,13 +211,14 @@ async def test_delete_active_recurring_ends_series_then_soft_deletes():
 @pytest.mark.asyncio
 async def test_compute_next_after_delivery_mid_series_has_next_slot():
     repo = MagicMock()
-    repo.fetch_organization_timezone = AsyncMock(return_value="Asia/Kolkata")
+    repo.fetch_project_timezone = AsyncMock(return_value="Asia/Kolkata")
     repo.list_series_weekly_days = AsyncMock(return_value=[1, 3])
     row = _recurring_row(series_sends_completed=1)
 
     next_at, ended = await recurring.compute_next_after_delivery(
         repo,
         organization_id=ORG_ID,
+        project_id=PROJECT_ID,
         notice_id=NOTICE_ID,
         row=row,
         after_planned_at=PLANNED_UTC,

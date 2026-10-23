@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime, time, timezone
 from typing import Any
 
+import asyncpg
+
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import NOTICE_MAX_PIN_SLOTS, NoticeListStatus
 
@@ -1274,6 +1276,27 @@ class NoticesRepository(BaseRepository):
             return "UTC"
         return str(row["timezone"] or "UTC")
 
+    async def fetch_project_timezone(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+    ) -> str:
+        """Return IANA timezone for a project (settings row, then organization default)."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT timezone
+            FROM project_booking_settings
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+            """,
+            organization_id,
+            project_id,
+        )
+        if row is not None and row["timezone"]:
+            return str(row["timezone"])
+        return await self.fetch_organization_timezone(organization_id=organization_id)
+
     async def insert_notice_series(
         self,
         *,
@@ -1418,6 +1441,32 @@ class NoticesRepository(BaseRepository):
         )
         return [int(row["day_of_week"]) for row in rows]
 
+    async def list_series_weekly_days_for_notices(
+        self,
+        *,
+        organization_id: str,
+        notice_ids: list[str],
+    ) -> dict[str, list[int]]:
+        """Batch-load ISO weekdays for many recurring notices."""
+        if not notice_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT notice_id, day_of_week
+            FROM notice_series_weekly_days
+            WHERE organization_id = $1::uuid
+              AND notice_id = ANY($2::uuid[])
+            ORDER BY notice_id, day_of_week
+            """,
+            organization_id,
+            notice_ids,
+        )
+        by_notice: dict[str, list[int]] = {}
+        for row in rows:
+            notice_id = str(row["notice_id"])
+            by_notice.setdefault(notice_id, []).append(int(row["day_of_week"]))
+        return by_notice
+
     async def notice_has_series(
         self,
         *,
@@ -1493,20 +1542,30 @@ class NoticesRepository(BaseRepository):
         )
         return [str(row["id"]) for row in rows]
 
-    async def deliver_recurring_notice(
+    async def deliver_due_recurring_notice(
         self,
         *,
         organization_id: str,
         notice_id: str,
-        occurrence_index: int,
-        next_send_at: datetime | None,
-        repeat_ended: bool,
+        project_id: str,
     ) -> bool:
-        """Record one recurring delivery and refresh the notice row."""
+        """Record one due recurring delivery under row lock (cursor computed from locked state)."""
+        from apps.user_service.app.services import notice_recurring_support as recurring
+
         async with self.db_connection.transaction():
             locked = await self.db_connection.fetchrow(
                 """
-                SELECT ns.next_send_at, ns.repeat_ended_at, ns.sends_completed
+                SELECT
+                  ns.next_send_at,
+                  ns.repeat_ended_at,
+                  ns.sends_completed,
+                  ns.frequency,
+                  ns.monthly_day,
+                  ns.starts_on,
+                  ns.time_of_day,
+                  ns.end_type,
+                  ns.end_on,
+                  ns.end_after_sends
                 FROM notice_series ns
                 JOIN notices n ON n.id = ns.notice_id
                 WHERE ns.organization_id = $1::uuid
@@ -1522,31 +1581,58 @@ class NoticesRepository(BaseRepository):
             if locked["repeat_ended_at"] is not None:
                 return False
             now = datetime.now(timezone.utc)
-            next_at = locked["next_send_at"]
-            if next_at is None:
+            planned_at = locked["next_send_at"]
+            if planned_at is None:
                 return False
-            if next_at.tzinfo is None:
-                next_at = next_at.replace(tzinfo=timezone.utc)
-            if next_at > now:
+            if planned_at.tzinfo is None:
+                planned_at = planned_at.replace(tzinfo=timezone.utc)
+            if planned_at > now:
                 return False
-            planned_at = next_at
 
-            await self.db_connection.execute(
-                """
-                INSERT INTO notice_series_occurrences (
+            occurrence_index = int(locked["sends_completed"]) + 1
+            series_row = {
+                "series_frequency": locked["frequency"],
+                "series_monthly_day": locked["monthly_day"],
+                "series_starts_on": locked["starts_on"],
+                "series_time_of_day": locked["time_of_day"],
+                "series_end_type": locked["end_type"],
+                "series_end_on": locked["end_on"],
+                "series_end_after_sends": locked["end_after_sends"],
+            }
+            next_at, repeat_ended = await recurring.compute_next_after_delivery(
+                self,
+                organization_id=organization_id,
+                project_id=project_id,
+                notice_id=notice_id,
+                row=series_row,
+                after_planned_at=planned_at,
+                sends_completed=occurrence_index,
+            )
+            if str(locked["end_type"]) == "after_count" and locked["end_after_sends"] is not None:
+                if occurrence_index >= int(locked["end_after_sends"]):
+                    repeat_ended = True
+                    next_at = None
+
+            try:
+                await self.db_connection.execute(
+                    """
+                    INSERT INTO notice_series_occurrences (
+                        organization_id,
+                        notice_id,
+                        occurrence_index,
+                        planned_at,
+                        published_at
+                    )
+                    VALUES ($1::uuid, $2::uuid, $3, $4, now())
+                    """,
                     organization_id,
                     notice_id,
                     occurrence_index,
                     planned_at,
-                    published_at
                 )
-                VALUES ($1::uuid, $2::uuid, $3, $4, now())
-                """,
-                organization_id,
-                notice_id,
-                occurrence_index,
-                planned_at,
-            )
+            except asyncpg.UniqueViolationError:
+                return False
+
             await self.db_connection.execute(
                 """
                 UPDATE notices
@@ -1560,9 +1646,9 @@ class NoticesRepository(BaseRepository):
                 notice_id,
             )
             series_fields: dict[str, Any] = {
-                "sends_completed": int(locked["sends_completed"]) + 1,
+                "sends_completed": occurrence_index,
                 "last_sent_at": datetime.now(timezone.utc),
-                "next_send_at": None if repeat_ended else next_send_at,
+                "next_send_at": None if repeat_ended else next_at,
             }
             if repeat_ended:
                 series_fields["repeat_ended_at"] = datetime.now(timezone.utc)

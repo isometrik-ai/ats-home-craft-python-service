@@ -1165,14 +1165,15 @@ One-time **`POST .../notices/publish-due`** remains **only** for non-recurring `
 
 ### 14.7 Response flags (list + detail)
 
-| Field                | When                                                                        |
-| -------------------- | --------------------------------------------------------------------------- |
-| `is_recurring`       | `notice_series` row exists and `repeat_ended_at IS NULL` (or was recurring) |
-| `repeats_label`      | e.g. “Every Monday and Thursday at 8:00 am”                                 |
-| `next_send_at`       | Recurring and not ended                                                     |
-| `series_starts_on`   | Detail                                                                      |
-| `series_ends_label`  | Detail — date or “After N sends”                                            |
-| `next_sends_preview` | Create/PATCH response; optional on detail                                   |
+| Field                | When                                                |
+| -------------------- | --------------------------------------------------- |
+| `is_recurring`       | `notice_series` row exists (including ended series) |
+| `editable` (live)    | Active series only (`repeat_ended_at IS NULL`)      |
+| `repeats_label`      | e.g. “Every Monday and Thursday at 8:00 am”         |
+| `next_send_at`       | Recurring and not ended                             |
+| `series_starts_on`   | Detail                                              |
+| `series_ends_label`  | Detail — date or “After N sends”                    |
+| `next_sends_preview` | Create/PATCH response; optional on detail           |
 
 ### 14.8 Business rules (recurring)
 

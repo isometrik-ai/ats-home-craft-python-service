@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -37,8 +37,10 @@ async def test_process_recurring_skips_when_deliver_fails():
             "scope_type": "whole_society",
             "series_frequency": "weekly",
             "series_monthly_day": 1,
+            "series_starts_on": date(2026, 1, 1),
             "series_time_of_day": time(9, 0),
             "series_end_type": "after_count",
+            "series_end_on": None,
             "series_end_after_sends": 5,
             "series_sends_completed": 0,
             "series_next_send_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
@@ -46,8 +48,7 @@ async def test_process_recurring_skips_when_deliver_fails():
         }
     )
     repo.list_series_weekly_days = AsyncMock(return_value=[1])
-    repo.deliver_recurring_notice = AsyncMock(return_value=False)
-    repo.fetch_organization_timezone = AsyncMock(return_value="UTC")
+    repo.deliver_due_recurring_notice = AsyncMock(return_value=False)
 
     with (
         patch(

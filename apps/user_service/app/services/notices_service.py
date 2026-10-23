@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import asyncpg
 
@@ -123,12 +124,26 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_ids=notice_ids,
         )
+        recurring_ids = [str(row["id"]) for row in rows if recurring.has_series(row)]
+        weekly_by_notice = await self.repo.list_series_weekly_days_for_notices(
+            organization_id=self.organization_id,
+            notice_ids=recurring_ids,
+        )
+        project_tz = recurring.parse_org_timezone(
+            await self.repo.fetch_project_timezone(
+                organization_id=self.organization_id,
+                project_id=project_id,
+            )
+        )
         items: list[NoticeListItemResponse] = []
         for row in rows:
+            notice_id = str(row["id"])
             items.append(
                 await self._to_list_item(
                     row,
-                    attachments=attachments_by_notice.get(str(row["id"]), []),
+                    attachments=attachments_by_notice.get(notice_id, []),
+                    weekly_days=weekly_by_notice.get(notice_id, []),
+                    project_tz=project_tz,
                 )
             )
         return items, total
@@ -242,6 +257,7 @@ class NoticesService:
             await recurring.repeat_to_storage(
                 self.repo,
                 organization_id=self.organization_id,
+                project_id=project_id,
                 notice_id=notice_id,
                 repeat=repeat,
                 start_series=body.publish_mode == NoticePublishMode.START_SERIES,
@@ -252,6 +268,7 @@ class NoticesService:
             detail.next_sends_preview = await recurring.build_preview(
                 self.repo,
                 organization_id=self.organization_id,
+                project_id=project_id,
                 repeat=repeat,
             )
         return detail
@@ -510,6 +527,7 @@ class NoticesService:
         await recurring.repeat_to_storage(
             self.repo,
             organization_id=self.organization_id,
+            project_id=project_id,
             notice_id=notice_id,
             repeat=body.repeat,
             start_series=start_series,
@@ -526,6 +544,7 @@ class NoticesService:
         next_at = await recurring.recompute_next_send_from_row(
             self.repo,
             organization_id=self.organization_id,
+            project_id=project_id,
             notice_id=notice_id,
             row=refreshed,
         )
@@ -549,6 +568,7 @@ class NoticesService:
             updated.next_sends_preview = await recurring.build_preview(
                 self.repo,
                 organization_id=self.organization_id,
+                project_id=project_id,
                 repeat=body.repeat,
             )
         if updated.status == NoticeStatus.LIVE and not recurring.series_active(existing):
@@ -1008,12 +1028,13 @@ class NoticesService:
         category = str(row["category"])
         scope_type = NoticeScopeType(str(row["scope_type"]))
         scope_label = self._scope_label(scope_type, towers)
-        is_recurring = recurring.series_active(row)
+        is_recurring = recurring.has_series(row)
         repeats_label = None
-        if row.get("series_frequency"):
+        if is_recurring:
             repeats_label = await recurring.repeats_label_for_row(
                 self.repo,
                 organization_id=self.organization_id,
+                project_id=str(row["project_id"]),
                 notice_id=notice_id,
                 row=row,
             )
@@ -1031,7 +1052,10 @@ class NoticesService:
                 )
                 for item in occ_rows
             ]
-        editable = status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED} or is_recurring
+        editable = status in {
+            NoticeStatus.DRAFT,
+            NoticeStatus.SCHEDULED,
+        } or recurring.series_active(row)
         return NoticeDetailResponse(
             id=notice_id,
             organization_id=str(row["organization_id"]),
@@ -1078,6 +1102,8 @@ class NoticesService:
         row: dict[str, Any],
         *,
         attachments: list[dict[str, Any]] | None = None,
+        weekly_days: list[int] | None = None,
+        project_tz: ZoneInfo | None = None,
     ) -> NoticeListItemResponse:
         """Map a notice row to admin list item."""
         status = NoticeStatus(str(row["status"]))
@@ -1087,17 +1113,19 @@ class NoticesService:
         scope_label = str(row["scope_label"]) if row.get("scope_label") else None
         if scope_type == NoticeScopeType.WHOLE_SOCIETY:
             scope_label = "Whole society"
-        is_recurring = recurring.series_active(row)
+        is_recurring = recurring.has_series(row)
         repeats_label = None
-        if row.get("series_frequency"):
-            repeats_label = await recurring.repeats_label_for_row(
-                self.repo,
-                organization_id=self.organization_id,
-                notice_id=str(row["id"]),
+        if is_recurring and project_tz is not None:
+            repeats_label = recurring.repeats_label_for_stored_row(
                 row=row,
+                weekly_days=weekly_days,
+                project_tz=project_tz,
             )
         footer = recurring.recurrence_footer(row, repeats_label)
-        editable = status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED} or is_recurring
+        editable = status in {
+            NoticeStatus.DRAFT,
+            NoticeStatus.SCHEDULED,
+        } or recurring.series_active(row)
         return NoticeListItemResponse(
             id=str(row["id"]),
             display_code=str(row["display_code"]),

@@ -117,9 +117,14 @@ def _series_end_type_for_insert(repeat: NoticeRepeatInput) -> str:
     return "on_date"
 
 
+def has_series(row: dict[str, Any]) -> bool:
+    """True when notice has a notice_series row (including ended series)."""
+    return bool(row.get("series_frequency"))
+
+
 def series_active(row: dict[str, Any]) -> bool:
-    """True when notice has an active recurrence config."""
-    return bool(row.get("series_frequency")) and row.get("series_repeat_ended_at") is None
+    """True when recurrence is still sending (not ended)."""
+    return has_series(row) and row.get("series_repeat_ended_at") is None
 
 
 def format_series_ends_label(row: dict[str, Any]) -> str | None:
@@ -146,22 +151,52 @@ def recurrence_footer(row: dict[str, Any], repeats_label: str | None) -> str | N
     return repeats_label
 
 
-async def load_org_tz(repo: NoticesRepository, organization_id: str) -> ZoneInfo:
-    """Resolve organization timezone."""
-    tz_name = await repo.fetch_organization_timezone(organization_id=organization_id)
+async def load_project_tz(
+    repo: NoticesRepository,
+    *,
+    organization_id: str,
+    project_id: str,
+) -> ZoneInfo:
+    """Resolve project-local timezone (project settings, then organization default)."""
+    tz_name = await repo.fetch_project_timezone(
+        organization_id=organization_id,
+        project_id=project_id,
+    )
     return parse_org_timezone(tz_name)
+
+
+def repeats_label_for_stored_row(
+    *,
+    row: dict[str, Any],
+    weekly_days: list[int],
+    project_tz: ZoneInfo,
+) -> str:
+    """Build repeats label without extra database round trips."""
+    schedule = _stored_series_schedule(row)
+    return format_repeats_label(
+        frequency=schedule.frequency,
+        weekly_days=weekly_days if schedule.frequency == "weekly" else None,
+        monthly_day=schedule.monthly_day,
+        time_of_day=schedule.time_of_day,
+        org_tz=project_tz,
+    )
 
 
 async def repeat_to_storage(
     repo: NoticesRepository,
     *,
     organization_id: str,
+    project_id: str,
     notice_id: str,
     repeat: NoticeRepeatInput,
     start_series: bool,
 ) -> datetime | None:
     """Insert or replace notice_series + weekly days."""
-    org_tz = await load_org_tz(repo, organization_id)
+    project_tz = await load_project_tz(
+        repo,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
     frequency_lit = _calculator_frequency(repeat.frequency)
     frequency_str = frequency_lit
     monthly_day = repeat.monthly_day if repeat.monthly_day is not None else 1
@@ -176,7 +211,7 @@ async def repeat_to_storage(
             frequency=frequency_lit,
             weekly_days=frozenset(weekly) if frequency_lit == "weekly" else None,
             monthly_day=monthly_day,
-            org_tz=org_tz,
+            org_tz=project_tz,
         )
 
     if await repo.notice_has_series(organization_id=organization_id, notice_id=notice_id):
@@ -231,13 +266,18 @@ async def build_preview(
     repo: NoticesRepository,
     *,
     organization_id: str,
+    project_id: str,
     repeat: NoticeRepeatInput,
     limit: int = 4,
 ) -> list[datetime]:
     """Next send preview for API responses."""
     if not repeat.enabled or not repeat.frequency or not repeat.starts_on or not repeat.time_of_day:
         return []
-    org_tz = await load_org_tz(repo, organization_id)
+    project_tz = await load_project_tz(
+        repo,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
     frequency_lit = _calculator_frequency(repeat.frequency)
     starts_on, time_of_day = _required_repeat_schedule(repeat)
     monthly_day = repeat.monthly_day if repeat.monthly_day is not None else 1
@@ -252,7 +292,7 @@ async def build_preview(
         end_type=end_type_lit,
         end_on=repeat.end_on,
         end_after_sends=repeat.end_after_sends,
-        org_tz=org_tz,
+        org_tz=project_tz,
         limit=limit,
     )
 
@@ -261,13 +301,18 @@ async def compute_next_after_delivery(
     repo: NoticesRepository,
     *,
     organization_id: str,
+    project_id: str,
     notice_id: str,
     row: dict[str, Any],
     after_planned_at: datetime,
     sends_completed: int,
 ) -> tuple[datetime | None, bool]:
     """Return next send time and whether the series has ended."""
-    org_tz = await load_org_tz(repo, organization_id)
+    project_tz = await load_project_tz(
+        repo,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
     schedule = _stored_series_schedule(row)
 
     if (
@@ -288,7 +333,7 @@ async def compute_next_after_delivery(
             frequency=schedule.frequency,
             weekly_days=frozenset(weekly) if schedule.frequency == "weekly" else None,
             monthly_day=schedule.monthly_day,
-            org_tz=org_tz,
+            org_tz=project_tz,
         )
     except ValueError:
         return None, True
@@ -299,7 +344,7 @@ async def compute_next_after_delivery(
         end_after_sends=schedule.end_after_sends,
         sends_completed=sends_completed,
         candidate_planned_at=candidate,
-        org_tz=org_tz,
+        org_tz=project_tz,
     ):
         return None, True
 
@@ -309,7 +354,7 @@ async def compute_next_after_delivery(
         end_after_sends=schedule.end_after_sends,
         sends_completed=sends_completed,
         next_send_at=candidate,
-        org_tz=org_tz,
+        org_tz=project_tz,
     ):
         return None, True
     return candidate, False
@@ -319,36 +364,39 @@ async def repeats_label_for_row(
     repo: NoticesRepository,
     *,
     organization_id: str,
+    project_id: str,
     notice_id: str,
     row: dict[str, Any],
 ) -> str | None:
     """Build repeats label from stored series row."""
-    if not row.get("series_frequency"):
+    if not has_series(row):
         return None
-    org_tz = await load_org_tz(repo, organization_id)
-    schedule = _stored_series_schedule(row)
+    project_tz = await load_project_tz(
+        repo,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
     weekly = await repo.list_series_weekly_days(
         organization_id=organization_id,
         notice_id=notice_id,
     )
-    return format_repeats_label(
-        frequency=schedule.frequency,
-        weekly_days=weekly if schedule.frequency == "weekly" else None,
-        monthly_day=schedule.monthly_day,
-        time_of_day=schedule.time_of_day,
-        org_tz=org_tz,
-    )
+    return repeats_label_for_stored_row(row=row, weekly_days=weekly, project_tz=project_tz)
 
 
 async def recompute_next_send_from_row(
     repo: NoticesRepository,
     *,
     organization_id: str,
+    project_id: str,
     notice_id: str,
     row: dict[str, Any],
 ) -> datetime | None:
     """Recompute next_send_at after PATCH (no sends yet or after last)."""
-    org_tz = await load_org_tz(repo, organization_id)
+    project_tz = await load_project_tz(
+        repo,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
     schedule = _stored_series_schedule(row)
     weekly = await repo.list_series_weekly_days(
         organization_id=organization_id,
@@ -362,7 +410,7 @@ async def recompute_next_send_from_row(
             frequency=schedule.frequency,
             weekly_days=frozenset(weekly) if schedule.frequency == "weekly" else None,
             monthly_day=schedule.monthly_day,
-            org_tz=org_tz,
+            org_tz=project_tz,
         )
     last = row.get("series_last_sent_at") or row.get("series_next_send_at")
     if last is None:
@@ -370,6 +418,7 @@ async def recompute_next_send_from_row(
     next_at, _ = await compute_next_after_delivery(
         repo,
         organization_id=organization_id,
+        project_id=project_id,
         notice_id=notice_id,
         row=row,
         after_planned_at=last,
