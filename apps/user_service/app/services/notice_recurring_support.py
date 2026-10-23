@@ -15,13 +15,13 @@ from apps.user_service.app.schemas.enums import (
     NoticeSeriesEndType,
 )
 from apps.user_service.app.schemas.notices import NoticeRepeatInput
-from apps.user_service.app.services.notice_recurrence_calculator import (
+from apps.user_service.app.services.notice_recurring import (
     NoticeRecurrenceFrequency,
 )
-from apps.user_service.app.services.notice_recurrence_calculator import (
+from apps.user_service.app.services.notice_recurring import (
     NoticeSeriesEndType as RecurrenceEndType,
 )
-from apps.user_service.app.services.notice_recurrence_calculator import (
+from apps.user_service.app.services.notice_recurring import (
     compute_first_send_at,
     compute_next_send_after,
     format_repeats_label,

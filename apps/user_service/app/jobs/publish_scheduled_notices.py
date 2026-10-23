@@ -27,7 +27,11 @@ async def publish_scheduled_notices(
         project_id=project_id,
     )
     if not published_ids:
-        return []
+        return await process_recurring_notices(
+            db_connection,
+            organization_id=organization_id,
+            project_id=project_id,
+        )
 
     recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
     push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
@@ -92,7 +96,12 @@ async def publish_scheduled_notices(
                 entity=push_fields["entity"],
                 options=push_fields["options"],
             )
-    return published_ids
+    recurring_ids = await process_recurring_notices(
+        db_connection,
+        organization_id=organization_id,
+        project_id=project_id,
+    )
+    return list(dict.fromkeys([*published_ids, *recurring_ids]))
 
 
 async def expire_notice_pins(db_connection: asyncpg.Connection) -> int:

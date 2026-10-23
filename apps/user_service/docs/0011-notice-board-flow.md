@@ -89,7 +89,7 @@ see pinned banners on the home feed.
 | Recurring card / detail (NTC-3)                | Same `GET .../notices` list + `GET .../notices/{id}` (`repeat.enabled` / joined `notice_series`)         |
 | Edit / end / delete recurring notice           | `PATCH .../notices/{id}`, `POST .../notices/{id}/delete` (§14)                                           |
 | Send history                                   | `GET .../notices/{id}` detail includes `occurrences[]` (§14)                                             |
-| Recurring cron (ops)                           | `POST /projects/{project_id}/notices/process-recurring` (§14.6)                                          |
+| Recurring delivery (ops)                       | Same as scheduled publish: `POST /projects/{project_id}/notices/publish-due` (§7.1 / §14.6)              |
 | Reach estimate                                 | `GET /projects/{project_id}/notices/reach-estimate?groups=&scope=&tower_ids=`                            |
 | Edit notice (draft / scheduled)                | `PATCH /projects/{project_id}/notices/{id}`                                                              |
 | Pin live notice                                | `POST /projects/{project_id}/notices/{id}/pin`                                                           |
@@ -124,25 +124,25 @@ HTTP → API router → NoticesService (business rules) → NoticesRepository (S
 
 ### File map (to create)
 
-| Concern                     | File                                                                                                                                   |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Admin API endpoints         | `app/api/notices.py`                                                                                                                   |
-| Resident API (Phase 2)      | `app/api/notices_resident.py`                                                                                                          |
-| Route registration          | `app/api/routes.py`                                                                                                                    |
-| Orchestration               | `app/services/notices_service.py`                                                                                                      |
-| Recipient / reach count     | `app/services/notice_recipient_resolution_service.py`                                                                                  |
-| Persistence                 | `app/db/repositories/notices_repository.py`                                                                                            |
-| Request/response models     | `app/schemas/notices.py`                                                                                                               |
-| Enums (mirror Postgres)     | `app/schemas/enums.py`                                                                                                                 |
-| Admin RBAC + project access | Reuse `projects_management.*` + `ensure_staff_project_access`                                                                          |
-| Presigned uploads           | Reuse `app/api/presigned_url.py`                                                                                                       |
-| Scheduled publish job       | `app/jobs/publish_scheduled_notices.py` (or cron script)                                                                               |
-| Recurring notices job       | **`app/jobs/publish_scheduled_notices.py`** (`process_recurring_notices`) — separate cron / `POST .../notices/process-recurring` (§14) |
-| Pin expiry job              | `app/jobs/expire_notice_pins.py`                                                                                                       |
-| Recurrence calculator       | `app/services/notice_recurrence_calculator.py` (pure; used from `NoticesService`)                                                      |
-| Audit logging               | `@audit_api_call` + `set_audit_context`                                                                                                |
-| i18n                        | `app/locales/en.json` (`notices.*`)                                                                                                    |
-| Push (Phase 2)              | Hook `PushNotificationService` per [0008-push-notifications-flow.md](./0008-push-notifications-flow.md)                                |
+| Concern                     | File                                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Admin API endpoints         | `app/api/notices.py`                                                                                    |
+| Resident API (Phase 2)      | `app/api/notices_resident.py`                                                                           |
+| Route registration          | `app/api/routes.py`                                                                                     |
+| Orchestration               | `app/services/notices_service.py`                                                                       |
+| Recipient / reach count     | `app/services/notice_recipient_resolution_service.py`                                                   |
+| Persistence                 | `app/db/repositories/notices_repository.py`                                                             |
+| Request/response models     | `app/schemas/notices.py`                                                                                |
+| Enums (mirror Postgres)     | `app/schemas/enums.py`                                                                                  |
+| Admin RBAC + project access | Reuse `projects_management.*` + `ensure_staff_project_access`                                           |
+| Presigned uploads           | Reuse `app/api/presigned_url.py`                                                                        |
+| Scheduled publish job       | `app/jobs/publish_scheduled_notices.py` (or cron script)                                                |
+| Recurring notices job       | Same `publish_scheduled_notices.py` / `publish-due` as one-time scheduled notices (§14)                 |
+| Pin expiry job              | `app/jobs/expire_notice_pins.py`                                                                        |
+| Recurrence calculator       | `app/services/notice_recurring.py` (pure; used from `NoticesService`)                                   |
+| Audit logging               | `@audit_api_call` + `set_audit_context`                                                                 |
+| i18n                        | `app/locales/en.json` (`notices.*`)                                                                     |
+| Push (Phase 2)              | Hook `PushNotificationService` per [0008-push-notifications-flow.md](./0008-push-notifications-flow.md) |
 
 `NoticesService` composes `NoticeRecipientResolutionService` for reach estimates and (Phase 2) push
 recipient lists — it does not duplicate `contact_roles` / `contact_units` query logic inline.
@@ -802,19 +802,15 @@ WHERE status = 'scheduled'
 
 Does **not** auto-pin — pinning requires explicit admin action on live notices.
 
+The same job also delivers due **recurring** notices (`notice_series.next_send_at <= now()`). See §14.6.
+
 ### 7.2 Pin expiry
 
 See §5.5.
 
 ### 7.3 Recurring notice delivery
 
-**Separate** from §7.1. Cron (e.g. every minute):
-
-```text
-publish_scheduled_notices.process_recurring_notices  →  POST .../notices/process-recurring
-```
-
-See §14.6 for transaction steps. Does **not** run inside `publish-due`.
+Runs inside §7.1 (`publish-due` / `publish-scheduled`). See §14.6.
 
 ______________________________________________________________________
 
@@ -936,17 +932,17 @@ ______________________________________________________________________
 
 ## 12. Implementation phases
 
-| Phase     | Scope                                                                                        |
-| --------- | -------------------------------------------------------------------------------------------- |
-| **1a**    | Migrations + `notice-board-schema.md`                                                        |
-| **1b**    | Admin API: summary, list, detail, create, PATCH, delete, restore, duplicate                  |
-| **1c**    | Banner-slots, pin/unpin, reach-estimate                                                      |
-| **1d**    | Presigned upload integration + attachment validation                                         |
-| **1e**    | Scheduled publish job + pin expiry job                                                       |
-| **2a**    | Resident feed + banner + view/like                                                           |
-| **2b**    | Push on publish ([ADR 0008](./adr/0008-push-notifications-grpc.md))                          |
-| **3**     | RLS policies if client-side Supabase reads added                                             |
-| **1f–1h** | Recurring (§14): migrations, `repeat` on `POST`/`PATCH`, **`process_recurring_notices` job** |
+| Phase     | Scope                                                                                         |
+| --------- | --------------------------------------------------------------------------------------------- |
+| **1a**    | Migrations + `notice-board-schema.md`                                                         |
+| **1b**    | Admin API: summary, list, detail, create, PATCH, delete, restore, duplicate                   |
+| **1c**    | Banner-slots, pin/unpin, reach-estimate                                                       |
+| **1d**    | Presigned upload integration + attachment validation                                          |
+| **1e**    | Scheduled publish job + pin expiry job                                                        |
+| **2a**    | Resident feed + banner + view/like                                                            |
+| **2b**    | Push on publish ([ADR 0008](./adr/0008-push-notifications-grpc.md))                           |
+| **3**     | RLS policies if client-side Supabase reads added                                              |
+| **1f–1h** | Recurring (§14): migrations, `repeat` on `POST`/`PATCH`, recurring delivery via `publish-due` |
 
 ______________________________________________________________________
 
@@ -1077,7 +1073,7 @@ Content-Type: application/json
 
 Promote draft series: **`PATCH .../notices/{id}`** with `"publish_mode": "start_series"` (and valid `repeat` if not already stored).
 
-Stop future sends: **`PATCH`** with `"series_action": "end"` **or** `"publish_mode": "end_series"` (product pick one in implementation).
+Stop future sends: **`PATCH`** with `"publish_mode": "end_series"`.
 
 ### 14.3 List, detail, summary (existing GET)
 
@@ -1141,17 +1137,19 @@ copy via Create Notice prefilled → **`POST .../notices`**.
 Weekly/monthly examples match product copy in §14 (Mon-only from Wed start → Mon 26 Oct; monthly 1st
 → first send 1 Nov).
 
-### 14.6 Recurring notices job (separate from scheduled publish)
+### 14.6 Recurring notices job (same cron as scheduled publish)
 
-**Do not** fold recurring delivery into §7.1 `publish-due`. Use a **dedicated cron** (e.g. every minute)
-and ops endpoint:
+Recurring delivery runs on the **existing** scheduled-publish path:
 
 ```http
-POST /v1/projects/{project_id}/notices/process-recurring
+POST /v1/projects/{project_id}/notices/publish-due
 Authorization: Bearer <staff_jwt>
 ```
 
-Implementation: **`app/jobs/publish_scheduled_notices.py`** (`process_recurring_notices`) → `NoticesService.process_recurring_notices(project_id)`.
+Global cron: `POST /internal/notices/publish-due` or CLI `publish-scheduled`.
+
+Implementation: **`app/jobs/publish_scheduled_notices.py`** — one-time `publish_at` rows, then
+`process_recurring_notices` for due series.
 
 **Per due row** (`notice_series.next_send_at <= now()`, `repeat_ended_at IS NULL`, parent notice not deleted):
 
@@ -1161,7 +1159,8 @@ Implementation: **`app/jobs/publish_scheduled_notices.py`** (`process_recurring_
 1. Increment `sends_completed`; set `last_sent_at`; compute next `next_send_at` **or** set `repeat_ended_at` when end condition met.
 1. Phase 2: push for this delivery (same notice id).
 
-One-time **`POST .../notices/publish-due`** remains **only** for non-recurring `scheduled` rows with `publish_at`.
+One-time scheduled rows still use `publish_at`; recurring rows use `notice_series.next_send_at`. Both run
+in the same `publish-due` job.
 
 ### 14.7 Response flags (list + detail)
 
@@ -1200,8 +1199,8 @@ One-time **`POST .../notices/publish-due`** remains **only** for non-recurring `
 
 ### 14.10 Implementation phase (recurring)
 
-| Phase  | Scope                                                                   |
-| ------ | ----------------------------------------------------------------------- |
-| **1f** | Migrations (series tables), extend `CreateNoticeRequest` / responses    |
-| **1g** | Recurrence calculator + **`process_recurring_notices`** job + ops route |
-| **1h** | List/detail/summary recurring fields; admin UI                          |
+| Phase  | Scope                                                                |
+| ------ | -------------------------------------------------------------------- |
+| **1f** | Migrations (series tables), extend `CreateNoticeRequest` / responses |
+| **1g** | Recurrence calculator + recurring delivery inside `publish-due`      |
+| **1h** | List/detail/summary recurring fields; admin UI                       |

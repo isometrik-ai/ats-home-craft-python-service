@@ -10,7 +10,6 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_uow
 from apps.user_service.app.jobs.publish_scheduled_notices import (
     expire_notice_pins,
-    process_recurring_notices,
     publish_scheduled_notices,
 )
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
@@ -38,27 +37,6 @@ async def publish_due_notices_internal(
         message_key="notices.success.publish_due_completed",
         custom_code=CustomStatusCode.SUCCESS,
         data={"published_notice_ids": published_ids, "count": len(published_ids)},
-    )
-
-
-@handle_api_exceptions("process recurring notices globally")
-@router.post(
-    "/process-recurring",
-    status_code=http_status.HTTP_200_OK,
-    summary="Deliver all due recurring notices (cron)",
-)
-@limiter.limit("10/minute")
-async def process_recurring_notices_internal(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_uow),
-):
-    """Deliver all due recurring notices org-wide."""
-    delivered_ids = await process_recurring_notices(db_connection)
-    return success_response(
-        request=request,
-        message_key="notices.success.process_recurring_completed",
-        custom_code=CustomStatusCode.SUCCESS,
-        data={"delivered_notice_ids": delivered_ids, "count": len(delivered_ids)},
     )
 
 

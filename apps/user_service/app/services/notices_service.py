@@ -834,28 +834,16 @@ class NoticesService:
         )
         return ReachEstimateResponse(estimated_recipients=total, breakdown=breakdown)
 
-    async def process_recurring_notices(
-        self,
-        *,
-        project_id: str | None = None,
-    ) -> list[str]:
-        """Deliver due recurring notices (same notice row each time)."""
-        from apps.user_service.app.jobs.publish_scheduled_notices import (
-            process_recurring_notices as run_recurring_job,
-        )
-
-        return await run_recurring_job(
-            self.db_connection,
-            organization_id=self.organization_id,
-            project_id=project_id,
-        )
-
     async def publish_due_notices(
         self,
         *,
         project_id: str | None = None,
     ) -> list[str]:
-        """Promote scheduled notices that are due."""
+        """Promote due one-time scheduled notices and deliver due recurring notices."""
+        from apps.user_service.app.jobs.publish_scheduled_notices import (
+            process_recurring_notices as run_recurring_job,
+        )
+
         published_ids = await self.repo.publish_due_scheduled_notices(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -871,7 +859,12 @@ class NoticesService:
                     notice_id=notice_id,
                     title=str(row["title"]),
                 )
-        return published_ids
+        recurring_ids = await run_recurring_job(
+            self.db_connection,
+            organization_id=self.organization_id,
+            project_id=project_id,
+        )
+        return list(dict.fromkeys([*published_ids, *recurring_ids]))
 
     async def expire_due_pins(self) -> int:
         """Deactivate expired banner pins."""

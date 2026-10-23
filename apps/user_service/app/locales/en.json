@@ -1354,7 +1354,6 @@
       "pinned": "Notice pinned to banner successfully.",
       "unpinned": "Notice unpinned successfully.",
       "publish_due_completed": "Due scheduled notices published successfully.",
-      "process_recurring_completed": "Due recurring notices delivered successfully.",
       "expire_pins_completed": "Expired banner pins cleared successfully.",
       "banner_retrieved": "Notice banner retrieved successfully.",
       "feed_retrieved": "Notice feed retrieved successfully.",

@@ -83,14 +83,14 @@ Resident Phase 2: **`/v1/notices`** — feed + banner + like.
 
 **No separate notice-series API.** Recurring behaviour is an extension of the same routes:
 
-| Action                      | Route                                                     | Change                                                                                  |
-| --------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Create draft / start series | `POST .../notices`                                        | Optional `repeat` object; `publish_mode` adds **`start_series`**                        |
-| Edit / end series           | `PATCH .../notices/{id}`                                  | Update `repeat`; promote with `start_series`; stop with `end_series` or `series_action` |
-| List / detail / summary     | Existing GET                                              | `is_recurring`, `next_send_at`, `repeats_label` on same notice rows                     |
-| Delete recurring            | `POST .../notices/{id}/delete`                            | Same row; sets `repeat_ended_at`                                                        |
-| Deliver recurring sends     | **`POST .../notices/process-recurring`** + dedicated cron | **Separate** from `publish-due` (§6)                                                    |
-| Reach / pin                 | Unchanged                                                 | Pin the **same** notice when live                                                       |
+| Action                      | Route                                            | Change                                                               |
+| --------------------------- | ------------------------------------------------ | -------------------------------------------------------------------- |
+| Create draft / start series | `POST .../notices`                               | Optional `repeat` object; `publish_mode` adds **`start_series`**     |
+| Edit / end series           | `PATCH .../notices/{id}`                         | Update `repeat`; promote with `start_series`; stop with `end_series` |
+| List / detail / summary     | Existing GET                                     | `is_recurring`, `next_send_at`, `repeats_label` on same notice rows  |
+| Delete recurring            | `POST .../notices/{id}/delete`                   | Same row; sets `repeat_ended_at`                                     |
+| Deliver recurring sends     | Existing **`POST .../notices/publish-due`** cron | Same job as one-time scheduled notices                               |
+| Reach / pin                 | Unchanged                                        | Pin the **same** notice when live                                    |
 
 ### 5. Display code
 
@@ -127,8 +127,8 @@ lifecycle uses **`notices.status`** + `repeat_ended_at` / `next_send_at`.
 | **`notice_series_weekly_days`** | ISO weekdays when weekly                                                            |
 | **`notice_series_occurrences`** | Send history (`notice_id` = same row every time)                                    |
 
-**Job:** **`process_recurring_notices`** cron + `POST .../notices/process-recurring` — **not** bundled
-with `publish-due`.
+**Job:** Recurring delivery is bundled with existing **`publish-due`** / `publish_scheduled_notices`
+(one-time `publish_at` first, then due `notice_series.next_send_at`).
 
 **Immutability:** Recurring notices remain **`PATCH`-able** while active (content applies to next delivery).
 One-time live notices stay immutable.
@@ -149,7 +149,7 @@ ______________________________________________________________________
 1. Admin API + service in `user_service`.
 1. Scheduled publish + pin expiry jobs.
 1. Phase 2 resident feed + push ([ADR 0008](./0008-push-notifications-grpc.md)).
-1. Recurring migrations + `NoticesService.process_recurring_notices` + dedicated cron.
+1. Recurring migrations + recurring delivery inside existing `publish-due`.
 
 ______________________________________________________________________
 
@@ -162,7 +162,7 @@ ______________________________________________________________________
 | Edit live notices                     | Immutable for one-time; **recurring may PATCH** while active           |
 | New notice row per recurring send     | Product reuses one notice id for all deliveries                        |
 | Series status column                  | Use `notices.status` + `repeat_ended_at` only                          |
-| Recurring inside `publish-due`        | Separate cron keeps one-time schedule path simple                      |
+| Separate `process-recurring` HTTP     | Reuse existing `publish-due` cron so ops schedule one endpoint         |
 | Duplicate API for live notices        | Must use explicit Create Notice flow                                   |
 | Pin draft/scheduled                   | Only live notices may be pinned                                        |
 | Separate `/notice-series` REST tree   | Product uses one Create Notice drawer — extend `POST /notices` only    |

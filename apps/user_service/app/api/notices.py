@@ -576,35 +576,3 @@ async def publish_due_project_notices(
         custom_code=CustomStatusCode.SUCCESS,
         data={"published_notice_ids": published_ids, "count": len(published_ids)},
     )
-
-
-@handle_api_exceptions("process recurring project notices")
-@router.post(
-    "/{project_id}/notices/process-recurring",
-    status_code=http_status.HTTP_200_OK,
-    summary="Deliver due recurring notices for this project (ops/cron)",
-    responses=COMMON_ERROR_RESPONSES,
-)
-@limiter.limit("30/minute")
-async def process_recurring_project_notices(
-    request: Request,
-    project_id: str = Path(..., description="Project identifier (UUID string)."),
-    db_connection: asyncpg.Connection = Depends(db_uow),
-    current_user: dict = Depends(get_user_from_auth),
-):
-    """Run recurring notice deliveries for one project."""
-    user_context = await ensure_staff_project_access(
-        current_user=current_user,
-        db_connection=db_connection,
-        project_id=project_id,
-        permission_codes=NOTICES_MANAGEMENT_EDIT,
-        request=request,
-    )
-    service = NoticesService(db_connection=db_connection, user_context=user_context)
-    delivered_ids = await service.process_recurring_notices(project_id=project_id)
-    return success_response(
-        request=request,
-        message_key="notices.success.process_recurring_completed",
-        custom_code=CustomStatusCode.SUCCESS,
-        data={"delivered_notice_ids": delivered_ids, "count": len(delivered_ids)},
-    )

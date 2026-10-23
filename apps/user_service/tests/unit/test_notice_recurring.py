@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from apps.user_service.app.services.notice_recurrence_calculator import (
+from apps.user_service.app.services.notice_recurring import (
     compute_first_send_at,
     preview_sends,
     should_end_before_send,

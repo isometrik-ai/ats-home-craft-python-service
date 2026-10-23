@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -344,7 +344,12 @@ async def test_publish_due_notices_and_expire_pins():
     svc.push_dispatcher = MagicMock()
     svc.push_dispatcher.send_to_user = AsyncMock()
 
-    ids = await svc.publish_due_notices(project_id=PROJECT_ID)
+    with patch(
+        "apps.user_service.app.jobs.publish_scheduled_notices.process_recurring_notices",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        ids = await svc.publish_due_notices(project_id=PROJECT_ID)
     assert ids == [NOTICE_ID]
     svc.push_dispatcher.send_to_user.assert_awaited_once()
 

@@ -24,6 +24,7 @@ async def test_publish_scheduled_notices_empty():
     ) as repo_cls:
         repo = repo_cls.return_value
         repo.publish_due_scheduled_notices = AsyncMock(return_value=[])
+        repo.list_due_recurring_notice_ids = AsyncMock(return_value=[])
         result = await publish_scheduled_notices(conn)
     assert result == []
 
@@ -49,6 +50,7 @@ async def test_publish_scheduled_notices_dispatches_push():
     ):
         repo = repo_cls.return_value
         repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE])
+        repo.list_due_recurring_notice_ids = AsyncMock(return_value=[])
         repo.list_notices_published_since = AsyncMock(return_value=[notice_row])
         repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
         repo.list_contact_recipient_ids = AsyncMock(return_value=[])
@@ -85,6 +87,7 @@ async def test_publish_scheduled_notices_skips_missing_notice_rows():
     ):
         repo = repo_cls.return_value
         repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE])
+        repo.list_due_recurring_notice_ids = AsyncMock(return_value=[])
         repo.list_notices_published_since = AsyncMock(return_value=[])
         repo.fetch_notice_by_id = AsyncMock(return_value=None)
         push = push_cls.return_value
