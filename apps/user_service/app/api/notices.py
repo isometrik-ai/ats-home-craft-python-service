@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.notices import (
     CreateNoticeRequest,
     DeleteNoticeRequest,
     NoticeListQuery,
+    NoticeRepeatInput,
     PinNoticeRequest,
     ReachEstimateQuery,
     UpdateNoticeRequest,
@@ -142,6 +143,39 @@ async def get_project_notice_reach_estimate(
         message_key="notices.success.reach_estimate_retrieved",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(),
+    )
+
+
+@handle_api_exceptions("preview notice repeat")
+@router.post(
+    "/{project_id}/notices/repeat-preview",
+    status_code=http_status.HTTP_200_OK,
+    summary="Preview the next sends for a repeat rule",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+async def preview_project_notice_repeat(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    body: NoticeRepeatInput = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return the summary and upcoming send times for a repeat rule."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=NOTICES_MANAGEMENT_VIEW,
+        request=request,
+    )
+    service = NoticesService(db_connection=db_connection, user_context=user_context)
+    data = await service.preview_repeat(body)
+    return success_response(
+        request=request,
+        message_key="notices.success.repeat_preview_retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(mode="json"),
     )
 
 
@@ -541,6 +575,56 @@ async def unpin_project_notice(
     return success_response(
         request=request,
         message_key="notices.success.unpinned",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(mode="json"),
+    )
+
+
+@handle_api_exceptions("stop notice repeat")
+@router.post(
+    "/{project_id}/notices/{notice_id}/stop-repeat",
+    status_code=http_status.HTTP_200_OK,
+    summary="Stop future sends of a repeating notice",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="notices",
+    category="NOTICES",
+)
+async def stop_project_notice_repeat(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    notice_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Cancel future sends. A notice that already went out stays live."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=NOTICES_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = NoticesService(db_connection=db_connection, user_context=user_context)
+    data = await service.stop_repeat(project_id=project_id, notice_id=notice_id)
+    set_audit_context(
+        request,
+        user_context,
+        project_id=project_id,
+        table="notices",
+        requested_id=notice_id,
+        description=f"Stopped repeat for notice: {data.display_code}",
+        risk_level="medium",
+        new_data=data.model_dump(mode="json"),
+    )
+    return success_response(
+        request=request,
+        message_key="notices.success.repeat_stopped",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(mode="json"),
     )

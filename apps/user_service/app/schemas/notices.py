@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,12 +14,14 @@ from apps.user_service.app.schemas.enums import (
     NOTICE_MAX_CONTACT_RECIPIENTS,
     NOTICE_MAX_DESCRIPTION_LENGTH,
     NOTICE_MAX_TITLE_LENGTH,
+    NOTICE_REPEAT_MAX_COUNT,
     NoticeCategory,
     NoticeListStatus,
     NoticePinDuration,
     NoticePublishMode,
     NoticeRecipientGroup,
     NoticeRecipientInputGroup,
+    NoticeRepeatFrequency,
     NoticeScopeType,
     NoticeStatus,
 )
@@ -81,6 +83,44 @@ class NoticeAttachmentResponse(BaseModel):
     sort_order: int
 
 
+class NoticeRepeatInput(BaseModel):
+    """Weekly or monthly repeat rule. One notice is sent again on each match."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    frequency: NoticeRepeatFrequency
+    weekdays: list[str] | None = None
+    day_of_month: int | None = Field(None, ge=1, le=28)
+    last_day_of_month: bool = False
+    time_of_day: str = Field(
+        ...,
+        min_length=4,
+        max_length=8,
+        description="Clock time in UTC, for example 09:00.",
+    )
+    starts_on: date
+    ends_on: date | None = None
+    end_after_count: int | None = Field(None, ge=1, le=NOTICE_REPEAT_MAX_COUNT)
+
+
+class NoticeRepeatResponse(BaseModel):
+    """Repeat rule returned on notice detail and list cards."""
+
+    frequency: NoticeRepeatFrequency
+    weekdays: list[str] = Field(default_factory=list)
+    day_of_month: int | None = None
+    last_day_of_month: bool = False
+    time_of_day: str
+    starts_on: date
+    ends_on: date | None = None
+    end_after_count: int | None = None
+    occurrences_sent: int = 0
+    next_publish_at: datetime | None = None
+    cancelled_at: datetime | None = None
+    summary: str
+    upcoming: list[datetime] = Field(default_factory=list)
+
+
 class CreateNoticeRequest(BaseModel):
     """Create a notice (draft, publish now, or schedule)."""
 
@@ -106,6 +146,7 @@ class CreateNoticeRequest(BaseModel):
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode = NoticePublishMode.DRAFT
     publish_at: datetime | None = None
+    repeat: NoticeRepeatInput | None = None
     pin_to_banner: bool = False
     slot_index: int | None = Field(None, ge=1, le=6)
     pin_duration: NoticePinDuration = NoticePinDuration.MANUAL
@@ -167,6 +208,7 @@ class UpdateNoticeRequest(BaseModel):
     tower_ids: list[str] | None = None
     publish_mode: NoticePublishMode | None = None
     publish_at: datetime | None = None
+    repeat: NoticeRepeatInput | None = None
     attachments: list[NoticeAttachmentInput] | None = None
 
     @field_validator("recipient_groups", mode="before")
@@ -296,6 +338,7 @@ class NoticeListItemResponse(BaseModel):
     published_at: datetime | None = None
     publish_at: datetime | None = None
     deleted_at: datetime | None = None
+    repeat: NoticeRepeatResponse | None = None
     pinned: bool = False
     slot_index: int | None = None
     view_count: int = 0
@@ -327,6 +370,7 @@ class NoticeDetailResponse(BaseModel):
     published_at: datetime | None = None
     deleted_at: datetime | None = None
     deleted_reason: str | None = None
+    repeat: NoticeRepeatResponse | None = None
     attachments: list[NoticeAttachmentResponse] = Field(default_factory=list)
     pinned: bool = False
     slot_index: int | None = None

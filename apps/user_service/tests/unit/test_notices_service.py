@@ -324,7 +324,9 @@ async def test_get_summary():
 @pytest.mark.asyncio
 async def test_publish_due_notices_and_expire_pins():
     svc = _service()
-    svc.repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE_ID])
+    svc.repo.claim_due_notice_sends = AsyncMock(
+        return_value=[{"id": NOTICE_ID, "fired_at": None, "repeating": False}]
+    )
     svc.repo.fetch_notice_by_id_only = AsyncMock(
         return_value={
             "id": NOTICE_ID,

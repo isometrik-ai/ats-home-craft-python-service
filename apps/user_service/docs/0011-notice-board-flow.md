@@ -1,17 +1,18 @@
 # Notice Board Flow — Context & Change Guide
 
-> **Status: Not yet implemented (ADR + flow spec).** Migrations and schema doc exist; admin API,
-> resident feed, push, and background jobs are follow-ups. This document describes the **Notices**
-> feature — community admin publish/schedule on dashboard, resident read on mobile — in the same
-> style as [`0006-tenant-requests-flow.md`](./0006-tenant-requests-flow.md), [`0007-walk-in-flow.md`](./0007-walk-in-flow.md),
+> **Status: Implemented.** Admin API, resident feed, push, scheduled publish, pin expiry, and
+> repeat are in the service. This document is the behavior spec for community admin publish on the
+> dashboard and resident read on mobile, in the same style as
+> [`0006-tenant-requests-flow.md`](./0006-tenant-requests-flow.md), [`0007-walk-in-flow.md`](./0007-walk-in-flow.md),
 > and [`0005-move-events-flow.md`](./0005-move-events-flow.md).
 >
 > Schema and architecture rationale: [ADR 0011](./adr/0011-notice-board.md), [ADR 0010](./adr/0010-project-membership.md) (project access), [ADR 0009](./adr/0009-contact-roles.md) (recipient roles).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/notices`
-- **Resident API prefix (Phase 2):** `/v1/notices`
-- **DB schema:** `ats-home-craft-supabase` (migrations not yet added — see [notice-board-schema.md](../../../../ats-home-craft-supabase/docs/notice-board-schema.md))
+- **Resident API prefix:** `/v1/notices`
+- **Internal jobs:** `/v1/internal/notices` (no JWT)
+- **DB schema:** `ats-home-craft-supabase`. Repeat rules: `supabase/migrations/20261023120000_notice_repeat.sql`. Column reference: [notice-board-schema.md](../../../../ats-home-craft-supabase/docs/notice-board-schema.md)
 
 ______________________________________________________________________
 
@@ -28,7 +29,10 @@ Each notice has:
   see which other groups were targeted).
 - **Scope** — **whole society** or **by tower** (one or more towers in the project).
 - **Publishing** — save as **draft**, **publish now** → `live`, or **schedule** → `scheduled`
-  (max **2 months** ahead).
+  (max **2 months** ahead). A one-shot `publish_at` is an absolute timestamp. The client sends the
+  offset (`2026-08-15T09:00:00+05:30`). The server stores `timestamptz` and compares it to `now()`.
+- **Repeat** — optional weekly or monthly rule on the **same** notice. `time_of_day` is a **UTC**
+  clock (`09:00` means 09:00 UTC). There is no project timezone and no `Asia/Kolkata` default.
 
 On the **Live** tab, a **banner row** shows up to **6 pin slots**. Only **live (published)**
 notices may be pinned. Each occupied slot shows the notice's **category name** as the header label
@@ -50,7 +54,10 @@ see pinned banners on the home feed.
 | **≥1 recipient group to publish/schedule** | Service validation; drafts may omit                                  |
 | **By tower → ≥1 tower selected**           | `notice_towers` rows required when `scope_type = by_tower`           |
 | **≤4 attachments, JPG/PNG, ≤5 MB each**    | Service count + mime/size validation                                 |
-| **Schedule ≤ 2 months ahead**              | `publish_at <= now() + interval '2 months'` → else `422`             |
+| **Schedule ≤ 2 months ahead**              | One-shot `publish_at` only. Repeat series can run up to 2 years      |
+| **Repeat time is UTC**                     | `time_of_day` is a UTC clock. No local or project timezone           |
+| **One notice per repeat**                  | Re-send the same row. Do not create a new notice per occurrence      |
+| **Stop repeat keeps a live notice**        | Cancels future sends. An already-live notice stays live              |
 | **Live notices immutable**                 | `PATCH` rejected when `status = live` → `409 notice_not_editable`    |
 | **Only live notices can pin**              | Pin on create (publish now) or `POST .../pin`; reject otherwise      |
 | **Max 6 banner slots**                     | `slot_index` 1–6; partial unique index per active slot               |
@@ -82,6 +89,9 @@ see pinned banners on the home feed.
 | Save as draft                                  | `POST` with `{ "publish_mode": "draft" }`                                                                |
 | Publish now (+ optional pin)                   | `POST` with `{ "publish_mode": "now", "pin_to_banner": true }`                                           |
 | Schedule notice                                | `POST` with `{ "publish_mode": "schedule", "publish_at": "..." }`                                        |
+| Preview a repeat rule                          | `POST /projects/{project_id}/notices/repeat-preview`                                                     |
+| Repeat on create / edit                        | `repeat` object on `POST` or `PATCH` (see §4.12)                                                         |
+| Stop future repeat sends                       | `POST /projects/{project_id}/notices/{id}/stop-repeat`                                                   |
 | Reach estimate                                 | `GET /projects/{project_id}/notices/reach-estimate?groups=&scope=&tower_ids=`                            |
 | Edit notice (draft / scheduled)                | `PATCH /projects/{project_id}/notices/{id}`                                                              |
 | Pin live notice                                | `POST /projects/{project_id}/notices/{id}/pin`                                                           |
@@ -122,6 +132,8 @@ HTTP → API router → NoticesService (business rules) → NoticesRepository (S
 | Resident API (Phase 2)      | `app/api/notices_resident.py`                                                                           |
 | Route registration          | `app/api/routes.py`                                                                                     |
 | Orchestration               | `app/services/notices_service.py`                                                                       |
+| Repeat calendar             | `app/services/notice_repeat.py`                                                                         |
+| Internal cron routes        | `app/api/notices_internal.py`                                                                           |
 | Recipient / reach count     | `app/services/notice_recipient_resolution_service.py`                                                   |
 | Persistence                 | `app/db/repositories/notices_repository.py`                                                             |
 | Request/response models     | `app/schemas/notices.py`                                                                                |
@@ -143,14 +155,15 @@ ______________________________________________________________________
 
 ### New tables
 
-| Table                    | Purpose                                                                   |
-| ------------------------ | ------------------------------------------------------------------------- |
-| **`notices`**            | Header: content, category, status, scope, schedule, stats, `display_code` |
-| **`notice_recipients`**  | Audience groups (Owner, Tenant, Staff, Security)                          |
-| **`notice_towers`**      | Tower scope when `scope_type = by_tower`                                  |
-| **`notice_attachments`** | Up to 4 image rows (`file_path`, metadata, `sort_order`)                  |
-| **`notice_pins`**        | Banner slot assignment (`slot_index` 1–6) for live notices                |
-| **`notice_likes`**       | One row per contact like (Phase 2)                                        |
+| Table                    | Purpose                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| **`notices`**            | Header: content, category, status, scope, schedule, stats, `display_code`          |
+| **`notice_repeats`**     | Optional 1:1 rule. `notice_id` is the primary key. Cascade-deletes with the notice |
+| **`notice_recipients`**  | Audience groups (Owner, Tenant, Staff, Security)                                   |
+| **`notice_towers`**      | Tower scope when `scope_type = by_tower`                                           |
+| **`notice_attachments`** | Up to 4 image rows (`file_path`, metadata, `sort_order`)                           |
+| **`notice_pins`**        | Banner slot assignment (`slot_index` 1–6) for live notices                         |
+| **`notice_likes`**       | One row per contact like (Phase 2)                                                 |
 
 Full column reference: [notice-board-schema.md](../../../../ats-home-craft-supabase/docs/notice-board-schema.md).
 
@@ -336,6 +349,9 @@ POST /v1/projects/{project_id}/notices
   "publish_at": "2026-08-15T09:00:00+05:30"
 }
 ```
+
+`publish_at` is an absolute instant. The `+05:30` offset comes from the client. The server does
+not convert it with a local timezone. A naive timestamp is treated as UTC.
 
 #### Create request (draft)
 
@@ -652,6 +668,91 @@ Implementation: `notices_resident_service.get_notice`, `notices_repository.incre
 
 ______________________________________________________________________
 
+### 4.12 Repeat the same notice
+
+A repeat does not create a new notice, display code, view count, or like count. Residents keep
+seeing one notice. Each due time sends that notice again and bumps `published_at`.
+
+The rule is one row in `notice_repeats`:
+
+| Field                          | Meaning                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| `frequency`                    | `weekly` or `monthly`                                                          |
+| `weekdays`                     | ISO weekdays, Monday = 1. Weekly only                                          |
+| `day_of_month`                 | 1–28. Monthly only. Days 29–31 are not allowed                                 |
+| `last_day`                     | Last calendar day of the month. Monthly only, instead of `day_of_month`        |
+| `time_of_day`                  | UTC clock, such as `09:00`. Not a local time                                   |
+| `starts_on`                    | First date the rule may match. A non-matching weekday waits for the next match |
+| `ends_on` or `end_after_count` | Exactly one. End date is inclusive. Count is 1–100 planned sends               |
+| `occurrences_sent`             | Pushes actually sent                                                           |
+| `next_publish_at`              | Next UTC instant. Empty when the series is finished or cancelled               |
+| `cancelled_at`                 | Set by stop-repeat or delete. Future sends stop                                |
+
+Series length is capped at 2 years (`NOTICE_REPEAT_MAX_DAYS`). The 2-month cap applies only to a
+one-shot `publish_at`.
+
+#### Preview (does not save)
+
+```http
+POST /v1/projects/{project_id}/notices/repeat-preview
+{
+  "frequency": "weekly",
+  "weekdays": ["monday"],
+  "time_of_day": "09:00",
+  "starts_on": "2026-10-21",
+  "ends_on": "2027-01-21"
+}
+```
+
+Returns `summary` (`Every Monday at 9:00 am UTC`), `next_publish_at`, and the next few `upcoming`
+instants. 21 Oct 2026 is a Wednesday, so the first send is **Monday 26 Oct 2026 09:00 UTC**.
+
+If the UI time picker is in the viewer's wall clock, the client converts that clock to UTC before
+sending `time_of_day`. The API does not accept a timezone.
+
+#### Save
+
+`repeat` on create or update uses the same object.
+
+- **Draft:** store the rule. Send nothing. `next_publish_at` stays empty.
+- **Publish now or schedule, first slot still in the future:** status `scheduled`. `publish_at`
+  and `next_publish_at` are that first UTC slot.
+- **Publish now or schedule, first slot already due:** status `live`, one push, `occurrences_sent = 1`,
+  `next_publish_at` moves to the following slot.
+
+Omitting `repeat` on update leaves the stored rule. Sending `repeat: null` removes it. Editing the
+rule on a scheduled notice recalculates the next slot. A live notice's title and body stay locked.
+
+#### Each later send
+
+Dkron calls `POST /v1/internal/notices/publish-due` every minute. No JWT. The same job publishes
+one-shot scheduled notices and re-sends live repeats whose `next_publish_at` is due.
+
+On a repeat send the job:
+
+1. Sets `published_at = now()` so the notice moves up the board.
+1. Sends the push again. The idempotency key includes the slot time
+   (`notice:{id}:published:{YYYYMMDDTHHMMSSZ}:{user_id}`), so a later slot is not dropped.
+1. Adds 1 to `occurrences_sent`.
+1. Sets `next_publish_at` to the next slot, or null after the last one.
+
+A late cron sends **once**, for the latest missed slot, then schedules the next future slot. It
+does not push once per missed week. `end_after_count` counts planned slots, not skipped ones.
+
+The notice stays live after the last send. The pin stays on that same notice.
+
+#### Stop
+
+```http
+POST /v1/projects/{project_id}/notices/{notice_id}/stop-repeat
+```
+
+Sets `cancelled_at` and clears `next_publish_at`. A live notice stays live. A scheduled notice that
+has not been sent returns to draft and clears `publish_at`. Deleting the notice also cancels the
+rule. Duplicating copies the rule onto a new draft with `occurrences_sent = 0`.
+
+______________________________________________________________________
+
 ## 5. Banner slots & pinning
 
 ### 5.1 UI layout
@@ -770,20 +871,28 @@ ______________________________________________________________________
 
 ## 7. Background jobs
 
-### 7.1 Scheduled publish
+### 7.1 Scheduled publish and repeat sends
 
-Cron every minute (or `POST /notices/publish-due` for ops):
+Dkron, every minute, UTC:
 
-```sql
-UPDATE notices
-SET status = 'live',
-    published_at = now(),
-    updated_at = now()
-WHERE status = 'scheduled'
-  AND publish_at <= now();
+```http
+POST /v1/internal/notices/publish-due
 ```
 
-Does **not** auto-pin — pinning requires explicit admin action on live notices.
+No JWT. Rate limit 10/minute. The job claims a row when either:
+
+- `status = scheduled` and `publish_at <= now()`, or
+- `status = live`, a `notice_repeats` row exists, `cancelled_at` is null, and
+  `next_publish_at <= now()`.
+
+One-shot rows become `live` and get one push. Repeat rows are re-sent and `notice_repeats.next_publish_at`
+moves to the next UTC slot (§4.12). The job does **not** auto-pin.
+
+Staff can also run the project-scoped route, which still requires project access:
+
+```http
+POST /v1/projects/{project_id}/notices/publish-due
+```
 
 ### 7.2 Pin expiry
 
@@ -859,23 +968,29 @@ ______________________________________________________________________
 
 ## 10. Error cases (i18n keys to add)
 
-| Key                                       | When                                      |
-| ----------------------------------------- | ----------------------------------------- |
-| `notices.errors.title_too_long`           | Title > 70 chars                          |
-| `notices.errors.description_too_long`     | Description > 600 chars                   |
-| `notices.errors.recipients_required`      | Publish/schedule without recipient groups |
-| `notices.errors.towers_required`          | `by_tower` without tower_ids              |
-| `notices.errors.schedule_too_far`         | `publish_at` > 2 months ahead             |
-| `notices.errors.not_editable`             | PATCH on live notice                      |
-| `notices.errors.not_pinnable`             | Pin on non-live notice                    |
-| `notices.errors.already_pinned`           | Pin when notice already in a slot         |
-| `notices.errors.pin_slots_full`           | All 6 slots occupied                      |
-| `notices.errors.slot_occupied`            | Pin without confirm when slot taken       |
-| `notices.errors.too_many_attachments`     | > 4 attachments                           |
-| `notices.errors.invalid_attachment`       | Wrong mime or size                        |
-| `notices.errors.duplicate_live_forbidden` | Duplicate API on live notice              |
-| `notices.errors.project_access_denied`    | Failed `ensure_staff_project_access`      |
-| `notices.errors.not_found`                | Unknown notice_id or wrong project        |
+| Key                                       | When                                        |
+| ----------------------------------------- | ------------------------------------------- |
+| `notices.errors.title_too_long`           | Title > 70 chars                            |
+| `notices.errors.description_too_long`     | Description > 600 chars                     |
+| `notices.errors.recipients_required`      | Publish/schedule without recipient groups   |
+| `notices.errors.towers_required`          | `by_tower` without tower_ids                |
+| `notices.errors.schedule_too_far`         | One-shot `publish_at` > 2 months ahead      |
+| `notices.errors.repeat_weekdays_required` | Weekly repeat with no weekday               |
+| `notices.errors.repeat_day_required`      | Monthly repeat with no day and not last day |
+| `notices.errors.repeat_end_required`      | Missing end date and end count, or both set |
+| `notices.errors.repeat_time_invalid`      | `time_of_day` is not a UTC clock            |
+| `notices.errors.repeat_has_no_sends`      | Rule matches no slot                        |
+| `notices.errors.repeat_not_set`           | Stop-repeat on a notice with no rule        |
+| `notices.errors.not_editable`             | PATCH on live notice                        |
+| `notices.errors.not_pinnable`             | Pin on non-live notice                      |
+| `notices.errors.already_pinned`           | Pin when notice already in a slot           |
+| `notices.errors.pin_slots_full`           | All 6 slots occupied                        |
+| `notices.errors.slot_occupied`            | Pin without confirm when slot taken         |
+| `notices.errors.too_many_attachments`     | > 4 attachments                             |
+| `notices.errors.invalid_attachment`       | Wrong mime or size                          |
+| `notices.errors.duplicate_live_forbidden` | Duplicate API on live notice                |
+| `notices.errors.project_access_denied`    | Failed `ensure_staff_project_access`        |
+| `notices.errors.not_found`                | Unknown notice_id or wrong project          |
 
 ______________________________________________________________________
 
@@ -924,17 +1039,19 @@ ______________________________________________________________________
 
 ## 13. Where to change things (quick reference)
 
-| Change                       | Location                                                    |
-| ---------------------------- | ----------------------------------------------------------- |
-| Add notice category          | Migration enum + `NoticeCategory` + UI icons                |
-| Change pin slot count (6)    | Migration CHECK + service constant + UI grid                |
-| Reach count query            | `notice_recipient_resolution_service.py`                    |
-| Pin / unpin rules            | `notices_service.pin_notice` / `unpin_notice`               |
-| Scheduled horizon (2 months) | `notices_service._validate_schedule`                        |
-| Live immutability            | `notices_service.update_notice` guard                       |
-| Display code format          | `notices_repository.allocate_display_code`                  |
-| Admin RBAC                   | `notices.py` — permission dependency                        |
-| Project access               | `ensure_staff_project_access` in router or service          |
-| Resident visibility          | `notices_resident_service._is_visible_to_contact` (Phase 2) |
-| Tab counts                   | `notices_repository.get_summary_counts`                     |
-| View / like counters         | §4.11; `notices_resident_service` + `notices_repository`    |
+| Change                       | Location                                                          |
+| ---------------------------- | ----------------------------------------------------------------- |
+| Add notice category          | Migration enum + `NoticeCategory` + UI icons                      |
+| Change pin slot count (6)    | Migration CHECK + service constant + UI grid                      |
+| Reach count query            | `notice_recipient_resolution_service.py`                          |
+| Pin / unpin rules            | `notices_service.pin_notice` / `unpin_notice`                     |
+| Scheduled horizon (2 months) | `notices_service._validate_schedule` (one-shot `publish_at` only) |
+| Repeat calendar and UTC time | `notice_repeat.py`. `time_of_day` is UTC                          |
+| Repeat persistence           | `notice_repeats` via `notices_repository._write_notice_repeat`    |
+| Live immutability            | `notices_service.update_notice` guard                             |
+| Display code format          | `notices_repository.allocate_display_code`                        |
+| Admin RBAC                   | `notices.py` — permission dependency                              |
+| Project access               | `ensure_staff_project_access` in router or service                |
+| Resident visibility          | `notices_resident_service._is_visible_to_contact` (Phase 2)       |
+| Tab counts                   | `notices_repository.get_summary_counts`                           |
+| View / like counters         | §4.11; `notices_resident_service` + `notices_repository`          |

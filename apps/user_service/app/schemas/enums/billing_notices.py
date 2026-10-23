@@ -78,6 +78,13 @@ class NoticePublishMode(str, Enum):
     SCHEDULE = "schedule"
 
 
+class NoticeRepeatFrequency(str, Enum):
+    """How often a notice is sent again."""
+
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
 class NoticeListStatus(str, Enum):
     """Admin list tab filter."""
 
@@ -104,6 +111,8 @@ NOTICE_MAX_CONTACT_RECIPIENTS = 200
 NOTICE_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 NOTICE_ALLOWED_ATTACHMENT_MIMES = frozenset({"image/jpeg", "image/png"})
 NOTICE_SCHEDULE_MAX_DAYS = 62
+NOTICE_REPEAT_MAX_COUNT = 100
+NOTICE_REPEAT_MAX_DAYS = 366 * 2
 
 
 # ============================================================================
