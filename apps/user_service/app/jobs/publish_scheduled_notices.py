@@ -13,6 +13,8 @@ from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
 
+RECURRING_BATCH_SIZE = 50
+
 
 async def publish_scheduled_notices(
     db_connection: asyncpg.Connection,
@@ -116,88 +118,114 @@ async def process_recurring_notices(
     organization_id: str | None = None,
     project_id: str | None = None,
 ) -> list[str]:
-    """Deliver due recurring notices (same row each send) and dispatch push."""
+    """Deliver due recurring notices in bounded batches and dispatch push."""
     repo = NoticesRepository(db_connection=db_connection)
-    notice_ids = await repo.list_due_recurring_notice_ids(
-        organization_id=organization_id,
-        project_id=project_id,
-    )
-    if not notice_ids:
-        return []
-
     push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
     recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
     delivered: list[str] = []
+    attempted: list[str] = []
 
-    for notice_id in notice_ids:
-        if organization_id:
-            row = await repo.fetch_notice_by_id_only(
+    while True:
+        notice_ids = await repo.list_due_recurring_notice_ids(
+            organization_id=organization_id,
+            project_id=project_id,
+            limit=RECURRING_BATCH_SIZE,
+            exclude_notice_ids=list(attempted) or None,
+        )
+        if not notice_ids:
+            break
+        for notice_id in notice_ids:
+            attempted.append(notice_id)
+            delivered_id = await _deliver_one_recurring_notice(
+                repo,
+                push_dispatcher=push_dispatcher,
+                recipient_service=recipient_service,
                 organization_id=organization_id,
                 notice_id=notice_id,
             )
-        else:
-            row = await _fetch_recurring_notice_any_org(repo, notice_id=notice_id)
-        if row is None or not row.get("series_frequency"):
-            continue
-        org_id = str(row["organization_id"])
-        if row.get("series_repeat_ended_at") is not None:
-            continue
-        ok = await repo.deliver_due_recurring_notice(
-            organization_id=org_id,
-            notice_id=notice_id,
-            project_id=str(row["project_id"]),
-        )
-        if not ok:
-            continue
-        delivered.append(notice_id)
-
-        recipient_groups = await repo.list_recipient_groups(
-            organization_id=org_id,
-            notice_id=notice_id,
-        )
-        contact_ids = await repo.list_contact_recipient_ids(
-            organization_id=org_id,
-            notice_id=notice_id,
-        )
-        towers = await repo.list_towers_for_notice(
-            organization_id=org_id,
-            notice_id=notice_id,
-        )
-        user_ids: set[str] = set(
-            await recipient_service.resolve_recipient_user_ids(
-                organization_id=org_id,
-                project_id=str(row["project_id"]),
-                notice_id=notice_id,
-                recipient_groups=recipient_groups,
-                scope_type=str(row["scope_type"]),
-                tower_ids=[str(t["tower_id"]) for t in towers],
-            )
-        )
-        if contact_ids:
-            user_ids.update(
-                await recipient_service.resolve_user_ids_for_contact_ids(
-                    organization_id=org_id,
-                    contact_ids=contact_ids,
-                )
-            )
-        for user_id in user_ids:
-            push_fields = NoticesService._notice_publish_push_fields(
-                project_id=str(row["project_id"]),
-                notice_id=notice_id,
-                recipient_user_id=user_id,
-            )
-            await push_dispatcher.send_to_user(
-                organization_id=org_id,
-                recipient_user_id=user_id,
-                message_key="notifications.push.notices.published",
-                notification_type="notice_published",
-                feed_type="notices",
-                params={"title": str(row["title"])},
-                data=push_fields["data"],
-                entity=push_fields["entity"],
-                options=push_fields["options"],
-            )
+            if delivered_id is not None:
+                delivered.append(delivered_id)
+        if len(notice_ids) < RECURRING_BATCH_SIZE:
+            break
     return delivered
+
+
+async def _deliver_one_recurring_notice(
+    repo: NoticesRepository,
+    *,
+    push_dispatcher: PushNotificationDispatcher,
+    recipient_service: NoticeRecipientResolutionService,
+    organization_id: str | None,
+    notice_id: str,
+) -> str | None:
+    """Deliver one due series row and push; None when skipped."""
+    if organization_id:
+        row = await repo.fetch_notice_by_id_only(
+            organization_id=organization_id,
+            notice_id=notice_id,
+        )
+    else:
+        row = await _fetch_recurring_notice_any_org(repo, notice_id=notice_id)
+    if row is None or not row.get("series_frequency"):
+        return None
+    org_id = str(row["organization_id"])
+    if row.get("series_repeat_ended_at") is not None:
+        return None
+    ok = await repo.deliver_due_recurring_notice(
+        organization_id=org_id,
+        notice_id=notice_id,
+        project_id=str(row["project_id"]),
+    )
+    if not ok:
+        return None
+
+    recipient_groups = await repo.list_recipient_groups(
+        organization_id=org_id,
+        notice_id=notice_id,
+    )
+    contact_ids = await repo.list_contact_recipient_ids(
+        organization_id=org_id,
+        notice_id=notice_id,
+    )
+    towers = await repo.list_towers_for_notice(
+        organization_id=org_id,
+        notice_id=notice_id,
+    )
+    user_ids: set[str] = set(
+        await recipient_service.resolve_recipient_user_ids(
+            organization_id=org_id,
+            project_id=str(row["project_id"]),
+            notice_id=notice_id,
+            recipient_groups=recipient_groups,
+            scope_type=str(row["scope_type"]),
+            tower_ids=[str(t["tower_id"]) for t in towers],
+        )
+    )
+    if contact_ids:
+        user_ids.update(
+            await recipient_service.resolve_user_ids_for_contact_ids(
+                organization_id=org_id,
+                contact_ids=contact_ids,
+            )
+        )
+    for user_id in user_ids:
+        push_fields = NoticesService._notice_publish_push_fields(
+            project_id=str(row["project_id"]),
+            notice_id=notice_id,
+            recipient_user_id=user_id,
+        )
+        await push_dispatcher.send_to_user(
+            organization_id=org_id,
+            recipient_user_id=user_id,
+            message_key="notifications.push.notices.published",
+            notification_type="notice_published",
+            feed_type="notices",
+            params={"title": str(row["title"])},
+            data=push_fields["data"],
+            entity=push_fields["entity"],
+            options=push_fields["options"],
+        )
+    return notice_id
 
 
 async def _fetch_recurring_notice_any_org(

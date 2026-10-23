@@ -1512,6 +1512,8 @@ class NoticesRepository(BaseRepository):
         *,
         organization_id: str | None = None,
         project_id: str | None = None,
+        limit: int | None = None,
+        exclude_notice_ids: list[str] | None = None,
     ) -> list[str]:
         """Notice ids with a due recurring send."""
         conditions = [
@@ -1530,6 +1532,14 @@ class NoticesRepository(BaseRepository):
             conditions.append(f"n.project_id = ${idx}::uuid")
             values.append(project_id)
             idx += 1
+        if exclude_notice_ids:
+            conditions.append(f"n.id <> ALL(${idx}::uuid[])")
+            values.append(exclude_notice_ids)
+            idx += 1
+        limit_sql = ""
+        if limit is not None:
+            limit_sql = f" LIMIT ${idx}"
+            values.append(limit)
         rows = await self.db_connection.fetch(
             f"""
             SELECT n.id::text AS id
@@ -1537,6 +1547,7 @@ class NoticesRepository(BaseRepository):
             JOIN notices n ON n.id = ns.notice_id
             WHERE {" AND ".join(conditions)}
             ORDER BY ns.next_send_at
+            {limit_sql}
             """,
             *values,
         )

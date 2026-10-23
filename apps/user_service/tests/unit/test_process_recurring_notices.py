@@ -64,3 +64,32 @@ async def test_process_recurring_skips_when_deliver_fails():
     ):
         result = await process_recurring_notices(MagicMock(), organization_id="org-1")
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_process_recurring_batches_until_exhausted():
+    first = [f"11111111-1111-1111-1111-{i:012d}" for i in range(50)]
+    second = ["22222222-2222-2222-2222-000000000001"]
+    repo = MagicMock()
+    repo.list_due_recurring_notice_ids = AsyncMock(side_effect=[first, second])
+    repo.fetch_notice_by_id_only = AsyncMock(return_value=None)
+
+    with (
+        patch(
+            "apps.user_service.app.jobs.publish_scheduled_notices.NoticesRepository",
+            return_value=repo,
+        ),
+        patch(
+            "apps.user_service.app.jobs.publish_scheduled_notices.PushNotificationDispatcher",
+        ),
+        patch(
+            "apps.user_service.app.jobs.publish_scheduled_notices.NoticeRecipientResolutionService",
+        ),
+    ):
+        result = await process_recurring_notices(MagicMock(), organization_id="org-1")
+
+    assert result == []
+    assert repo.list_due_recurring_notice_ids.await_count == 2
+    second_kwargs = repo.list_due_recurring_notice_ids.await_args_list[1].kwargs
+    assert second_kwargs["limit"] == 50
+    assert second_kwargs["exclude_notice_ids"] == first
