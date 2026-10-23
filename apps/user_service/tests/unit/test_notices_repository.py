@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
+from apps.user_service.app.db.repositories.notices_repository import (
+    NoticesRepository,
+    RecurringDueCursor,
+)
 from apps.user_service.app.schemas.enums import NoticeListStatus
 
 ORG = "11111111-1111-1111-1111-111111111111"
@@ -534,3 +537,27 @@ async def test_increment_view_count():
     repo = NoticesRepository(db_connection=conn)
     await repo.increment_view_count(organization_id=ORG, notice_id=NOTICE)
     assert "view_count = view_count + 1" in conn.execute_calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_list_due_recurring_notice_ids_uses_keyset_cursor():
+    due_at = datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc)
+    conn = _FakeConn(
+        rows=[{"id": NOTICE, "next_send_at": due_at.replace(tzinfo=None)}],
+    )
+    repo = NoticesRepository(db_connection=conn)
+    cursor = RecurringDueCursor(next_send_at=due_at, notice_id=NOTICE)
+
+    rows = await repo.list_due_recurring_notice_ids(
+        organization_id=ORG,
+        project_id=PROJECT,
+        limit=50,
+        after_cursor=cursor,
+    )
+
+    assert rows == [RecurringDueCursor(next_send_at=due_at, notice_id=NOTICE)]
+    query, args = conn.fetch_calls[0]
+    assert "n.id <> ALL" not in query
+    assert "(ns.next_send_at, n.id) > ($3::timestamptz, $4::uuid)" in query
+    assert "ORDER BY ns.next_send_at ASC, n.id ASC" in query
+    assert args == (ORG, PROJECT, due_at, NOTICE, 50)

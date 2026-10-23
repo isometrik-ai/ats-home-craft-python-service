@@ -7,9 +7,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from apps.user_service.app.db.repositories.notices_repository import RecurringDueCursor
 from apps.user_service.app.jobs.publish_scheduled_notices import (
     process_recurring_notices,
 )
+
+_DUE_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+
+def _due(notice_id: str) -> RecurringDueCursor:
+    return RecurringDueCursor(next_send_at=_DUE_AT, notice_id=notice_id)
 
 
 @pytest.mark.asyncio
@@ -28,7 +35,7 @@ async def test_process_recurring_notices_empty():
 async def test_process_recurring_skips_when_deliver_fails():
     notice_id = "44444444-4444-4444-4444-444444444444"
     repo = MagicMock()
-    repo.list_due_recurring_notice_ids = AsyncMock(return_value=[notice_id])
+    repo.list_due_recurring_notice_ids = AsyncMock(return_value=[_due(notice_id)])
     repo.fetch_notice_by_id_only = AsyncMock(
         return_value={
             "organization_id": "org-1",
@@ -68,8 +75,8 @@ async def test_process_recurring_skips_when_deliver_fails():
 
 @pytest.mark.asyncio
 async def test_process_recurring_batches_until_exhausted():
-    first = [f"11111111-1111-1111-1111-{i:012d}" for i in range(50)]
-    second = ["22222222-2222-2222-2222-000000000001"]
+    first = [_due(f"11111111-1111-1111-1111-{i:012d}") for i in range(50)]
+    second = [_due("22222222-2222-2222-2222-000000000001")]
     repo = MagicMock()
     repo.list_due_recurring_notice_ids = AsyncMock(side_effect=[first, second])
     repo.fetch_notice_by_id_only = AsyncMock(return_value=None)
@@ -90,6 +97,8 @@ async def test_process_recurring_batches_until_exhausted():
 
     assert result == []
     assert repo.list_due_recurring_notice_ids.await_count == 2
+    first_kwargs = repo.list_due_recurring_notice_ids.await_args_list[0].kwargs
     second_kwargs = repo.list_due_recurring_notice_ids.await_args_list[1].kwargs
+    assert first_kwargs["after_cursor"] is None
     assert second_kwargs["limit"] == 50
-    assert second_kwargs["exclude_notice_ids"] == first
+    assert second_kwargs["after_cursor"] == first[-1]

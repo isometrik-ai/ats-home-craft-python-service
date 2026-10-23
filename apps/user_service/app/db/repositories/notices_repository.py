@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timezone
-from typing import Any
+from typing import Any, NamedTuple
 
 import asyncpg
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import NOTICE_MAX_PIN_SLOTS, NoticeListStatus
+
+
+class RecurringDueCursor(NamedTuple):
+    """Stable keyset position for due recurring notice pagination."""
+
+    next_send_at: datetime
+    notice_id: str
+
 
 _NOTICE_SELECT_COLUMNS = """
   n.id::text AS id,
@@ -1513,9 +1521,9 @@ class NoticesRepository(BaseRepository):
         organization_id: str | None = None,
         project_id: str | None = None,
         limit: int | None = None,
-        exclude_notice_ids: list[str] | None = None,
-    ) -> list[str]:
-        """Notice ids with a due recurring send."""
+        after_cursor: RecurringDueCursor | None = None,
+    ) -> list[RecurringDueCursor]:
+        """Due recurring series rows after an optional keyset cursor."""
         conditions = [
             "ns.repeat_ended_at IS NULL",
             "ns.next_send_at IS NOT NULL",
@@ -1532,26 +1540,38 @@ class NoticesRepository(BaseRepository):
             conditions.append(f"n.project_id = ${idx}::uuid")
             values.append(project_id)
             idx += 1
-        if exclude_notice_ids:
-            conditions.append(f"n.id <> ALL(${idx}::uuid[])")
-            values.append(exclude_notice_ids)
-            idx += 1
+        if after_cursor is not None:
+            conditions.append(f"(ns.next_send_at, n.id) > (${idx}::timestamptz, ${idx + 1}::uuid)")
+            values.append(after_cursor.next_send_at)
+            values.append(after_cursor.notice_id)
+            idx += 2
         limit_sql = ""
         if limit is not None:
             limit_sql = f" LIMIT ${idx}"
             values.append(limit)
         rows = await self.db_connection.fetch(
             f"""
-            SELECT n.id::text AS id
+            SELECT n.id::text AS id, ns.next_send_at
             FROM notice_series ns
             JOIN notices n ON n.id = ns.notice_id
             WHERE {" AND ".join(conditions)}
-            ORDER BY ns.next_send_at
+            ORDER BY ns.next_send_at ASC, n.id ASC
             {limit_sql}
             """,
             *values,
         )
-        return [str(row["id"]) for row in rows]
+        due: list[RecurringDueCursor] = []
+        for row in rows:
+            next_send_at = row["next_send_at"]
+            if next_send_at.tzinfo is None:
+                next_send_at = next_send_at.replace(tzinfo=timezone.utc)
+            due.append(
+                RecurringDueCursor(
+                    next_send_at=next_send_at,
+                    notice_id=str(row["id"]),
+                )
+            )
+        return due
 
     async def deliver_due_recurring_notice(
         self,

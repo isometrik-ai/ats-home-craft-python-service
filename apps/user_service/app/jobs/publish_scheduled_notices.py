@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncpg
 
-from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
+from apps.user_service.app.db.repositories.notices_repository import (
+    NoticesRepository,
+    RecurringDueCursor,
+)
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
@@ -123,29 +126,29 @@ async def process_recurring_notices(
     push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
     recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
     delivered: list[str] = []
-    attempted: list[str] = []
+    cursor: RecurringDueCursor | None = None
 
     while True:
-        notice_ids = await repo.list_due_recurring_notice_ids(
+        due_rows = await repo.list_due_recurring_notice_ids(
             organization_id=organization_id,
             project_id=project_id,
             limit=RECURRING_BATCH_SIZE,
-            exclude_notice_ids=list(attempted) or None,
+            after_cursor=cursor,
         )
-        if not notice_ids:
+        if not due_rows:
             break
-        for notice_id in notice_ids:
-            attempted.append(notice_id)
+        for due in due_rows:
             delivered_id = await _deliver_one_recurring_notice(
                 repo,
                 push_dispatcher=push_dispatcher,
                 recipient_service=recipient_service,
                 organization_id=organization_id,
-                notice_id=notice_id,
+                notice_id=due.notice_id,
             )
             if delivered_id is not None:
                 delivered.append(delivered_id)
-        if len(notice_ids) < RECURRING_BATCH_SIZE:
+        cursor = due_rows[-1]
+        if len(due_rows) < RECURRING_BATCH_SIZE:
             break
     return delivered
 

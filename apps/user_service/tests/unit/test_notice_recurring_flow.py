@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from apps.user_service.app.db.repositories.notices_repository import RecurringDueCursor
 from apps.user_service.app.jobs.publish_scheduled_notices import (
     process_recurring_notices,
 )
@@ -124,7 +125,11 @@ async def test_process_recurring_delivers_final_send_and_ends_series():
         "series_repeat_ended_at": None,
     }
     repo = MagicMock()
-    repo.list_due_recurring_notice_ids = AsyncMock(return_value=[notice_id])
+    repo.list_due_recurring_notice_ids = AsyncMock(
+        return_value=[
+            RecurringDueCursor(next_send_at=PLANNED_UTC, notice_id=notice_id),
+        ]
+    )
     repo.fetch_notice_by_id_only = AsyncMock(return_value=job_row)
     repo.deliver_due_recurring_notice = AsyncMock(return_value=True)
     repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
