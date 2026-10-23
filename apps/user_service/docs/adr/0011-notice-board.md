@@ -1,13 +1,13 @@
 # ADR 0011: Notice board — admin publish, resident feed
 
-|                  |                                                                                                                                                                |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Proposed                                                                                                                                                       |
-| **Date**         | 2026-08-10                                                                                                                                                     |
-| **Authors**      | Home Craft platform team                                                                                                                                       |
-| **Depends on**   | [ADR 0010](./0010-project-membership.md) (project scoping), [ADR 0009](./0009-contact-roles.md), [ADR 0008](./0008-push-notifications-grpc.md) (push, Phase 2) |
-| **Related docs** | [0011-notice-board-flow.md](../0011-notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md)        |
-| **Migrations**   | `20260810120000_notice_board_enums.sql`, `20260810121000_notice_board_tables.sql`, `20260810122000_notice_board_rls_deferred.sql`                              |
+|                  |                                                                                                                                                                       |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Proposed                                                                                                                                                              |
+| **Date**         | 2026-08-10                                                                                                                                                            |
+| **Authors**      | Home Craft platform team                                                                                                                                              |
+| **Depends on**   | [ADR 0010](./0010-project-membership.md) (project scoping), [ADR 0009](./0009-contact-roles.md), [ADR 0008](./0008-push-notifications-grpc.md) (push, Phase 2)        |
+| **Related docs** | [0011-notice-board-flow.md](../0011-notice-board-flow.md), [notice-board-schema.md](../../../../../ats-home-craft-supabase/docs/notice-board-schema.md)               |
+| **Migrations**   | `20260810120000_notice_board_enums.sql`, `20260810121000_notice_board_tables.sql`, `20260810122000_notice_board_rls_deferred.sql`, `20261023120000_notice_repeat.sql` |
 
 ______________________________________________________________________
 
@@ -18,16 +18,17 @@ Community admins publish notices for a **project** (`projects` = gated community
 
 ### Product rules (confirmed)
 
-| Area                  | Behaviour                                                                                           |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| **Content**           | Title ≤70, description ≤600, category, up to 4 images (JPG/PNG, ≤5 MB)                              |
-| **Recipients**        | Multi-select Owner, Tenant, Staff, Security — recipients never see other groups                     |
-| **Scope**             | Whole society or by tower                                                                           |
-| **Publishing**        | Draft, publish now → `live`, schedule → `scheduled` (**≤2 months** ahead)                           |
-| **Live immutability** | Published notices **cannot be edited** — delete or copy via Create Notice                           |
-| **Duplicate live**    | UI prefills Create Notice; **`POST /notices`**, not duplicate API                                   |
-| **Banner pins**       | **6 generic slots**; **only live** notices; slot header = notice **category label**; click → detail |
-| **Soft delete**       | Audit retained; restore creates new draft copy (duplicate semantics)                                |
+| Area                  | Behaviour                                                                                                                                     |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Content**           | Title ≤70, description ≤600, category, up to 4 images (JPG/PNG, ≤5 MB)                                                                        |
+| **Recipients**        | Multi-select Owner, Tenant, Staff, Security — recipients never see other groups                                                               |
+| **Scope**             | Whole society or by tower                                                                                                                     |
+| **Publishing**        | Draft, publish now → `live`, schedule → `scheduled` (**≤2 months** ahead). `publish_at` is an absolute timestamp; the client sends the offset |
+| **Repeat**            | Optional 1:1 `notice_repeats` row. Same notice is re-sent. `time_of_day` is **UTC**. No local or project timezone                             |
+| **Live immutability** | Published notices **cannot be edited** — delete or copy via Create Notice                                                                     |
+| **Duplicate live**    | UI prefills Create Notice; **`POST /notices`**, not duplicate API                                                                             |
+| **Banner pins**       | **6 generic slots**; **only live** notices; slot header = notice **category label**; click → detail                                           |
+| **Soft delete**       | Audit retained; restore creates new draft copy (duplicate semantics)                                                                          |
 
 ### Membership alignment ([ADR 0010](./0010-project-membership.md))
 
@@ -40,7 +41,7 @@ ______________________________________________________________________
 
 ## Decision
 
-### 1. Six new tables
+### 1. Tables
 
 | Table                    | Purpose                                                                 |
 | ------------------------ | ----------------------------------------------------------------------- |
@@ -50,6 +51,7 @@ ______________________________________________________________________
 | **`notice_attachments`** | Up to 4 images                                                          |
 | **`notice_pins`**        | Banner slot assignment (`slot_index` 1–6) for **live** notices only     |
 | **`notice_likes`**       | One like per contact (Phase 2)                                          |
+| **`notice_repeats`**     | Optional 1:1 repeat rule. `notice_id` primary key, cascade delete       |
 
 ### 2. Status model
 
@@ -82,7 +84,19 @@ Resident Phase 2: **`/v1/notices`** — feed + banner + like.
 
 ### 5. Display code
 
-`display_code` e.g. `NTC-1042` — monotonic per `project_id`, immutable.
+`display_code` e.g. `NTC-1042` — monotonic per `project_id`, immutable. A repeating notice keeps
+that one code across every send.
+
+### 6. Repeat
+
+One `notices` row plus at most one `notice_repeats` row. Weekly (ISO weekdays) or monthly (day 1–28
+or last day of the month). End by `ends_on` or `end_after_count` (1–100), not both. Series span is
+at most 2 years. The 2-month schedule cap applies only to a one-shot `publish_at`.
+
+`time_of_day` is a UTC clock. The server does not default a timezone and does not read a project
+timezone. `next_publish_at` is `timestamptz`. Publish-due (`POST /v1/internal/notices/publish-due`,
+no JWT) re-sends a live repeat when that instant is due, then advances it. A late run sends once
+for the latest due slot. Stop-repeat cancels future sends and leaves an already-live notice live.
 
 ______________________________________________________________________
 
@@ -122,10 +136,12 @@ ______________________________________________________________________
 
 ## Alternatives considered
 
-| Alternative                           | Rejected because                                        |
-| ------------------------------------- | ------------------------------------------------------- |
-| Banner slots by recipient group       | Product uses category label on slot, not Owner/Tenant/… |
-| Fixed category columns (6 enum slots) | Slots are generic; any live notice fills a free slot    |
-| Edit live notices                     | Confirmed immutable after publish                       |
-| Duplicate API for live notices        | Must use explicit Create Notice flow                    |
-| Pin draft/scheduled                   | Only live notices may be pinned                         |
+| Alternative                           | Rejected because                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Banner slots by recipient group       | Product uses category label on slot, not Owner/Tenant/…                                                     |
+| Fixed category columns (6 enum slots) | Slots are generic; any live notice fills a free slot                                                        |
+| Edit live notices                     | Confirmed immutable after publish                                                                           |
+| Duplicate API for live notices        | Must use explicit Create Notice flow                                                                        |
+| Pin draft/scheduled                   | Only live notices may be pinned                                                                             |
+| New notice row per repeat occurrence  | Views, likes, and display code must stay on one notice                                                      |
+| Repeat clock in `Asia/Kolkata`        | Notices have no local timezone. One-shot `publish_at` is an absolute timestamp; repeat `time_of_day` is UTC |

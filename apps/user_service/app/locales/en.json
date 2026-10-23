@@ -1330,7 +1330,21 @@
       "project_access_denied": "You do not have access to manage notices for this project.",
       "feed_access_denied": "You do not have access to notices for this project.",
       "likes_require_contact": "Unable to like notices for this account.",
-      "not_found": "The notice could not be found."
+      "not_found": "The notice could not be found.",
+      "repeat_weekdays_required": "Select at least one day for a weekly notice.",
+      "repeat_weekday_invalid": "{weekday} is not a valid weekday.",
+      "repeat_day_required": "Select a day of the month, or last day.",
+      "repeat_day_conflict": "Choose either a day of the month or the last day.",
+      "repeat_end_required": "Choose an end date or a number of sends.",
+      "repeat_end_before_start": "The end date must be on or after the start date.",
+      "repeat_count_invalid": "A repeating notice can send at most {max} times.",
+      "repeat_too_long": "A repeating notice can run for at most 2 years.",
+      "repeat_time_invalid": "Enter a UTC time of day like 09:00.",
+      "repeat_has_no_sends": "This repeat rule does not include any send.",
+      "repeat_not_set": "This notice does not repeat.",
+      "invoice_unpaid_groups": "An unpaid-invoice notice can go only to Owner, Tenant, or both.",
+      "invoice_unpaid_contacts": "These contacts do not have an unpaid invoice for the selected group: {contact_ids}.",
+      "invoice_unpaid_none": "Nobody in the selected group has an unpaid invoice."
     },
     "success": {
       "summary_retrieved": "Notice summary retrieved successfully.",
@@ -1349,7 +1363,9 @@
       "banner_retrieved": "Notice banner retrieved successfully.",
       "feed_retrieved": "Notice feed retrieved successfully.",
       "liked": "Notice liked successfully.",
-      "unliked": "Notice like removed successfully."
+      "unliked": "Notice like removed successfully.",
+      "repeat_preview_retrieved": "Repeat preview retrieved successfully.",
+      "repeat_stopped": "Future sends stopped. The notice stays available."
     }
   },
   "community_events": {

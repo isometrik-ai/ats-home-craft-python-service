@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
+from apps.user_service.app.schemas.enums import NoticeCategory
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
@@ -20,14 +21,16 @@ async def publish_scheduled_notices(
     organization_id: str | None = None,
     project_id: str | None = None,
 ) -> list[str]:
-    """Promote due scheduled notices to live and dispatch push notifications."""
+    """Promote due scheduled notices to live, re-send due repeats, and push."""
     repo = NoticesRepository(db_connection=db_connection)
-    published_ids = await repo.publish_due_scheduled_notices(
+    sends = await repo.claim_due_notice_sends(
         organization_id=organization_id,
         project_id=project_id,
     )
-    if not published_ids:
+    if not sends:
         return []
+    sends_by_id = {str(send["id"]): send for send in sends}
+    published_ids = list(sends_by_id)
 
     recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
     push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
@@ -58,6 +61,8 @@ async def publish_scheduled_notices(
         )
         if notice_row is None:
             continue
+        unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
+        tower_ids = [str(tower["tower_id"]) for tower in towers]
         user_ids: set[str] = set(
             await recipient_service.resolve_recipient_user_ids(
                 organization_id=org_id,
@@ -65,9 +70,19 @@ async def publish_scheduled_notices(
                 notice_id=notice_id,
                 recipient_groups=recipient_groups,
                 scope_type=str(notice_row["scope_type"]),
-                tower_ids=[str(t["tower_id"]) for t in towers],
+                tower_ids=tower_ids,
+                require_unpaid_invoice=unpaid_only,
             )
         )
+        if contact_ids and unpaid_only:
+            allowed = await recipient_service.unpaid_invoice_contact_ids(
+                organization_id=org_id,
+                project_id=proj_id,
+                recipient_groups=recipient_groups,
+                scope_type=str(notice_row["scope_type"]),
+                tower_ids=tower_ids,
+            )
+            contact_ids = [contact_id for contact_id in contact_ids if contact_id in allowed]
         if contact_ids:
             user_ids.update(
                 await recipient_service.resolve_user_ids_for_contact_ids(
@@ -75,11 +90,14 @@ async def publish_scheduled_notices(
                     contact_ids=contact_ids,
                 )
             )
+        send = sends_by_id.get(notice_id) or {}
+        occurrence_at = send.get("fired_at") if send.get("repeating") else None
         for user_id in user_ids:
             push_fields = NoticesService._notice_publish_push_fields(
                 project_id=proj_id,
                 notice_id=notice_id,
                 recipient_user_id=user_id,
+                occurrence_at=occurrence_at,
             )
             await push_dispatcher.send_to_user(
                 organization_id=org_id,

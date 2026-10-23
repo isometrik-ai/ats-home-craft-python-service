@@ -346,7 +346,20 @@ async def test_find_first_free_slot():
 
 @pytest.mark.asyncio
 async def test_publish_due_scheduled_notices_and_expire_pins():
-    conn = _FakeConn(rows=[{"id": NOTICE}], execute_result="UPDATE 4")
+    conn = _FakeConn(
+        rows=[
+            {
+                "id": NOTICE,
+                "status": "scheduled",
+                "publish_at": datetime.now(timezone.utc),
+                "next_publish_at": None,
+                "repeat_frequency": None,
+                "repeat_occurrences_sent": 0,
+                "repeat_cancelled_at": None,
+            }
+        ],
+        execute_result="UPDATE 4",
+    )
     repo = NoticesRepository(db_connection=conn)
 
     ids = await repo.publish_due_scheduled_notices(
@@ -355,8 +368,11 @@ async def test_publish_due_scheduled_notices_and_expire_pins():
     )
     assert ids == [NOTICE]
     query, _ = conn.fetch_calls[0]
-    assert "status = 'live'" in query
+    assert "status = 'scheduled'" in query
     assert "organization_id = $1::uuid" in query
+    update_query, update_args = conn.execute_calls[0]
+    assert "status = 'live'" in update_query
+    assert update_args[0] == NOTICE
 
     assert await repo.expire_due_pins() == 4
 

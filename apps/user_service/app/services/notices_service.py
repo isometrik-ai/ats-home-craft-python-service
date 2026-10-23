@@ -9,6 +9,7 @@ import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
 from apps.user_service.app.schemas.enums import (
+    INVOICE_UNPAID_RECIPIENT_GROUPS,
     NOTICE_CATEGORY_LABELS,
     NOTICE_MAX_ATTACHMENTS,
     NOTICE_SCHEDULE_MAX_DAYS,
@@ -26,6 +27,8 @@ from apps.user_service.app.schemas.notices import (
     NoticeDetailResponse,
     NoticeListItemResponse,
     NoticeListQuery,
+    NoticeRepeatInput,
+    NoticeRepeatResponse,
     NoticeSummaryResponse,
     PinNoticeRequest,
     ReachEstimateQuery,
@@ -35,6 +38,18 @@ from apps.user_service.app.schemas.notices import (
 )
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
+)
+from apps.user_service.app.services.notice_repeat import (
+    WEEKDAY_NAMES,
+    NoticeRepeatRule,
+    activate_repeat,
+    empty_repeat_columns,
+    first_occurrence,
+    parse_repeat_input,
+    repeat_columns,
+    rule_from_row,
+    summary_text,
+    upcoming_sends,
 )
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
@@ -153,10 +168,20 @@ class NoticesService:
             contact_ids=list(body.contact_ids or []),
         )
         tower_ids = body.tower_ids or []
+        await self._validate_invoice_unpaid_audience(
+            project_id=project_id,
+            category=body.category,
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=body.scope_type,
+            tower_ids=tower_ids,
+            publishing=body.publish_mode in {NoticePublishMode.NOW, NoticePublishMode.SCHEDULE},
+        )
 
-        status, publish_at, published_at = self._resolve_publish_state(
+        status, publish_at, published_at, repeat_fields, fired_at = self._schedule_for_write(
             publish_mode=body.publish_mode,
             publish_at=body.publish_at,
+            repeat=body.repeat,
             recipient_groups=recipient_groups,
             contact_ids=contact_ids,
             scope_type=body.scope_type,
@@ -184,6 +209,7 @@ class NoticesService:
             duplicate_of_id=None,
             created_by_user_id=self.user_id,
             updated_by_user_id=self.user_id,
+            repeat=repeat_fields,
         )
         notice_id = str(row["id"])
         await self._replace_children(
@@ -209,6 +235,7 @@ class NoticesService:
                 project_id=project_id,
                 notice_id=notice_id,
                 title=body.title.strip(),
+                occurrence_at=fired_at,
             )
 
         return await self.get_notice(project_id=project_id, notice_id=notice_id)
@@ -275,9 +302,17 @@ class NoticesService:
             if body.tower_ids is not None
             else [str(row["tower_id"]) for row in current_towers]
         )
+        category = body.category or NoticeCategory(str(existing["category"]))
+        await self._validate_invoice_unpaid_audience(
+            project_id=project_id,
+            category=category,
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=scope_type,
+            tower_ids=tower_ids,
+            publishing=body.publish_mode in {NoticePublishMode.NOW, NoticePublishMode.SCHEDULE},
+        )
 
-        publish_mode = body.publish_mode
-        publish_at_input = body.publish_at
         fields: dict[str, Any] = {
             "title": title,
             "description": description,
@@ -285,29 +320,18 @@ class NoticesService:
         if body.category is not None:
             fields["category"] = body.category.value
 
-        if publish_mode is not None:
-            status, publish_at, published_at = self._resolve_publish_state(
-                publish_mode=publish_mode,
-                publish_at=publish_at_input,
-                recipient_groups=recipient_groups,
-                contact_ids=contact_ids,
-                scope_type=scope_type,
-                tower_ids=tower_ids,
-                _current_status=str(existing["status"]),
-            )
-            fields["status"] = status
-            fields["publish_at"] = publish_at
-            fields["published_at"] = published_at
-        elif publish_at_input is not None:
-            self._validate_schedule(publish_at_input)
-            self._validate_publish_requirements(
-                recipient_groups=recipient_groups,
-                contact_ids=contact_ids,
-                scope_type=scope_type,
-                tower_ids=tower_ids,
-            )
-            fields["publish_at"] = publish_at_input
-            fields["status"] = NoticeStatus.SCHEDULED.value
+        fired_at = self._apply_update_schedule(
+            existing=existing,
+            fields=fields,
+            publish_mode=body.publish_mode,
+            publish_at=body.publish_at,
+            repeat_changed="repeat" in body.model_fields_set,
+            repeat=body.repeat,
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=scope_type,
+            tower_ids=tower_ids,
+        )
 
         if body.scope_type is not None:
             fields["scope_type"] = body.scope_type.value
@@ -339,11 +363,12 @@ class NoticesService:
             )
 
         updated = await self.get_notice(project_id=project_id, notice_id=notice_id)
-        if updated.status == NoticeStatus.LIVE:
+        if fields.get("status") == NoticeStatus.LIVE.value:
             await self._dispatch_publish_push(
                 project_id=project_id,
                 notice_id=notice_id,
                 title=updated.title,
+                occurrence_at=fired_at,
             )
         return updated
 
@@ -480,6 +505,7 @@ class NoticesService:
             duplicate_of_id=source_notice_id,
             created_by_user_id=self.user_id,
             updated_by_user_id=self.user_id,
+            repeat=self._draft_repeat_columns(source),
         )
         new_id = str(row["id"])
         attachment_inputs = [
@@ -579,12 +605,23 @@ class NoticesService:
                 message_key="notices.errors.towers_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        unpaid_only = query.category == NoticeCategory.INVOICE_UNPAID
+        await self._validate_invoice_unpaid_audience(
+            project_id=project_id,
+            category=query.category or NoticeCategory.GENERAL,
+            recipient_groups=groups,
+            contact_ids=[],
+            scope_type=query.scope_type,
+            tower_ids=tower_ids,
+            publishing=False,
+        )
         total, breakdown = await self.recipient_service.estimate_reach(
             organization_id=self.organization_id,
             project_id=project_id,
             recipient_groups=groups,
             scope_type=query.scope_type.value,
             tower_ids=tower_ids,
+            require_unpaid_invoice=unpaid_only,
         )
         return ReachEstimateResponse(estimated_recipients=total, breakdown=breakdown)
 
@@ -593,12 +630,15 @@ class NoticesService:
         *,
         project_id: str | None = None,
     ) -> list[str]:
-        """Promote scheduled notices that are due."""
-        published_ids = await self.repo.publish_due_scheduled_notices(
+        """Promote scheduled notices and re-send live repeats that are due."""
+        sends = await self.repo.claim_due_notice_sends(
             organization_id=self.organization_id,
             project_id=project_id,
         )
-        for notice_id in published_ids:
+        published_ids: list[str] = []
+        for send in sends:
+            notice_id = str(send["id"])
+            published_ids.append(notice_id)
             row = await self.repo.fetch_notice_by_id_only(
                 organization_id=self.organization_id,
                 notice_id=notice_id,
@@ -608,8 +648,67 @@ class NoticesService:
                     project_id=str(row["project_id"]),
                     notice_id=notice_id,
                     title=str(row["title"]),
+                    occurrence_at=send["fired_at"] if send["repeating"] else None,
                 )
         return published_ids
+
+    async def preview_repeat(self, body: NoticeRepeatInput) -> NoticeRepeatResponse:
+        """Preview the next sends for a repeat rule before it is saved."""
+        rule = parse_repeat_input(body)
+        first_send = first_occurrence(rule)
+        if first_send is None:
+            raise ValidationException(
+                message_key="notices.errors.repeat_has_no_sends",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return self._repeat_response(
+            rule,
+            occurrences_sent=0,
+            next_publish_at=first_send,
+        )
+
+    async def stop_repeat(
+        self,
+        *,
+        project_id: str,
+        notice_id: str,
+    ) -> NoticeDetailResponse:
+        """Cancel future sends. A notice that already went out stays live."""
+        existing = await self.repo.fetch_notice_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+        )
+        if existing is None:
+            raise NotFoundException(
+                message_key="notices.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if rule_from_row(existing) is None:
+            raise ValidationException(
+                message_key="notices.errors.repeat_not_set",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if str(existing["status"]) == NoticeStatus.DELETED.value:
+            raise ConflictException(
+                message_key="notices.errors.not_editable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        fields: dict[str, Any] = {
+            "next_publish_at": None,
+            "repeat_cancelled_at": datetime.now(timezone.utc),
+            "updated_by_user_id": self.user_id,
+        }
+        if str(existing["status"]) == NoticeStatus.SCHEDULED.value:
+            fields["status"] = NoticeStatus.DRAFT.value
+            fields["publish_at"] = None
+        await self.repo.update_notice_fields(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+            fields=fields,
+        )
+        return await self.get_notice(project_id=project_id, notice_id=notice_id)
 
     async def expire_due_pins(self) -> int:
         """Deactivate expired banner pins."""
@@ -786,6 +885,7 @@ class NoticesService:
             published_at=row.get("published_at"),
             deleted_at=row.get("deleted_at"),
             deleted_reason=row.get("deleted_reason"),
+            repeat=self._repeat_response_from_row(row),
             attachments=[NoticeAttachmentResponse(**item) for item in attachments],
             pinned=bool(row.get("pinned")),
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
@@ -829,6 +929,7 @@ class NoticesService:
             published_at=row.get("published_at"),
             publish_at=row.get("publish_at"),
             deleted_at=row.get("deleted_at"),
+            repeat=self._repeat_response_from_row(row),
             pinned=bool(row.get("pinned")),
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
             view_count=int(row.get("view_count") or 0),
@@ -849,6 +950,231 @@ class NoticesService:
         if not towers:
             return None
         return ", ".join(str(t["tower_name"]) for t in towers)
+
+    def _apply_update_schedule(
+        self,
+        *,
+        existing: dict[str, Any],
+        fields: dict[str, Any],
+        publish_mode: NoticePublishMode | None,
+        publish_at: datetime | None,
+        repeat_changed: bool,
+        repeat: NoticeRepeatInput | None,
+        recipient_groups: list[str],
+        contact_ids: list[str],
+        scope_type: NoticeScopeType,
+        tower_ids: list[str],
+    ) -> datetime | None:
+        """Merge publish and repeat changes into `fields`. Return the fired slot."""
+        active_repeat = repeat if repeat_changed else self._repeat_input_from_row(existing)
+        mode = self._publish_mode_for_repeat_edit(
+            existing=existing,
+            publish_mode=publish_mode,
+            repeat_changed=repeat_changed,
+            active_repeat=active_repeat,
+        )
+        if mode is not None:
+            return self._write_activated_schedule(
+                fields=fields,
+                publish_mode=mode,
+                publish_at=publish_at,
+                repeat=active_repeat if repeat_changed or active_repeat is not None else None,
+                include_repeat=repeat_changed or active_repeat is not None,
+                recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
+                scope_type=scope_type,
+                tower_ids=tower_ids,
+            )
+        if repeat_changed and active_repeat is None:
+            fields.update(empty_repeat_columns())
+            if str(existing["status"]) == NoticeStatus.SCHEDULED.value:
+                fields["next_publish_at"] = None
+            return None
+        if publish_at is not None and rule_from_row(existing) is None:
+            self._validate_schedule(publish_at)
+            self._validate_publish_requirements(
+                recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
+                scope_type=scope_type,
+                tower_ids=tower_ids,
+            )
+            fields["publish_at"] = publish_at
+            fields["status"] = NoticeStatus.SCHEDULED.value
+            return None
+        if repeat_changed and active_repeat is not None:
+            fields.update(
+                repeat_columns(
+                    parse_repeat_input(active_repeat),
+                    occurrences_sent=0,
+                    next_publish_at=None,
+                )
+            )
+        return None
+
+    def _publish_mode_for_repeat_edit(
+        self,
+        *,
+        existing: dict[str, Any],
+        publish_mode: NoticePublishMode | None,
+        repeat_changed: bool,
+        active_repeat: NoticeRepeatInput | None,
+    ) -> NoticePublishMode | None:
+        """Re-activate a scheduled notice when its repeat rule changes."""
+        if publish_mode is not None or not repeat_changed or active_repeat is None:
+            return publish_mode
+        if str(existing["status"]) == NoticeStatus.SCHEDULED.value:
+            return NoticePublishMode.SCHEDULE
+        return publish_mode
+
+    def _write_activated_schedule(
+        self,
+        *,
+        fields: dict[str, Any],
+        publish_mode: NoticePublishMode,
+        publish_at: datetime | None,
+        repeat: NoticeRepeatInput | None,
+        include_repeat: bool,
+        recipient_groups: list[str],
+        contact_ids: list[str],
+        scope_type: NoticeScopeType,
+        tower_ids: list[str],
+    ) -> datetime | None:
+        """Store the status chosen by publishing or scheduling."""
+        status, resolved_publish_at, published_at, repeat_fields, fired_at = (
+            self._schedule_for_write(
+                publish_mode=publish_mode,
+                publish_at=publish_at,
+                repeat=repeat,
+                recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
+                scope_type=scope_type,
+                tower_ids=tower_ids,
+            )
+        )
+        fields["status"] = status
+        fields["publish_at"] = resolved_publish_at
+        fields["published_at"] = published_at
+        if include_repeat:
+            fields.update(repeat_fields)
+        return fired_at
+
+    def _schedule_for_write(
+        self,
+        *,
+        publish_mode: NoticePublishMode,
+        publish_at: datetime | None,
+        repeat: NoticeRepeatInput | None,
+        recipient_groups: list[str],
+        contact_ids: list[str],
+        scope_type: NoticeScopeType,
+        tower_ids: list[str],
+    ) -> tuple[str, datetime | None, datetime | None, dict[str, Any], datetime | None]:
+        """Resolve status, timestamps, and repeat columns for create or update."""
+        if repeat is None:
+            status, resolved_publish_at, published_at = self._resolve_publish_state(
+                publish_mode=publish_mode,
+                publish_at=publish_at,
+                recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
+                scope_type=scope_type,
+                tower_ids=tower_ids,
+            )
+            return status, resolved_publish_at, published_at, empty_repeat_columns(), None
+
+        rule = parse_repeat_input(repeat)
+        if publish_mode == NoticePublishMode.DRAFT:
+            return (
+                NoticeStatus.DRAFT.value,
+                None,
+                None,
+                repeat_columns(rule, occurrences_sent=0, next_publish_at=None),
+                None,
+            )
+        self._validate_publish_requirements(
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=scope_type,
+            tower_ids=tower_ids,
+        )
+        activation = activate_repeat(rule, datetime.now(timezone.utc))
+        return (
+            activation.status,
+            activation.publish_at,
+            activation.published_at,
+            repeat_columns(
+                rule,
+                occurrences_sent=activation.occurrences_sent,
+                next_publish_at=activation.next_publish_at,
+            ),
+            activation.fired_at,
+        )
+
+    def _draft_repeat_columns(self, source: dict[str, Any]) -> dict[str, Any]:
+        """Copy a repeat rule onto a new draft without a pending send."""
+        rule = rule_from_row(source)
+        if rule is None:
+            return empty_repeat_columns()
+        return repeat_columns(rule, occurrences_sent=0, next_publish_at=None)
+
+    @staticmethod
+    def _repeat_input_from_row(row: dict[str, Any]) -> NoticeRepeatInput | None:
+        """Rebuild API input from a stored rule so an edit can re-activate it."""
+        rule = rule_from_row(row)
+        if rule is None:
+            return None
+        return NoticeRepeatInput(
+            frequency=rule.frequency,  # type: ignore[arg-type]
+            weekdays=[WEEKDAY_NAMES[day - 1] for day in rule.weekdays] or None,
+            day_of_month=rule.day_of_month,
+            last_day_of_month=rule.last_day_of_month,
+            time_of_day=rule.time_of_day.strftime("%H:%M"),
+            starts_on=rule.starts_on,
+            ends_on=rule.ends_on,
+            end_after_count=rule.end_after_count,
+        )
+
+    @staticmethod
+    def _repeat_response(
+        rule: NoticeRepeatRule,
+        *,
+        occurrences_sent: int,
+        next_publish_at: datetime | None,
+        cancelled_at: datetime | None = None,
+    ) -> NoticeRepeatResponse:
+        """Build the repeat block returned to the admin UI."""
+        if cancelled_at is not None or (next_publish_at is None and occurrences_sent > 0):
+            upcoming: list[datetime] = []
+        elif next_publish_at is not None:
+            upcoming = upcoming_sends(rule, start_at=next_publish_at)
+        else:
+            upcoming = upcoming_sends(rule, start_at=None)
+        return NoticeRepeatResponse(
+            frequency=rule.frequency,  # type: ignore[arg-type]
+            weekdays=[WEEKDAY_NAMES[day - 1] for day in rule.weekdays],
+            day_of_month=rule.day_of_month,
+            last_day_of_month=rule.last_day_of_month,
+            time_of_day=rule.time_of_day.strftime("%H:%M"),
+            starts_on=rule.starts_on,
+            ends_on=rule.ends_on,
+            end_after_count=rule.end_after_count,
+            occurrences_sent=occurrences_sent,
+            next_publish_at=None if cancelled_at is not None else next_publish_at,
+            cancelled_at=cancelled_at,
+            summary=summary_text(rule),
+            upcoming=upcoming,
+        )
+
+    def _repeat_response_from_row(self, row: dict[str, Any]) -> NoticeRepeatResponse | None:
+        """Map stored repeat columns onto the API response."""
+        rule = rule_from_row(row)
+        if rule is None:
+            return None
+        return self._repeat_response(
+            rule,
+            occurrences_sent=int(row.get("repeat_occurrences_sent") or 0),
+            next_publish_at=row.get("next_publish_at"),
+            cancelled_at=row.get("repeat_cancelled_at"),
+        )
 
     def _resolve_publish_state(
         self,
@@ -922,6 +1248,58 @@ class NoticesService:
         """Ensure attachment path uses notice upload prefix."""
         normalized = file_path.strip().lower()
         return "/notices/" in normalized or normalized.startswith("notices/")
+
+    async def _validate_invoice_unpaid_audience(
+        self,
+        *,
+        project_id: str,
+        category: NoticeCategory,
+        recipient_groups: list[str],
+        contact_ids: list[str],
+        scope_type: NoticeScopeType,
+        tower_ids: list[str],
+        publishing: bool,
+    ) -> None:
+        """Invoice-unpaid notices go only to owners or tenants who still owe."""
+        if category != NoticeCategory.INVOICE_UNPAID:
+            return
+        if any(group not in INVOICE_UNPAID_RECIPIENT_GROUPS for group in recipient_groups):
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_groups",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if contact_ids and not recipient_groups:
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_groups",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        allowed: set[str] = set()
+        if recipient_groups and (contact_ids or publishing):
+            allowed = await self.recipient_service.unpaid_invoice_contact_ids(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                recipient_groups=recipient_groups,
+                scope_type=scope_type.value,
+                tower_ids=tower_ids,
+            )
+        if contact_ids:
+            invalid = [contact_id for contact_id in contact_ids if contact_id not in allowed]
+            if invalid:
+                raise ValidationException(
+                    message_key="notices.errors.invoice_unpaid_contacts",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"contact_ids": ", ".join(invalid[:10])},
+                )
+        if publishing and not recipient_groups:
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_groups",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if publishing and not contact_ids and not allowed:
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_none",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
 
     def _validate_publish_requirements(
         self,
@@ -1024,8 +1402,15 @@ class NoticesService:
         project_id: str,
         notice_id: str,
         recipient_user_id: str,
+        occurrence_at: datetime | None = None,
     ) -> dict[str, Any]:
         """Deep-link payload fields for notice publish push notifications."""
+        idempotency_key = f"notice:{notice_id}:published:{recipient_user_id}"
+        if occurrence_at is not None:
+            if occurrence_at.tzinfo is None:
+                occurrence_at = occurrence_at.replace(tzinfo=timezone.utc)
+            token = occurrence_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            idempotency_key = f"notice:{notice_id}:published:{token}:{recipient_user_id}"
         return {
             "data": {
                 "notice_id": notice_id,
@@ -1035,7 +1420,7 @@ class NoticesService:
             "entity": {"kind": "notice", "id": notice_id},
             "options": {
                 "click_action": "OPEN_NOTICE",
-                "idempotency_key": f"notice:{notice_id}:published:{recipient_user_id}",
+                "idempotency_key": idempotency_key,
             },
         }
 
@@ -1045,6 +1430,7 @@ class NoticesService:
         project_id: str,
         notice_id: str,
         title: str,
+        occurrence_at: datetime | None = None,
     ) -> None:
         """Send push notifications when a notice goes live."""
         recipient_groups = await self.repo.list_recipient_groups(
@@ -1066,6 +1452,8 @@ class NoticesService:
         )
         if notice_row is None:
             return
+        unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
+        tower_ids = [str(tower["tower_id"]) for tower in towers]
         user_ids: set[str] = set(
             await self.recipient_service.resolve_recipient_user_ids(
                 organization_id=self.organization_id,
@@ -1073,9 +1461,19 @@ class NoticesService:
                 notice_id=notice_id,
                 recipient_groups=recipient_groups,
                 scope_type=str(notice_row["scope_type"]),
-                tower_ids=[str(t["tower_id"]) for t in towers],
+                tower_ids=tower_ids,
+                require_unpaid_invoice=unpaid_only,
             )
         )
+        if contact_ids and unpaid_only:
+            allowed = await self.recipient_service.unpaid_invoice_contact_ids(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                recipient_groups=recipient_groups,
+                scope_type=str(notice_row["scope_type"]),
+                tower_ids=tower_ids,
+            )
+            contact_ids = [contact_id for contact_id in contact_ids if contact_id in allowed]
         if contact_ids:
             user_ids.update(
                 await self.recipient_service.resolve_user_ids_for_contact_ids(
@@ -1088,6 +1486,7 @@ class NoticesService:
                 project_id=project_id,
                 notice_id=notice_id,
                 recipient_user_id=user_id,
+                occurrence_at=occurrence_at,
             )
             await self.push_dispatcher.send_to_user(
                 organization_id=self.organization_id,

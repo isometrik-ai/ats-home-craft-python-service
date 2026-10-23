@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
@@ -21,6 +21,17 @@ _NOTICE_SELECT_COLUMNS = """
   n.scope_type::text AS scope_type,
   n.publish_at,
   n.published_at,
+  nrpt.frequency AS repeat_frequency,
+  nrpt.weekdays AS repeat_weekdays,
+  nrpt.day_of_month AS repeat_day_of_month,
+  nrpt.last_day AS repeat_last_day,
+  nrpt.time_of_day AS repeat_time,
+  nrpt.starts_on AS repeat_starts_on,
+  nrpt.ends_on AS repeat_ends_on,
+  nrpt.end_after_count AS repeat_end_after_count,
+  nrpt.occurrences_sent AS repeat_occurrences_sent,
+  nrpt.next_publish_at,
+  nrpt.cancelled_at AS repeat_cancelled_at,
   n.deleted_at,
   n.deleted_reason,
   n.duplicate_of_id::text AS duplicate_of_id,
@@ -34,6 +45,35 @@ _NOTICE_SELECT_COLUMNS = """
   np.pin_duration::text AS pin_duration,
   (np.id IS NOT NULL) AS pinned
 """
+
+_NOTICE_REPEAT_JOIN = """
+LEFT JOIN notice_repeats nrpt
+  ON nrpt.notice_id = n.id
+"""
+
+_REPEAT_COLUMN_MAP = {
+    "repeat_frequency": "frequency",
+    "repeat_weekdays": "weekdays",
+    "repeat_day_of_month": "day_of_month",
+    "repeat_last_day": "last_day",
+    "repeat_time": "time_of_day",
+    "repeat_starts_on": "starts_on",
+    "repeat_ends_on": "ends_on",
+    "repeat_end_after_count": "end_after_count",
+    "repeat_occurrences_sent": "occurrences_sent",
+    "next_publish_at": "next_publish_at",
+    "repeat_cancelled_at": "cancelled_at",
+}
+
+_REPEAT_CASTS = {
+    "weekdays": "::smallint[]",
+    "day_of_month": "::smallint",
+    "time_of_day": "::time",
+    "starts_on": "::date",
+    "ends_on": "::date",
+    "end_after_count": "::int",
+    "occurrences_sent": "::int",
+}
 
 
 class NoticesRepository(BaseRepository):
@@ -75,8 +115,10 @@ class NoticesRepository(BaseRepository):
         duplicate_of_id: str | None,
         created_by_user_id: str | None,
         updated_by_user_id: str | None,
+        repeat: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Insert notices header row."""
+        repeat_values = repeat or {}
         row = await self.db_connection.fetchrow(
             """
             INSERT INTO notices (
@@ -117,10 +159,21 @@ class NoticesRepository(BaseRepository):
             created_by_user_id,
             updated_by_user_id,
         )
+        notice_id = str(row["id"])
+        if repeat_values.get("repeat_frequency"):
+            await self._write_notice_repeat(
+                organization_id=organization_id,
+                notice_id=notice_id,
+                columns={
+                    _REPEAT_COLUMN_MAP[key]: value
+                    for key, value in repeat_values.items()
+                    if key in _REPEAT_COLUMN_MAP
+                },
+            )
         return await self.fetch_notice_by_id(
             organization_id=organization_id,
             project_id=project_id,
-            notice_id=str(row["id"]),
+            notice_id=notice_id,
         )
 
     async def update_notice_fields(
@@ -131,8 +184,22 @@ class NoticesRepository(BaseRepository):
         notice_id: str,
         fields: dict[str, Any],
     ) -> dict[str, Any] | None:
-        """Update notice header fields."""
-        if not fields:
+        """Update notice header fields and, when present, the repeat row."""
+        repeat_columns = {
+            _REPEAT_COLUMN_MAP[key]: value
+            for key, value in fields.items()
+            if key in _REPEAT_COLUMN_MAP
+        }
+        notice_fields = {
+            key: value for key, value in fields.items() if key not in _REPEAT_COLUMN_MAP
+        }
+        if repeat_columns:
+            await self._write_notice_repeat(
+                organization_id=organization_id,
+                notice_id=notice_id,
+                columns=repeat_columns,
+            )
+        if not notice_fields:
             return await self.fetch_notice_by_id(
                 organization_id=organization_id,
                 project_id=project_id,
@@ -147,7 +214,7 @@ class NoticesRepository(BaseRepository):
             "status": "::notice_status",
             "scope_type": "::notice_scope_type",
         }
-        for key, value in fields.items():
+        for key, value in notice_fields.items():
             cast = casts.get(key, "")
             set_parts.append(f"{key} = ${idx}{cast}")
             values.append(value)
@@ -173,6 +240,93 @@ class NoticesRepository(BaseRepository):
             notice_id=notice_id,
         )
 
+    async def _write_notice_repeat(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+        columns: dict[str, Any],
+    ) -> None:
+        """Insert, replace, or partially update the 1:1 repeat row."""
+        if not columns:
+            return
+        if "frequency" in columns and columns["frequency"] is None:
+            await self.db_connection.execute(
+                "DELETE FROM notice_repeats WHERE notice_id = $1::uuid",
+                notice_id,
+            )
+            return
+        if "frequency" in columns:
+            await self.db_connection.execute(
+                """
+                INSERT INTO notice_repeats (
+                    notice_id,
+                    organization_id,
+                    frequency,
+                    weekdays,
+                    day_of_month,
+                    last_day,
+                    time_of_day,
+                    starts_on,
+                    ends_on,
+                    end_after_count,
+                    occurrences_sent,
+                    next_publish_at,
+                    cancelled_at
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3, $4::smallint[], $5::smallint,
+                    $6, $7::time, $8::date, $9::date,
+                    $10::int, $11::int, $12, $13
+                )
+                ON CONFLICT (notice_id) DO UPDATE SET
+                    frequency = EXCLUDED.frequency,
+                    weekdays = EXCLUDED.weekdays,
+                    day_of_month = EXCLUDED.day_of_month,
+                    last_day = EXCLUDED.last_day,
+                    time_of_day = EXCLUDED.time_of_day,
+                    starts_on = EXCLUDED.starts_on,
+                    ends_on = EXCLUDED.ends_on,
+                    end_after_count = EXCLUDED.end_after_count,
+                    occurrences_sent = EXCLUDED.occurrences_sent,
+                    next_publish_at = EXCLUDED.next_publish_at,
+                    cancelled_at = EXCLUDED.cancelled_at,
+                    updated_at = now()
+                """,
+                notice_id,
+                organization_id,
+                columns["frequency"],
+                columns.get("weekdays"),
+                columns.get("day_of_month"),
+                bool(columns.get("last_day", False)),
+                columns.get("time_of_day"),
+                columns.get("starts_on"),
+                columns.get("ends_on"),
+                columns.get("end_after_count"),
+                int(columns.get("occurrences_sent") or 0),
+                columns.get("next_publish_at"),
+                columns.get("cancelled_at"),
+            )
+            return
+
+        set_parts: list[str] = []
+        values: list[Any] = [notice_id]
+        idx = 2
+        for key, value in columns.items():
+            cast = _REPEAT_CASTS.get(key, "")
+            set_parts.append(f"{key} = ${idx}{cast}")
+            values.append(value)
+            idx += 1
+        set_parts.append("updated_at = now()")
+        await self.db_connection.execute(
+            f"""
+            UPDATE notice_repeats
+            SET {", ".join(set_parts)}
+            WHERE notice_id = $1::uuid
+            """,
+            *values,
+        )
+
     async def fetch_notice_by_id(
         self,
         *,
@@ -186,6 +340,7 @@ class NoticesRepository(BaseRepository):
             SELECT
             {_NOTICE_SELECT_COLUMNS}
             FROM notices n
+            {_NOTICE_REPEAT_JOIN}
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
@@ -539,6 +694,7 @@ class NoticesRepository(BaseRepository):
               WHERE nt.notice_id = n.id AND nt.organization_id = n.organization_id
             ) AS scope_label
             FROM notices n
+            {_NOTICE_REPEAT_JOIN}
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
@@ -802,37 +958,132 @@ class NoticesRepository(BaseRepository):
                 return slot
         return None
 
+    async def claim_due_notice_sends(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+        now: datetime | None = None,
+    ) -> list[dict[str, Any]]:
+        """Publish due scheduled notices and re-send live repeats that are due.
+
+        Overdue repeat slots collapse to the latest due occurrence so a late
+        cron run sends the notice once, then schedules the next future slot.
+        """
+        from apps.user_service.app.services.notice_repeat import (
+            advance_due_send,
+            rule_from_row,
+        )
+
+        conditions = [
+            """
+            (
+                n.status = 'scheduled' AND n.publish_at <= now()
+                OR (
+                    n.status = 'live'
+                    AND nrpt.notice_id IS NOT NULL
+                    AND nrpt.cancelled_at IS NULL
+                    AND nrpt.next_publish_at IS NOT NULL
+                    AND nrpt.next_publish_at <= now()
+                )
+            )
+            """
+        ]
+        values: list[Any] = []
+        idx = 1
+        if organization_id:
+            conditions.append(f"n.organization_id = ${idx}::uuid")
+            values.append(organization_id)
+            idx += 1
+        if project_id:
+            conditions.append(f"n.project_id = ${idx}::uuid")
+            values.append(project_id)
+
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT
+              n.id::text AS id,
+              n.status::text AS status,
+              n.publish_at,
+              nrpt.next_publish_at,
+              nrpt.frequency AS repeat_frequency,
+              nrpt.weekdays AS repeat_weekdays,
+              nrpt.day_of_month AS repeat_day_of_month,
+              nrpt.last_day AS repeat_last_day,
+              nrpt.time_of_day AS repeat_time,
+              nrpt.starts_on AS repeat_starts_on,
+              nrpt.ends_on AS repeat_ends_on,
+              nrpt.end_after_count AS repeat_end_after_count,
+              nrpt.occurrences_sent AS repeat_occurrences_sent,
+              nrpt.cancelled_at AS repeat_cancelled_at
+            FROM notices n
+            {_NOTICE_REPEAT_JOIN}
+            WHERE {" AND ".join(conditions)}
+            FOR UPDATE OF n
+            """,
+            *values,
+        )
+        moment = now or datetime.now(timezone.utc)
+        claimed: list[dict[str, Any]] = []
+        for row in rows:
+            if str(row["status"]) == "scheduled":
+                due_at = row["publish_at"]
+            else:
+                due_at = row["next_publish_at"]
+            if due_at is None:
+                continue
+            rule = rule_from_row(dict(row))
+            repeating = rule is not None and row.get("repeat_cancelled_at") is None
+            occurrences = int(row.get("repeat_occurrences_sent") or 0)
+            fired_at = due_at
+            next_at = None
+            if repeating and rule is not None:
+                fired_at, next_at = advance_due_send(rule, due_at, moment)
+                occurrences += 1
+            await self.db_connection.execute(
+                """
+                UPDATE notices
+                SET status = 'live',
+                    published_at = now(),
+                    updated_at = now()
+                WHERE id = $1::uuid
+                """,
+                str(row["id"]),
+            )
+            if repeating:
+                await self.db_connection.execute(
+                    """
+                    UPDATE notice_repeats
+                    SET occurrences_sent = $2::int,
+                        next_publish_at = $3,
+                        updated_at = now()
+                    WHERE notice_id = $1::uuid
+                    """,
+                    str(row["id"]),
+                    occurrences,
+                    next_at,
+                )
+            claimed.append(
+                {
+                    "id": str(row["id"]),
+                    "fired_at": fired_at if repeating else None,
+                    "repeating": repeating,
+                }
+            )
+        return claimed
+
     async def publish_due_scheduled_notices(
         self,
         *,
         organization_id: str | None = None,
         project_id: str | None = None,
     ) -> list[str]:
-        """Promote scheduled notices whose publish_at has passed."""
-        conditions = ["status = 'scheduled'", "publish_at <= now()"]
-        values: list[Any] = []
-        idx = 1
-        if organization_id:
-            conditions.append(f"organization_id = ${idx}::uuid")
-            values.append(organization_id)
-            idx += 1
-        if project_id:
-            conditions.append(f"project_id = ${idx}::uuid")
-            values.append(project_id)
-            idx += 1
-
-        rows = await self.db_connection.fetch(
-            f"""
-            UPDATE notices
-            SET status = 'live',
-                published_at = now(),
-                updated_at = now()
-            WHERE {" AND ".join(conditions)}
-            RETURNING id::text AS id
-            """,
-            *values,
+        """Promote due notices and return their ids."""
+        sends = await self.claim_due_notice_sends(
+            organization_id=organization_id,
+            project_id=project_id,
         )
-        return [str(row["id"]) for row in rows]
+        return [str(send["id"]) for send in sends]
 
     async def expire_due_pins(self) -> int:
         """Deactivate timed banner pins past expiry."""
@@ -1085,6 +1336,7 @@ class NoticesRepository(BaseRepository):
             SELECT
             {_NOTICE_SELECT_COLUMNS}
             FROM notices n
+            {_NOTICE_REPEAT_JOIN}
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
@@ -1118,6 +1370,7 @@ class NoticesRepository(BaseRepository):
               WHERE nt.notice_id = n.id AND nt.organization_id = n.organization_id
             ) AS scope_label
             FROM notices n
+            {_NOTICE_REPEAT_JOIN}
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
@@ -1211,6 +1464,7 @@ class NoticesRepository(BaseRepository):
             SELECT
             {_NOTICE_SELECT_COLUMNS}
             FROM notices n
+            {_NOTICE_REPEAT_JOIN}
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
@@ -1235,6 +1489,16 @@ class NoticesRepository(BaseRepository):
         await self.deactivate_pins_for_notice(
             organization_id=organization_id,
             notice_id=notice_id,
+        )
+        await self.db_connection.execute(
+            """
+            UPDATE notice_repeats
+            SET next_publish_at = NULL,
+                cancelled_at = COALESCE(cancelled_at, now()),
+                updated_at = now()
+            WHERE notice_id = $1::uuid
+            """,
+            notice_id,
         )
         row = await self.db_connection.fetchrow(
             """

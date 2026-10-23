@@ -324,7 +324,9 @@ async def test_get_summary():
 @pytest.mark.asyncio
 async def test_publish_due_notices_and_expire_pins():
     svc = _service()
-    svc.repo.publish_due_scheduled_notices = AsyncMock(return_value=[NOTICE_ID])
+    svc.repo.claim_due_notice_sends = AsyncMock(
+        return_value=[{"id": NOTICE_ID, "fired_at": None, "repeating": False}]
+    )
     svc.repo.fetch_notice_by_id_only = AsyncMock(
         return_value={
             "id": NOTICE_ID,
@@ -1109,3 +1111,36 @@ async def test_update_notice_all_recipients_expands_to_every_group():
         body=UpdateNoticeRequest(recipient_groups=[NoticeRecipientInputGroup.ALL]),
     )
     assert svc.repo.replace_recipients.await_args.kwargs["recipient_groups"] == all_groups
+
+
+@pytest.mark.asyncio
+async def test_invoice_unpaid_rejects_staff():
+    """An unpaid-invoice notice cannot target staff or security."""
+    svc = _service()
+    body = CreateNoticeRequest(
+        title="Pay your bill",
+        description="Invoices are still open",
+        category=NoticeCategory.INVOICE_UNPAID,
+        publish_mode=NoticePublishMode.NOW,
+        recipient_groups=[NoticeRecipientGroup.OWNER, NoticeRecipientGroup.STAFF],
+    )
+    with pytest.raises(ValidationException) as raised:
+        await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert raised.value.message_key == "notices.errors.invoice_unpaid_groups"
+
+
+@pytest.mark.asyncio
+async def test_invoice_unpaid_publish_requires_an_open_invoice():
+    """Publishing sends only when an owner or tenant still has an open invoice."""
+    svc = _service()
+    svc.recipient_service.unpaid_invoice_contact_ids = AsyncMock(return_value=set())
+    body = CreateNoticeRequest(
+        title="Pay your bill",
+        description="Invoices are still open",
+        category=NoticeCategory.INVOICE_UNPAID,
+        publish_mode=NoticePublishMode.NOW,
+        recipient_groups=[NoticeRecipientGroup.TENANT],
+    )
+    with pytest.raises(ValidationException) as raised:
+        await svc.create_notice(project_id=PROJECT_ID, body=body)
+    assert raised.value.message_key == "notices.errors.invoice_unpaid_none"

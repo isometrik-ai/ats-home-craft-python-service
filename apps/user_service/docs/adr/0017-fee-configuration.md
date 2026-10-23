@@ -315,6 +315,10 @@ Non-maintenance rows have a null rate and minimum. Maintenance rows have both.
 | `created_at` / `updated_at`      | timestamptz             |                                                          |
 | `updated_by`                     | uuid                    |                                                          |
 
+Those pre-due reminders are the daily invoice emails. A notice board post with category
+`invoice_unpaid` is a separate staff send. It targets Owner, Tenant, or both, and only units
+whose fee invoice is still `issued` or `partial`.
+
 ### Indexes
 
 - `fee_heads (organization_id, project_id, status)` for the billing run's active set

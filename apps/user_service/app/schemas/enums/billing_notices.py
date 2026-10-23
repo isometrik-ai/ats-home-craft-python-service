@@ -34,6 +34,7 @@ class NoticeCategory(str, Enum):
     BILLING = "billing"
     EMERGENCY = "emergency"
     GENERAL = "general"
+    INVOICE_UNPAID = "invoice_unpaid"
 
 
 class NoticeScopeType(str, Enum):
@@ -78,6 +79,13 @@ class NoticePublishMode(str, Enum):
     SCHEDULE = "schedule"
 
 
+class NoticeRepeatFrequency(str, Enum):
+    """How often a notice is sent again."""
+
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
 class NoticeListStatus(str, Enum):
     """Admin list tab filter."""
 
@@ -94,7 +102,15 @@ NOTICE_CATEGORY_LABELS: dict[str, str] = {
     NoticeCategory.BILLING.value: "Billing",
     NoticeCategory.EMERGENCY.value: "Emergency",
     NoticeCategory.GENERAL.value: "General",
+    NoticeCategory.INVOICE_UNPAID.value: "Invoice unpaid",
 }
+
+INVOICE_UNPAID_RECIPIENT_GROUPS = frozenset(
+    {
+        NoticeRecipientGroup.OWNER.value,
+        NoticeRecipientGroup.TENANT.value,
+    }
+)
 
 NOTICE_MAX_PIN_SLOTS = 6
 NOTICE_MAX_TITLE_LENGTH = 70
@@ -104,6 +120,8 @@ NOTICE_MAX_CONTACT_RECIPIENTS = 200
 NOTICE_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 NOTICE_ALLOWED_ATTACHMENT_MIMES = frozenset({"image/jpeg", "image/png"})
 NOTICE_SCHEDULE_MAX_DAYS = 62
+NOTICE_REPEAT_MAX_COUNT = 100
+NOTICE_REPEAT_MAX_DAYS = 366 * 2
 
 
 # ============================================================================
