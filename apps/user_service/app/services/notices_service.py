@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -26,6 +27,7 @@ from apps.user_service.app.schemas.notices import (
     NoticeDetailResponse,
     NoticeListItemResponse,
     NoticeListQuery,
+    NoticeSeriesOccurrenceResponse,
     NoticeSummaryResponse,
     PinNoticeRequest,
     ReachEstimateQuery,
@@ -33,6 +35,7 @@ from apps.user_service.app.schemas.notices import (
     UpdateNoticeRequest,
     validate_notice_attachment_mimes,
 )
+from apps.user_service.app.services import notice_recurring_support as recurring
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
@@ -47,6 +50,16 @@ from libs.shared_utils.http_exceptions import (
     ValidationException,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
+
+
+@dataclass(frozen=True)
+class _NoticeUpdateTargeting:
+    """Resolved recipients and scope for a notice PATCH."""
+
+    recipient_groups: list[str]
+    contact_ids: list[str]
+    scope_type: NoticeScopeType
+    tower_ids: list[str]
 
 
 class NoticesService:
@@ -110,13 +123,15 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_ids=notice_ids,
         )
-        return [
-            self._to_list_item(
-                row,
-                attachments=attachments_by_notice.get(str(row["id"]), []),
+        items: list[NoticeListItemResponse] = []
+        for row in rows:
+            items.append(
+                await self._to_list_item(
+                    row,
+                    attachments=attachments_by_notice.get(str(row["id"]), []),
+                )
             )
-            for row in rows
-        ], total
+        return items, total
 
     async def get_notice(
         self,
@@ -154,14 +169,26 @@ class NoticesService:
         )
         tower_ids = body.tower_ids or []
 
-        status, publish_at, published_at = self._resolve_publish_state(
-            publish_mode=body.publish_mode,
-            publish_at=body.publish_at,
-            recipient_groups=recipient_groups,
-            contact_ids=contact_ids,
-            scope_type=body.scope_type,
-            tower_ids=tower_ids,
-        )
+        repeat = body.repeat
+        if repeat and repeat.enabled:
+            if body.publish_mode == NoticePublishMode.START_SERIES:
+                pass  # validated via repeat.enabled
+            status, publish_at, published_at = self._resolve_recurring_publish_state(
+                publish_mode=body.publish_mode,
+                recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
+                scope_type=body.scope_type,
+                tower_ids=tower_ids,
+            )
+        else:
+            status, publish_at, published_at = self._resolve_publish_state(
+                publish_mode=body.publish_mode,
+                publish_at=body.publish_at,
+                recipient_groups=recipient_groups,
+                contact_ids=contact_ids,
+                scope_type=body.scope_type,
+                tower_ids=tower_ids,
+            )
 
         sequence_number = await self.repo.allocate_sequence_number(
             organization_id=self.organization_id,
@@ -211,7 +238,23 @@ class NoticesService:
                 title=body.title.strip(),
             )
 
-        return await self.get_notice(project_id=project_id, notice_id=notice_id)
+        if repeat and repeat.enabled:
+            await recurring.repeat_to_storage(
+                self.repo,
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+                repeat=repeat,
+                start_series=body.publish_mode == NoticePublishMode.START_SERIES,
+            )
+
+        detail = await self.get_notice(project_id=project_id, notice_id=notice_id)
+        if repeat and repeat.enabled and (body.preview_recurrence or body.publish_mode):
+            detail.next_sends_preview = await recurring.build_preview(
+                self.repo,
+                organization_id=self.organization_id,
+                repeat=repeat,
+            )
+        return detail
 
     async def update_notice(
         self,
@@ -231,7 +274,14 @@ class NoticesService:
                 message_key="notices.errors.not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        self._assert_editable(str(existing["status"]))
+        self._assert_editable(str(existing["status"]), existing)
+
+        if body.publish_mode == NoticePublishMode.END_SERIES:
+            return await self._update_notice_end_series(
+                project_id=project_id,
+                notice_id=notice_id,
+                existing=existing,
+            )
 
         title = body.title.strip() if body.title is not None else existing["title"]
         description = (
@@ -241,6 +291,80 @@ class NoticesService:
         if body.attachments is not None:
             self._validate_attachments(body.attachments)
 
+        targeting = await self._collect_notice_update_targeting(
+            body=body,
+            existing=existing,
+            project_id=project_id,
+            notice_id=notice_id,
+        )
+        fields = self._build_notice_update_fields(
+            body=body,
+            existing=existing,
+            title=title,
+            description=description,
+            targeting=targeting,
+        )
+        await self.repo.update_notice_fields(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+            fields=fields,
+        )
+
+        if self._notice_update_replaces_children(body):
+            attachments = body.attachments
+            if attachments is None:
+                attachments = await self._attachments_from_db(notice_id)
+            await self._replace_children(
+                notice_id=notice_id,
+                recipient_groups=targeting.recipient_groups,
+                contact_ids=targeting.contact_ids,
+                scope_type=targeting.scope_type,
+                tower_ids=targeting.tower_ids,
+                attachments=attachments,
+            )
+
+        await self._sync_notice_update_repeat(
+            body=body,
+            existing=existing,
+            project_id=project_id,
+            notice_id=notice_id,
+        )
+        return await self._complete_notice_update(
+            body=body,
+            existing=existing,
+            project_id=project_id,
+            notice_id=notice_id,
+        )
+
+    async def _update_notice_end_series(
+        self,
+        *,
+        project_id: str,
+        notice_id: str,
+        existing: dict[str, Any],
+    ) -> NoticeDetailResponse:
+        """Stop future recurring sends and return refreshed detail."""
+        if not existing.get("series_frequency"):
+            raise ValidationException(
+                message_key="notices.errors.not_recurring",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        await self.repo.end_notice_series(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
+        return await self.get_notice(project_id=project_id, notice_id=notice_id)
+
+    async def _collect_notice_update_targeting(
+        self,
+        *,
+        body: UpdateNoticeRequest,
+        existing: dict[str, Any],
+        project_id: str,
+        notice_id: str,
+    ) -> _NoticeUpdateTargeting:
+        """Merge PATCH targeting fields with stored notice recipients."""
         current_groups = await self.repo.list_recipient_groups(
             organization_id=self.organization_id,
             notice_id=notice_id,
@@ -275,71 +399,159 @@ class NoticesService:
             if body.tower_ids is not None
             else [str(row["tower_id"]) for row in current_towers]
         )
+        return _NoticeUpdateTargeting(
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=scope_type,
+            tower_ids=tower_ids,
+        )
 
-        publish_mode = body.publish_mode
-        publish_at_input = body.publish_at
+    def _build_notice_update_fields(
+        self,
+        *,
+        body: UpdateNoticeRequest,
+        existing: dict[str, Any],
+        title: str,
+        description: str,
+        targeting: _NoticeUpdateTargeting,
+    ) -> dict[str, Any]:
+        """Assemble column updates for PATCH."""
         fields: dict[str, Any] = {
             "title": title,
             "description": description,
         }
         if body.category is not None:
             fields["category"] = body.category.value
+        self._apply_notice_update_publish_fields(
+            body=body,
+            existing=existing,
+            fields=fields,
+            targeting=targeting,
+        )
+        if body.scope_type is not None:
+            fields["scope_type"] = body.scope_type.value
+        fields["updated_by_user_id"] = self.user_id
+        return fields
 
+    def _apply_notice_update_publish_fields(
+        self,
+        *,
+        body: UpdateNoticeRequest,
+        existing: dict[str, Any],
+        fields: dict[str, Any],
+        targeting: _NoticeUpdateTargeting,
+    ) -> None:
+        """Apply publish_mode / publish_at to the update fields dict."""
+        publish_mode = body.publish_mode
+        publish_at_input = body.publish_at
         if publish_mode is not None:
-            status, publish_at, published_at = self._resolve_publish_state(
-                publish_mode=publish_mode,
-                publish_at=publish_at_input,
-                recipient_groups=recipient_groups,
-                contact_ids=contact_ids,
-                scope_type=scope_type,
-                tower_ids=tower_ids,
-                _current_status=str(existing["status"]),
-            )
+            if body.repeat and body.repeat.enabled:
+                status, publish_at, published_at = self._resolve_recurring_publish_state(
+                    publish_mode=publish_mode,
+                    recipient_groups=targeting.recipient_groups,
+                    contact_ids=targeting.contact_ids,
+                    scope_type=targeting.scope_type,
+                    tower_ids=targeting.tower_ids,
+                )
+            else:
+                status, publish_at, published_at = self._resolve_publish_state(
+                    publish_mode=publish_mode,
+                    publish_at=publish_at_input,
+                    recipient_groups=targeting.recipient_groups,
+                    contact_ids=targeting.contact_ids,
+                    scope_type=targeting.scope_type,
+                    tower_ids=targeting.tower_ids,
+                    _current_status=str(existing["status"]),
+                )
             fields["status"] = status
             fields["publish_at"] = publish_at
             fields["published_at"] = published_at
-        elif publish_at_input is not None:
-            self._validate_schedule(publish_at_input)
-            self._validate_publish_requirements(
-                recipient_groups=recipient_groups,
-                contact_ids=contact_ids,
-                scope_type=scope_type,
-                tower_ids=tower_ids,
-            )
-            fields["publish_at"] = publish_at_input
-            fields["status"] = NoticeStatus.SCHEDULED.value
-
-        if body.scope_type is not None:
-            fields["scope_type"] = body.scope_type.value
-
-        fields["updated_by_user_id"] = self.user_id
-        await self.repo.update_notice_fields(
-            organization_id=self.organization_id,
-            project_id=project_id,
-            notice_id=notice_id,
-            fields=fields,
+            return
+        if publish_at_input is None:
+            return
+        self._validate_schedule(publish_at_input)
+        self._validate_publish_requirements(
+            recipient_groups=targeting.recipient_groups,
+            contact_ids=targeting.contact_ids,
+            scope_type=targeting.scope_type,
+            tower_ids=targeting.tower_ids,
         )
+        fields["publish_at"] = publish_at_input
+        fields["status"] = NoticeStatus.SCHEDULED.value
 
-        if (
+    @staticmethod
+    def _notice_update_replaces_children(body: UpdateNoticeRequest) -> bool:
+        """True when PATCH replaces recipients, scope, towers, or attachments."""
+        return (
             body.recipient_groups is not None
             or body.contact_ids is not None
             or body.tower_ids is not None
             or body.scope_type is not None
             or body.attachments is not None
-        ):
-            await self._replace_children(
-                notice_id=notice_id,
-                recipient_groups=recipient_groups,
-                contact_ids=contact_ids,
-                scope_type=scope_type,
-                tower_ids=tower_ids,
-                attachments=body.attachments
-                if body.attachments is not None
-                else await self._attachments_from_db(notice_id),
-            )
+        )
 
+    async def _sync_notice_update_repeat(
+        self,
+        *,
+        body: UpdateNoticeRequest,
+        existing: dict[str, Any],
+        project_id: str,
+        notice_id: str,
+    ) -> None:
+        """Persist repeat block changes and refresh next_send_at."""
+        if not body.repeat or not body.repeat.enabled:
+            return
+        if existing.get("series_repeat_ended_at"):
+            raise ConflictException(
+                message_key="notices.errors.recurrence_ended",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        start_series = body.publish_mode == NoticePublishMode.START_SERIES
+        await recurring.repeat_to_storage(
+            self.repo,
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+            repeat=body.repeat,
+            start_series=start_series,
+        )
+        refreshed = await self.repo.fetch_notice_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+        )
+        if refreshed is None or not refreshed.get("series_frequency"):
+            return
+        if not start_series and refreshed.get("series_next_send_at") is None:
+            return
+        next_at = await recurring.recompute_next_send_from_row(
+            self.repo,
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+            row=refreshed,
+        )
+        await self.repo.update_notice_series(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+            fields={"next_send_at": next_at},
+        )
+
+    async def _complete_notice_update(
+        self,
+        *,
+        body: UpdateNoticeRequest,
+        existing: dict[str, Any],
+        project_id: str,
+        notice_id: str,
+    ) -> NoticeDetailResponse:
+        """Load detail, optional preview, and one-time publish push after PATCH."""
         updated = await self.get_notice(project_id=project_id, notice_id=notice_id)
-        if updated.status == NoticeStatus.LIVE:
+        if body.repeat and body.repeat.enabled and body.preview_recurrence:
+            updated.next_sends_preview = await recurring.build_preview(
+                self.repo,
+                organization_id=self.organization_id,
+                repeat=body.repeat,
+            )
+        if updated.status == NoticeStatus.LIVE and not recurring.series_active(existing):
             await self._dispatch_publish_push(
                 project_id=project_id,
                 notice_id=notice_id,
@@ -367,6 +579,12 @@ class NoticesService:
             )
         if str(existing["status"]) == NoticeStatus.DELETED.value:
             return await self._to_detail(existing)
+
+        if existing.get("series_frequency") and existing.get("series_repeat_ended_at") is None:
+            await self.repo.end_notice_series(
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+            )
 
         row = await self.repo.soft_delete_notice(
             organization_id=self.organization_id,
@@ -428,6 +646,14 @@ class NoticesService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         self._assert_duplicatable(str(source["status"]))
+        if await self.repo.notice_has_series(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        ):
+            raise ConflictException(
+                message_key="notices.errors.duplicate_recurring_forbidden",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         return await self._duplicate_from_source(
             project_id=project_id,
             source_notice_id=notice_id,
@@ -587,6 +813,22 @@ class NoticesService:
             tower_ids=tower_ids,
         )
         return ReachEstimateResponse(estimated_recipients=total, breakdown=breakdown)
+
+    async def process_recurring_notices(
+        self,
+        *,
+        project_id: str | None = None,
+    ) -> list[str]:
+        """Deliver due recurring notices (same notice row each time)."""
+        from apps.user_service.app.jobs.publish_scheduled_notices import (
+            process_recurring_notices as run_recurring_job,
+        )
+
+        return await run_recurring_job(
+            self.db_connection,
+            organization_id=self.organization_id,
+            project_id=project_id,
+        )
 
     async def publish_due_notices(
         self,
@@ -766,6 +1008,30 @@ class NoticesService:
         category = str(row["category"])
         scope_type = NoticeScopeType(str(row["scope_type"]))
         scope_label = self._scope_label(scope_type, towers)
+        is_recurring = recurring.series_active(row)
+        repeats_label = None
+        if row.get("series_frequency"):
+            repeats_label = await recurring.repeats_label_for_row(
+                self.repo,
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+                row=row,
+            )
+        occurrences = []
+        if row.get("series_frequency"):
+            occ_rows = await self.repo.list_series_occurrences(
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+            )
+            occurrences = [
+                NoticeSeriesOccurrenceResponse(
+                    occurrence_index=int(item["occurrence_index"]),
+                    planned_at=item["planned_at"],
+                    published_at=item.get("published_at"),
+                )
+                for item in occ_rows
+            ]
+        editable = status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED} or is_recurring
         return NoticeDetailResponse(
             id=notice_id,
             organization_id=str(row["organization_id"]),
@@ -794,14 +1060,20 @@ class NoticesService:
             else None,
             view_count=int(row.get("view_count") or 0),
             like_count=int(row.get("like_count") or 0),
-            editable=status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED},
+            editable=editable,
             duplicate_of_id=row.get("duplicate_of_id"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             created_by_user_id=row.get("created_by_user_id"),
+            is_recurring=is_recurring,
+            repeats_label=repeats_label,
+            next_send_at=row.get("series_next_send_at"),
+            series_starts_on=row.get("series_starts_on"),
+            series_ends_label=recurring.format_series_ends_label(row),
+            occurrences=occurrences,
         )
 
-    def _to_list_item(
+    async def _to_list_item(
         self,
         row: dict[str, Any],
         *,
@@ -815,6 +1087,17 @@ class NoticesService:
         scope_label = str(row["scope_label"]) if row.get("scope_label") else None
         if scope_type == NoticeScopeType.WHOLE_SOCIETY:
             scope_label = "Whole society"
+        is_recurring = recurring.series_active(row)
+        repeats_label = None
+        if row.get("series_frequency"):
+            repeats_label = await recurring.repeats_label_for_row(
+                self.repo,
+                organization_id=self.organization_id,
+                notice_id=str(row["id"]),
+                row=row,
+            )
+        footer = recurring.recurrence_footer(row, repeats_label)
+        editable = status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED} or is_recurring
         return NoticeListItemResponse(
             id=str(row["id"]),
             display_code=str(row["display_code"]),
@@ -833,9 +1116,13 @@ class NoticesService:
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
             view_count=int(row.get("view_count") or 0),
             like_count=int(row.get("like_count") or 0),
-            editable=status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED},
+            editable=editable,
             created_at=row["created_at"],
             attachments=[NoticeAttachmentResponse(**item) for item in (attachments or [])],
+            is_recurring=is_recurring,
+            repeats_label=repeats_label,
+            next_send_at=row.get("series_next_send_at"),
+            recurrence_footer=footer,
         )
 
     def _scope_label(
@@ -849,6 +1136,36 @@ class NoticesService:
         if not towers:
             return None
         return ", ".join(str(t["tower_name"]) for t in towers)
+
+    def _resolve_recurring_publish_state(
+        self,
+        *,
+        publish_mode: NoticePublishMode,
+        recipient_groups: list[str],
+        contact_ids: list[str],
+        scope_type: NoticeScopeType,
+        tower_ids: list[str],
+    ) -> tuple[str, datetime | None, datetime | None]:
+        """Resolve status for recurring create/update."""
+        if publish_mode in (NoticePublishMode.NOW, NoticePublishMode.SCHEDULE):
+            raise ValidationException(
+                message_key="notices.errors.invalid_publish_mode_for_repeat",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if publish_mode == NoticePublishMode.DRAFT:
+            return NoticeStatus.DRAFT.value, None, None
+        if publish_mode == NoticePublishMode.END_SERIES:
+            raise ValidationException(
+                message_key="notices.errors.not_recurring",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        self._validate_publish_requirements(
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=scope_type,
+            tower_ids=tower_ids,
+        )
+        return NoticeStatus.SCHEDULED.value, None, None
 
     def _resolve_publish_state(
         self,
@@ -955,8 +1272,20 @@ class NoticesService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-    def _assert_editable(self, status: str) -> None:
+    def _assert_editable(self, status: str, row: dict[str, Any] | None = None) -> None:
         """Raise if notice status does not allow editing."""
+        if status == NoticeStatus.DELETED.value:
+            raise ConflictException(
+                message_key="notices.errors.not_editable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        if status == NoticeStatus.LIVE.value:
+            if row and recurring.series_active(row):
+                return
+            raise ConflictException(
+                message_key="notices.errors.not_editable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
         if status not in {NoticeStatus.DRAFT.value, NoticeStatus.SCHEDULED.value}:
             raise ConflictException(
                 message_key="notices.errors.not_editable",

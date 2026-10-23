@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
+from apps.user_service.app.services import notice_recurring_support as recurring
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
@@ -99,3 +100,149 @@ async def expire_notice_pins(db_connection: asyncpg.Connection) -> int:
     """Deactivate banner pins past their expiry time."""
     repo = NoticesRepository(db_connection=db_connection)
     return await repo.expire_due_pins()
+
+
+async def process_recurring_notices(
+    db_connection: asyncpg.Connection,
+    *,
+    organization_id: str | None = None,
+    project_id: str | None = None,
+) -> list[str]:
+    """Deliver due recurring notices (same row each send) and dispatch push."""
+    repo = NoticesRepository(db_connection=db_connection)
+    notice_ids = await repo.list_due_recurring_notice_ids(
+        organization_id=organization_id,
+        project_id=project_id,
+    )
+    if not notice_ids:
+        return []
+
+    push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
+    recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
+    delivered: list[str] = []
+
+    for notice_id in notice_ids:
+        if organization_id:
+            row = await repo.fetch_notice_by_id_only(
+                organization_id=organization_id,
+                notice_id=notice_id,
+            )
+        else:
+            row = await _fetch_recurring_notice_any_org(repo, notice_id=notice_id)
+        if row is None or not row.get("series_frequency"):
+            continue
+        org_id = str(row["organization_id"])
+        if row.get("series_repeat_ended_at") is not None:
+            continue
+        planned = row.get("series_next_send_at")
+        if planned is None:
+            continue
+
+        sends_before = int(row.get("series_sends_completed") or 0)
+        occurrence_index = sends_before + 1
+        sends_after = occurrence_index
+        next_at, ended = await recurring.compute_next_after_delivery(
+            repo,
+            organization_id=org_id,
+            notice_id=notice_id,
+            row=row,
+            after_planned_at=planned,
+            sends_completed=sends_after,
+        )
+        if row.get("series_end_type") == "after_count":
+            cap = row.get("series_end_after_sends")
+            if cap is not None and sends_after >= int(cap):
+                ended = True
+                next_at = None
+
+        ok = await repo.deliver_recurring_notice(
+            organization_id=org_id,
+            notice_id=notice_id,
+            occurrence_index=occurrence_index,
+            next_send_at=next_at,
+            repeat_ended=ended,
+        )
+        if not ok:
+            continue
+        delivered.append(notice_id)
+
+        recipient_groups = await repo.list_recipient_groups(
+            organization_id=org_id,
+            notice_id=notice_id,
+        )
+        contact_ids = await repo.list_contact_recipient_ids(
+            organization_id=org_id,
+            notice_id=notice_id,
+        )
+        towers = await repo.list_towers_for_notice(
+            organization_id=org_id,
+            notice_id=notice_id,
+        )
+        user_ids: set[str] = set(
+            await recipient_service.resolve_recipient_user_ids(
+                organization_id=org_id,
+                project_id=str(row["project_id"]),
+                notice_id=notice_id,
+                recipient_groups=recipient_groups,
+                scope_type=str(row["scope_type"]),
+                tower_ids=[str(t["tower_id"]) for t in towers],
+            )
+        )
+        if contact_ids:
+            user_ids.update(
+                await recipient_service.resolve_user_ids_for_contact_ids(
+                    organization_id=org_id,
+                    contact_ids=contact_ids,
+                )
+            )
+        for user_id in user_ids:
+            push_fields = NoticesService._notice_publish_push_fields(
+                project_id=str(row["project_id"]),
+                notice_id=notice_id,
+                recipient_user_id=user_id,
+            )
+            await push_dispatcher.send_to_user(
+                organization_id=org_id,
+                recipient_user_id=user_id,
+                message_key="notifications.push.notices.published",
+                notification_type="notice_published",
+                feed_type="notices",
+                params={"title": str(row["title"])},
+                data=push_fields["data"],
+                entity=push_fields["entity"],
+                options=push_fields["options"],
+            )
+    return delivered
+
+
+async def _fetch_recurring_notice_any_org(
+    repo: NoticesRepository,
+    *,
+    notice_id: str,
+) -> dict | None:
+    """Load notice + series when cron runs org-wide."""
+    row = await repo.db_connection.fetchrow(
+        """
+        SELECT
+          n.id::text AS id,
+          n.organization_id::text AS organization_id,
+          n.project_id::text AS project_id,
+          n.title,
+          n.scope_type::text AS scope_type,
+          ns.frequency::text AS series_frequency,
+          ns.monthly_day AS series_monthly_day,
+          ns.starts_on AS series_starts_on,
+          ns.time_of_day AS series_time_of_day,
+          ns.end_type::text AS series_end_type,
+          ns.end_on AS series_end_on,
+          ns.end_after_sends AS series_end_after_sends,
+          ns.sends_completed AS series_sends_completed,
+          ns.next_send_at AS series_next_send_at,
+          ns.repeat_ended_at AS series_repeat_ended_at
+        FROM notices n
+        JOIN notice_series ns ON ns.notice_id = n.id
+        WHERE n.id = $1::uuid
+        """,
+        notice_id,
+    )
+    return dict(row) if row else None

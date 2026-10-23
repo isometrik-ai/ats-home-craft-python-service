@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.enums import (
     NOTICE_ALLOWED_ATTACHMENT_MIMES,
@@ -20,7 +20,9 @@ from apps.user_service.app.schemas.enums import (
     NoticePublishMode,
     NoticeRecipientGroup,
     NoticeRecipientInputGroup,
+    NoticeRecurrenceFrequency,
     NoticeScopeType,
+    NoticeSeriesEndType,
     NoticeStatus,
 )
 from apps.user_service.app.utils.notice_targeting_utils import (
@@ -54,6 +56,92 @@ def _validate_contact_id_uuids(contact_ids: list[str] | None) -> list[str] | Non
     except ValueError as exc:
         raise ValueError("contact_ids must contain valid UUIDs") from exc
     return list(dict.fromkeys(canonical))
+
+
+def _validate_repeat_required_fields(repeat: NoticeRepeatInput) -> None:
+    """Raise when enabled repeat is missing core fields."""
+    if repeat.frequency is None:
+        raise ValueError("frequency is required when repeat is enabled")
+    if repeat.starts_on is None or repeat.time_of_day is None:
+        raise ValueError("starts_on and time_of_day are required when repeat is enabled")
+    if repeat.end_type is None:
+        raise ValueError("end_type is required when repeat is enabled")
+    if repeat.end_type == NoticeSeriesEndType.ON_DATE and repeat.end_on is None:
+        raise ValueError("end_on is required when end_type is on_date")
+    if repeat.end_type == NoticeSeriesEndType.AFTER_COUNT and repeat.end_after_sends is None:
+        raise ValueError("end_after_sends is required when end_type is after_count")
+
+
+def _validate_repeat_frequency_fields(repeat: NoticeRepeatInput) -> None:
+    """Raise when frequency-specific fields are missing."""
+    if repeat.frequency == NoticeRecurrenceFrequency.WEEKLY and not repeat.weekly_days:
+        raise ValueError("weekly_days required for weekly frequency")
+    if repeat.frequency == NoticeRecurrenceFrequency.MONTHLY and repeat.monthly_day is None:
+        raise ValueError("monthly_day required for monthly frequency")
+
+
+def _validate_repeat_end_on_order(repeat: NoticeRepeatInput) -> None:
+    """Raise when end_on precedes starts_on."""
+    if (
+        repeat.end_type == NoticeSeriesEndType.ON_DATE
+        and repeat.end_on is not None
+        and repeat.starts_on is not None
+        and repeat.end_on < repeat.starts_on
+    ):
+        raise ValueError("end_on must be on or after starts_on")
+
+
+class NoticeRepeatInput(BaseModel):
+    """Recurring delivery schedule (optional on create/update)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    frequency: NoticeRecurrenceFrequency | None = None
+    weekly_days: list[int] | None = Field(
+        None,
+        description="ISO weekday 1=Monday … 7=Sunday",
+    )
+    monthly_day: int | None = Field(
+        None,
+        ge=0,
+        le=31,
+        description="1–31, or 0 for last day of month",
+    )
+    starts_on: date | None = None
+    time_of_day: time | None = None
+    end_type: NoticeSeriesEndType | None = None
+    end_on: date | None = None
+    end_after_sends: int | None = Field(None, ge=1)
+
+    @field_validator("weekly_days")
+    @classmethod
+    def validate_weekly_days(cls, weekly_days: list[int] | None) -> list[int] | None:
+        """Ensure weekday integers are in ISO range."""
+        if weekly_days is None:
+            return None
+        for day in weekly_days:
+            if day < 1 or day > 7:
+                raise ValueError("weekly_days must be between 1 and 7")
+        return sorted(set(weekly_days))
+
+    @model_validator(mode="after")
+    def validate_repeat_block(self) -> NoticeRepeatInput:
+        """Validate recurrence fields when enabled."""
+        if not self.enabled:
+            return self
+        _validate_repeat_required_fields(self)
+        _validate_repeat_frequency_fields(self)
+        _validate_repeat_end_on_order(self)
+        return self
+
+
+class NoticeSeriesOccurrenceResponse(BaseModel):
+    """One recurring send in history."""
+
+    occurrence_index: int
+    planned_at: datetime
+    published_at: datetime | None = None
 
 
 class NoticeAttachmentInput(BaseModel):
@@ -111,6 +199,8 @@ class CreateNoticeRequest(BaseModel):
     pin_duration: NoticePinDuration = NoticePinDuration.MANUAL
     confirm_pin_replace: bool = False
     attachments: list[NoticeAttachmentInput] | None = None
+    repeat: NoticeRepeatInput | None = None
+    preview_recurrence: bool = False
 
     @field_validator("recipient_groups", mode="before")
     @classmethod
@@ -123,6 +213,14 @@ class CreateNoticeRequest(BaseModel):
     def normalize_contact_ids(cls, contact_ids: object) -> object:
         """Dedupe and drop blank contact ids."""
         return _normalize_contact_ids_input(contact_ids, empty_means_omitted=True)
+
+    @model_validator(mode="after")
+    def validate_repeat_publish_mode(self) -> CreateNoticeRequest:
+        """Disallow one-time publish modes when repeat is enabled."""
+        if self.repeat and self.repeat.enabled:
+            if self.publish_mode in (NoticePublishMode.NOW, NoticePublishMode.SCHEDULE):
+                raise ValueError("use draft or start_series when repeat is enabled")
+        return self
 
     @field_validator("contact_ids")
     @classmethod
@@ -168,6 +266,8 @@ class UpdateNoticeRequest(BaseModel):
     publish_mode: NoticePublishMode | None = None
     publish_at: datetime | None = None
     attachments: list[NoticeAttachmentInput] | None = None
+    repeat: NoticeRepeatInput | None = None
+    preview_recurrence: bool = False
 
     @field_validator("recipient_groups", mode="before")
     @classmethod
@@ -180,6 +280,14 @@ class UpdateNoticeRequest(BaseModel):
     def normalize_contact_ids(cls, contact_ids: object) -> object:
         """Dedupe and drop blank contact ids; preserve explicit empty list for PATCH."""
         return _normalize_contact_ids_input(contact_ids, empty_means_omitted=False)
+
+    @model_validator(mode="after")
+    def validate_repeat_publish_mode(self) -> UpdateNoticeRequest:
+        """Disallow one-time publish modes when repeat is enabled."""
+        if self.repeat and self.repeat.enabled:
+            if self.publish_mode in (NoticePublishMode.NOW, NoticePublishMode.SCHEDULE):
+                raise ValueError("use draft, start_series, or end_series when repeat is enabled")
+        return self
 
     @field_validator("contact_ids")
     @classmethod
@@ -303,6 +411,10 @@ class NoticeListItemResponse(BaseModel):
     editable: bool = False
     created_at: datetime
     attachments: list[NoticeAttachmentResponse] = Field(default_factory=list)
+    is_recurring: bool = False
+    repeats_label: str | None = None
+    next_send_at: datetime | None = None
+    recurrence_footer: str | None = None
 
 
 class NoticeDetailResponse(BaseModel):
@@ -338,6 +450,13 @@ class NoticeDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     created_by_user_id: str | None = None
+    is_recurring: bool = False
+    repeats_label: str | None = None
+    next_send_at: datetime | None = None
+    series_starts_on: date | None = None
+    series_ends_label: str | None = None
+    next_sends_preview: list[datetime] = Field(default_factory=list)
+    occurrences: list[NoticeSeriesOccurrenceResponse] = Field(default_factory=list)
 
 
 class ReachEstimateResponse(BaseModel):

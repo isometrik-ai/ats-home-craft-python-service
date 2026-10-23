@@ -64,6 +64,8 @@ __all__ = [
     "NoticeRecipientInputGroup",
     "NoticePinDuration",
     "NoticePublishMode",
+    "NoticeRecurrenceFrequency",
+    "NoticeSeriesEndType",
     "NoticeListStatus",
     "NOTICE_CATEGORY_LABELS",
     "NOTICE_MAX_PIN_SLOTS",

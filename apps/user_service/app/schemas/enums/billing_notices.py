@@ -76,6 +76,22 @@ class NoticePublishMode(str, Enum):
     DRAFT = "draft"
     NOW = "now"
     SCHEDULE = "schedule"
+    START_SERIES = "start_series"
+    END_SERIES = "end_series"
+
+
+class NoticeRecurrenceFrequency(str, Enum):
+    """Recurring notice cadence."""
+
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+
+
+class NoticeSeriesEndType(str, Enum):
+    """How a recurring notice series stops."""
+
+    ON_DATE = "on_date"
+    AFTER_COUNT = "after_count"
 
 
 class NoticeListStatus(str, Enum):

@@ -7,6 +7,7 @@
 > and [`0005-move-events-flow.md`](./0005-move-events-flow.md).
 >
 > Schema and architecture rationale: [ADR 0011](./adr/0011-notice-board.md), [ADR 0010](./adr/0010-project-membership.md) (project access), [ADR 0009](./adr/0009-contact-roles.md) (recipient roles).
+> **Recurring series:** same admin prefix and endpoints as one-time notices — see [§14 Recurring series](#14-recurring-series-repeat-on-publish).
 
 - **Service:** `ats-home-craft-python-service` → `apps/user_service`
 - **Admin API prefix:** `/v1/projects/{project_id}/notices`
@@ -28,7 +29,7 @@ Each notice has:
   see which other groups were targeted).
 - **Scope** — **whole society** or **by tower** (one or more towers in the project).
 - **Publishing** — save as **draft**, **publish now** → `live`, or **schedule** → `scheduled`
-  (max **2 months** ahead).
+  (max **2 months** ahead); or with **Repeat this notice** ON → **Start series** (see §14).
 
 On the **Live** tab, a **banner row** shows up to **6 pin slots**. Only **live (published)**
 notices may be pinned. Each occupied slot shows the notice's **category name** as the header label
@@ -44,25 +45,26 @@ see pinned banners on the home feed.
 
 ### Business rules (must enforce)
 
-| Rule                                       | Enforcement                                                          |
-| ------------------------------------------ | -------------------------------------------------------------------- |
-| **Title ≤ 70 chars, description ≤ 600**    | Pydantic + DB CHECK on `notices`                                     |
-| **≥1 recipient group to publish/schedule** | Service validation; drafts may omit                                  |
-| **By tower → ≥1 tower selected**           | `notice_towers` rows required when `scope_type = by_tower`           |
-| **≤4 attachments, JPG/PNG, ≤5 MB each**    | Service count + mime/size validation                                 |
-| **Schedule ≤ 2 months ahead**              | `publish_at <= now() + interval '2 months'` → else `422`             |
-| **Live notices immutable**                 | `PATCH` rejected when `status = live` → `409 notice_not_editable`    |
-| **Only live notices can pin**              | Pin on create (publish now) or `POST .../pin`; reject otherwise      |
-| **Max 6 banner slots**                     | `slot_index` 1–6; partial unique index per active slot               |
-| **One notice → one slot**                  | Partial unique index on active `notice_id`                           |
-| **Slot header = category label**           | UI derives from `notices.category`; not recipient group              |
-| **Click banner → detail**                  | Same `GET .../notices/{id}` as card click                            |
-| **Soft delete only**                       | `status = deleted`, `deleted_at` set; row retained for audit         |
-| **Restore → draft**                        | Clears `deleted_at`; does not re-pin                                 |
-| **Display code immutable**                 | `NTC-{n}` assigned at create per `project_id`                        |
-| **Duplicate draft/scheduled**              | `POST .../duplicate` → new draft                                     |
-| **Duplicate live**                         | UI → Create Notice prefilled → `POST .../notices` (no duplicate API) |
-| **Staff project access**                   | `ensure_staff_project_access(project_id)` on all admin routes        |
+| Rule                                       | Enforcement                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------ |
+| **Title ≤ 70 chars, description ≤ 600**    | Pydantic + DB CHECK on `notices`                                               |
+| **≥1 recipient group to publish/schedule** | Service validation; drafts may omit                                            |
+| **By tower → ≥1 tower selected**           | `notice_towers` rows required when `scope_type = by_tower`                     |
+| **≤4 attachments, JPG/PNG, ≤5 MB each**    | Service count + mime/size validation                                           |
+| **Schedule ≤ 2 months ahead**              | `publish_at <= now() + interval '2 months'` → else `422`                       |
+| **Live notices immutable**                 | `PATCH` rejected when `status = live` and **not** recurring → `409`            |
+| **Only live notices can pin**              | Pin on create (publish now) or `POST .../pin`; reject otherwise                |
+| **Max 6 banner slots**                     | `slot_index` 1–6; partial unique index per active slot                         |
+| **One notice → one slot**                  | Partial unique index on active `notice_id`                                     |
+| **Slot header = category label**           | UI derives from `notices.category`; not recipient group                        |
+| **Click banner → detail**                  | Same `GET .../notices/{id}` as card click                                      |
+| **Soft delete only**                       | `status = deleted`, `deleted_at` set; row retained for audit                   |
+| **Restore → draft**                        | Clears `deleted_at`; does not re-pin                                           |
+| **Display code immutable**                 | `NTC-{n}` assigned at create per `project_id`                                  |
+| **Duplicate draft/scheduled**              | `POST .../duplicate` → new draft                                               |
+| **Duplicate live**                         | UI → Create Notice prefilled → `POST .../notices` (no duplicate API)           |
+| **Staff project access**                   | `ensure_staff_project_access(project_id)` on all admin routes                  |
+| **Recurring series**                       | Same `POST`/`PATCH`/`GET`/`DELETE` routes; `repeat` block + `publish_mode` §14 |
 
 ### Screen → capability map
 
@@ -82,6 +84,12 @@ see pinned banners on the home feed.
 | Save as draft                                  | `POST` with `{ "publish_mode": "draft" }`                                                                |
 | Publish now (+ optional pin)                   | `POST` with `{ "publish_mode": "now", "pin_to_banner": true }`                                           |
 | Schedule notice                                | `POST` with `{ "publish_mode": "schedule", "publish_at": "..." }`                                        |
+| Repeat ON → Save as draft (series)             | `POST` with `{ "repeat": { "enabled": true, ... }, "publish_mode": "draft" }`                            |
+| Repeat ON → Start series                       | `POST` with `{ "repeat": { "enabled": true, ... }, "publish_mode": "start_series" }`                     |
+| Recurring card / detail (NTC-3)                | Same `GET .../notices` list + `GET .../notices/{id}` (`repeat.enabled` / joined `notice_series`)         |
+| Edit / end / delete recurring notice           | `PATCH .../notices/{id}`, `POST .../notices/{id}/delete` (§14)                                           |
+| Send history                                   | `GET .../notices/{id}` detail includes `occurrences[]` (§14)                                             |
+| Recurring cron (ops)                           | `POST /projects/{project_id}/notices/process-recurring` (§14.6)                                          |
 | Reach estimate                                 | `GET /projects/{project_id}/notices/reach-estimate?groups=&scope=&tower_ids=`                            |
 | Edit notice (draft / scheduled)                | `PATCH /projects/{project_id}/notices/{id}`                                                              |
 | Pin live notice                                | `POST /projects/{project_id}/notices/{id}/pin`                                                           |
@@ -116,23 +124,25 @@ HTTP → API router → NoticesService (business rules) → NoticesRepository (S
 
 ### File map (to create)
 
-| Concern                     | File                                                                                                    |
-| --------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Admin API endpoints         | `app/api/notices.py`                                                                                    |
-| Resident API (Phase 2)      | `app/api/notices_resident.py`                                                                           |
-| Route registration          | `app/api/routes.py`                                                                                     |
-| Orchestration               | `app/services/notices_service.py`                                                                       |
-| Recipient / reach count     | `app/services/notice_recipient_resolution_service.py`                                                   |
-| Persistence                 | `app/db/repositories/notices_repository.py`                                                             |
-| Request/response models     | `app/schemas/notices.py`                                                                                |
-| Enums (mirror Postgres)     | `app/schemas/enums.py`                                                                                  |
-| Admin RBAC + project access | Reuse `projects_management.*` + `ensure_staff_project_access`                                           |
-| Presigned uploads           | Reuse `app/api/presigned_url.py`                                                                        |
-| Scheduled publish job       | `app/jobs/publish_scheduled_notices.py` (or cron script)                                                |
-| Pin expiry job              | `app/jobs/expire_notice_pins.py`                                                                        |
-| Audit logging               | `@audit_api_call` + `set_audit_context`                                                                 |
-| i18n                        | `app/locales/en.json` (`notices.*`)                                                                     |
-| Push (Phase 2)              | Hook `PushNotificationService` per [0008-push-notifications-flow.md](./0008-push-notifications-flow.md) |
+| Concern                     | File                                                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Admin API endpoints         | `app/api/notices.py`                                                                                                                   |
+| Resident API (Phase 2)      | `app/api/notices_resident.py`                                                                                                          |
+| Route registration          | `app/api/routes.py`                                                                                                                    |
+| Orchestration               | `app/services/notices_service.py`                                                                                                      |
+| Recipient / reach count     | `app/services/notice_recipient_resolution_service.py`                                                                                  |
+| Persistence                 | `app/db/repositories/notices_repository.py`                                                                                            |
+| Request/response models     | `app/schemas/notices.py`                                                                                                               |
+| Enums (mirror Postgres)     | `app/schemas/enums.py`                                                                                                                 |
+| Admin RBAC + project access | Reuse `projects_management.*` + `ensure_staff_project_access`                                                                          |
+| Presigned uploads           | Reuse `app/api/presigned_url.py`                                                                                                       |
+| Scheduled publish job       | `app/jobs/publish_scheduled_notices.py` (or cron script)                                                                               |
+| Recurring notices job       | **`app/jobs/publish_scheduled_notices.py`** (`process_recurring_notices`) — separate cron / `POST .../notices/process-recurring` (§14) |
+| Pin expiry job              | `app/jobs/expire_notice_pins.py`                                                                                                       |
+| Recurrence calculator       | `app/services/notice_recurrence_calculator.py` (pure; used from `NoticesService`)                                                      |
+| Audit logging               | `@audit_api_call` + `set_audit_context`                                                                                                |
+| i18n                        | `app/locales/en.json` (`notices.*`)                                                                                                    |
+| Push (Phase 2)              | Hook `PushNotificationService` per [0008-push-notifications-flow.md](./0008-push-notifications-flow.md)                                |
 
 `NoticesService` composes `NoticeRecipientResolutionService` for reach estimates and (Phase 2) push
 recipient lists — it does not duplicate `contact_roles` / `contact_units` query logic inline.
@@ -143,14 +153,20 @@ ______________________________________________________________________
 
 ### New tables
 
-| Table                    | Purpose                                                                   |
-| ------------------------ | ------------------------------------------------------------------------- |
-| **`notices`**            | Header: content, category, status, scope, schedule, stats, `display_code` |
-| **`notice_recipients`**  | Audience groups (Owner, Tenant, Staff, Security)                          |
-| **`notice_towers`**      | Tower scope when `scope_type = by_tower`                                  |
-| **`notice_attachments`** | Up to 4 image rows (`file_path`, metadata, `sort_order`)                  |
-| **`notice_pins`**        | Banner slot assignment (`slot_index` 1–6) for live notices                |
-| **`notice_likes`**       | One row per contact like (Phase 2)                                        |
+| Table                           | Purpose                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| **`notices`**                   | Header: content, category, status, scope, schedule, stats, `display_code` |
+| **`notice_recipients`**         | Audience groups (Owner, Tenant, Staff, Security)                          |
+| **`notice_towers`**             | Tower scope when `scope_type = by_tower`                                  |
+| **`notice_attachments`**        | Up to 4 image rows (`file_path`, metadata, `sort_order`)                  |
+| **`notice_pins`**               | Banner slot assignment (`slot_index` 1–6) for live notices                |
+| **`notice_likes`**              | One row per contact like (Phase 2)                                        |
+| **`notice_series`**             | Recurrence rule + cursor (1:1 with the **same** `notices` row)            |
+| **`notice_series_weekly_days`** | Weekdays when frequency = weekly                                          |
+| **`notice_series_occurrences`** | Send history ledger (same `notice_id` every delivery)                     |
+
+Recurring notices reuse **`notice_recipients`**, **`notice_towers`**, and **`notice_attachments`** on
+that single `notices` row. **No second notice row per send.**
 
 Full column reference: [notice-board-schema.md](../../../../ats-home-craft-supabase/docs/notice-board-schema.md).
 
@@ -380,7 +396,8 @@ PATCH /v1/projects/{project_id}/notices/{notice_id}
 
 Rules:
 
-- Rejected with **`409 notice_not_editable`** when `status = live` or `deleted`.
+- Rejected with **`409 notice_not_editable`** when `status = live` or `deleted`, **except** recurring
+  notices (`notice_series` present and `repeat_ended_at IS NULL`) — see §14.
 - Rescheduled `publish_at` must stay within **2-month** window.
 - Cannot pin via PATCH — use `POST .../pin` after live, or pin at publish-now create.
 - Replacing attachments: send full `attachments[]` array (same pattern as create).
@@ -789,6 +806,16 @@ Does **not** auto-pin — pinning requires explicit admin action on live notices
 
 See §5.5.
 
+### 7.3 Recurring notice delivery
+
+**Separate** from §7.1. Cron (e.g. every minute):
+
+```text
+publish_scheduled_notices.process_recurring_notices  →  POST .../notices/process-recurring
+```
+
+See §14.6 for transaction steps. Does **not** run inside `publish-due`.
+
 ______________________________________________________________________
 
 ## 8. Resident flow (Phase 2)
@@ -909,32 +936,271 @@ ______________________________________________________________________
 
 ## 12. Implementation phases
 
-| Phase  | Scope                                                                       |
-| ------ | --------------------------------------------------------------------------- |
-| **1a** | Migrations + `notice-board-schema.md`                                       |
-| **1b** | Admin API: summary, list, detail, create, PATCH, delete, restore, duplicate |
-| **1c** | Banner-slots, pin/unpin, reach-estimate                                     |
-| **1d** | Presigned upload integration + attachment validation                        |
-| **1e** | Scheduled publish job + pin expiry job                                      |
-| **2a** | Resident feed + banner + view/like                                          |
-| **2b** | Push on publish ([ADR 0008](./adr/0008-push-notifications-grpc.md))         |
-| **3**  | RLS policies if client-side Supabase reads added                            |
+| Phase     | Scope                                                                                        |
+| --------- | -------------------------------------------------------------------------------------------- |
+| **1a**    | Migrations + `notice-board-schema.md`                                                        |
+| **1b**    | Admin API: summary, list, detail, create, PATCH, delete, restore, duplicate                  |
+| **1c**    | Banner-slots, pin/unpin, reach-estimate                                                      |
+| **1d**    | Presigned upload integration + attachment validation                                         |
+| **1e**    | Scheduled publish job + pin expiry job                                                       |
+| **2a**    | Resident feed + banner + view/like                                                           |
+| **2b**    | Push on publish ([ADR 0008](./adr/0008-push-notifications-grpc.md))                          |
+| **3**     | RLS policies if client-side Supabase reads added                                             |
+| **1f–1h** | Recurring (§14): migrations, `repeat` on `POST`/`PATCH`, **`process_recurring_notices` job** |
 
 ______________________________________________________________________
 
 ## 13. Where to change things (quick reference)
 
-| Change                       | Location                                                    |
-| ---------------------------- | ----------------------------------------------------------- |
-| Add notice category          | Migration enum + `NoticeCategory` + UI icons                |
-| Change pin slot count (6)    | Migration CHECK + service constant + UI grid                |
-| Reach count query            | `notice_recipient_resolution_service.py`                    |
-| Pin / unpin rules            | `notices_service.pin_notice` / `unpin_notice`               |
-| Scheduled horizon (2 months) | `notices_service._validate_schedule`                        |
-| Live immutability            | `notices_service.update_notice` guard                       |
-| Display code format          | `notices_repository.allocate_display_code`                  |
-| Admin RBAC                   | `notices.py` — permission dependency                        |
-| Project access               | `ensure_staff_project_access` in router or service          |
-| Resident visibility          | `notices_resident_service._is_visible_to_contact` (Phase 2) |
-| Tab counts                   | `notices_repository.get_summary_counts`                     |
-| View / like counters         | §4.11; `notices_resident_service` + `notices_repository`    |
+| Change                       | Location                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------ |
+| Add notice category          | Migration enum + `NoticeCategory` + UI icons                                         |
+| Change pin slot count (6)    | Migration CHECK + service constant + UI grid                                         |
+| Reach count query            | `notice_recipient_resolution_service.py`                                             |
+| Pin / unpin rules            | `notices_service.pin_notice` / `unpin_notice`                                        |
+| Scheduled horizon (2 months) | `notices_service._validate_schedule`                                                 |
+| Live immutability            | `notices_service.update_notice` guard                                                |
+| Display code format          | `notices_repository.allocate_display_code`                                           |
+| Admin RBAC                   | `notices.py` — permission dependency                                                 |
+| Project access               | `ensure_staff_project_access` in router or service                                   |
+| Resident visibility          | `notices_resident_service._is_visible_to_contact` (Phase 2)                          |
+| Tab counts                   | `notices_repository.get_summary_counts`                                              |
+| View / like counters         | §4.11; `notices_resident_service` + `notices_repository`                             |
+| Recurring series             | §14; extend `notices_service.py`, `notices_repository.py`, `notices.py` schemas only |
+
+______________________________________________________________________
+
+## 14. Recurring series (repeat on publish)
+
+> **Status: Not yet implemented.** Extends the same **`/v1/projects/{project_id}/notices`** admin API —
+> **no separate notice-series routes**. Create, edit, list, detail, delete, summary, and reach
+> estimate stay on existing handlers; request/response bodies gain optional **`repeat`** and list/detail
+> gain recurrence fields (`is_recurring`, `repeats_label`, `next_send_at`, …).
+
+### 14.1 What it does
+
+When **Repeat this notice** is ON, **`POST .../notices`** creates **one** `notices` row plus a
+**`notice_series`** recurrence record (1:1 on `notice_id`). Every scheduled delivery **reuses that same
+notice** — the job updates `published_at`, keeps (or sets) `status = live`, appends an
+**`notice_series_occurrences`** row, and triggers resident visibility / push for that delivery. **No new
+`notices` row per send.**
+
+Residents see the same notice id on the feed (refreshed `published_at` each delivery). Admin list shows
+**one card** (e.g. `NTC-3`) with the **Repeats** badge and **Next send** — **no separate series status**
+column or badge; use the normal notice **`status`** field only (`draft` / `scheduled` / `live` / `deleted`).
+
+| Aspect                | One-time                               | Recurring                                                                             |
+| --------------------- | -------------------------------------- | ------------------------------------------------------------------------------------- |
+| Rows per delivery     | One notice                             | **Same** notice id                                                                    |
+| Create                | `publish_mode`: draft / now / schedule | `repeat.enabled` + `publish_mode`: draft / **`start_series`**                         |
+| `publish_at`          | Required for schedule (≤2 months)      | **Ignored** when `repeat.enabled` (use `notice_series.next_send_at`)                  |
+| 2-month cap           | Yes for one-time schedule              | **No** on recurrence end date / send count                                            |
+| Edit after first send | Live → immutable (§4)                  | **`PATCH` allowed** while `repeat.enabled` and not deleted (applies to next delivery) |
+| Pin                   | When live                              | Same notice row — **`POST .../pin`** when live                                        |
+
+### 14.2 Request shape (existing `POST` / `PATCH`)
+
+Add optional **`repeat`** to `CreateNoticeRequest` / `UpdateNoticeRequest`:
+
+```json
+"repeat": {
+  "enabled": true,
+  "frequency": "weekly",
+  "weekly_days": [1, 4],
+  "monthly_day": null,
+  "starts_on": "2026-10-26",
+  "time_of_day": "08:00",
+  "end_type": "on_date",
+  "end_on": "2027-01-31",
+  "end_after_sends": null
+}
+```
+
+| Field                        | Notes                                                           |
+| ---------------------------- | --------------------------------------------------------------- |
+| `enabled`                    | When `false` or omitted, behaviour is unchanged one-time notice |
+| `frequency`                  | `weekly` \| `monthly`                                           |
+| `weekly_days`                | ISO 1=Mon … 7=Sun; required non-empty when weekly               |
+| `monthly_day`                | 1–31, or **`0`** = last day of month                            |
+| `starts_on`                  | Date; first send on/after this date                             |
+| `time_of_day`                | `HH:MM` in **project timezone**                                 |
+| `end_type`                   | `on_date` \| `after_count`                                      |
+| `end_on` / `end_after_sends` | Per UI “Ends” tabs                                              |
+
+Extend **`NoticePublishMode`**: add **`start_series`**. When `repeat.enabled`:
+
+| UI            | `publish_mode`     | Result                                                                                                  |
+| ------------- | ------------------ | ------------------------------------------------------------------------------------------------------- |
+| Save as Draft | `draft`            | `notices.status = draft`; insert/update `notice_series`; `next_send_at = NULL`                          |
+| Start Series  | **`start_series`** | `notices.status = scheduled` until first delivery; compute `next_send_at`; **`repeat_ended_at = NULL`** |
+
+When `repeat.enabled`, reject `publish_mode` **`now`** and **`schedule`** → `422` (use one-time flow with repeat off).
+
+**Preview (“Next few sends”):** returned on **`POST` / `PATCH` response** as `recurrence_summary` and
+`next_sends_preview[]` when `repeat` is present — no extra create route. Optional: same fields when
+`preview_recurrence: true` on draft save (still `POST .../notices`).
+
+#### Create series (Start Series) — same endpoint as today
+
+```http
+POST /v1/projects/{project_id}/notices
+Authorization: Bearer <staff_jwt>
+Content-Type: application/json
+
+{
+  "title": "Water tanker arrival — podium bay",
+  "description": "Tanker expected at podium loading bay. Keep access clear.",
+  "category": "maintenance",
+  "recipient_groups": ["Owner", "Tenant"],
+  "scope_type": "whole_society",
+  "publish_mode": "start_series",
+  "attachments": [],
+  "repeat": {
+    "enabled": true,
+    "frequency": "weekly",
+    "weekly_days": [1, 4],
+    "starts_on": "2026-10-26",
+    "time_of_day": "08:00",
+    "end_type": "on_date",
+    "end_on": "2027-01-31"
+  }
+}
+```
+
+**Service transaction (create with repeat):**
+
+1. Same steps as §4.3 (access, content, recipients, towers, attachments).
+1. If `publish_mode = start_series`: validate repeat block and recipients.
+1. Insert **one** `notices` row + junction rows; insert `notice_series` (+ weekly day rows).
+1. When starting: compute `next_send_at` (no separate series status table).
+1. Return **`NoticeDetailResponse`** with `is_recurring`, `repeats_label`, `next_send_at`, `series_starts_on`, `series_ends_label`, `next_sends_preview`.
+
+Promote draft series: **`PATCH .../notices/{id}`** with `"publish_mode": "start_series"` (and valid `repeat` if not already stored).
+
+Stop future sends: **`PATCH`** with `"series_action": "end"` **or** `"publish_mode": "end_series"` (product pick one in implementation).
+
+### 14.3 List, detail, summary (existing GET)
+
+**List `GET .../notices?status=`**
+
+- One row per notice (recurring or not). Recurring cards: `is_recurring: true`, `repeats_label`,
+  `next_send_at`, `recurrence_footer`.
+- Tab filters use **`notices.status` only** (no parallel series status).
+
+**Detail `GET .../notices/{id}`**
+
+- When `notice_series` exists: **Repeats**, Series starts, Next send, Ends; `occurrences[]` (past
+  `planned_at` / `published_at` for this `notice_id`).
+
+**Summary `GET .../notices/summary`**
+
+- Count recurring notices with `next_send_at IS NOT NULL` and `repeat_ended_at IS NULL` inside existing
+  tab buckets (typically **`scheduled`** before first send, **`live`** after).
+
+**Reach estimate:** unchanged **`GET .../notices/reach-estimate`** — same params while building the
+create form (series or one-time).
+
+### 14.4 Edit and delete (existing PATCH / POST delete)
+
+```http
+PATCH /v1/projects/{project_id}/notices/{notice_id}
+{
+  "title": "Updated tanker notice",
+  "repeat": {
+    "enabled": true,
+    "weekly_days": [1, 4, 6],
+    "end_type": "after_count",
+    "end_after_sends": 12
+  }
+}
+```
+
+- Allowed when `repeat.enabled` and `notices.status != deleted` and `repeat_ended_at IS NULL` (or draft).
+- Recompute `next_send_at` after last send (or from `starts_on` if none).
+
+```http
+POST /v1/projects/{project_id}/notices/{notice_id}/delete
+```
+
+- Standard soft delete on the **same** notice row; clear `next_send_at`; set `repeat_ended_at = now()`.
+
+Duplicate / restore APIs apply to **one-time** draft/scheduled notices only; for series, **Edit** or
+copy via Create Notice prefilled → **`POST .../notices`**.
+
+### 14.5 Recurrence rules
+
+| Rule                           | Enforcement                                                              |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| Weekly → ≥1 weekday            | `notice_series_weekly_days`                                              |
+| Monthly day 1–31 or last (`0`) | Column + validation                                                      |
+| End on ≥ starts on             | Service                                                                  |
+| Monthly 29–31                  | Skip months without that calendar day                                    |
+| First send                     | Earliest matching slot on/after `starts_on` at `time_of_day`             |
+| Deliver                        | Recurring job when `repeat_ended_at IS NULL` and `next_send_at <= now()` |
+
+Weekly/monthly examples match product copy in §14 (Mon-only from Wed start → Mon 26 Oct; monthly 1st
+→ first send 1 Nov).
+
+### 14.6 Recurring notices job (separate from scheduled publish)
+
+**Do not** fold recurring delivery into §7.1 `publish-due`. Use a **dedicated cron** (e.g. every minute)
+and ops endpoint:
+
+```http
+POST /v1/projects/{project_id}/notices/process-recurring
+Authorization: Bearer <staff_jwt>
+```
+
+Implementation: **`app/jobs/publish_scheduled_notices.py`** (`process_recurring_notices`) → `NoticesService.process_recurring_notices(project_id)`.
+
+**Per due row** (`notice_series.next_send_at <= now()`, `repeat_ended_at IS NULL`, parent notice not deleted):
+
+1. Lock `notices` + `notice_series` (`FOR UPDATE`).
+1. Insert **`notice_series_occurrences`** (`notice_id`, `planned_at`, `occurrence_index`).
+1. **Reuse existing notice:** `UPDATE notices SET status = 'live', published_at = now(), updated_at = now() WHERE id = :notice_id`.
+1. Increment `sends_completed`; set `last_sent_at`; compute next `next_send_at` **or** set `repeat_ended_at` when end condition met.
+1. Phase 2: push for this delivery (same notice id).
+
+One-time **`POST .../notices/publish-due`** remains **only** for non-recurring `scheduled` rows with `publish_at`.
+
+### 14.7 Response flags (list + detail)
+
+| Field                | When                                                                        |
+| -------------------- | --------------------------------------------------------------------------- |
+| `is_recurring`       | `notice_series` row exists and `repeat_ended_at IS NULL` (or was recurring) |
+| `repeats_label`      | e.g. “Every Monday and Thursday at 8:00 am”                                 |
+| `next_send_at`       | Recurring and not ended                                                     |
+| `series_starts_on`   | Detail                                                                      |
+| `series_ends_label`  | Detail — date or “After N sends”                                            |
+| `next_sends_preview` | Create/PATCH response; optional on detail                                   |
+
+### 14.8 Business rules (recurring)
+
+| Rule                        | Enforcement                                                                       |
+| --------------------------- | --------------------------------------------------------------------------------- |
+| One notice id for all sends | Occurrences FK → same `notice_id`; job UPDATE only                                |
+| No series status enum       | End via `repeat_ended_at` + `next_send_at`; delete via `notices.status = deleted` |
+| Live immutability           | **Waived** when `is_recurring` — `PATCH` updates content for next delivery        |
+| Engagement                  | Cumulative on **same** `notices` row (`view_count` / `like_count`)                |
+| Staff project access        | Unchanged                                                                         |
+
+### 14.9 Error keys (add to §10)
+
+| Key                                              | When                                           |
+| ------------------------------------------------ | ---------------------------------------------- |
+| `notices.errors.repeat_required`                 | `start_series` without `repeat.enabled`        |
+| `notices.errors.invalid_publish_mode_for_repeat` | `now` / `schedule` with repeat on              |
+| `notices.errors.weekly_days_required`            | Weekly repeat without days                     |
+| `notices.errors.invalid_monthly_day`             | Bad `monthly_day`                              |
+| `notices.errors.end_before_start`                | `end_on` before `starts_on`                    |
+| `notices.errors.invalid_end_count`               | `end_after_sends` < 1                          |
+| `notices.errors.not_recurring`                   | `end_series` / repeat PATCH on one-time notice |
+| `notices.errors.recurrence_ended`                | PATCH repeat on ended recurring notice         |
+
+### 14.10 Implementation phase (recurring)
+
+| Phase  | Scope                                                                   |
+| ------ | ----------------------------------------------------------------------- |
+| **1f** | Migrations (series tables), extend `CreateNoticeRequest` / responses    |
+| **1g** | Recurrence calculator + **`process_recurring_notices`** job + ops route |
+| **1h** | List/detail/summary recurring fields; admin UI                          |

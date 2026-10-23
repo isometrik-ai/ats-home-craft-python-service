@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
@@ -33,6 +33,26 @@ _NOTICE_SELECT_COLUMNS = """
   np.slot_index AS pin_slot_index,
   np.pin_duration::text AS pin_duration,
   (np.id IS NOT NULL) AS pinned
+"""
+
+_NOTICE_SERIES_COLUMNS = """
+  ns.frequency::text AS series_frequency,
+  ns.monthly_day AS series_monthly_day,
+  ns.starts_on AS series_starts_on,
+  ns.time_of_day AS series_time_of_day,
+  ns.end_type::text AS series_end_type,
+  ns.end_on AS series_end_on,
+  ns.end_after_sends AS series_end_after_sends,
+  ns.sends_completed AS series_sends_completed,
+  ns.next_send_at AS series_next_send_at,
+  ns.last_sent_at AS series_last_sent_at,
+  ns.repeat_ended_at AS series_repeat_ended_at
+"""
+
+_NOTICE_SERIES_JOIN = """
+            LEFT JOIN notice_series ns
+              ON ns.notice_id = n.id
+             AND ns.organization_id = n.organization_id
 """
 
 
@@ -184,11 +204,13 @@ class NoticesRepository(BaseRepository):
         row = await self.db_connection.fetchrow(
             f"""
             SELECT
-            {_NOTICE_SELECT_COLUMNS}
+            {_NOTICE_SELECT_COLUMNS},
+            {_NOTICE_SERIES_COLUMNS}
             FROM notices n
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
+            {_NOTICE_SERIES_JOIN}
             WHERE n.organization_id = $1::uuid
               AND n.project_id = $2::uuid
               AND n.id = $3::uuid
@@ -502,7 +524,9 @@ class NoticesRepository(BaseRepository):
               n.created_at DESC
             """
         elif status == NoticeListStatus.SCHEDULED:
-            order_sql = "ORDER BY n.publish_at ASC NULLS LAST, n.created_at DESC"
+            order_sql = """
+            ORDER BY COALESCE(ns.next_send_at, n.publish_at) ASC NULLS LAST, n.created_at DESC
+            """
         elif status == NoticeListStatus.DELETED:
             order_sql = "ORDER BY n.deleted_at DESC NULLS LAST, n.created_at DESC"
         else:
@@ -522,6 +546,7 @@ class NoticesRepository(BaseRepository):
             f"""
             SELECT
             {_NOTICE_SELECT_COLUMNS},
+            {_NOTICE_SERIES_COLUMNS},
             COALESCE(
               (
                 SELECT array_agg(nr.recipient_group::text ORDER BY nr.recipient_group)
@@ -542,6 +567,7 @@ class NoticesRepository(BaseRepository):
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
+            {_NOTICE_SERIES_JOIN}
             WHERE {where_sql}
             {order_sql}
             LIMIT ${idx} OFFSET ${idx + 1}
@@ -809,7 +835,17 @@ class NoticesRepository(BaseRepository):
         project_id: str | None = None,
     ) -> list[str]:
         """Promote scheduled notices whose publish_at has passed."""
-        conditions = ["status = 'scheduled'", "publish_at <= now()"]
+        conditions = [
+            "status = 'scheduled'",
+            "publish_at IS NOT NULL",
+            "publish_at <= now()",
+            """NOT EXISTS (
+                SELECT 1
+                FROM notice_series ns
+                WHERE ns.notice_id = notices.id
+                  AND ns.repeat_ended_at IS NULL
+            )""",
+        ]
         values: list[Any] = []
         idx = 1
         if organization_id:
@@ -1209,11 +1245,13 @@ class NoticesRepository(BaseRepository):
         row = await self.db_connection.fetchrow(
             f"""
             SELECT
-            {_NOTICE_SELECT_COLUMNS}
+            {_NOTICE_SELECT_COLUMNS},
+            {_NOTICE_SERIES_COLUMNS}
             FROM notices n
             LEFT JOIN notice_pins np
               ON np.notice_id = n.id
              AND np.is_active = true
+            {_NOTICE_SERIES_JOIN}
             WHERE n.organization_id = $1::uuid
               AND n.id = $2::uuid
             """,
@@ -1221,6 +1259,342 @@ class NoticesRepository(BaseRepository):
             notice_id,
         )
         return dict(row) if row else None
+
+    async def fetch_organization_timezone(self, *, organization_id: str) -> str:
+        """Return IANA timezone name for an organization."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT timezone
+            FROM organizations
+            WHERE id = $1::uuid
+            """,
+            organization_id,
+        )
+        if row is None:
+            return "UTC"
+        return str(row["timezone"] or "UTC")
+
+    async def insert_notice_series(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+        frequency: str,
+        monthly_day: int,
+        starts_on: date,
+        time_of_day: time,
+        end_type: str,
+        end_on: date | None,
+        end_after_sends: int | None,
+        next_send_at: datetime | None,
+    ) -> None:
+        """Insert recurrence config for a notice."""
+        await self.db_connection.execute(
+            """
+            INSERT INTO notice_series (
+                notice_id,
+                organization_id,
+                frequency,
+                monthly_day,
+                starts_on,
+                time_of_day,
+                end_type,
+                end_on,
+                end_after_sends,
+                next_send_at
+            )
+            VALUES (
+                $1::uuid, $2::uuid, $3::notice_recurrence_frequency, $4,
+                $5, $6, $7::notice_series_end_type, $8, $9, $10
+            )
+            """,
+            notice_id,
+            organization_id,
+            frequency,
+            monthly_day,
+            starts_on,
+            time_of_day,
+            end_type,
+            end_on,
+            end_after_sends,
+            next_send_at,
+        )
+
+    async def update_notice_series(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+        fields: dict[str, Any],
+    ) -> None:
+        """Patch notice_series columns."""
+        if not fields:
+            return
+        allowed = {
+            "frequency",
+            "monthly_day",
+            "starts_on",
+            "time_of_day",
+            "end_type",
+            "end_on",
+            "end_after_sends",
+            "next_send_at",
+            "last_sent_at",
+            "repeat_ended_at",
+            "sends_completed",
+        }
+        sets: list[str] = []
+        values: list[Any] = []
+        idx = 1
+        for key, value in fields.items():
+            if key not in allowed:
+                continue
+            if key in {"frequency"}:
+                sets.append(f"{key} = ${idx}::notice_recurrence_frequency")
+            elif key == "end_type":
+                sets.append(f"{key} = ${idx}::notice_series_end_type")
+            else:
+                sets.append(f"{key} = ${idx}")
+            values.append(value)
+            idx += 1
+        if not sets:
+            return
+        sets.append("updated_at = now()")
+        values.extend([organization_id, notice_id])
+        await self.db_connection.execute(
+            f"""
+            UPDATE notice_series
+            SET {", ".join(sets)}
+            WHERE organization_id = ${idx}::uuid
+              AND notice_id = ${idx + 1}::uuid
+            """,
+            *values,
+        )
+
+    async def replace_series_weekly_days(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+        weekly_days: list[int],
+    ) -> None:
+        """Replace weekly day rows for a series."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM notice_series_weekly_days
+            WHERE organization_id = $1::uuid
+              AND notice_id = $2::uuid
+            """,
+            organization_id,
+            notice_id,
+        )
+        if not weekly_days:
+            return
+        await self.db_connection.executemany(
+            """
+            INSERT INTO notice_series_weekly_days (organization_id, notice_id, day_of_week)
+            VALUES ($1::uuid, $2::uuid, $3)
+            """,
+            [(organization_id, notice_id, day) for day in weekly_days],
+        )
+
+    async def list_series_weekly_days(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+    ) -> list[int]:
+        """Return ISO weekdays configured for a series."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT day_of_week
+            FROM notice_series_weekly_days
+            WHERE organization_id = $1::uuid
+              AND notice_id = $2::uuid
+            ORDER BY day_of_week
+            """,
+            organization_id,
+            notice_id,
+        )
+        return [int(row["day_of_week"]) for row in rows]
+
+    async def notice_has_series(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+    ) -> bool:
+        """True when a notice_series row exists."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT 1
+            FROM notice_series
+            WHERE organization_id = $1::uuid
+              AND notice_id = $2::uuid
+            """,
+            organization_id,
+            notice_id,
+        )
+        return row is not None
+
+    async def end_notice_series(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+    ) -> None:
+        """Stop future recurring sends."""
+        await self.db_connection.execute(
+            """
+            UPDATE notice_series
+            SET repeat_ended_at = now(),
+                next_send_at = NULL,
+                updated_at = now()
+            WHERE organization_id = $1::uuid
+              AND notice_id = $2::uuid
+              AND repeat_ended_at IS NULL
+            """,
+            organization_id,
+            notice_id,
+        )
+
+    async def list_due_recurring_notice_ids(
+        self,
+        *,
+        organization_id: str | None = None,
+        project_id: str | None = None,
+    ) -> list[str]:
+        """Notice ids with a due recurring send."""
+        conditions = [
+            "ns.repeat_ended_at IS NULL",
+            "ns.next_send_at IS NOT NULL",
+            "ns.next_send_at <= now()",
+            "n.status <> 'deleted'",
+        ]
+        values: list[Any] = []
+        idx = 1
+        if organization_id:
+            conditions.append(f"n.organization_id = ${idx}::uuid")
+            values.append(organization_id)
+            idx += 1
+        if project_id:
+            conditions.append(f"n.project_id = ${idx}::uuid")
+            values.append(project_id)
+            idx += 1
+        rows = await self.db_connection.fetch(
+            f"""
+            SELECT n.id::text AS id
+            FROM notice_series ns
+            JOIN notices n ON n.id = ns.notice_id
+            WHERE {" AND ".join(conditions)}
+            ORDER BY ns.next_send_at
+            """,
+            *values,
+        )
+        return [str(row["id"]) for row in rows]
+
+    async def deliver_recurring_notice(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+        occurrence_index: int,
+        next_send_at: datetime | None,
+        repeat_ended: bool,
+    ) -> bool:
+        """Record one recurring delivery and refresh the notice row."""
+        async with self.db_connection.transaction():
+            locked = await self.db_connection.fetchrow(
+                """
+                SELECT ns.next_send_at, ns.repeat_ended_at, ns.sends_completed
+                FROM notice_series ns
+                JOIN notices n ON n.id = ns.notice_id
+                WHERE ns.organization_id = $1::uuid
+                  AND ns.notice_id = $2::uuid
+                  AND n.status <> 'deleted'
+                FOR UPDATE OF ns, n
+                """,
+                organization_id,
+                notice_id,
+            )
+            if locked is None:
+                return False
+            if locked["repeat_ended_at"] is not None:
+                return False
+            now = datetime.now(timezone.utc)
+            next_at = locked["next_send_at"]
+            if next_at is None:
+                return False
+            if next_at.tzinfo is None:
+                next_at = next_at.replace(tzinfo=timezone.utc)
+            if next_at > now:
+                return False
+            planned_at = next_at
+
+            await self.db_connection.execute(
+                """
+                INSERT INTO notice_series_occurrences (
+                    organization_id,
+                    notice_id,
+                    occurrence_index,
+                    planned_at,
+                    published_at
+                )
+                VALUES ($1::uuid, $2::uuid, $3, $4, now())
+                """,
+                organization_id,
+                notice_id,
+                occurrence_index,
+                planned_at,
+            )
+            await self.db_connection.execute(
+                """
+                UPDATE notices
+                SET status = 'live',
+                    published_at = now(),
+                    updated_at = now()
+                WHERE organization_id = $1::uuid
+                  AND id = $2::uuid
+                """,
+                organization_id,
+                notice_id,
+            )
+            series_fields: dict[str, Any] = {
+                "sends_completed": int(locked["sends_completed"]) + 1,
+                "last_sent_at": datetime.now(timezone.utc),
+                "next_send_at": None if repeat_ended else next_send_at,
+            }
+            if repeat_ended:
+                series_fields["repeat_ended_at"] = datetime.now(timezone.utc)
+            await self.update_notice_series(
+                organization_id=organization_id,
+                notice_id=notice_id,
+                fields=series_fields,
+            )
+        return True
+
+    async def list_series_occurrences(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Recent send history for a recurring notice."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT occurrence_index, planned_at, published_at
+            FROM notice_series_occurrences
+            WHERE organization_id = $1::uuid
+              AND notice_id = $2::uuid
+            ORDER BY occurrence_index DESC
+            LIMIT $3
+            """,
+            organization_id,
+            notice_id,
+            limit,
+        )
+        return [dict(row) for row in rows]
 
     async def soft_delete_notice(
         self,

@@ -52,6 +52,7 @@ def _service() -> NoticesService:
     svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
     svc.repo.list_attachments = AsyncMock(return_value=[])
     svc.recipient_service.filter_valid_project_contact_ids = AsyncMock(return_value=[])
+    svc.repo.notice_has_series = AsyncMock(return_value=False)
     return svc
 
 

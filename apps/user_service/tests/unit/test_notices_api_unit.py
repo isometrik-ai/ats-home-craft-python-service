@@ -17,6 +17,7 @@ from apps.user_service.app.api.notices import (
     get_project_notice_summary,
     list_project_notices,
     pin_project_notice,
+    process_recurring_project_notices,
     publish_due_project_notices,
     restore_project_notice,
     unpin_project_notice,
@@ -166,6 +167,7 @@ async def test_notice_write_endpoints(mock_service_cls, mock_access):
     service.pin_notice = AsyncMock(return_value=_detail(pinned=True))
     service.unpin_notice = AsyncMock(return_value=_detail())
     service.publish_due_notices = AsyncMock(return_value=[NOTICE_ID])
+    service.process_recurring_notices = AsyncMock(return_value=[NOTICE_ID])
 
     assert (
         await create_project_notice(
@@ -235,6 +237,14 @@ async def test_notice_write_endpoints(mock_service_cls, mock_access):
     ).status_code == 200
     assert (
         await publish_due_project_notices(
+            request=_request(),
+            project_id=PROJECT_ID,
+            db_connection=MagicMock(),
+            current_user={"sub": "staff-1"},
+        )
+    ).status_code == 200
+    assert (
+        await process_recurring_project_notices(
             request=_request(),
             project_id=PROJECT_ID,
             db_connection=MagicMock(),

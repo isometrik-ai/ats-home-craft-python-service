@@ -1330,7 +1330,16 @@
       "project_access_denied": "You do not have access to manage notices for this project.",
       "feed_access_denied": "You do not have access to notices for this project.",
       "likes_require_contact": "Unable to like notices for this account.",
-      "not_found": "The notice could not be found."
+      "not_found": "The notice could not be found.",
+      "repeat_required": "Recurrence settings are required to start a series.",
+      "invalid_publish_mode_for_repeat": "Use draft or start_series when repeat is enabled.",
+      "weekly_days_required": "Select at least one weekday for a weekly recurring notice.",
+      "invalid_monthly_day": "Monthly day must be 0 (last day) or between 1 and 31.",
+      "end_before_start": "End date must be on or after the series start date.",
+      "invalid_end_count": "End after sends must be at least 1.",
+      "not_recurring": "This action applies to recurring notices only.",
+      "recurrence_ended": "This recurring notice has already ended.",
+      "duplicate_recurring_forbidden": "Recurring notices cannot be duplicated. Edit the series or create a new notice."
     },
     "success": {
       "summary_retrieved": "Notice summary retrieved successfully.",
@@ -1345,6 +1354,7 @@
       "pinned": "Notice pinned to banner successfully.",
       "unpinned": "Notice unpinned successfully.",
       "publish_due_completed": "Due scheduled notices published successfully.",
+      "process_recurring_completed": "Due recurring notices delivered successfully.",
       "expire_pins_completed": "Expired banner pins cleared successfully.",
       "banner_retrieved": "Notice banner retrieved successfully.",
       "feed_retrieved": "Notice feed retrieved successfully.",

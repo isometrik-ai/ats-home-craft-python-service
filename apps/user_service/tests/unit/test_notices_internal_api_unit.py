@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from apps.user_service.app.api.notices_internal import (
     expire_notice_pins_internal,
+    process_recurring_notices_internal,
     publish_due_notices_internal,
 )
 
@@ -41,6 +42,22 @@ async def test_publish_due_notices_internal():
     body = response.body.decode()
     assert "n-1" in body
     assert '"count":2' in body.replace(" ", "")
+
+
+@pytest.mark.asyncio
+async def test_process_recurring_notices_internal():
+    with patch(
+        "apps.user_service.app.api.notices_internal.process_recurring_notices",
+        new_callable=AsyncMock,
+        return_value=["n-9"],
+    ):
+        response = await process_recurring_notices_internal(
+            request=_request(),
+            db_connection=MagicMock(),
+        )
+
+    assert response.status_code == 200
+    assert '"count":1' in response.body.decode().replace(" ", "")
 
 
 @pytest.mark.asyncio
