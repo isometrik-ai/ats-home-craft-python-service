@@ -1341,7 +1341,10 @@
       "repeat_too_long": "A repeating notice can run for at most 2 years.",
       "repeat_time_invalid": "Enter a UTC time of day like 09:00.",
       "repeat_has_no_sends": "This repeat rule does not include any send.",
-      "repeat_not_set": "This notice does not repeat."
+      "repeat_not_set": "This notice does not repeat.",
+      "invoice_unpaid_groups": "An unpaid-invoice notice can go only to Owner, Tenant, or both.",
+      "invoice_unpaid_contacts": "These contacts do not have an unpaid invoice for the selected group: {contact_ids}.",
+      "invoice_unpaid_none": "Nobody in the selected group has an unpaid invoice."
     },
     "success": {
       "summary_retrieved": "Notice summary retrieved successfully.",

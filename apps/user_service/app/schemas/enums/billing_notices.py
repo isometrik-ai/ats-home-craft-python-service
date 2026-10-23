@@ -34,6 +34,7 @@ class NoticeCategory(str, Enum):
     BILLING = "billing"
     EMERGENCY = "emergency"
     GENERAL = "general"
+    INVOICE_UNPAID = "invoice_unpaid"
 
 
 class NoticeScopeType(str, Enum):
@@ -101,7 +102,15 @@ NOTICE_CATEGORY_LABELS: dict[str, str] = {
     NoticeCategory.BILLING.value: "Billing",
     NoticeCategory.EMERGENCY.value: "Emergency",
     NoticeCategory.GENERAL.value: "General",
+    NoticeCategory.INVOICE_UNPAID.value: "Invoice unpaid",
 }
+
+INVOICE_UNPAID_RECIPIENT_GROUPS = frozenset(
+    {
+        NoticeRecipientGroup.OWNER.value,
+        NoticeRecipientGroup.TENANT.value,
+    }
+)
 
 NOTICE_MAX_PIN_SLOTS = 6
 NOTICE_MAX_TITLE_LENGTH = 70

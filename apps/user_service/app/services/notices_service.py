@@ -9,6 +9,7 @@ import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
 from apps.user_service.app.schemas.enums import (
+    INVOICE_UNPAID_RECIPIENT_GROUPS,
     NOTICE_CATEGORY_LABELS,
     NOTICE_MAX_ATTACHMENTS,
     NOTICE_SCHEDULE_MAX_DAYS,
@@ -167,6 +168,15 @@ class NoticesService:
             contact_ids=list(body.contact_ids or []),
         )
         tower_ids = body.tower_ids or []
+        await self._validate_invoice_unpaid_audience(
+            project_id=project_id,
+            category=body.category,
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=body.scope_type,
+            tower_ids=tower_ids,
+            publishing=body.publish_mode in {NoticePublishMode.NOW, NoticePublishMode.SCHEDULE},
+        )
 
         status, publish_at, published_at, repeat_fields, fired_at = self._schedule_for_write(
             publish_mode=body.publish_mode,
@@ -291,6 +301,16 @@ class NoticesService:
             body.tower_ids
             if body.tower_ids is not None
             else [str(row["tower_id"]) for row in current_towers]
+        )
+        category = body.category or NoticeCategory(str(existing["category"]))
+        await self._validate_invoice_unpaid_audience(
+            project_id=project_id,
+            category=category,
+            recipient_groups=recipient_groups,
+            contact_ids=contact_ids,
+            scope_type=scope_type,
+            tower_ids=tower_ids,
+            publishing=body.publish_mode in {NoticePublishMode.NOW, NoticePublishMode.SCHEDULE},
         )
 
         fields: dict[str, Any] = {
@@ -585,12 +605,23 @@ class NoticesService:
                 message_key="notices.errors.towers_required",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        unpaid_only = query.category == NoticeCategory.INVOICE_UNPAID
+        await self._validate_invoice_unpaid_audience(
+            project_id=project_id,
+            category=query.category or NoticeCategory.GENERAL,
+            recipient_groups=groups,
+            contact_ids=[],
+            scope_type=query.scope_type,
+            tower_ids=tower_ids,
+            publishing=False,
+        )
         total, breakdown = await self.recipient_service.estimate_reach(
             organization_id=self.organization_id,
             project_id=project_id,
             recipient_groups=groups,
             scope_type=query.scope_type.value,
             tower_ids=tower_ids,
+            require_unpaid_invoice=unpaid_only,
         )
         return ReachEstimateResponse(estimated_recipients=total, breakdown=breakdown)
 
@@ -1218,6 +1249,58 @@ class NoticesService:
         normalized = file_path.strip().lower()
         return "/notices/" in normalized or normalized.startswith("notices/")
 
+    async def _validate_invoice_unpaid_audience(
+        self,
+        *,
+        project_id: str,
+        category: NoticeCategory,
+        recipient_groups: list[str],
+        contact_ids: list[str],
+        scope_type: NoticeScopeType,
+        tower_ids: list[str],
+        publishing: bool,
+    ) -> None:
+        """Invoice-unpaid notices go only to owners or tenants who still owe."""
+        if category != NoticeCategory.INVOICE_UNPAID:
+            return
+        if any(group not in INVOICE_UNPAID_RECIPIENT_GROUPS for group in recipient_groups):
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_groups",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if contact_ids and not recipient_groups:
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_groups",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        allowed: set[str] = set()
+        if recipient_groups and (contact_ids or publishing):
+            allowed = await self.recipient_service.unpaid_invoice_contact_ids(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                recipient_groups=recipient_groups,
+                scope_type=scope_type.value,
+                tower_ids=tower_ids,
+            )
+        if contact_ids:
+            invalid = [contact_id for contact_id in contact_ids if contact_id not in allowed]
+            if invalid:
+                raise ValidationException(
+                    message_key="notices.errors.invoice_unpaid_contacts",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    params={"contact_ids": ", ".join(invalid[:10])},
+                )
+        if publishing and not recipient_groups:
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_groups",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if publishing and not contact_ids and not allowed:
+            raise ValidationException(
+                message_key="notices.errors.invoice_unpaid_none",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
     def _validate_publish_requirements(
         self,
         *,
@@ -1369,6 +1452,8 @@ class NoticesService:
         )
         if notice_row is None:
             return
+        unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
+        tower_ids = [str(tower["tower_id"]) for tower in towers]
         user_ids: set[str] = set(
             await self.recipient_service.resolve_recipient_user_ids(
                 organization_id=self.organization_id,
@@ -1376,9 +1461,19 @@ class NoticesService:
                 notice_id=notice_id,
                 recipient_groups=recipient_groups,
                 scope_type=str(notice_row["scope_type"]),
-                tower_ids=[str(t["tower_id"]) for t in towers],
+                tower_ids=tower_ids,
+                require_unpaid_invoice=unpaid_only,
             )
         )
+        if contact_ids and unpaid_only:
+            allowed = await self.recipient_service.unpaid_invoice_contact_ids(
+                organization_id=self.organization_id,
+                project_id=project_id,
+                recipient_groups=recipient_groups,
+                scope_type=str(notice_row["scope_type"]),
+                tower_ids=tower_ids,
+            )
+            contact_ids = [contact_id for contact_id in contact_ids if contact_id in allowed]
         if contact_ids:
             user_ids.update(
                 await self.recipient_service.resolve_user_ids_for_contact_ids(

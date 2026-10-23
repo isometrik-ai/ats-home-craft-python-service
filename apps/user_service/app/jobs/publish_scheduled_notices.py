@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
+from apps.user_service.app.schemas.enums import NoticeCategory
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
@@ -60,6 +61,8 @@ async def publish_scheduled_notices(
         )
         if notice_row is None:
             continue
+        unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
+        tower_ids = [str(tower["tower_id"]) for tower in towers]
         user_ids: set[str] = set(
             await recipient_service.resolve_recipient_user_ids(
                 organization_id=org_id,
@@ -67,9 +70,19 @@ async def publish_scheduled_notices(
                 notice_id=notice_id,
                 recipient_groups=recipient_groups,
                 scope_type=str(notice_row["scope_type"]),
-                tower_ids=[str(t["tower_id"]) for t in towers],
+                tower_ids=tower_ids,
+                require_unpaid_invoice=unpaid_only,
             )
         )
+        if contact_ids and unpaid_only:
+            allowed = await recipient_service.unpaid_invoice_contact_ids(
+                organization_id=org_id,
+                project_id=proj_id,
+                recipient_groups=recipient_groups,
+                scope_type=str(notice_row["scope_type"]),
+                tower_ids=tower_ids,
+            )
+            contact_ids = [contact_id for contact_id in contact_ids if contact_id in allowed]
         if contact_ids:
             user_ids.update(
                 await recipient_service.resolve_user_ids_for_contact_ids(

@@ -255,6 +255,35 @@ async def test_estimate_reach_owner_tenant_uses_contact_roles():
 
 
 @pytest.mark.asyncio
+async def test_unpaid_invoice_notice_limits_owners_to_open_invoices():
+    """Invoice-unpaid reach keeps owners whose unit invoice is issued or partial."""
+    db = MagicMock()
+    db.fetch = AsyncMock(
+        side_effect=[
+            [{"contact_id": "contact-1"}],
+            [{"contact_id": "contact-1"}],
+            [{"user_id": "resident-1"}],
+        ]
+    )
+    service = NoticeRecipientResolutionService(db_connection=db)
+
+    total, breakdown = await service.estimate_reach(
+        organization_id="org-1",
+        project_id="project-1",
+        recipient_groups=["Owner"],
+        scope_type="whole_society",
+        tower_ids=[],
+        require_unpaid_invoice=True,
+    )
+
+    assert total == 1
+    assert breakdown == {"Owner": 1}
+    owner_query = db.fetch.await_args_list[0].args[0]
+    assert "fee_invoices fi" in owner_query
+    assert "fi.status IN ('issued', 'partial')" in owner_query
+
+
+@pytest.mark.asyncio
 async def test_is_visible_to_contact_staff_manager_checks_project_members():
     """Staff Manager notices are visible to assigned staff manager project members."""
     db = MagicMock()

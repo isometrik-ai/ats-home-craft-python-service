@@ -67,6 +67,7 @@ __all__ = [
     "NoticeRepeatFrequency",
     "NoticeListStatus",
     "NOTICE_CATEGORY_LABELS",
+    "INVOICE_UNPAID_RECIPIENT_GROUPS",
     "NOTICE_MAX_PIN_SLOTS",
     "NOTICE_MAX_TITLE_LENGTH",
     "NOTICE_MAX_DESCRIPTION_LENGTH",

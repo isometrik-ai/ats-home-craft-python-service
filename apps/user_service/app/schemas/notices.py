@@ -289,6 +289,7 @@ class ReachEstimateQuery(BaseModel):
     )
     scope_type: NoticeScopeType = NoticeScopeType.WHOLE_SOCIETY
     tower_ids: str | None = Field(None, description="Comma-separated tower UUIDs")
+    category: NoticeCategory | None = None
 
     def parsed_groups(self) -> list[str]:
         """Parse comma-separated groups."""

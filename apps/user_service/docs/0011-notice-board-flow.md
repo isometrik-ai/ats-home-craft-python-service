@@ -219,14 +219,21 @@ and search title.
 
 ### Category values (`notice_category`)
 
-| Key           | UI label    | Icon hint |
-| ------------- | ----------- | --------- |
-| `maintenance` | Maintenance | Wrench    |
-| `security`    | Security    | Shield    |
-| `event`       | Event       | Calendar  |
-| `billing`     | Billing     | Card      |
-| `emergency`   | Emergency   | Alert     |
-| `general`     | General     | Clock     |
+| Key              | UI label       | Icon hint |
+| ---------------- | -------------- | --------- |
+| `maintenance`    | Maintenance    | Wrench    |
+| `security`       | Security       | Shield    |
+| `event`          | Event          | Calendar  |
+| `billing`        | Billing        | Card      |
+| `emergency`      | Emergency      | Alert     |
+| `general`        | General        | Clock     |
+| `invoice_unpaid` | Invoice unpaid | Card      |
+
+`invoice_unpaid` is a staff notice, not the automatic fee email. Recipients must be **Owner**,
+**Tenant**, or both. Staff, Security, and All are rejected. Push and the resident feed include a
+person only when they hold that role on a unit with an open fee invoice (`issued` or `partial`,
+including overdue). A paid or cancelled invoice drops them out. Reach estimate accepts
+`category=invoice_unpaid` so the count matches that audience.
 
 Category appears on notice cards and as the **banner slot header label** when that notice is pinned.
 
@@ -968,29 +975,31 @@ ______________________________________________________________________
 
 ## 10. Error cases (i18n keys to add)
 
-| Key                                       | When                                        |
-| ----------------------------------------- | ------------------------------------------- |
-| `notices.errors.title_too_long`           | Title > 70 chars                            |
-| `notices.errors.description_too_long`     | Description > 600 chars                     |
-| `notices.errors.recipients_required`      | Publish/schedule without recipient groups   |
-| `notices.errors.towers_required`          | `by_tower` without tower_ids                |
-| `notices.errors.schedule_too_far`         | One-shot `publish_at` > 2 months ahead      |
-| `notices.errors.repeat_weekdays_required` | Weekly repeat with no weekday               |
-| `notices.errors.repeat_day_required`      | Monthly repeat with no day and not last day |
-| `notices.errors.repeat_end_required`      | Missing end date and end count, or both set |
-| `notices.errors.repeat_time_invalid`      | `time_of_day` is not a UTC clock            |
-| `notices.errors.repeat_has_no_sends`      | Rule matches no slot                        |
-| `notices.errors.repeat_not_set`           | Stop-repeat on a notice with no rule        |
-| `notices.errors.not_editable`             | PATCH on live notice                        |
-| `notices.errors.not_pinnable`             | Pin on non-live notice                      |
-| `notices.errors.already_pinned`           | Pin when notice already in a slot           |
-| `notices.errors.pin_slots_full`           | All 6 slots occupied                        |
-| `notices.errors.slot_occupied`            | Pin without confirm when slot taken         |
-| `notices.errors.too_many_attachments`     | > 4 attachments                             |
-| `notices.errors.invalid_attachment`       | Wrong mime or size                          |
-| `notices.errors.duplicate_live_forbidden` | Duplicate API on live notice                |
-| `notices.errors.project_access_denied`    | Failed `ensure_staff_project_access`        |
-| `notices.errors.not_found`                | Unknown notice_id or wrong project          |
+| Key                                       | When                                             |
+| ----------------------------------------- | ------------------------------------------------ |
+| `notices.errors.title_too_long`           | Title > 70 chars                                 |
+| `notices.errors.description_too_long`     | Description > 600 chars                          |
+| `notices.errors.recipients_required`      | Publish/schedule without recipient groups        |
+| `notices.errors.towers_required`          | `by_tower` without tower_ids                     |
+| `notices.errors.schedule_too_far`         | One-shot `publish_at` > 2 months ahead           |
+| `notices.errors.repeat_weekdays_required` | Weekly repeat with no weekday                    |
+| `notices.errors.repeat_day_required`      | Monthly repeat with no day and not last day      |
+| `notices.errors.repeat_end_required`      | Missing end date and end count, or both set      |
+| `notices.errors.repeat_time_invalid`      | `time_of_day` is not a UTC clock                 |
+| `notices.errors.repeat_has_no_sends`      | Rule matches no slot                             |
+| `notices.errors.repeat_not_set`           | Stop-repeat on a notice with no rule             |
+| `notices.errors.invoice_unpaid_groups`    | Invoice-unpaid notice is not Owner and/or Tenant |
+| `notices.errors.invoice_unpaid_none`      | Publish when nobody selected has an open invoice |
+| `notices.errors.not_editable`             | PATCH on live notice                             |
+| `notices.errors.not_pinnable`             | Pin on non-live notice                           |
+| `notices.errors.already_pinned`           | Pin when notice already in a slot                |
+| `notices.errors.pin_slots_full`           | All 6 slots occupied                             |
+| `notices.errors.slot_occupied`            | Pin without confirm when slot taken              |
+| `notices.errors.too_many_attachments`     | > 4 attachments                                  |
+| `notices.errors.invalid_attachment`       | Wrong mime or size                               |
+| `notices.errors.duplicate_live_forbidden` | Duplicate API on live notice                     |
+| `notices.errors.project_access_denied`    | Failed `ensure_staff_project_access`             |
+| `notices.errors.not_found`                | Unknown notice_id or wrong project               |
 
 ______________________________________________________________________
 
