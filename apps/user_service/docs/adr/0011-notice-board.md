@@ -117,15 +117,13 @@ Partial uniques: `(project_id, slot_index) WHERE is_active`; `(notice_id) WHERE 
 
 **Model:** One **`notices`** row per recurring notice. Content, recipients, towers, and attachments stay
 on that id. Recurrence lives in **`notice_series`** (1:1 `notice_id`). Each automated send **reuses the
-same notice**: update `published_at`, set `status = live`, append **`notice_series_occurrences`**, advance
+same notice**: update `published_at`, set `status = live`, append to **`notice_series.occurrences`**, advance
 `next_send_at` or set **`repeat_ended_at`**. **No `notice_series.status`** (or occurrence status enum) —
 lifecycle uses **`notices.status`** + `repeat_ended_at` / `next_send_at`.
 
-| Table                           | Purpose                                                                             |
-| ------------------------------- | ----------------------------------------------------------------------------------- |
-| **`notice_series`**             | Frequency, start/end, cursor (`next_send_at`, `sends_completed`, `repeat_ended_at`) |
-| **`notice_series_weekly_days`** | ISO weekdays when weekly                                                            |
-| **`notice_series_occurrences`** | Send history (`notice_id` = same row every time)                                    |
+| Table               | Purpose                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------- |
+| **`notice_series`** | Frequency, `weekly_days[]`, cursor, and send history jsonb (`occurrences`) — one row per notice |
 
 **Job:** Recurring delivery is bundled with existing **`publish-due`** / `publish_scheduled_notices`
 (one-time `publish_at` first, then due `notice_series.next_send_at`).

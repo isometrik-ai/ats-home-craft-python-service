@@ -117,6 +117,25 @@ def _series_end_type_for_insert(repeat: NoticeRepeatInput) -> str:
     return "on_date"
 
 
+def weekly_days_from_row(row: dict[str, Any]) -> list[int]:
+    """ISO weekdays stored on notice_series.weekly_days."""
+    raw = row.get("series_weekly_days")
+    if raw is None:
+        return []
+    return sorted({int(day) for day in raw if 1 <= int(day) <= 7})
+
+
+def occurrences_from_row(row: dict[str, Any], *, limit: int = 20) -> list[dict[str, Any]]:
+    """Send history stored on notice_series.occurrences."""
+    from apps.user_service.app.db.repositories.notices_repository import (
+        _parse_occurrences,
+    )
+
+    items = _parse_occurrences(row.get("series_occurrences"))
+    items.sort(key=lambda item: int(item["occurrence_index"]), reverse=True)
+    return items[:limit]
+
+
 def has_series(row: dict[str, Any]) -> bool:
     """True when notice has a notice_series row (including ended series)."""
     return bool(row.get("series_frequency"))
@@ -191,7 +210,7 @@ async def repeat_to_storage(
     repeat: NoticeRepeatInput,
     start_series: bool,
 ) -> datetime | None:
-    """Insert or replace notice_series + weekly days."""
+    """Insert or replace notice_series (weekly_days stored on the same row)."""
     project_tz = await load_project_tz(
         repo,
         organization_id=organization_id,
@@ -215,6 +234,7 @@ async def repeat_to_storage(
         )
 
     if await repo.notice_has_series(organization_id=organization_id, notice_id=notice_id):
+        stored_weekly = weekly if frequency_lit == "weekly" else []
         patch: dict[str, Any] = {
             "frequency": frequency_str,
             "monthly_day": monthly_day,
@@ -223,6 +243,7 @@ async def repeat_to_storage(
             "end_type": repeat.end_type.value if repeat.end_type else None,
             "end_on": repeat.end_on,
             "end_after_sends": repeat.end_after_sends,
+            "weekly_days": stored_weekly,
         }
         if start_series:
             patch["next_send_at"] = next_send_at
@@ -245,19 +266,7 @@ async def repeat_to_storage(
             end_on=repeat.end_on,
             end_after_sends=repeat.end_after_sends,
             next_send_at=next_send_at,
-        )
-
-    if frequency_lit == "weekly":
-        await repo.replace_series_weekly_days(
-            organization_id=organization_id,
-            notice_id=notice_id,
-            weekly_days=weekly,
-        )
-    else:
-        await repo.replace_series_weekly_days(
-            organization_id=organization_id,
-            notice_id=notice_id,
-            weekly_days=[],
+            weekly_days=weekly if frequency_lit == "weekly" else [],
         )
     return next_send_at
 
@@ -322,10 +331,13 @@ async def compute_next_after_delivery(
     ):
         return None, True
 
-    weekly = await repo.list_series_weekly_days(
-        organization_id=organization_id,
-        notice_id=notice_id,
-    )
+    if "series_weekly_days" in row:
+        weekly = weekly_days_from_row(row)
+    else:
+        weekly = await repo.list_series_weekly_days(
+            organization_id=organization_id,
+            notice_id=notice_id,
+        )
     try:
         candidate = compute_next_send_after(
             after_planned_at=after_planned_at,
@@ -376,10 +388,13 @@ async def repeats_label_for_row(
         organization_id=organization_id,
         project_id=project_id,
     )
-    weekly = await repo.list_series_weekly_days(
-        organization_id=organization_id,
-        notice_id=notice_id,
-    )
+    if "series_weekly_days" in row:
+        weekly = weekly_days_from_row(row)
+    else:
+        weekly = await repo.list_series_weekly_days(
+            organization_id=organization_id,
+            notice_id=notice_id,
+        )
     return repeats_label_for_stored_row(row=row, weekly_days=weekly, project_tz=project_tz)
 
 
@@ -398,10 +413,13 @@ async def recompute_next_send_from_row(
         project_id=project_id,
     )
     schedule = _stored_series_schedule(row)
-    weekly = await repo.list_series_weekly_days(
-        organization_id=organization_id,
-        notice_id=notice_id,
-    )
+    if "series_weekly_days" in row:
+        weekly = weekly_days_from_row(row)
+    else:
+        weekly = await repo.list_series_weekly_days(
+            organization_id=organization_id,
+            notice_id=notice_id,
+        )
     sends = int(row.get("series_sends_completed") or 0)
     if sends == 0:
         return compute_first_send_at(

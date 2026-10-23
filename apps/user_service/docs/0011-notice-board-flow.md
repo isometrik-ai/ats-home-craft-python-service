@@ -153,17 +153,15 @@ ______________________________________________________________________
 
 ### New tables
 
-| Table                           | Purpose                                                                   |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| **`notices`**                   | Header: content, category, status, scope, schedule, stats, `display_code` |
-| **`notice_recipients`**         | Audience groups (Owner, Tenant, Staff, Security)                          |
-| **`notice_towers`**             | Tower scope when `scope_type = by_tower`                                  |
-| **`notice_attachments`**        | Up to 4 image rows (`file_path`, metadata, `sort_order`)                  |
-| **`notice_pins`**               | Banner slot assignment (`slot_index` 1–6) for live notices                |
-| **`notice_likes`**              | One row per contact like (Phase 2)                                        |
-| **`notice_series`**             | Recurrence rule + cursor (1:1 with the **same** `notices` row)            |
-| **`notice_series_weekly_days`** | Weekdays when frequency = weekly                                          |
-| **`notice_series_occurrences`** | Send history ledger (same `notice_id` every delivery)                     |
+| Table                    | Purpose                                                                                          |
+| ------------------------ | ------------------------------------------------------------------------------------------------ |
+| **`notices`**            | Header: content, category, status, scope, schedule, stats, `display_code`                        |
+| **`notice_recipients`**  | Audience groups (Owner, Tenant, Staff, Security)                                                 |
+| **`notice_towers`**      | Tower scope when `scope_type = by_tower`                                                         |
+| **`notice_attachments`** | Up to 4 image rows (`file_path`, metadata, `sort_order`)                                         |
+| **`notice_pins`**        | Banner slot assignment (`slot_index` 1–6) for live notices                                       |
+| **`notice_likes`**       | One row per contact like (Phase 2)                                                               |
+| **`notice_series`**      | Recurrence rule, `weekly_days[]`, send `occurrences` jsonb (1:1 with the **same** `notices` row) |
 
 Recurring notices reuse **`notice_recipients`**, **`notice_towers`**, and **`notice_attachments`** on
 that single `notices` row. **No second notice row per send.**
@@ -978,7 +976,7 @@ ______________________________________________________________________
 When **Repeat this notice** is ON, **`POST .../notices`** creates **one** `notices` row plus a
 **`notice_series`** recurrence record (1:1 on `notice_id`). Every scheduled delivery **reuses that same
 notice** — the job updates `published_at`, keeps (or sets) `status = live`, appends an
-**`notice_series_occurrences`** row, and triggers resident visibility / push for that delivery. **No new
+entry to **`notice_series.occurrences`**, and triggers resident visibility / push for that delivery. **No new
 `notices` row per send.**
 
 Residents see the same notice id on the feed (refreshed `published_at` each delivery). Admin list shows
@@ -1067,7 +1065,7 @@ Content-Type: application/json
 
 1. Same steps as §4.3 (access, content, recipients, towers, attachments).
 1. If `publish_mode = start_series`: validate repeat block and recipients.
-1. Insert **one** `notices` row + junction rows; insert `notice_series` (+ weekly day rows).
+1. Insert **one** `notices` row + junction rows; insert `notice_series` (including `weekly_days`).
 1. When starting: compute `next_send_at` (no separate series status table).
 1. Return **`NoticeDetailResponse`** with `is_recurring`, `repeats_label`, `next_send_at`, `series_starts_on`, `series_ends_label`, `next_sends_preview`.
 
@@ -1127,7 +1125,7 @@ copy via Create Notice prefilled → **`POST .../notices`**.
 
 | Rule                           | Enforcement                                                              |
 | ------------------------------ | ------------------------------------------------------------------------ |
-| Weekly → ≥1 weekday            | `notice_series_weekly_days`                                              |
+| Weekly → ≥1 weekday            | `notice_series.weekly_days` (smallint[])                                 |
 | Monthly day 1–31 or last (`0`) | Column + validation                                                      |
 | End on ≥ starts on             | Service                                                                  |
 | Monthly 29–31                  | Skip months without that calendar day                                    |
@@ -1154,7 +1152,7 @@ Implementation: **`app/jobs/publish_scheduled_notices.py`** — one-time `publis
 **Per due row** (`notice_series.next_send_at <= now()`, `repeat_ended_at IS NULL`, parent notice not deleted):
 
 1. Lock `notices` + `notice_series` (`FOR UPDATE`).
-1. Insert **`notice_series_occurrences`** (`notice_id`, `planned_at`, `occurrence_index`).
+1. Append send to **`notice_series.occurrences`** (`occurrence_index`, `planned_at`, `published_at`).
 1. **Reuse existing notice:** `UPDATE notices SET status = 'live', published_at = now(), updated_at = now() WHERE id = :notice_id`.
 1. Increment `sends_completed`; set `last_sent_at`; compute next `next_send_at` **or** set `repeat_ended_at` when end condition met.
 1. Phase 2: push for this delivery (same notice id).
@@ -1178,7 +1176,7 @@ in the same `publish-due` job.
 
 | Rule                        | Enforcement                                                                       |
 | --------------------------- | --------------------------------------------------------------------------------- |
-| One notice id for all sends | Occurrences FK → same `notice_id`; job UPDATE only                                |
+| One notice id for all sends | `notice_series` 1:1 with `notices.id`; job UPDATE only                            |
 | No series status enum       | End via `repeat_ended_at` + `next_send_at`; delete via `notices.status = deleted` |
 | Live immutability           | **Waived** when `is_recurring` — `PATCH` updates content for next delivery        |
 | Engagement                  | Cumulative on **same** `notices` row (`view_count` / `like_count`)                |

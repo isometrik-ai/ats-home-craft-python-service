@@ -252,9 +252,11 @@ async def _fetch_recurring_notice_any_org(
           ns.end_type::text AS series_end_type,
           ns.end_on AS series_end_on,
           ns.end_after_sends AS series_end_after_sends,
+          ns.weekly_days AS series_weekly_days,
           ns.sends_completed AS series_sends_completed,
           ns.next_send_at AS series_next_send_at,
-          ns.repeat_ended_at AS series_repeat_ended_at
+          ns.repeat_ended_at AS series_repeat_ended_at,
+          ns.occurrences AS series_occurrences
         FROM notices n
         JOIN notice_series ns ON ns.notice_id = n.id
         WHERE n.id = $1::uuid

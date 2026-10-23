@@ -51,6 +51,8 @@ def _recurring_row(**overrides) -> dict:
         series_next_send_at=PLANNED_UTC,
         series_repeat_ended_at=None,
         series_last_sent_at=None,
+        series_weekly_days=[1, 3],
+        series_occurrences=[],
     )
     base.update(overrides)
     return base
@@ -68,10 +70,7 @@ async def test_create_start_series_persists_series_and_next_send():
     svc.repo.fetch_project_timezone = AsyncMock(return_value="Asia/Kolkata")
     svc.repo.notice_has_series = AsyncMock(return_value=False)
     svc.repo.insert_notice_series = AsyncMock()
-    svc.repo.replace_series_weekly_days = AsyncMock()
     svc.repo.fetch_notice_by_id = AsyncMock(return_value=scheduled_row)
-    svc.repo.list_series_occurrences = AsyncMock(return_value=[])
-    svc.repo.list_series_weekly_days = AsyncMock(return_value=[1, 3])
     _stub_detail_repo(svc)
 
     body = CreateNoticeRequest(
@@ -96,11 +95,7 @@ async def test_create_start_series_persists_series_and_next_send():
     series_kwargs = svc.repo.insert_notice_series.await_args.kwargs
     assert series_kwargs["frequency"] == "weekly"
     assert series_kwargs["next_send_at"] is not None
-    svc.repo.replace_series_weekly_days.assert_awaited_once_with(
-        organization_id=ORG_ID,
-        notice_id=NOTICE_ID,
-        weekly_days=[1, 3],
-    )
+    assert series_kwargs["weekly_days"] == [1, 3]
     assert detail.is_recurring is True
 
 
@@ -181,8 +176,6 @@ async def test_update_end_series_stops_recurrence():
     )
     svc.repo.fetch_notice_by_id = AsyncMock(side_effect=[live, ended])
     svc.repo.end_notice_series = AsyncMock()
-    svc.repo.list_series_occurrences = AsyncMock(return_value=[])
-    svc.repo.list_series_weekly_days = AsyncMock(return_value=[1, 3])
     svc.repo.fetch_project_timezone = AsyncMock(return_value="Asia/Kolkata")
     _stub_detail_repo(svc)
 
@@ -217,7 +210,6 @@ async def test_delete_active_recurring_ends_series_then_soft_deletes():
 async def test_compute_next_after_delivery_mid_series_has_next_slot():
     repo = MagicMock()
     repo.fetch_project_timezone = AsyncMock(return_value="Asia/Kolkata")
-    repo.list_series_weekly_days = AsyncMock(return_value=[1, 3])
     row = _recurring_row(series_sends_completed=1)
 
     next_at, ended = await recurring.compute_next_after_delivery(

@@ -124,11 +124,6 @@ class NoticesService:
             organization_id=self.organization_id,
             notice_ids=notice_ids,
         )
-        recurring_ids = [str(row["id"]) for row in rows if recurring.has_series(row)]
-        weekly_by_notice = await self.repo.list_series_weekly_days_for_notices(
-            organization_id=self.organization_id,
-            notice_ids=recurring_ids,
-        )
         project_tz = recurring.parse_org_timezone(
             await self.repo.fetch_project_timezone(
                 organization_id=self.organization_id,
@@ -142,7 +137,7 @@ class NoticesService:
                 await self._to_list_item(
                     row,
                     attachments=attachments_by_notice.get(notice_id, []),
-                    weekly_days=weekly_by_notice.get(notice_id, []),
+                    weekly_days=recurring.weekly_days_from_row(row),
                     project_tz=project_tz,
                 )
             )
@@ -1031,20 +1026,14 @@ class NoticesService:
                 notice_id=notice_id,
                 row=row,
             )
-        occurrences = []
-        if row.get("series_frequency"):
-            occ_rows = await self.repo.list_series_occurrences(
-                organization_id=self.organization_id,
-                notice_id=notice_id,
+        occurrences = [
+            NoticeSeriesOccurrenceResponse(
+                occurrence_index=int(item["occurrence_index"]),
+                planned_at=item["planned_at"],
+                published_at=item.get("published_at"),
             )
-            occurrences = [
-                NoticeSeriesOccurrenceResponse(
-                    occurrence_index=int(item["occurrence_index"]),
-                    planned_at=item["planned_at"],
-                    published_at=item.get("published_at"),
-                )
-                for item in occ_rows
-            ]
+            for item in recurring.occurrences_from_row(row)
+        ]
         editable = status in {
             NoticeStatus.DRAFT,
             NoticeStatus.SCHEDULED,

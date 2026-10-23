@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time, timezone
 from typing import Any, NamedTuple
 
-import asyncpg
-
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.enums import NOTICE_MAX_PIN_SLOTS, NoticeListStatus
+from apps.user_service.app.utils.common_utils import safe_json_loads
 
 
 class RecurringDueCursor(NamedTuple):
@@ -16,6 +16,75 @@ class RecurringDueCursor(NamedTuple):
 
     next_send_at: datetime
     notice_id: str
+
+
+def _normalize_weekly_days(weekly_days: list[int] | None) -> list[int]:
+    """Deduped ISO weekdays 1–7."""
+    if not weekly_days:
+        return []
+    return sorted({int(day) for day in weekly_days if 1 <= int(day) <= 7})
+
+
+def _parse_occurrences(raw: Any) -> list[dict[str, Any]]:
+    """Decode notice_series.occurrences jsonb into dict rows."""
+    loaded = raw
+    if isinstance(raw, str):
+        loaded = safe_json_loads(raw, default=[])
+    if loaded is None:
+        return []
+    if not isinstance(loaded, list):
+        return []
+    items: list[dict[str, Any]] = []
+    for item in loaded:
+        if not isinstance(item, dict):
+            continue
+        planned_at = _parse_occurrence_datetime(item.get("planned_at"))
+        if planned_at is None:
+            continue
+        items.append(
+            {
+                "occurrence_index": int(item.get("occurrence_index") or 0),
+                "planned_at": planned_at,
+                "published_at": _parse_occurrence_datetime(item.get("published_at")),
+            }
+        )
+    return items
+
+
+def _parse_occurrence_datetime(value: Any) -> datetime | None:
+    """Parse ISO datetime from jsonb; None when missing."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    return None
+
+
+def _serialize_occurrences(items: list[dict[str, Any]]) -> str:
+    """Encode occurrence dicts for jsonb storage."""
+    payload = []
+    for item in items:
+        planned_at = item["planned_at"]
+        published_at = item.get("published_at")
+        payload.append(
+            {
+                "occurrence_index": int(item["occurrence_index"]),
+                "planned_at": planned_at.isoformat()
+                if isinstance(planned_at, datetime)
+                else planned_at,
+                "published_at": published_at.isoformat()
+                if isinstance(published_at, datetime)
+                else published_at,
+            }
+        )
+    return json.dumps(payload)
 
 
 _NOTICE_SELECT_COLUMNS = """
@@ -53,10 +122,12 @@ _NOTICE_SERIES_COLUMNS = """
   ns.end_type::text AS series_end_type,
   ns.end_on AS series_end_on,
   ns.end_after_sends AS series_end_after_sends,
+  ns.weekly_days AS series_weekly_days,
   ns.sends_completed AS series_sends_completed,
   ns.next_send_at AS series_next_send_at,
   ns.last_sent_at AS series_last_sent_at,
-  ns.repeat_ended_at AS series_repeat_ended_at
+  ns.repeat_ended_at AS series_repeat_ended_at,
+  ns.occurrences AS series_occurrences
 """
 
 _NOTICE_SERIES_JOIN = """
@@ -1318,8 +1389,10 @@ class NoticesRepository(BaseRepository):
         end_on: date | None,
         end_after_sends: int | None,
         next_send_at: datetime | None,
+        weekly_days: list[int] | None = None,
     ) -> None:
         """Insert recurrence config for a notice."""
+        days = _normalize_weekly_days(weekly_days)
         await self.db_connection.execute(
             """
             INSERT INTO notice_series (
@@ -1332,11 +1405,12 @@ class NoticesRepository(BaseRepository):
                 end_type,
                 end_on,
                 end_after_sends,
-                next_send_at
+                next_send_at,
+                weekly_days
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::notice_recurrence_frequency, $4,
-                $5, $6, $7::notice_series_end_type, $8, $9, $10
+                $5, $6, $7::notice_series_end_type, $8, $9, $10, $11::smallint[]
             )
             """,
             notice_id,
@@ -1349,6 +1423,7 @@ class NoticesRepository(BaseRepository):
             end_on,
             end_after_sends,
             next_send_at,
+            days,
         )
 
     async def update_notice_series(
@@ -1369,10 +1444,12 @@ class NoticesRepository(BaseRepository):
             "end_type",
             "end_on",
             "end_after_sends",
+            "weekly_days",
             "next_send_at",
             "last_sent_at",
             "repeat_ended_at",
             "sends_completed",
+            "occurrences",
         }
         sets: list[str] = []
         values: list[Any] = []
@@ -1380,10 +1457,21 @@ class NoticesRepository(BaseRepository):
         for key, value in fields.items():
             if key not in allowed:
                 continue
-            if key in {"frequency"}:
+            if key == "frequency":
                 sets.append(f"{key} = ${idx}::notice_recurrence_frequency")
             elif key == "end_type":
                 sets.append(f"{key} = ${idx}::notice_series_end_type")
+            elif key == "weekly_days":
+                sets.append(f"{key} = ${idx}::smallint[]")
+                value = _normalize_weekly_days(value)
+            elif key == "occurrences":
+                sets.append(f"{key} = ${idx}::jsonb")
+                if not isinstance(value, str):
+                    value = (
+                        _serialize_occurrences(value)
+                        if isinstance(value, list)
+                        else json.dumps(value)
+                    )
             else:
                 sets.append(f"{key} = ${idx}")
             values.append(value)
@@ -1409,24 +1497,11 @@ class NoticesRepository(BaseRepository):
         notice_id: str,
         weekly_days: list[int],
     ) -> None:
-        """Replace weekly day rows for a series."""
-        await self.db_connection.execute(
-            """
-            DELETE FROM notice_series_weekly_days
-            WHERE organization_id = $1::uuid
-              AND notice_id = $2::uuid
-            """,
-            organization_id,
-            notice_id,
-        )
-        if not weekly_days:
-            return
-        await self.db_connection.executemany(
-            """
-            INSERT INTO notice_series_weekly_days (organization_id, notice_id, day_of_week)
-            VALUES ($1::uuid, $2::uuid, $3)
-            """,
-            [(organization_id, notice_id, day) for day in weekly_days],
+        """Replace weekly_days on the series row."""
+        await self.update_notice_series(
+            organization_id=organization_id,
+            notice_id=notice_id,
+            fields={"weekly_days": weekly_days},
         )
 
     async def list_series_weekly_days(
@@ -1436,18 +1511,19 @@ class NoticesRepository(BaseRepository):
         notice_id: str,
     ) -> list[int]:
         """Return ISO weekdays configured for a series."""
-        rows = await self.db_connection.fetch(
+        row = await self.db_connection.fetchrow(
             """
-            SELECT day_of_week
-            FROM notice_series_weekly_days
+            SELECT weekly_days
+            FROM notice_series
             WHERE organization_id = $1::uuid
               AND notice_id = $2::uuid
-            ORDER BY day_of_week
             """,
             organization_id,
             notice_id,
         )
-        return [int(row["day_of_week"]) for row in rows]
+        if row is None:
+            return []
+        return _normalize_weekly_days(row["weekly_days"])
 
     async def list_series_weekly_days_for_notices(
         self,
@@ -1460,20 +1536,15 @@ class NoticesRepository(BaseRepository):
             return {}
         rows = await self.db_connection.fetch(
             """
-            SELECT notice_id, day_of_week
-            FROM notice_series_weekly_days
+            SELECT notice_id, weekly_days
+            FROM notice_series
             WHERE organization_id = $1::uuid
               AND notice_id = ANY($2::uuid[])
-            ORDER BY notice_id, day_of_week
             """,
             organization_id,
             notice_ids,
         )
-        by_notice: dict[str, list[int]] = {}
-        for row in rows:
-            notice_id = str(row["notice_id"])
-            by_notice.setdefault(notice_id, []).append(int(row["day_of_week"]))
-        return by_notice
+        return {str(row["notice_id"]): _normalize_weekly_days(row["weekly_days"]) for row in rows}
 
     async def notice_has_series(
         self,
@@ -1596,7 +1667,9 @@ class NoticesRepository(BaseRepository):
                   ns.time_of_day,
                   ns.end_type,
                   ns.end_on,
-                  ns.end_after_sends
+                  ns.end_after_sends,
+                  ns.weekly_days,
+                  ns.occurrences
                 FROM notice_series ns
                 JOIN notices n ON n.id = ns.notice_id
                 WHERE ns.organization_id = $1::uuid
@@ -1621,6 +1694,13 @@ class NoticesRepository(BaseRepository):
                 return False
 
             occurrence_index = int(locked["sends_completed"]) + 1
+            occurrences = _parse_occurrences(locked.get("occurrences"))
+            for existing in occurrences:
+                if int(existing["occurrence_index"]) == occurrence_index:
+                    return False
+                existing_planned = existing["planned_at"]
+                if existing_planned == planned_at:
+                    return False
             series_row = {
                 "series_frequency": locked["frequency"],
                 "series_monthly_day": locked["monthly_day"],
@@ -1629,6 +1709,7 @@ class NoticesRepository(BaseRepository):
                 "series_end_type": locked["end_type"],
                 "series_end_on": locked["end_on"],
                 "series_end_after_sends": locked["end_after_sends"],
+                "series_weekly_days": _normalize_weekly_days(locked.get("weekly_days")),
             }
             next_at, repeat_ended = await recurring.compute_next_after_delivery(
                 self,
@@ -1644,25 +1725,14 @@ class NoticesRepository(BaseRepository):
                     repeat_ended = True
                     next_at = None
 
-            try:
-                await self.db_connection.execute(
-                    """
-                    INSERT INTO notice_series_occurrences (
-                        organization_id,
-                        notice_id,
-                        occurrence_index,
-                        planned_at,
-                        published_at
-                    )
-                    VALUES ($1::uuid, $2::uuid, $3, $4, now())
-                    """,
-                    organization_id,
-                    notice_id,
-                    occurrence_index,
-                    planned_at,
-                )
-            except asyncpg.UniqueViolationError:
-                return False
+            published_at = datetime.now(timezone.utc)
+            occurrences.append(
+                {
+                    "occurrence_index": occurrence_index,
+                    "planned_at": planned_at,
+                    "published_at": published_at,
+                }
+            )
 
             await self.db_connection.execute(
                 """
@@ -1678,11 +1748,12 @@ class NoticesRepository(BaseRepository):
             )
             series_fields: dict[str, Any] = {
                 "sends_completed": occurrence_index,
-                "last_sent_at": datetime.now(timezone.utc),
+                "last_sent_at": published_at,
                 "next_send_at": None if repeat_ended else next_at,
+                "occurrences": occurrences,
             }
             if repeat_ended:
-                series_fields["repeat_ended_at"] = datetime.now(timezone.utc)
+                series_fields["repeat_ended_at"] = published_at
             await self.update_notice_series(
                 organization_id=organization_id,
                 notice_id=notice_id,
@@ -1698,20 +1769,21 @@ class NoticesRepository(BaseRepository):
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Recent send history for a recurring notice."""
-        rows = await self.db_connection.fetch(
+        row = await self.db_connection.fetchrow(
             """
-            SELECT occurrence_index, planned_at, published_at
-            FROM notice_series_occurrences
+            SELECT occurrences
+            FROM notice_series
             WHERE organization_id = $1::uuid
               AND notice_id = $2::uuid
-            ORDER BY occurrence_index DESC
-            LIMIT $3
             """,
             organization_id,
             notice_id,
-            limit,
         )
-        return [dict(row) for row in rows]
+        if row is None:
+            return []
+        items = _parse_occurrences(row["occurrences"])
+        items.sort(key=lambda item: int(item["occurrence_index"]), reverse=True)
+        return items[:limit]
 
     async def soft_delete_notice(
         self,

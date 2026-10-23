@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import pytest
 
@@ -561,3 +561,59 @@ async def test_list_due_recurring_notice_ids_uses_keyset_cursor():
     assert "(ns.next_send_at, n.id) > ($3::timestamptz, $4::uuid)" in query
     assert "ORDER BY ns.next_send_at ASC, n.id ASC" in query
     assert args == (ORG, PROJECT, due_at, NOTICE, 50)
+
+
+@pytest.mark.asyncio
+async def test_insert_notice_series_stores_weekly_days_on_series_row():
+    conn = _FakeConn()
+    repo = NoticesRepository(db_connection=conn)
+    await repo.insert_notice_series(
+        organization_id=ORG,
+        notice_id=NOTICE,
+        frequency="weekly",
+        monthly_day=1,
+        starts_on=date(2026, 10, 27),
+        time_of_day=time(9, 0),
+        end_type="after_count",
+        end_on=None,
+        end_after_sends=4,
+        next_send_at=datetime(2026, 10, 27, 3, 30, tzinfo=timezone.utc),
+        weekly_days=[3, 1, 1],
+    )
+    query, args = conn.execute_calls[0]
+    assert "weekly_days" in query
+    assert "notice_series_weekly_days" not in query
+    assert args[-1] == [1, 3]
+
+
+@pytest.mark.asyncio
+async def test_list_series_weekly_days_reads_array_column():
+    conn = _FakeConn(row={"weekly_days": [4, 1]})
+    repo = NoticesRepository(db_connection=conn)
+    days = await repo.list_series_weekly_days(organization_id=ORG, notice_id=NOTICE)
+    assert days == [1, 4]
+    query, _ = conn.fetchrow_calls[0]
+    assert "FROM notice_series" in query
+    assert "notice_series_weekly_days" not in query
+
+
+@pytest.mark.asyncio
+async def test_list_series_occurrences_reads_jsonb():
+    planned = datetime(2026, 10, 27, 3, 30, tzinfo=timezone.utc)
+    conn = _FakeConn(
+        row={
+            "occurrences": [
+                {
+                    "occurrence_index": 1,
+                    "planned_at": planned.isoformat(),
+                    "published_at": planned.isoformat(),
+                }
+            ]
+        }
+    )
+    repo = NoticesRepository(db_connection=conn)
+    items = await repo.list_series_occurrences(organization_id=ORG, notice_id=NOTICE)
+    assert items[0]["occurrence_index"] == 1
+    query, _ = conn.fetchrow_calls[0]
+    assert "FROM notice_series" in query
+    assert "notice_series_occurrences" not in query
