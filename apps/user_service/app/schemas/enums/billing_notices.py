@@ -37,6 +37,13 @@ class NoticeCategory(str, Enum):
     INVOICE_UNPAID = "invoice_unpaid"
 
 
+class FlashNoticeAction(str, Enum):
+    """Resident response to a flash notice."""
+
+    ACKNOWLEDGED = "acknowledged"
+    DECLINED = "declined"
+
+
 class NoticeScopeType(str, Enum):
     """Audience scope (Postgres notice_scope_type enum)."""
 
@@ -120,6 +127,7 @@ NOTICE_MAX_CONTACT_RECIPIENTS = 200
 NOTICE_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
 NOTICE_ALLOWED_ATTACHMENT_MIMES = frozenset({"image/jpeg", "image/png"})
 NOTICE_SCHEDULE_MAX_DAYS = 62
+NOTICE_FLASH_WINDOW_HOURS = 48
 NOTICE_REPEAT_MAX_COUNT = 100
 NOTICE_REPEAT_MAX_DAYS = 366 * 2
 

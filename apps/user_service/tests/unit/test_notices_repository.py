@@ -489,6 +489,8 @@ async def test_list_live_notices_for_resident_with_filters():
     )
     assert total == 1
     assert "ILIKE" in conn.fetchrow_calls[0][0]
+    assert "notice_flash_responses" in conn.fetchrow_calls[0][0]
+    assert "NOT (n.is_flash" in conn.fetchrow_calls[0][0]
 
 
 @pytest.mark.asyncio
@@ -506,7 +508,7 @@ async def test_list_live_notices_for_resident_category_filter():
     assert total == 1
     count_query, count_args = conn.fetchrow_calls[0]
     assert "n.category = $4::notice_category" in count_query
-    assert count_args == (ORG, PROJECT, [NOTICE], "maintenance")
+    assert count_args == (ORG, PROJECT, [NOTICE], "maintenance", 48, None, None)
     list_query, list_args = conn.fetch_calls[0]
     assert "n.category = $4::notice_category" in list_query
     assert list_args[:4] == (ORG, PROJECT, [NOTICE], "maintenance")

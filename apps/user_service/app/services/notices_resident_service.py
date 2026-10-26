@@ -2,13 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
-from apps.user_service.app.schemas.enums import NOTICE_CATEGORY_LABELS, NoticeScopeType
+from apps.user_service.app.schemas.enums import (
+    NOTICE_CATEGORY_LABELS,
+    NOTICE_FLASH_WINDOW_HOURS,
+    FlashNoticeAction,
+    NoticeScopeType,
+)
 from apps.user_service.app.schemas.notices import (
+    FlashNoticeResponseResult,
     NoticeAttachmentResponse,
     ResidentBannerQuery,
     ResidentNoticeDetailResponse,
@@ -19,7 +26,11 @@ from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ForbiddenException, NotFoundException
+from libs.shared_utils.http_exceptions import (
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
@@ -62,6 +73,9 @@ class NoticesResidentService:
             notice_ids=visible_ids,
             category=query.category.value if query.category else None,
             search=query.search,
+            contact_id=contact_id,
+            user_id=None if contact_id else contact_user_id,
+            flash_only=False,
             limit=query.page_size,
             offset=offset,
         )
@@ -70,6 +84,85 @@ class NoticesResidentService:
             for row in rows
         ]
         return items, total
+
+    async def list_flash_notices(
+        self,
+        *,
+        contact_id: str | None,
+        contact_user_id: str | None,
+        query: ResidentNoticeListQuery,
+    ) -> tuple[list[ResidentNoticeListItemResponse], int]:
+        """Return live flash notices still inside the 48-hour window."""
+        visible_ids = await self._visible_notice_ids(
+            project_id=query.project_id,
+            contact_id=contact_id,
+            contact_user_id=contact_user_id,
+        )
+        offset = (query.page - 1) * query.page_size
+        rows, total = await self.repo.list_live_notices_for_resident(
+            organization_id=self.organization_id,
+            project_id=query.project_id,
+            notice_ids=visible_ids,
+            category=query.category.value if query.category else None,
+            search=query.search,
+            contact_id=contact_id,
+            user_id=None if contact_id else contact_user_id,
+            flash_only=True,
+            limit=query.page_size,
+            offset=offset,
+        )
+        items = [
+            await self._to_list_item(row, contact_id=contact_id, contact_user_id=contact_user_id)
+            for row in rows
+        ]
+        return items, total
+
+    async def respond_to_flash(
+        self,
+        *,
+        contact_id: str | None,
+        contact_user_id: str | None,
+        notice_id: str,
+        action: str,
+    ) -> FlashNoticeResponseResult:
+        """Acknowledge or decline a live flash notice for this viewer."""
+        context = await self.repo.fetch_notice_visibility_context(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+        )
+        if context is None or str(context.get("status")) != "live":
+            raise NotFoundException(
+                message_key="notices.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        visible = await self.recipient_service.is_visible_to_contact(
+            organization_id=self.organization_id,
+            project_id=str(context["project_id"]),
+            notice=context,
+            contact_id=contact_id,
+            contact_user_id=contact_user_id,
+        )
+        if not visible:
+            raise NotFoundException(
+                message_key="notices.errors.not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if not context.get("is_flash"):
+            raise ValidationException(
+                message_key="notices.errors.not_flash",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        identity = self._like_identity_kwargs(contact_id, contact_user_id)
+        await self.repo.upsert_flash_response(
+            organization_id=self.organization_id,
+            notice_id=notice_id,
+            action=action,
+            **identity,
+        )
+        return FlashNoticeResponseResult(
+            notice_id=notice_id,
+            action=FlashNoticeAction(action),
+        )
 
     async def get_banner(
         self,
@@ -85,6 +178,14 @@ class NoticesResidentService:
             contact_user_id=contact_user_id,
         )
         visible_set = set(visible_ids)
+        responded = set(
+            await self.repo.list_responded_flash_notice_ids(
+                organization_id=self.organization_id,
+                project_id=query.project_id,
+                contact_id=contact_id,
+                user_id=None if contact_id else contact_user_id,
+            )
+        )
         pins = await self.repo.list_active_pins_with_notices(
             organization_id=self.organization_id,
             project_id=query.project_id,
@@ -98,7 +199,7 @@ class NoticesResidentService:
                 organization_id=self.organization_id,
                 notice_id=notice_id,
             )
-            if row is None:
+            if row is None or self._hidden_from_regular_feed(row, responded):
                 continue
             items.append(
                 await self._to_list_item(
@@ -305,6 +406,7 @@ class NoticesResidentService:
             like_count=int(row.get("like_count") or 0),
             liked_by_me=liked,
             pinned=bool(row.get("pinned")),
+            is_flash=bool(row.get("is_flash")),
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
         )
 
@@ -344,5 +446,21 @@ class NoticesResidentService:
             like_count=int(row.get("like_count") or 0),
             liked_by_me=liked,
             pinned=bool(row.get("pinned")),
+            is_flash=bool(row.get("is_flash")),
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
         )
+
+    @staticmethod
+    def _hidden_from_regular_feed(row: dict[str, Any], responded_ids: set[str]) -> bool:
+        """Hide an in-window flash notice, and any flash notice already answered."""
+        if not row.get("is_flash"):
+            return False
+        if str(row.get("id")) in responded_ids:
+            return True
+        created_at = row.get("created_at")
+        if not isinstance(created_at, datetime):
+            return False
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        window_start = datetime.now(timezone.utc) - timedelta(hours=NOTICE_FLASH_WINDOW_HOURS)
+        return created_at > window_start

@@ -76,6 +76,8 @@ __all__ = [
     "NOTICE_MAX_ATTACHMENT_BYTES",
     "NOTICE_ALLOWED_ATTACHMENT_MIMES",
     "NOTICE_SCHEDULE_MAX_DAYS",
+    "NOTICE_FLASH_WINDOW_HOURS",
+    "FlashNoticeAction",
     "NOTICE_REPEAT_MAX_COUNT",
     "NOTICE_REPEAT_MAX_DAYS",
     "CommunityEventCategory",
