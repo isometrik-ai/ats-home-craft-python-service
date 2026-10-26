@@ -667,6 +667,26 @@ async def test_next_invoice_adds_one_month_of_interest():
     assert fake.invoices[0]["total_amount"] == Decimal("1527")
 
 
+async def test_late_fee_waits_for_the_next_head_invoice():
+    """A day with no fee head does not open an invoice that is only a late fee."""
+    club = _november_club()
+    club["invoice_day"] = 15
+    prior = _prior_invoice(invoice_date=date(2026, 10, 15), due_date=date(2026, 10, 25))
+    fake = FakeFeeBillingRepository([club], [_unit()])
+    fake.prior_invoices = [prior]
+
+    await _service(fake).issue_due(run_date=date(2026, 10, 26))
+    assert not fake.invoices
+
+    await _service(fake).issue_due(run_date=date(2026, 11, 15))
+    roles = [line["line_role"] for line in fake.lines]
+    assert roles == ["charge", "late_fee"]
+    late = next(line for line in fake.lines if line["line_role"] == "late_fee")
+    assert late["line_total"] == Decimal("27.00")
+    assert fake.invoices[0]["invoice_day"] == 15
+    assert fake.invoices[0]["total_amount"] == Decimal("1527")
+
+
 async def test_payment_on_the_due_date_adds_no_late_fee():
     """A bill paid on the due date is not overdue."""
     prior = _prior_invoice(
