@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
-from apps.user_service.app.schemas.enums import NOTICE_MAX_PIN_SLOTS, NoticeListStatus
+from apps.user_service.app.schemas.enums import (
+    NOTICE_FLASH_WINDOW_HOURS,
+    NOTICE_MAX_PIN_SLOTS,
+    NoticeListStatus,
+)
 
 _NOTICE_SELECT_COLUMNS = """
   n.id::text AS id,
@@ -19,6 +23,7 @@ _NOTICE_SELECT_COLUMNS = """
   n.category::text AS category,
   n.status::text AS status,
   n.scope_type::text AS scope_type,
+  n.is_flash,
   n.publish_at,
   n.published_at,
   nrpt.frequency AS repeat_frequency,
@@ -64,6 +69,7 @@ _REPEAT_COLUMN_MAP = {
     "next_publish_at": "next_publish_at",
     "repeat_cancelled_at": "cancelled_at",
 }
+
 
 _REPEAT_CASTS = {
     "weekdays": "::smallint[]",
@@ -115,6 +121,7 @@ class NoticesRepository(BaseRepository):
         duplicate_of_id: str | None,
         created_by_user_id: str | None,
         updated_by_user_id: str | None,
+        is_flash: bool = False,
         repeat: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Insert notices header row."""
@@ -135,12 +142,13 @@ class NoticesRepository(BaseRepository):
                 published_at,
                 duplicate_of_id,
                 created_by_user_id,
-                updated_by_user_id
+                updated_by_user_id,
+                is_flash
             )
             VALUES (
                 $1::uuid, $2::uuid, $3, $4, $5, $6,
                 $7::notice_category, $8::notice_status, $9::notice_scope_type,
-                $10, $11, $12::uuid, $13::uuid, $14::uuid
+                $10, $11, $12::uuid, $13::uuid, $14::uuid, $15
             )
             RETURNING id::text AS id
             """,
@@ -158,6 +166,7 @@ class NoticesRepository(BaseRepository):
             duplicate_of_id,
             created_by_user_id,
             updated_by_user_id,
+            is_flash,
         )
         notice_id = str(row["id"])
         if repeat_values.get("repeat_frequency"):
@@ -1325,6 +1334,9 @@ class NoticesRepository(BaseRepository):
         notice_ids: list[str] | None,
         category: str | None = None,
         search: str | None = None,
+        contact_id: str | None = None,
+        user_id: str | None = None,
+        flash_only: bool = False,
         limit: int,
         offset: int,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -1351,6 +1363,39 @@ class NoticesRepository(BaseRepository):
             conditions.append(f"n.title ILIKE ${idx}")
             values.append(f"%{search}%")
             idx += 1
+
+        hours_idx = idx
+        values.append(NOTICE_FLASH_WINDOW_HOURS)
+        idx += 1
+        contact_idx = idx
+        values.append(contact_id)
+        idx += 1
+        user_idx = idx
+        values.append(user_id)
+        idx += 1
+        window_sql = f"n.created_at > now() - make_interval(hours => ${hours_idx})"
+        responded_sql = f"""
+            EXISTS (
+              SELECT 1
+              FROM notice_flash_responses r
+              WHERE r.notice_id = n.id
+                AND r.organization_id = n.organization_id
+                AND (
+                  (${contact_idx}::uuid IS NOT NULL AND r.contact_id = ${contact_idx}::uuid)
+                  OR (
+                    ${contact_idx}::uuid IS NULL
+                    AND ${user_idx}::uuid IS NOT NULL
+                    AND r.user_id = ${user_idx}::uuid
+                  )
+                )
+            )
+        """
+        if flash_only:
+            conditions.append("n.is_flash")
+            conditions.append(window_sql)
+            conditions.append(f"NOT {responded_sql}")
+        else:
+            conditions.append(f"NOT (n.is_flash AND ({window_sql} OR {responded_sql}))")
 
         where_sql = " AND ".join(conditions)
         total_row = await self.db_connection.fetchrow(
@@ -1424,6 +1469,8 @@ class NoticesRepository(BaseRepository):
               n.id::text AS id,
               n.project_id::text AS project_id,
               n.status::text AS status,
+              n.is_flash,
+              n.created_at,
               n.scope_type::text AS scope_type,
               COALESCE(
                 (
@@ -1459,6 +1506,81 @@ class NoticesRepository(BaseRepository):
             notice_id,
         )
         return dict(row) if row else None
+
+    async def list_responded_flash_notice_ids(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        contact_id: str | None = None,
+        user_id: str | None = None,
+    ) -> list[str]:
+        """Flash notices this viewer has acknowledged or declined."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT r.notice_id::text AS notice_id
+            FROM notice_flash_responses r
+            INNER JOIN notices n
+              ON n.id = r.notice_id
+             AND n.organization_id = r.organization_id
+            WHERE r.organization_id = $1::uuid
+              AND n.project_id = $2::uuid
+              AND (
+                ($3::uuid IS NOT NULL AND r.contact_id = $3::uuid)
+                OR (
+                  $3::uuid IS NULL
+                  AND $4::uuid IS NOT NULL
+                  AND r.user_id = $4::uuid
+                )
+              )
+            """,
+            organization_id,
+            project_id,
+            contact_id,
+            user_id,
+        )
+        return [str(row["notice_id"]) for row in rows]
+
+    async def upsert_flash_response(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+        action: str,
+        contact_id: str | None = None,
+        user_id: str | None = None,
+    ) -> None:
+        """Save acknowledge or decline for one viewer."""
+        if contact_id is not None:
+            await self.db_connection.execute(
+                """
+                INSERT INTO notice_flash_responses (
+                    organization_id, notice_id, contact_id, action
+                )
+                VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+                ON CONFLICT (notice_id, contact_id) WHERE contact_id IS NOT NULL
+                DO UPDATE SET action = EXCLUDED.action, updated_at = now()
+                """,
+                organization_id,
+                notice_id,
+                contact_id,
+                action,
+            )
+            return
+        await self.db_connection.execute(
+            """
+            INSERT INTO notice_flash_responses (
+                organization_id, notice_id, user_id, action
+            )
+            VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
+            ON CONFLICT (notice_id, user_id) WHERE user_id IS NOT NULL
+            DO UPDATE SET action = EXCLUDED.action, updated_at = now()
+            """,
+            organization_id,
+            notice_id,
+            user_id,
+            action,
+        )
 
     async def list_live_notice_ids_for_project(
         self,

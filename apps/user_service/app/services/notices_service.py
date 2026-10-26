@@ -214,6 +214,7 @@ class NoticesService:
             duplicate_of_id=None,
             created_by_user_id=self.user_id,
             updated_by_user_id=self.user_id,
+            is_flash=body.is_flash,
             repeat=repeat_fields,
         )
         notice_id = str(row["id"])
@@ -331,6 +332,8 @@ class NoticesService:
         }
         if body.category is not None:
             fields["category"] = body.category.value
+        if body.is_flash is not None:
+            fields["is_flash"] = body.is_flash
 
         fired_at = self._apply_update_schedule(
             existing=existing,
@@ -517,6 +520,7 @@ class NoticesService:
             duplicate_of_id=source_notice_id,
             created_by_user_id=self.user_id,
             updated_by_user_id=self.user_id,
+            is_flash=bool(source.get("is_flash")),
             repeat=self._draft_repeat_columns(source),
         )
         new_id = str(row["id"])
@@ -912,6 +916,7 @@ class NoticesService:
             attachments=[NoticeAttachmentResponse(**item) for item in attachments],
             pinned=bool(row.get("pinned")),
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
+            is_flash=bool(row.get("is_flash")),
             pin_duration=NoticePinDuration(str(row["pin_duration"]))
             if row.get("pin_duration")
             else None,
@@ -955,6 +960,7 @@ class NoticesService:
             repeat=self._repeat_response_from_row(row),
             pinned=bool(row.get("pinned")),
             slot_index=int(row["pin_slot_index"]) if row.get("pin_slot_index") else None,
+            is_flash=bool(row.get("is_flash")),
             view_count=int(row.get("view_count") or 0),
             like_count=int(row.get("like_count") or 0),
             editable=status in {NoticeStatus.DRAFT, NoticeStatus.SCHEDULED},

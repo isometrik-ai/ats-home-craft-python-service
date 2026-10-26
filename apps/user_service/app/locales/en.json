@@ -1347,7 +1347,8 @@
       "repeat_not_set": "This notice does not repeat.",
       "invoice_unpaid_groups": "An unpaid-invoice notice can go only to Owner, Tenant, or both.",
       "invoice_unpaid_contacts": "These contacts do not have an unpaid invoice for the selected group: {contact_ids}.",
-      "invoice_unpaid_none": "Nobody in the selected group has an unpaid invoice."
+      "invoice_unpaid_none": "Nobody in the selected group has an unpaid invoice.",
+      "not_flash": "Only a flash notice can be acknowledged or declined."
     },
     "success": {
       "summary_retrieved": "Notice summary retrieved successfully.",
@@ -1365,6 +1366,8 @@
       "expire_pins_completed": "Expired banner pins cleared successfully.",
       "banner_retrieved": "Notice banner retrieved successfully.",
       "feed_retrieved": "Notice feed retrieved successfully.",
+      "flash_retrieved": "Flash notices retrieved successfully.",
+      "flash_responded": "Flash notice response saved.",
       "liked": "Notice liked successfully.",
       "unliked": "Notice like removed successfully.",
       "repeat_preview_retrieved": "Repeat preview retrieved successfully.",

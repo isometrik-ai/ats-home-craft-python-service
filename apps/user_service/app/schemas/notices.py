@@ -15,6 +15,7 @@ from apps.user_service.app.schemas.enums import (
     NOTICE_MAX_DESCRIPTION_LENGTH,
     NOTICE_MAX_TITLE_LENGTH,
     NOTICE_REPEAT_MAX_COUNT,
+    FlashNoticeAction,
     NoticeCategory,
     NoticeListStatus,
     NoticePinDuration,
@@ -147,6 +148,14 @@ class CreateNoticeRequest(BaseModel):
     publish_mode: NoticePublishMode = NoticePublishMode.DRAFT
     publish_at: datetime | None = None
     repeat: NoticeRepeatInput | None = None
+    is_flash: bool = Field(
+        False,
+        description=(
+            "Show on the flash feed for 48 hours from creation, and keep it off "
+            "the resident notice list during that window. After 48 hours with no "
+            "response it joins the resident list. Acknowledge or decline hides it."
+        ),
+    )
     pin_to_banner: bool = False
     slot_index: int | None = Field(None, ge=1, le=6)
     pin_duration: NoticePinDuration = NoticePinDuration.MANUAL
@@ -194,6 +203,7 @@ class UpdateNoticeRequest(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=NOTICE_MAX_TITLE_LENGTH)
     description: str | None = Field(None, max_length=NOTICE_MAX_DESCRIPTION_LENGTH)
     category: NoticeCategory | None = None
+    is_flash: bool | None = None
     recipient_groups: list[NoticeRecipientInputGroup] | None = Field(
         None,
         description=(
@@ -358,6 +368,7 @@ class NoticeListItemResponse(BaseModel):
     repeat: NoticeRepeatResponse | None = None
     pinned: bool = False
     slot_index: int | None = None
+    is_flash: bool = False
     view_count: int = 0
     like_count: int = 0
     editable: bool = False
@@ -392,6 +403,7 @@ class NoticeDetailResponse(BaseModel):
     attachments: list[NoticeAttachmentResponse] = Field(default_factory=list)
     pinned: bool = False
     slot_index: int | None = None
+    is_flash: bool = False
     pin_duration: NoticePinDuration | None = None
     view_count: int = 0
     like_count: int = 0
@@ -453,6 +465,7 @@ class ResidentNoticeListItemResponse(BaseModel):
     like_count: int = 0
     liked_by_me: bool = False
     pinned: bool = False
+    is_flash: bool = False
     slot_index: int | None = None
 
 
@@ -472,7 +485,23 @@ class ResidentNoticeDetailResponse(BaseModel):
     like_count: int = 0
     liked_by_me: bool = False
     pinned: bool = False
+    is_flash: bool = False
     slot_index: int | None = None
+
+
+class FlashNoticeResponseRequest(BaseModel):
+    """Acknowledge or decline a flash notice."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: FlashNoticeAction
+
+
+class FlashNoticeResponseResult(BaseModel):
+    """Saved flash response."""
+
+    notice_id: str
+    action: FlashNoticeAction
 
 
 def validate_notice_attachment_mimes(attachments: list[NoticeAttachmentInput] | None) -> None:

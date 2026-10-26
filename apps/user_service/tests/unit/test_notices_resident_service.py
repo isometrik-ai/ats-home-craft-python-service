@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from apps.user_service.app.schemas.enums import NoticeCategory
+from apps.user_service.app.schemas.enums import FlashNoticeAction, NoticeCategory
 from apps.user_service.app.schemas.notices import (
     ResidentBannerQuery,
     ResidentNoticeListQuery,
@@ -15,7 +16,11 @@ from apps.user_service.app.services.notices_resident_service import (
     NoticesResidentService,
 )
 from apps.user_service.app.utils.common_utils import UserContext
-from libs.shared_utils.http_exceptions import ForbiddenException, NotFoundException
+from libs.shared_utils.http_exceptions import (
+    ForbiddenException,
+    NotFoundException,
+    ValidationException,
+)
 
 
 def _service() -> NoticesResidentService:
@@ -115,6 +120,9 @@ async def test_list_notices_passes_search_to_repository():
         notice_ids=["notice-1"],
         category=None,
         search="water",
+        contact_id="contact-1",
+        user_id=None,
+        flash_only=False,
         limit=20,
         offset=0,
     )
@@ -148,6 +156,9 @@ async def test_list_notices_passes_category_to_repository():
         notice_ids=["notice-1"],
         category="maintenance",
         search=None,
+        contact_id="contact-1",
+        user_id=None,
+        flash_only=False,
         limit=20,
         offset=0,
     )
@@ -185,6 +196,7 @@ async def test_get_banner_filters_to_visible_pins():
     )
     svc.repo.list_attachments = AsyncMock(return_value=[])
     svc.repo.contact_has_liked = AsyncMock(return_value=False)
+    svc.repo.list_responded_flash_notice_ids = AsyncMock(return_value=[])
 
     items = await svc.get_banner(
         contact_id=None,
@@ -336,3 +348,112 @@ async def test_resident_like_uses_contact_id():
         notice_id="notice-1",
         contact_id="contact-1",
     )
+
+
+@pytest.mark.asyncio
+async def test_list_flash_notices_requests_the_flash_feed():
+    """The flash feed asks for in-window flash notices only."""
+    svc = _service()
+    svc.repo = MagicMock()
+    svc.recipient_service = MagicMock()
+    svc.repo.list_live_notice_ids_for_project = AsyncMock(return_value=["notice-1"])
+    svc.recipient_service.load_notice_contexts = AsyncMock(return_value=[])
+    svc.recipient_service.filter_visible_notice_ids = AsyncMock(return_value=["notice-1"])
+    svc.repo.list_live_notices_for_resident = AsyncMock(return_value=([], 0))
+
+    await svc.list_flash_notices(
+        contact_id="contact-1",
+        contact_user_id="user-1",
+        query=ResidentNoticeListQuery(project_id="project-1"),
+    )
+
+    assert svc.repo.list_live_notices_for_resident.await_args.kwargs["flash_only"] is True
+
+
+@pytest.mark.asyncio
+async def test_respond_to_flash_saves_acknowledge():
+    """A visible live flash notice can be acknowledged."""
+    svc = _service()
+    svc.repo = MagicMock()
+    svc.recipient_service = MagicMock()
+    svc.repo.fetch_notice_visibility_context = AsyncMock(
+        return_value={
+            "id": "notice-1",
+            "project_id": "project-1",
+            "status": "live",
+            "is_flash": True,
+        }
+    )
+    svc.recipient_service.is_visible_to_contact = AsyncMock(return_value=True)
+    svc.repo.upsert_flash_response = AsyncMock()
+
+    result = await svc.respond_to_flash(
+        contact_id="contact-1",
+        contact_user_id="user-1",
+        notice_id="notice-1",
+        action=FlashNoticeAction.ACKNOWLEDGED.value,
+    )
+
+    assert result.action == FlashNoticeAction.ACKNOWLEDGED
+    svc.repo.upsert_flash_response.assert_awaited_once_with(
+        organization_id="org-1",
+        notice_id="notice-1",
+        action="acknowledged",
+        contact_id="contact-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_respond_to_flash_rejects_a_normal_notice():
+    """Acknowledge applies only to flash notices."""
+    svc = _service()
+    svc.repo = MagicMock()
+    svc.recipient_service = MagicMock()
+    svc.repo.fetch_notice_visibility_context = AsyncMock(
+        return_value={
+            "id": "notice-1",
+            "project_id": "project-1",
+            "status": "live",
+            "is_flash": False,
+        }
+    )
+    svc.recipient_service.is_visible_to_contact = AsyncMock(return_value=True)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.respond_to_flash(
+            contact_id="contact-1",
+            contact_user_id=None,
+            notice_id="notice-1",
+            action=FlashNoticeAction.DECLINED.value,
+        )
+    assert exc_info.value.message_key == "notices.errors.not_flash"
+
+
+def test_recent_flash_notice_stays_off_the_regular_feed():
+    """A flash notice created inside 48 hours is hidden from the banner feed."""
+    created_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    hidden = NoticesResidentService._hidden_from_regular_feed(
+        {"id": "notice-1", "is_flash": True, "created_at": created_at},
+        set(),
+    )
+    assert hidden is True
+
+
+def test_unanswered_flash_notice_returns_after_48_hours():
+    """With no response, a flash notice older than 48 hours can join the feed."""
+    created_at = datetime.now(timezone.utc) - timedelta(hours=49)
+    hidden = NoticesResidentService._hidden_from_regular_feed(
+        {"id": "notice-1", "is_flash": True, "created_at": created_at},
+        set(),
+    )
+    assert hidden is False
+
+
+def test_answered_flash_notice_stays_hidden_after_the_window():
+    """Acknowledge or decline keeps the notice hidden after 48 hours."""
+    created_at = datetime.now(timezone.utc) - timedelta(hours=49)
+    hidden = NoticesResidentService._hidden_from_regular_feed(
+        {"id": "notice-1", "is_flash": True, "created_at": created_at},
+        {"notice-1"},
+    )
+    assert hidden is True

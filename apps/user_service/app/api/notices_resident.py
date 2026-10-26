@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Body, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.notices import (
+    FlashNoticeResponseRequest,
     ResidentBannerQuery,
     ResidentNoticeListQuery,
 )
@@ -72,6 +73,47 @@ async def get_resident_notice_banner(
         page=1,
         page_size=max(len(items), 1),
         message_key="notices.success.banner_retrieved",
+        custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
+    )
+
+
+@handle_api_exceptions("list resident flash notices")
+@router.get(
+    "/flash",
+    status_code=http_status.HTTP_200_OK,
+    summary="Flash notices still waiting for a response",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def list_resident_flash_notices(
+    request: Request,
+    query: ResidentNoticeListQuery = Depends(),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Return live flash notices created within the last 48 hours."""
+    viewer = await extract_notice_viewer_context(
+        current_user,
+        db_connection,
+        project_id=query.project_id,
+        request=request,
+    )
+    service = NoticesResidentService(
+        db_connection=db_connection,
+        user_context=viewer.user_context,
+    )
+    items, total = await service.list_flash_notices(
+        contact_id=viewer.contact_id,
+        contact_user_id=viewer.contact_user_id,
+        query=query,
+    )
+    return list_response(
+        request=request,
+        items=[item.model_dump(mode="json") for item in items],
+        total=total,
+        page=query.page,
+        page_size=query.page_size,
+        message_key="notices.success.flash_retrieved",
         custom_code=CustomStatusCode.SUCCESS if items else CustomStatusCode.NO_CONTENT,
     )
 
@@ -150,6 +192,46 @@ async def get_resident_notice(
     return success_response(
         request=request,
         message_key="notices.success.retrieved",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(mode="json"),
+    )
+
+
+@handle_api_exceptions("respond to flash notice")
+@router.post(
+    "/{notice_id}/flash-response",
+    status_code=http_status.HTTP_200_OK,
+    summary="Acknowledge or decline a flash notice",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("60/minute")
+async def respond_to_resident_flash_notice(
+    request: Request,
+    notice_id: str = Path(...),
+    body: FlashNoticeResponseRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Hide this flash notice from the resident after acknowledge or decline."""
+    viewer = await extract_notice_viewer_context(
+        current_user,
+        db_connection,
+        notice_id=notice_id,
+        request=request,
+    )
+    service = NoticesResidentService(
+        db_connection=db_connection,
+        user_context=viewer.user_context,
+    )
+    data = await service.respond_to_flash(
+        contact_id=viewer.contact_id,
+        contact_user_id=viewer.contact_user_id,
+        notice_id=notice_id,
+        action=body.action.value,
+    )
+    return success_response(
+        request=request,
+        message_key="notices.success.flash_responded",
         custom_code=CustomStatusCode.SUCCESS,
         data=data.model_dump(mode="json"),
     )
