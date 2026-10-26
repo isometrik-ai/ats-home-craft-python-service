@@ -360,9 +360,9 @@ class NoticesRepository(BaseRepository):
         organization_id: str,
         notice_id: str,
         recipient_groups: list[str],
-        contact_ids: list[str] | None = None,
+        unit_ids: list[str] | None = None,
     ) -> None:
-        """Replace notice audience rows (recipient groups and/or contact ids)."""
+        """Replace audience rows. A row is a recipient group or a unit limit."""
         await self.db_connection.execute(
             """
             DELETE FROM notice_recipients
@@ -375,8 +375,8 @@ class NoticesRepository(BaseRepository):
         rows: list[tuple[str, str, str | None, str | None]] = []
         for group in recipient_groups:
             rows.append((organization_id, notice_id, group, None))
-        for contact_id in contact_ids or []:
-            rows.append((organization_id, notice_id, None, contact_id))
+        for unit_id in unit_ids or []:
+            rows.append((organization_id, notice_id, None, unit_id))
         if not rows:
             return
         await self.db_connection.executemany(
@@ -385,7 +385,7 @@ class NoticesRepository(BaseRepository):
                 organization_id,
                 notice_id,
                 recipient_group,
-                contact_id
+                unit_id
             )
             VALUES ($1::uuid, $2::uuid, $3::notice_recipient_group, $4::uuid)
             """,
@@ -418,6 +418,55 @@ class NoticesRepository(BaseRepository):
             """,
             [(organization_id, notice_id, tower_id) for tower_id in tower_ids],
         )
+
+    async def list_unit_ids(
+        self,
+        *,
+        organization_id: str,
+        notice_id: str,
+    ) -> list[str]:
+        """Return the stored unit limit. Empty means every unit in the towers."""
+        rows = await self.db_connection.fetch(
+            """
+            SELECT unit_id::text AS unit_id
+            FROM notice_recipients
+            WHERE organization_id = $1::uuid
+              AND notice_id = $2::uuid
+              AND unit_id IS NOT NULL
+            ORDER BY unit_id
+            """,
+            organization_id,
+            notice_id,
+        )
+        return [str(row["unit_id"]) for row in rows]
+
+    async def filter_project_unit_ids(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        unit_ids: list[str],
+        tower_ids: list[str],
+    ) -> list[str]:
+        """Return requested units that belong to the project and the selected towers."""
+        if not unit_ids:
+            return []
+        rows = await self.db_connection.fetch(
+            """
+            SELECT u.id::text AS unit_id
+            FROM units u
+            WHERE u.organization_id = $1::uuid
+              AND u.project_id = $2::uuid
+              AND u.id = ANY($3::uuid[])
+              AND u.tower_id = ANY($4::uuid[])
+            """,
+            organization_id,
+            project_id,
+            unit_ids,
+            tower_ids,
+        )
+        found = {str(row["unit_id"]) for row in rows}
+        return [unit_id for unit_id in unit_ids if unit_id in found]
 
     async def replace_attachments(
         self,
@@ -485,27 +534,6 @@ class NoticesRepository(BaseRepository):
             notice_id,
         )
         return [str(row["recipient_group"]) for row in rows]
-
-    async def list_contact_recipient_ids(
-        self,
-        *,
-        organization_id: str,
-        notice_id: str,
-    ) -> list[str]:
-        """Return contact ids targeted directly by a notice."""
-        rows = await self.db_connection.fetch(
-            """
-            SELECT contact_id::text AS contact_id
-            FROM notice_recipients
-            WHERE organization_id = $1::uuid
-              AND notice_id = $2::uuid
-              AND contact_id IS NOT NULL
-            ORDER BY contact_id
-            """,
-            organization_id,
-            notice_id,
-        )
-        return [str(row["contact_id"]) for row in rows]
 
     async def list_towers_for_notice(
         self,
@@ -1408,13 +1436,13 @@ class NoticesRepository(BaseRepository):
               ) AS recipient_groups,
               COALESCE(
                 (
-                  SELECT array_agg(nr.contact_id::text ORDER BY nr.contact_id)
+                  SELECT array_agg(nr.unit_id::text ORDER BY nr.unit_id)
                   FROM notice_recipients nr
                   WHERE nr.notice_id = n.id
-                    AND nr.contact_id IS NOT NULL
+                    AND nr.unit_id IS NOT NULL
                 ),
                 ARRAY[]::text[]
-              ) AS contact_recipient_ids,
+              ) AS unit_ids,
               COALESCE(
                 (
                   SELECT array_agg(nt.tower_id::text)

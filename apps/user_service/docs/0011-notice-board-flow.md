@@ -48,28 +48,28 @@ see pinned banners on the home feed.
 
 ### Business rules (must enforce)
 
-| Rule                                       | Enforcement                                                          |
-| ------------------------------------------ | -------------------------------------------------------------------- |
-| **Title ≤ 70 chars, description ≤ 600**    | Pydantic + DB CHECK on `notices`                                     |
-| **≥1 recipient group to publish/schedule** | Service validation; drafts may omit                                  |
-| **By tower → ≥1 tower selected**           | `notice_towers` rows required when `scope_type = by_tower`           |
-| **≤4 attachments, JPG/PNG, ≤5 MB each**    | Service count + mime/size validation                                 |
-| **Schedule ≤ 2 months ahead**              | One-shot `publish_at` only. Repeat series can run up to 2 years      |
-| **Repeat time is UTC**                     | `time_of_day` is a UTC clock. No local or project timezone           |
-| **One notice per repeat**                  | Re-send the same row. Do not create a new notice per occurrence      |
-| **Stop repeat keeps a live notice**        | Cancels future sends. An already-live notice stays live              |
-| **Live notices immutable**                 | `PATCH` rejected when `status = live` → `409 notice_not_editable`    |
-| **Only live notices can pin**              | Pin on create (publish now) or `POST .../pin`; reject otherwise      |
-| **Max 6 banner slots**                     | `slot_index` 1–6; partial unique index per active slot               |
-| **One notice → one slot**                  | Partial unique index on active `notice_id`                           |
-| **Slot header = category label**           | UI derives from `notices.category`; not recipient group              |
-| **Click banner → detail**                  | Same `GET .../notices/{id}` as card click                            |
-| **Soft delete only**                       | `status = deleted`, `deleted_at` set; row retained for audit         |
-| **Restore → draft**                        | Clears `deleted_at`; does not re-pin                                 |
-| **Display code immutable**                 | `NTC-{n}` assigned at create per `project_id`                        |
-| **Duplicate draft/scheduled**              | `POST .../duplicate` → new draft                                     |
-| **Duplicate live**                         | UI → Create Notice prefilled → `POST .../notices` (no duplicate API) |
-| **Staff project access**                   | `ensure_staff_project_access(project_id)` on all admin routes        |
+| Rule                                       | Enforcement                                                                                                                    |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Title ≤ 70 chars, description ≤ 600**    | Pydantic + DB CHECK on `notices`                                                                                               |
+| **≥1 recipient group to publish/schedule** | Service validation; drafts may omit                                                                                            |
+| **By tower → ≥1 tower, Owner or Tenant**   | `by_tower` is only for Owner and Tenant. Optional `unit_ids` limit the towers; omit them to include every unit in those towers |
+| **≤4 attachments, JPG/PNG, ≤5 MB each**    | Service count + mime/size validation                                                                                           |
+| **Schedule ≤ 2 months ahead**              | One-shot `publish_at` only. Repeat series can run up to 2 years                                                                |
+| **Repeat time is UTC**                     | `time_of_day` is a UTC clock. No local or project timezone                                                                     |
+| **One notice per repeat**                  | Re-send the same row. Do not create a new notice per occurrence                                                                |
+| **Stop repeat keeps a live notice**        | Cancels future sends. An already-live notice stays live                                                                        |
+| **Live notices immutable**                 | `PATCH` rejected when `status = live` → `409 notice_not_editable`                                                              |
+| **Only live notices can pin**              | Pin on create (publish now) or `POST .../pin`; reject otherwise                                                                |
+| **Max 6 banner slots**                     | `slot_index` 1–6; partial unique index per active slot                                                                         |
+| **One notice → one slot**                  | Partial unique index on active `notice_id`                                                                                     |
+| **Slot header = category label**           | UI derives from `notices.category`; not recipient group                                                                        |
+| **Click banner → detail**                  | Same `GET .../notices/{id}` as card click                                                                                      |
+| **Soft delete only**                       | `status = deleted`, `deleted_at` set; row retained for audit                                                                   |
+| **Restore → draft**                        | Clears `deleted_at`; does not re-pin                                                                                           |
+| **Display code immutable**                 | `NTC-{n}` assigned at create per `project_id`                                                                                  |
+| **Duplicate draft/scheduled**              | `POST .../duplicate` → new draft                                                                                               |
+| **Duplicate live**                         | UI → Create Notice prefilled → `POST .../notices` (no duplicate API)                                                           |
+| **Staff project access**                   | `ensure_staff_project_access(project_id)` on all admin routes                                                                  |
 
 ### Screen → capability map
 
@@ -159,7 +159,7 @@ ______________________________________________________________________
 | ------------------------ | ---------------------------------------------------------------------------------- |
 | **`notices`**            | Header: content, category, status, scope, schedule, stats, `display_code`          |
 | **`notice_repeats`**     | Optional 1:1 rule. `notice_id` is the primary key. Cascade-deletes with the notice |
-| **`notice_recipients`**  | Audience groups (Owner, Tenant, Staff, Security)                                   |
+| **`notice_recipients`**  | Audience groups, plus optional unit rows when scope is by tower                    |
 | **`notice_towers`**      | Tower scope when `scope_type = by_tower`                                           |
 | **`notice_attachments`** | Up to 4 image rows (`file_path`, metadata, `sort_order`)                           |
 | **`notice_pins`**        | Banner slot assignment (`slot_index` 1–6) for live notices                         |
@@ -975,31 +975,34 @@ ______________________________________________________________________
 
 ## 10. Error cases (i18n keys to add)
 
-| Key                                       | When                                             |
-| ----------------------------------------- | ------------------------------------------------ |
-| `notices.errors.title_too_long`           | Title > 70 chars                                 |
-| `notices.errors.description_too_long`     | Description > 600 chars                          |
-| `notices.errors.recipients_required`      | Publish/schedule without recipient groups        |
-| `notices.errors.towers_required`          | `by_tower` without tower_ids                     |
-| `notices.errors.schedule_too_far`         | One-shot `publish_at` > 2 months ahead           |
-| `notices.errors.repeat_weekdays_required` | Weekly repeat with no weekday                    |
-| `notices.errors.repeat_day_required`      | Monthly repeat with no day and not last day      |
-| `notices.errors.repeat_end_required`      | Missing end date and end count, or both set      |
-| `notices.errors.repeat_time_invalid`      | `time_of_day` is not a UTC clock                 |
-| `notices.errors.repeat_has_no_sends`      | Rule matches no slot                             |
-| `notices.errors.repeat_not_set`           | Stop-repeat on a notice with no rule             |
-| `notices.errors.invoice_unpaid_groups`    | Invoice-unpaid notice is not Owner and/or Tenant |
-| `notices.errors.invoice_unpaid_none`      | Publish when nobody selected has an open invoice |
-| `notices.errors.not_editable`             | PATCH on live notice                             |
-| `notices.errors.not_pinnable`             | Pin on non-live notice                           |
-| `notices.errors.already_pinned`           | Pin when notice already in a slot                |
-| `notices.errors.pin_slots_full`           | All 6 slots occupied                             |
-| `notices.errors.slot_occupied`            | Pin without confirm when slot taken              |
-| `notices.errors.too_many_attachments`     | > 4 attachments                                  |
-| `notices.errors.invalid_attachment`       | Wrong mime or size                               |
-| `notices.errors.duplicate_live_forbidden` | Duplicate API on live notice                     |
-| `notices.errors.project_access_denied`    | Failed `ensure_staff_project_access`             |
-| `notices.errors.not_found`                | Unknown notice_id or wrong project               |
+| Key                                        | When                                             |
+| ------------------------------------------ | ------------------------------------------------ |
+| `notices.errors.title_too_long`            | Title > 70 chars                                 |
+| `notices.errors.description_too_long`      | Description > 600 chars                          |
+| `notices.errors.recipients_required`       | Publish/schedule without recipient groups        |
+| `notices.errors.towers_required`           | `by_tower` without tower_ids                     |
+| `notices.errors.scope_owner_tenant_only`   | `by_tower` with Staff, Security, or All          |
+| `notices.errors.unit_ids_require_by_tower` | `unit_ids` sent when scope is whole society      |
+| `notices.errors.invalid_units`             | A unit is outside the project or selected towers |
+| `notices.errors.schedule_too_far`          | One-shot `publish_at` > 2 months ahead           |
+| `notices.errors.repeat_weekdays_required`  | Weekly repeat with no weekday                    |
+| `notices.errors.repeat_day_required`       | Monthly repeat with no day and not last day      |
+| `notices.errors.repeat_end_required`       | Missing end date and end count, or both set      |
+| `notices.errors.repeat_time_invalid`       | `time_of_day` is not a UTC clock                 |
+| `notices.errors.repeat_has_no_sends`       | Rule matches no slot                             |
+| `notices.errors.repeat_not_set`            | Stop-repeat on a notice with no rule             |
+| `notices.errors.invoice_unpaid_groups`     | Invoice-unpaid notice is not Owner and/or Tenant |
+| `notices.errors.invoice_unpaid_none`       | Publish when nobody selected has an open invoice |
+| `notices.errors.not_editable`              | PATCH on live notice                             |
+| `notices.errors.not_pinnable`              | Pin on non-live notice                           |
+| `notices.errors.already_pinned`            | Pin when notice already in a slot                |
+| `notices.errors.pin_slots_full`            | All 6 slots occupied                             |
+| `notices.errors.slot_occupied`             | Pin without confirm when slot taken              |
+| `notices.errors.too_many_attachments`      | > 4 attachments                                  |
+| `notices.errors.invalid_attachment`        | Wrong mime or size                               |
+| `notices.errors.duplicate_live_forbidden`  | Duplicate API on live notice                     |
+| `notices.errors.project_access_denied`     | Failed `ensure_staff_project_access`             |
+| `notices.errors.not_found`                 | Unknown notice_id or wrong project               |
 
 ______________________________________________________________________
 

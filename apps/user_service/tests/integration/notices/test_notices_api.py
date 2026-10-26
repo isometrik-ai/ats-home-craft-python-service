@@ -189,29 +189,34 @@ async def test_create_project_notice_all_recipients_success(monkeypatch, client)
 
 
 @pytest.mark.asyncio
-async def test_create_project_notice_with_contact_ids_success(monkeypatch, client):
-    """POST create accepts contact_ids and returns them on the detail payload."""
+async def test_create_project_notice_with_unit_ids_success(monkeypatch, client):
+    """POST create accepts unit_ids for a by-tower Owner notice."""
     _patch_admin_access(monkeypatch)
-    contact_id = "55555555-5555-5555-5555-555555555555"
+    tower_id = "11111111-1111-4111-8111-111111111111"
+    unit_id = "55555555-5555-4555-8555-555555555555"
 
     async def fake_create_notice(_self, *, project_id: str, body):
         del _self
         assert project_id == PROJECT_ID
-        assert body.contact_ids == [contact_id]
-        return _fake_detail(contact_ids=[contact_id], status=NoticeStatus.LIVE)
+        assert body.unit_ids == [unit_id]
+        assert body.scope_type == NoticeScopeType.BY_TOWER
+        return _fake_detail(unit_ids=[unit_id], status=NoticeStatus.LIVE)
 
     monkeypatch.setattr(f"{_SERVICE}.create_notice", fake_create_notice)
 
     res = await client.post(
         f"/v1/projects/{PROJECT_ID}/notices",
         json={
-            "title": "Direct notice",
-            "contact_ids": [contact_id],
+            "title": "Tower notice",
+            "recipient_groups": ["Owner"],
+            "scope_type": "by_tower",
+            "tower_ids": [tower_id],
+            "unit_ids": [unit_id],
             "publish_mode": "now",
         },
     )
     body = assert_success(res, 201)
-    assert body["data"]["contact_ids"] == [contact_id]
+    assert body["data"]["unit_ids"] == [unit_id]
 
 
 @pytest.mark.asyncio
