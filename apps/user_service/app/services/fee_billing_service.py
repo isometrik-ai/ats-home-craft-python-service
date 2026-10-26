@@ -581,7 +581,10 @@ class FeeBillingService:
                 )
             skips, drafts = _collect(work, units)
         for unit_id, lines in late_fee_drafts(priors, run_date).items():
-            drafts[(unit_id, run_date.day)].extend(lines)
+            key = (unit_id, run_date.day)
+            if key not in drafts:
+                continue
+            drafts[key].extend(lines)
         if not skips and not drafts:
             return [], _empty_skip_counts()
         created, counts = await self._persist(
