@@ -46,7 +46,7 @@ async def publish_scheduled_notices(
             organization_id=org_id,
             notice_id=notice_id,
         )
-        contact_ids = await repo.list_contact_recipient_ids(
+        unit_ids = await repo.list_unit_ids(
             organization_id=org_id,
             notice_id=notice_id,
         )
@@ -71,25 +71,10 @@ async def publish_scheduled_notices(
                 recipient_groups=recipient_groups,
                 scope_type=str(notice_row["scope_type"]),
                 tower_ids=tower_ids,
+                unit_ids=unit_ids,
                 require_unpaid_invoice=unpaid_only,
             )
         )
-        if contact_ids and unpaid_only:
-            allowed = await recipient_service.unpaid_invoice_contact_ids(
-                organization_id=org_id,
-                project_id=proj_id,
-                recipient_groups=recipient_groups,
-                scope_type=str(notice_row["scope_type"]),
-                tower_ids=tower_ids,
-            )
-            contact_ids = [contact_id for contact_id in contact_ids if contact_id in allowed]
-        if contact_ids:
-            user_ids.update(
-                await recipient_service.resolve_user_ids_for_contact_ids(
-                    organization_id=org_id,
-                    contact_ids=contact_ids,
-                )
-            )
         send = sends_by_id.get(notice_id) or {}
         occurrence_at = send.get("fired_at") if send.get("repeating") else None
         for user_id in user_ids:

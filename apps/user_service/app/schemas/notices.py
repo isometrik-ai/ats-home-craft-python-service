@@ -31,30 +31,30 @@ from apps.user_service.app.utils.notice_targeting_utils import (
 )
 
 
-def _normalize_contact_ids_input(
-    contact_ids: object,
+def _normalize_uuid_list(
+    values: object,
     *,
     empty_means_omitted: bool,
 ) -> object:
-    """Dedupe contact ids; optionally treat an empty list as omitted (create only)."""
-    if contact_ids is None:
+    """Dedupe ids. Create treats an empty list as omitted."""
+    if values is None:
         return None
-    if not isinstance(contact_ids, list):
-        return contact_ids
-    normalized = list(dict.fromkeys(str(item).strip() for item in contact_ids if str(item).strip()))
+    if not isinstance(values, list):
+        return values
+    normalized = list(dict.fromkeys(str(item).strip() for item in values if str(item).strip()))
     if empty_means_omitted:
         return normalized or None
     return normalized
 
 
-def _validate_contact_id_uuids(contact_ids: list[str] | None) -> list[str] | None:
-    """Ensure each contact id is a canonical UUID string (lowercase)."""
-    if contact_ids is None:
+def _validate_uuid_list(values: list[str] | None, *, field_name: str) -> list[str] | None:
+    """Ensure each id is a canonical UUID string."""
+    if values is None:
         return None
     try:
-        canonical = [str(UUID(contact_id)) for contact_id in contact_ids]
+        canonical = [str(UUID(value)) for value in values]
     except ValueError as exc:
-        raise ValueError("contact_ids must contain valid UUIDs") from exc
+        raise ValueError(f"{field_name} must contain valid UUIDs") from exc
     return list(dict.fromkeys(canonical))
 
 
@@ -135,15 +135,15 @@ class CreateNoticeRequest(BaseModel):
             "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
         ),
     )
-    contact_ids: list[str] | None = Field(
-        None,
-        description=(
-            "Send the notice to specific residents by contact id (one or many). "
-            "Can be combined with recipient_groups."
-        ),
-    )
     scope_type: NoticeScopeType = NoticeScopeType.WHOLE_SOCIETY
     tower_ids: list[str] | None = None
+    unit_ids: list[str] | None = Field(
+        None,
+        description=(
+            "Units inside the selected towers. Omit or pass an empty list to send "
+            "to every unit in those towers. Only for Owner and Tenant, with scope by tower."
+        ),
+    )
     publish_mode: NoticePublishMode = NoticePublishMode.DRAFT
     publish_at: datetime | None = None
     repeat: NoticeRepeatInput | None = None
@@ -159,20 +159,20 @@ class CreateNoticeRequest(BaseModel):
         """Accept All/all as a select-all recipient shortcut."""
         return normalize_recipient_groups_input(recipient_groups)
 
-    @field_validator("contact_ids", mode="before")
+    @field_validator("unit_ids", mode="before")
     @classmethod
-    def normalize_contact_ids(cls, contact_ids: object) -> object:
-        """Dedupe and drop blank contact ids."""
-        return _normalize_contact_ids_input(contact_ids, empty_means_omitted=True)
+    def normalize_unit_ids(cls, unit_ids: object) -> object:
+        """Dedupe unit ids. An empty list on create means every unit in the towers."""
+        return _normalize_uuid_list(unit_ids, empty_means_omitted=True)
 
-    @field_validator("contact_ids")
+    @field_validator("unit_ids")
     @classmethod
-    def validate_contact_ids(cls, contact_ids: list[str] | None) -> list[str] | None:
-        """Validate UUID shape, count, and max direct contact recipients."""
-        contact_ids = _validate_contact_id_uuids(contact_ids)
-        if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
-            raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
-        return contact_ids
+    def validate_unit_ids(cls, unit_ids: list[str] | None) -> list[str] | None:
+        """Validate UUID shape and the unit cap."""
+        unit_ids = _validate_uuid_list(unit_ids, field_name="unit_ids")
+        if unit_ids is not None and len(unit_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
+            raise ValueError(f"unit_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
+        return unit_ids
 
     @field_validator("attachments")
     @classmethod
@@ -200,12 +200,15 @@ class UpdateNoticeRequest(BaseModel):
             "Who receives this notice. Pass All to select Owner, Tenant, Staff, and Security."
         ),
     )
-    contact_ids: list[str] | None = Field(
-        None,
-        description="Send the notice to specific residents by contact id (one or many).",
-    )
     scope_type: NoticeScopeType | None = None
     tower_ids: list[str] | None = None
+    unit_ids: list[str] | None = Field(
+        None,
+        description=(
+            "Units inside the selected towers. Pass an empty list to send to every "
+            "unit in those towers."
+        ),
+    )
     publish_mode: NoticePublishMode | None = None
     publish_at: datetime | None = None
     repeat: NoticeRepeatInput | None = None
@@ -217,20 +220,20 @@ class UpdateNoticeRequest(BaseModel):
         """Accept All/all as a select-all recipient shortcut."""
         return normalize_recipient_groups_input(recipient_groups)
 
-    @field_validator("contact_ids", mode="before")
+    @field_validator("unit_ids", mode="before")
     @classmethod
-    def normalize_contact_ids(cls, contact_ids: object) -> object:
-        """Dedupe and drop blank contact ids; preserve explicit empty list for PATCH."""
-        return _normalize_contact_ids_input(contact_ids, empty_means_omitted=False)
+    def normalize_unit_ids(cls, unit_ids: object) -> object:
+        """Dedupe unit ids. An explicit empty list clears a previous unit limit."""
+        return _normalize_uuid_list(unit_ids, empty_means_omitted=False)
 
-    @field_validator("contact_ids")
+    @field_validator("unit_ids")
     @classmethod
-    def validate_contact_ids(cls, contact_ids: list[str] | None) -> list[str] | None:
-        """Validate UUID shape, count, and max direct contact recipients."""
-        contact_ids = _validate_contact_id_uuids(contact_ids)
-        if contact_ids is not None and len(contact_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
-            raise ValueError(f"contact_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
-        return contact_ids
+    def validate_unit_ids(cls, unit_ids: list[str] | None) -> list[str] | None:
+        """Validate UUID shape and the unit cap."""
+        unit_ids = _validate_uuid_list(unit_ids, field_name="unit_ids")
+        if unit_ids is not None and len(unit_ids) > NOTICE_MAX_CONTACT_RECIPIENTS:
+            raise ValueError(f"unit_ids cannot exceed {NOTICE_MAX_CONTACT_RECIPIENTS}")
+        return unit_ids
 
     @field_validator("attachments")
     @classmethod
@@ -289,6 +292,13 @@ class ReachEstimateQuery(BaseModel):
     )
     scope_type: NoticeScopeType = NoticeScopeType.WHOLE_SOCIETY
     tower_ids: str | None = Field(None, description="Comma-separated tower UUIDs")
+    unit_ids: str | None = Field(
+        None,
+        description=(
+            "Comma-separated unit UUIDs inside the selected towers. "
+            "Omit to count every unit in those towers."
+        ),
+    )
     category: NoticeCategory | None = None
 
     def parsed_groups(self) -> list[str]:
@@ -311,6 +321,12 @@ class ReachEstimateQuery(BaseModel):
         if not self.tower_ids:
             return []
         return [part.strip() for part in self.tower_ids.split(",") if part.strip()]
+
+    def parsed_unit_ids(self) -> list[str]:
+        """Parse comma-separated unit ids."""
+        if not self.unit_ids:
+            return []
+        return [part.strip() for part in self.unit_ids.split(",") if part.strip()]
 
 
 class NoticeSummaryResponse(BaseModel):
@@ -364,6 +380,7 @@ class NoticeDetailResponse(BaseModel):
     recipient_groups: list[str]
     contact_ids: list[str] = Field(default_factory=list)
     scope_type: NoticeScopeType
+    unit_ids: list[str] = Field(default_factory=list)
     scope_label: str | None = None
     tower_ids: list[str] = Field(default_factory=list)
     tower_names: list[str] = Field(default_factory=list)

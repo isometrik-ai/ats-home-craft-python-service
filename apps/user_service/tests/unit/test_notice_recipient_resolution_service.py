@@ -135,32 +135,32 @@ def test_create_notice_accepts_lowercase_all_recipient_group():
     assert body.recipient_groups == [NoticeRecipientInputGroup.ALL]
 
 
-def test_update_notice_preserves_empty_contact_ids_for_patch():
-    """Success: explicit empty contact_ids clears recipients on update (not treated as omitted)."""
-    body = UpdateNoticeRequest(contact_ids=[])
-    assert body.contact_ids == []
+def test_update_notice_preserves_empty_unit_ids_for_patch():
+    """Success: explicit empty unit_ids clears a previous unit limit on update."""
+    body = UpdateNoticeRequest(unit_ids=[])
+    assert body.unit_ids == []
 
 
-def test_create_notice_empty_contact_ids_becomes_none():
-    """Success: empty contact_ids on create is equivalent to omitted."""
-    body = CreateNoticeRequest(title="Draft", contact_ids=[])
-    assert body.contact_ids is None
+def test_create_notice_empty_unit_ids_becomes_none():
+    """Success: empty unit_ids on create means every unit in the selected towers."""
+    body = CreateNoticeRequest(title="Draft", unit_ids=[])
+    assert body.unit_ids is None
 
 
-def test_create_notice_rejects_invalid_contact_id_uuid():
-    """Failure: non-UUID contact ids are rejected at the schema layer."""
+def test_create_notice_rejects_invalid_unit_id_uuid():
+    """Failure: non-UUID unit ids are rejected at the schema layer."""
     with pytest.raises(ValidationError):
         CreateNoticeRequest(
             title="Bad id",
-            contact_ids=["not-a-uuid"],
+            unit_ids=["not-a-uuid"],
         )
 
 
-def test_create_notice_normalizes_contact_ids_to_canonical_uuid():
-    """Success: uppercase UUIDs are stored in canonical lowercase form."""
+def test_create_notice_normalizes_unit_ids_to_canonical_uuid():
+    """Success: uppercase unit UUIDs are stored in canonical lowercase form."""
     upper = "55555555-5555-5555-5555-555555555555".upper()
-    body = CreateNoticeRequest(title="Notice", contact_ids=[upper])
-    assert body.contact_ids == ["55555555-5555-5555-5555-555555555555"]
+    body = CreateNoticeRequest(title="Notice", unit_ids=[upper])
+    assert body.unit_ids == ["55555555-5555-5555-5555-555555555555"]
 
 
 def test_create_notice_rejects_unknown_recipient_group():
@@ -481,8 +481,8 @@ async def test_filter_valid_project_contact_ids_returns_subset_in_order():
 
 
 @pytest.mark.asyncio
-async def test_is_visible_direct_contact_recipient_without_groups():
-    """Success: contact-targeted notices are visible only to listed contacts."""
+async def test_is_visible_requires_a_recipient_group():
+    """A live notice with no recipient group is hidden."""
     db = MagicMock()
     service = NoticeRecipientResolutionService(db_connection=db)
 
@@ -492,35 +492,11 @@ async def test_is_visible_direct_contact_recipient_without_groups():
         notice={
             "status": "live",
             "recipient_groups": [],
-            "contact_recipient_ids": ["contact-1", "contact-2"],
-            "scope_type": "whole_society",
-            "tower_ids": [],
+            "unit_ids": ["unit-1"],
+            "scope_type": "by_tower",
+            "tower_ids": ["tower-1"],
         },
         contact_id="contact-2",
-        contact_user_id=None,
-    )
-
-    assert visible is True
-    db.fetchrow.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_is_visible_direct_contact_recipient_not_listed():
-    """Failure: contact-targeted notice is hidden from other contacts."""
-    db = MagicMock()
-    service = NoticeRecipientResolutionService(db_connection=db)
-
-    visible = await service.is_visible_to_contact(
-        organization_id="org-1",
-        project_id="project-1",
-        notice={
-            "status": "live",
-            "recipient_groups": [],
-            "contact_recipient_ids": ["contact-1"],
-            "scope_type": "whole_society",
-            "tower_ids": [],
-        },
-        contact_id="contact-99",
         contact_user_id=None,
     )
 

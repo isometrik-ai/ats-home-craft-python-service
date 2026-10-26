@@ -15,6 +15,13 @@ from apps.user_service.app.schemas.enums import (
 )
 
 
+def _unit_id_filter(next_index: int, unit_ids: list[str] | None) -> tuple[str, list[Any]]:
+    """SQL fragment that limits roles to the selected units. Empty means every unit."""
+    if not unit_ids:
+        return "", []
+    return f"AND cr.unit_id = ANY(${next_index}::uuid[])", [unit_ids]
+
+
 def _unpaid_invoice_filter(project_param: str) -> str:
     """Limit owner/tenant roles to units with an open fee invoice."""
     return f"""
@@ -50,6 +57,7 @@ class NoticeRecipientResolutionService:
         recipient_groups: list[str],
         scope_type: str,
         tower_ids: list[str],
+        unit_ids: list[str] | None = None,
         require_unpaid_invoice: bool = False,
     ) -> tuple[int, dict[str, int]]:
         """Return total distinct recipients and per-group breakdown."""
@@ -65,6 +73,7 @@ class NoticeRecipientResolutionService:
                     role_type=group,
                     scope_type=scope_type,
                     tower_ids=tower_ids,
+                    unit_ids=unit_ids,
                     require_unpaid_invoice=require_unpaid_invoice,
                 )
                 breakdown[group] = len(group_contact_ids)
@@ -100,6 +109,7 @@ class NoticeRecipientResolutionService:
         recipient_groups: list[str],
         scope_type: str,
         tower_ids: list[str],
+        unit_ids: list[str] | None = None,
         require_unpaid_invoice: bool = False,
     ) -> list[str]:
         """Resolve distinct user ids to notify for a published notice."""
@@ -114,6 +124,7 @@ class NoticeRecipientResolutionService:
                     role_type=group,
                     scope_type=scope_type,
                     tower_ids=tower_ids,
+                    unit_ids=unit_ids,
                     require_unpaid_invoice=require_unpaid_invoice,
                 )
                 user_ids.update(
@@ -319,6 +330,7 @@ class NoticeRecipientResolutionService:
         role_type: str,
         scope_type: str,
         tower_ids: list[str],
+        unit_ids: list[str] | None = None,
         require_unpaid_invoice: bool = False,
     ) -> set[str]:
         """Distinct owner/tenant contacts scoped like the contacts list API."""
@@ -340,6 +352,8 @@ class NoticeRecipientResolutionService:
               )
             """
             values.append(tower_ids)
+        unit_filter, unit_values = _unit_id_filter(len(values) + 1, unit_ids)
+        values.extend(unit_values)
         unpaid_filter = _unpaid_invoice_filter("$4") if require_unpaid_invoice else ""
 
         rows = await self.db_connection.fetch(
@@ -354,6 +368,7 @@ class NoticeRecipientResolutionService:
               AND cr.role_type = $3::public.contact_role_type
               AND cr.status = 'active'::public.contact_role_status
               AND cr.ended_at IS NULL
+              {unit_filter}
               {unpaid_filter}
               AND EXISTS (
                 SELECT 1
@@ -377,6 +392,7 @@ class NoticeRecipientResolutionService:
         recipient_groups: list[str],
         scope_type: str,
         tower_ids: list[str],
+        unit_ids: list[str] | None = None,
     ) -> set[str]:
         """Owner and tenant contacts on units with an open fee invoice."""
         found: set[str] = set()
@@ -390,6 +406,7 @@ class NoticeRecipientResolutionService:
                     role_type=group,
                     scope_type=scope_type,
                     tower_ids=tower_ids,
+                    unit_ids=unit_ids,
                     require_unpaid_invoice=True,
                 )
             )
@@ -474,10 +491,6 @@ class NoticeRecipientResolutionService:
             return False
 
         unpaid_only = str(notice.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
-        contact_recipient_ids = list(notice.get("contact_recipient_ids") or [])
-        if self._is_direct_contact_recipient(contact_id, contact_recipient_ids) and not unpaid_only:
-            return True
-
         recipient_groups = list(notice.get("recipient_groups") or [])
         if not recipient_groups:
             return False
@@ -488,18 +501,11 @@ class NoticeRecipientResolutionService:
             recipient_groups=recipient_groups,
             scope_type=str(notice.get("scope_type") or "whole_society"),
             tower_ids=list(notice.get("tower_ids") or []),
+            unit_ids=list(notice.get("unit_ids") or []),
             contact_id=contact_id,
             contact_user_id=contact_user_id,
             require_unpaid_invoice=unpaid_only,
         )
-
-    @staticmethod
-    def _is_direct_contact_recipient(
-        contact_id: str | None,
-        contact_recipient_ids: list[str],
-    ) -> bool:
-        """Return whether the contact is explicitly targeted by id."""
-        return bool(contact_id and contact_recipient_ids and contact_id in contact_recipient_ids)
 
     async def _is_visible_via_recipient_groups(
         self,
@@ -509,6 +515,7 @@ class NoticeRecipientResolutionService:
         recipient_groups: list[str],
         scope_type: str,
         tower_ids: list[str],
+        unit_ids: list[str] | None = None,
         contact_id: str | None,
         contact_user_id: str | None,
         require_unpaid_invoice: bool = False,
@@ -523,6 +530,7 @@ class NoticeRecipientResolutionService:
                     role_type=group,
                     scope_type=scope_type,
                     tower_ids=tower_ids,
+                    unit_ids=unit_ids,
                     require_unpaid_invoice=require_unpaid_invoice,
                 ):
                     return True
@@ -552,6 +560,7 @@ class NoticeRecipientResolutionService:
         role_type: str,
         scope_type: str,
         tower_ids: list[str],
+        unit_ids: list[str] | None = None,
         require_unpaid_invoice: bool = False,
     ) -> bool:
         """Check active owner/tenant role for contact within notice scope."""
@@ -577,6 +586,8 @@ class NoticeRecipientResolutionService:
               )
             """
             values.append(tower_ids)
+        unit_filter, unit_values = _unit_id_filter(len(values) + 1, unit_ids)
+        values.extend(unit_values)
         unpaid_filter = _unpaid_invoice_filter("$5") if require_unpaid_invoice else ""
 
         row = await self.db_connection.fetchrow(
@@ -592,6 +603,7 @@ class NoticeRecipientResolutionService:
               AND cr.role_type = $4::public.contact_role_type
               AND cr.status = 'active'::public.contact_role_status
               AND cr.ended_at IS NULL
+              {unit_filter}
               {unpaid_filter}
               AND EXISTS (
                 SELECT 1
@@ -658,13 +670,13 @@ class NoticeRecipientResolutionService:
               ) AS recipient_groups,
               COALESCE(
                 (
-                  SELECT array_agg(nr.contact_id::text ORDER BY nr.contact_id)
+                  SELECT array_agg(nr.unit_id::text ORDER BY nr.unit_id)
                   FROM notice_recipients nr
                   WHERE nr.notice_id = n.id
-                    AND nr.contact_id IS NOT NULL
+                    AND nr.unit_id IS NOT NULL
                 ),
                 ARRAY[]::text[]
-              ) AS contact_recipient_ids,
+              ) AS unit_ids,
               COALESCE(
                 (
                   SELECT array_agg(nt.tower_id::text)
