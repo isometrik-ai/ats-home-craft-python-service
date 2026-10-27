@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -28,10 +28,14 @@ router = APIRouter(prefix="/internal/notices", tags=["Notices (Internal)"])
 @limiter.limit("10/minute")
 async def publish_due_notices_internal(
     request: Request,
+    background_tasks: BackgroundTasks,
     db_connection: asyncpg.Connection = Depends(db_uow),
 ):
     """Promote all due scheduled notices org-wide."""
-    published_ids = await publish_scheduled_notices(db_connection)
+    published_ids = await publish_scheduled_notices(
+        db_connection,
+        background_tasks=background_tasks,
+    )
     return success_response(
         request=request,
         message_key="notices.success.publish_due_completed",

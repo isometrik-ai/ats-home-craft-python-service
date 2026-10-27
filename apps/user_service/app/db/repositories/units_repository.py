@@ -77,6 +77,27 @@ _UNIT_OWNER_SELECT_COLUMNS = """
               owner_row.owner_emails
 """
 
+_ACTIVE_UNIT_ROLE_EXISTS_SQL = """
+EXISTS (
+    SELECT 1
+    FROM contact_units cu_occ
+    JOIN contacts c_occ
+      ON c_occ.id = cu_occ.contact_id
+     AND c_occ.organization_id = cu_occ.organization_id
+    JOIN contact_roles cr_occ
+      ON cr_occ.organization_id = cu_occ.organization_id
+     AND cr_occ.contact_id = cu_occ.contact_id
+     AND cr_occ.unit_id = cu_occ.unit_id
+     AND cr_occ.status = 'active'::public.contact_role_status
+     AND cr_occ.ended_at IS NULL
+     AND cr_occ.role_type = {role_param}::contact_role_type
+    WHERE cu_occ.organization_id = u.organization_id
+      AND cu_occ.unit_id = u.id
+      AND cu_occ.status = 'active'::contact_unit_status
+      AND c_occ.status = 'active'
+)
+"""
+
 _HAS_ACTIVE_OWNER_EXISTS_SQL = f"""
 EXISTS (
     SELECT 1
@@ -171,6 +192,7 @@ class UnitsRepository(BaseRepository):
         tower_id: str | None = None,
         config_id: str | None = None,
         status: str | None = None,
+        occupant: str | None = None,
     ) -> tuple[str, list[Any], int]:
         """Build shared WHERE clause for unit registry list and summary queries."""
         args: list[Any] = [organization_id, project_id]
@@ -201,6 +223,17 @@ class UnitsRepository(BaseRepository):
             args.append(status)
             next_param += 1
 
+        if occupant == "tenant":
+            where.append(_ACTIVE_UNIT_ROLE_EXISTS_SQL.format(role_param=f"${next_param}"))
+            args.append("Tenant")
+            next_param += 1
+        elif occupant == "owner":
+            owner_exists = _ACTIVE_UNIT_ROLE_EXISTS_SQL.format(role_param=f"${next_param}")
+            tenant_exists = _ACTIVE_UNIT_ROLE_EXISTS_SQL.format(role_param=f"${next_param + 1}")
+            where.append(f"({owner_exists} AND NOT {tenant_exists})")
+            args.extend(["Owner", "Tenant"])
+            next_param += 2
+
         if search:
             where.append(
                 f"(u.code ILIKE ${next_param} OR COALESCE(u.unit_label, '') ILIKE ${next_param}"
@@ -222,6 +255,7 @@ class UnitsRepository(BaseRepository):
         tower_id: str | None = None,
         config_id: str | None = None,
         status: str | None = None,
+        occupant: str | None = None,
     ) -> dict[str, int]:
         """Return aggregate sold/unsold counts for the unit registry header."""
         where_sql, args, _ = self._build_registry_where(
@@ -232,6 +266,7 @@ class UnitsRepository(BaseRepository):
             tower_id=tower_id,
             config_id=config_id,
             status=status,
+            occupant=occupant,
         )
         row = await self.db_connection.fetchrow(
             f"""
@@ -318,6 +353,7 @@ class UnitsRepository(BaseRepository):
         tower_id: str | None = None,
         config_id: str | None = None,
         status: str | None = None,
+        occupant: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict[str, Any]], int]:
@@ -331,6 +367,7 @@ class UnitsRepository(BaseRepository):
             tower_id=tower_id,
             config_id=config_id,
             status=status,
+            occupant=occupant,
         )
         total = await self.db_connection.fetchval(
             f"""

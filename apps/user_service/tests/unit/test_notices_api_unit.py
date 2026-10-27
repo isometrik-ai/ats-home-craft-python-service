@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from apps.user_service.app.api.notices import (
@@ -170,6 +171,7 @@ async def test_notice_write_endpoints(mock_service_cls, mock_access):
     assert (
         await create_project_notice(
             request=_request(),
+            background_tasks=BackgroundTasks(),
             project_id=PROJECT_ID,
             body=CreateNoticeRequest(title="Hello", publish_mode=NoticePublishMode.DRAFT),
             db_connection=MagicMock(),
@@ -179,6 +181,7 @@ async def test_notice_write_endpoints(mock_service_cls, mock_access):
     assert (
         await update_project_notice(
             request=_request(),
+            background_tasks=BackgroundTasks(),
             project_id=PROJECT_ID,
             notice_id=NOTICE_ID,
             body=UpdateNoticeRequest(title="Updated"),

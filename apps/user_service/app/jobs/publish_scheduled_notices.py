@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncpg
+from fastapi import BackgroundTasks
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
 from apps.user_service.app.schemas.enums import NoticeCategory
@@ -13,6 +16,10 @@ from apps.user_service.app.services.notices_service import NoticesService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
+from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
+from libs.shared_utils.logger import get_logger
+
+logger = get_logger("publish_scheduled_notices")
 
 
 async def publish_scheduled_notices(
@@ -20,6 +27,7 @@ async def publish_scheduled_notices(
     *,
     organization_id: str | None = None,
     project_id: str | None = None,
+    background_tasks: BackgroundTasks | None = None,
 ) -> list[str]:
     """Promote due scheduled notices to live, re-send due repeats, and push."""
     repo = NoticesRepository(db_connection=db_connection)
@@ -31,7 +39,45 @@ async def publish_scheduled_notices(
         return []
     sends_by_id = {str(send["id"]): send for send in sends}
     published_ids = list(sends_by_id)
+    if background_tasks is not None:
+        background_tasks.add_task(
+            dispatch_due_notice_pushes,
+            [_send_payload(send) for send in sends],
+        )
+        return published_ids
 
+    await _dispatch_claimed_pushes(db_connection, sends_by_id)
+    return published_ids
+
+
+def _send_payload(send: Any) -> dict[str, Any]:
+    """Copy one claimed send so the push task does not keep the request connection."""
+    return {
+        "id": str(send["id"]),
+        "fired_at": send.get("fired_at"),
+        "repeating": bool(send.get("repeating")),
+    }
+
+
+async def dispatch_due_notice_pushes(sends: list[dict[str, Any]]) -> None:
+    """Send publish pushes after the publish-due transaction has committed."""
+    if not sends:
+        return
+    try:
+        async with UnitOfWork() as connection:
+            sends_by_id = {str(send["id"]): send for send in sends}
+            await _dispatch_claimed_pushes(connection, sends_by_id)
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("due notice publish push failed")
+
+
+async def _dispatch_claimed_pushes(
+    db_connection: asyncpg.Connection,
+    sends_by_id: dict[str, Any],
+) -> None:
+    """Resolve recipients and send one push per user for each claimed notice."""
+    published_ids = list(sends_by_id)
+    repo = NoticesRepository(db_connection=db_connection)
     recipient_service = NoticeRecipientResolutionService(db_connection=db_connection)
     push_dispatcher = PushNotificationDispatcher(db_connection=db_connection)
 
@@ -83,6 +129,7 @@ async def publish_scheduled_notices(
                 notice_id=notice_id,
                 recipient_user_id=user_id,
                 occurrence_at=occurrence_at,
+                is_flash=bool(notice_row.get("is_flash")),
             )
             await push_dispatcher.send_to_user(
                 organization_id=org_id,
@@ -95,7 +142,6 @@ async def publish_scheduled_notices(
                 entity=push_fields["entity"],
                 options=push_fields["options"],
             )
-    return published_ids
 
 
 async def expire_notice_pins(db_connection: asyncpg.Connection) -> int:

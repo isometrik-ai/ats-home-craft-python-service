@@ -183,6 +183,13 @@ class UnitStatus(str, Enum):
     BLOCKED = "blocked"
 
 
+class UnitOccupantAssignment(str, Enum):
+    """Who currently occupies a unit for registry filters."""
+
+    OWNER = "owner"
+    TENANT = "tenant"
+
+
 class FacilityStatus(str, Enum):
     """Facility status (Postgres facility_status enum)."""
 
