@@ -365,12 +365,18 @@ async def test_list_units_returns_paginated_payload():
         1,
     )
 
-    result = await service.list_units(project_id="proj-1", page=1, page_size=20)
+    result = await service.list_units(
+        project_id="proj-1",
+        page=1,
+        page_size=20,
+        tenant_id="tenant-1",
+    )
 
     assert result["total"] == 1
     assert result["items"][0]["property_type"] == "residential"
     assert "summary" not in result
     service.units_repo.list_units.assert_awaited_once()
+    assert service.units_repo.list_units.await_args.kwargs["tenant_id"] == "tenant-1"
 
 
 @pytest.mark.asyncio
@@ -386,10 +392,16 @@ async def test_get_units_registry_summary():
         "unsold_count": 24,
     }
 
-    summary = await service.get_units_registry_summary(project_id="proj-1")
+    summary = await service.get_units_registry_summary(
+        project_id="proj-1",
+        tenant_id="tenant-1",
+    )
 
     assert summary["sold_count"] == 51
     service.units_repo.get_units_registry_summary.assert_awaited_once()
+    assert (
+        service.units_repo.get_units_registry_summary.await_args.kwargs["tenant_id"] == "tenant-1"
+    )
 
 
 def _owner_contact_row(**overrides) -> dict[str, Any]:

@@ -489,6 +489,13 @@ class ListProjectUnitsFilterQuery(BaseModel):
     tower_id: str | None = None
     config_id: str | None = None
     status: UnitStatus | None = None
+    tenant_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional contact id. When set, only units where this contact is the "
+            "active tenant are returned."
+        ),
+    )
 
 
 class ListProjectUnitsQuery(ListProjectUnitsFilterQuery):

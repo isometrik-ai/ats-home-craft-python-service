@@ -11,6 +11,7 @@ PROJECT_ID = "660e8400-e29b-41d4-a716-446655440001"
 UNIT_ID = "770e8400-e29b-41d4-a716-446655440002"
 ZONE_ID = "880e8400-e29b-41d4-a716-446655440003"
 TOWER_ID = "990e8400-e29b-41d4-a716-446655440004"
+TENANT_ID = "aa0e8400-e29b-41d4-a716-446655440005"
 
 
 class _FakeConn:
@@ -104,15 +105,18 @@ async def test_list_units_applies_registry_filters():
         tower_id=TOWER_ID,
         config_id="cfg-1",
         status="vacant",
+        tenant_id=TENANT_ID,
     )
 
     assert units == []
     assert total == 0
-    list_query = conn.fetch_calls[0][0]
+    list_query, list_args = conn.fetch_calls[0]
     assert "ILIKE" in list_query
     assert "tower_id" in list_query
     assert "config_id" in list_query
     assert "::unit_status" in list_query
+    assert "role_type = 'Tenant'" in list_query
+    assert TENANT_ID in list_args
     assert "two_wheeler_parking_entitlement" in list_query
     assert "four_wheeler_parking_entitlement" in list_query
 

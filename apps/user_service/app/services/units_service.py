@@ -333,6 +333,7 @@ class UnitsService:
         tower_id: str | None = None,
         config_id: str | None = None,
         status: str | None = None,
+        tenant_id: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> dict[str, Any]:
@@ -346,6 +347,7 @@ class UnitsService:
             tower_id=tower_id,
             config_id=config_id,
             status=status,
+            tenant_id=tenant_id,
             page=page,
             page_size=page_size,
         )
@@ -361,6 +363,7 @@ class UnitsService:
         tower_id: str | None = None,
         config_id: str | None = None,
         status: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, int]:
         """Return sold/unsold header counts for the unit registry."""
         await self.setup_service.ensure_project(project_id=project_id)
@@ -372,6 +375,7 @@ class UnitsService:
             tower_id=tower_id,
             config_id=config_id,
             status=status,
+            tenant_id=tenant_id,
         )
 
     async def get_unit_detail(self, *, project_id: str, unit_id: str) -> dict[str, Any]:
