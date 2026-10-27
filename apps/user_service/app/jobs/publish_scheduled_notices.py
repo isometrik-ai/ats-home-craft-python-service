@@ -129,6 +129,7 @@ async def _dispatch_claimed_pushes(
                 notice_id=notice_id,
                 recipient_user_id=user_id,
                 occurrence_at=occurrence_at,
+                is_flash=bool(notice_row.get("is_flash")),
             )
             await push_dispatcher.send_to_user(
                 organization_id=org_id,

@@ -208,6 +208,15 @@ def test_notice_publish_push_fields_include_deep_link_payload() -> None:
     assert fields["entity"] == {"kind": "notice", "id": NOTICE_ID}
     assert fields["options"]["click_action"] == "OPEN_NOTICE"
     assert fields["options"]["idempotency_key"] == f"notice:{NOTICE_ID}:published:user-9"
+    assert "save_to_db" not in fields["options"]
+
+    flash_fields = NoticesService._notice_publish_push_fields(
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        recipient_user_id="user-9",
+        is_flash=True,
+    )
+    assert flash_fields["options"]["save_to_db"] is False
 
 
 def test_resolve_publish_state_now_and_scheduled():
@@ -371,6 +380,28 @@ async def test_dispatch_publish_push_skips_missing_notice():
         title="Hello",
     )
     svc.push_dispatcher.send_to_user.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_publish_push_flash_skips_saved_notification():
+    """Success: a flash notice push is delivered without a stored notification row."""
+    svc = _service()
+    svc.repo.fetch_notice_by_id = AsyncMock(
+        return_value=_notice_detail_row(status=NoticeStatus.LIVE.value, is_flash=True)
+    )
+    svc.recipient_service = MagicMock()
+    svc.recipient_service.resolve_recipient_user_ids = AsyncMock(return_value=["user-9"])
+    svc.push_dispatcher = MagicMock()
+    svc.push_dispatcher.send_to_user = AsyncMock()
+
+    await svc.dispatch_publish_push(
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        title="Pool closure",
+    )
+
+    options = svc.push_dispatcher.send_to_user.await_args.kwargs["options"]
+    assert options["save_to_db"] is False
 
 
 def _notice_detail_row(**overrides) -> dict:

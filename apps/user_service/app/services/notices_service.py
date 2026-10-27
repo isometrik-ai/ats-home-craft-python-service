@@ -1493,6 +1493,7 @@ class NoticesService:
         notice_id: str,
         recipient_user_id: str,
         occurrence_at: datetime | None = None,
+        is_flash: bool = False,
     ) -> dict[str, Any]:
         """Deep-link payload fields for notice publish push notifications."""
         idempotency_key = f"notice:{notice_id}:published:{recipient_user_id}"
@@ -1501,6 +1502,12 @@ class NoticesService:
                 occurrence_at = occurrence_at.replace(tzinfo=timezone.utc)
             token = occurrence_at.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
             idempotency_key = f"notice:{notice_id}:published:{token}:{recipient_user_id}"
+        options: dict[str, Any] = {
+            "click_action": "OPEN_NOTICE",
+            "idempotency_key": idempotency_key,
+        }
+        if is_flash:
+            options["save_to_db"] = False
         return {
             "data": {
                 "notice_id": notice_id,
@@ -1508,10 +1515,7 @@ class NoticesService:
                 "screen": "notice_detail",
             },
             "entity": {"kind": "notice", "id": notice_id},
-            "options": {
-                "click_action": "OPEN_NOTICE",
-                "idempotency_key": idempotency_key,
-            },
+            "options": options,
         }
 
     async def _enqueue_publish_push(
@@ -1583,12 +1587,14 @@ class NoticesService:
                 require_unpaid_invoice=unpaid_only,
             )
         )
+        is_flash = bool(notice_row.get("is_flash"))
         for user_id in user_ids:
             push_fields = self._notice_publish_push_fields(
                 project_id=project_id,
                 notice_id=notice_id,
                 recipient_user_id=user_id,
                 occurrence_at=occurrence_at,
+                is_flash=is_flash,
             )
             await self.push_dispatcher.send_to_user(
                 organization_id=self.organization_id,
