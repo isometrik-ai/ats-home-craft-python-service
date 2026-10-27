@@ -24,7 +24,10 @@ from apps.user_service.app.schemas.notices import (
     NoticeListQuery,
     UpdateNoticeRequest,
 )
-from apps.user_service.app.services.notices_service import NoticesService
+from apps.user_service.app.services.notices_service import (
+    NoticesService,
+    dispatch_notice_publish_push,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -372,6 +375,39 @@ async def test_dispatch_publish_push_skips_missing_notice():
         title="Hello",
     )
     svc.push_dispatcher.send_to_user.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_notice_publish_push_reuses_prefetched_notice_row():
+    """Cron path can pass list_notices_published_since rows and skip fetch_notice_by_id."""
+    svc = _service()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+    svc.repo.list_unit_ids = AsyncMock(return_value=[])
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.fetch_notice_by_id = AsyncMock()
+    svc.recipient_service.resolve_recipient_user_ids = AsyncMock(return_value=[])
+    svc.push_dispatcher.send_to_user = AsyncMock()
+
+    notice_row = {
+        "id": NOTICE_ID,
+        "organization_id": "org-1",
+        "project_id": PROJECT_ID,
+        "title": "Hello",
+        "category": "general",
+        "scope_type": "whole_society",
+    }
+    await dispatch_notice_publish_push(
+        svc.db_connection,
+        organization_id="org-1",
+        project_id=PROJECT_ID,
+        notice_id=NOTICE_ID,
+        title="Hello",
+        notice_row=notice_row,
+        repo=svc.repo,
+        recipient_service=svc.recipient_service,
+        push_dispatcher=svc.push_dispatcher,
+    )
+    svc.repo.fetch_notice_by_id.assert_not_awaited()
 
 
 def _notice_detail_row(**overrides) -> dict:

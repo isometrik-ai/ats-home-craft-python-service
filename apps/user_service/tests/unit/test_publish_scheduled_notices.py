@@ -32,9 +32,11 @@ async def test_publish_scheduled_notices_empty():
 async def test_publish_scheduled_notices_dispatches_push():
     conn = MagicMock()
     notice_row = {
+        "id": NOTICE,
         "organization_id": ORG,
         "project_id": PROJECT,
         "title": "Pool closure",
+        "category": "general",
         "scope_type": "whole_society",
     }
 
@@ -65,6 +67,7 @@ async def test_publish_scheduled_notices_dispatches_push():
         notice_id=NOTICE,
         title="Pool closure",
         occurrence_at=None,
+        notice_row=notice_row,
     )
 
 

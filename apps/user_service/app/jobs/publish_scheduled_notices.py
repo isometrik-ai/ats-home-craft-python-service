@@ -41,6 +41,7 @@ async def publish_scheduled_notices(
             notice_id=notice_id,
             title=str(notice["title"]),
             occurrence_at=occurrence_at,
+            notice_row=notice,
         )
     return published_ids
 

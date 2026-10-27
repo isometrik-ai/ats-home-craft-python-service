@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -1529,6 +1530,7 @@ async def dispatch_notice_publish_push(
     notice_id: str,
     title: str,
     occurrence_at: datetime | None = None,
+    notice_row: Mapping[str, Any] | None = None,
     repo: NoticesRepository | None = None,
     recipient_service: NoticeRecipientResolutionService | None = None,
     push_dispatcher: PushNotificationDispatcher | None = None,
@@ -1552,14 +1554,16 @@ async def dispatch_notice_publish_push(
         organization_id=organization_id,
         notice_id=notice_id,
     )
-    notice_row = await repo.fetch_notice_by_id(
-        organization_id=organization_id,
-        project_id=project_id,
-        notice_id=notice_id,
-    )
-    if notice_row is None:
+    resolved_notice = notice_row
+    if resolved_notice is None or resolved_notice.get("scope_type") is None:
+        resolved_notice = await repo.fetch_notice_by_id(
+            organization_id=organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+        )
+    if resolved_notice is None:
         return
-    unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
+    unpaid_only = str(resolved_notice.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
     tower_ids = [str(tower["tower_id"]) for tower in towers]
     user_ids: set[str] = set(
         await recipient_service.resolve_recipient_user_ids(
@@ -1567,7 +1571,7 @@ async def dispatch_notice_publish_push(
             project_id=project_id,
             notice_id=notice_id,
             recipient_groups=recipient_groups,
-            scope_type=str(notice_row["scope_type"]),
+            scope_type=str(resolved_notice["scope_type"]),
             tower_ids=tower_ids,
             unit_ids=unit_ids,
             require_unpaid_invoice=unpaid_only,

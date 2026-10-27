@@ -1692,7 +1692,8 @@ class NoticesRepository(BaseRepository):
               organization_id::text AS organization_id,
               project_id::text AS project_id,
               title,
-              category::text AS category
+              category::text AS category,
+              scope_type::text AS scope_type
             FROM notices
             WHERE id = ANY($1::uuid[])
             """,
