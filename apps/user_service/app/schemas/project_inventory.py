@@ -24,6 +24,7 @@ from apps.user_service.app.schemas.enums import (
     PropertyType,
     UnitConfigKind,
     UnitNumberingPattern,
+    UnitOccupantAssignment,
     UnitStatus,
 )
 
@@ -489,6 +490,13 @@ class ListProjectUnitsFilterQuery(BaseModel):
     tower_id: str | None = None
     config_id: str | None = None
     status: UnitStatus | None = None
+    occupant: UnitOccupantAssignment | None = Field(
+        default=None,
+        description=(
+            "Current assignment. `tenant` keeps units with an active tenant. "
+            "`owner` keeps units with an active owner and no active tenant."
+        ),
+    )
 
 
 class ListProjectUnitsQuery(ListProjectUnitsFilterQuery):

@@ -178,6 +178,7 @@ __all__ = [
     "PlotType",
     "PlotItemStatus",
     "UnitStatus",
+    "UnitOccupantAssignment",
     "FacilityStatus",
     "FacilityLocationType",
     "FacilityType",

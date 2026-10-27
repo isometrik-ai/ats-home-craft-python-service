@@ -118,6 +118,36 @@ async def test_list_units_applies_registry_filters():
 
 
 @pytest.mark.asyncio
+async def test_list_units_filters_by_current_occupant():
+    """Occupant filter restricts the registry to the current owner or tenant assignment."""
+    conn = _FakeConn(row={"total": 0, "sold_count": 0, "unsold_count": 0})
+    conn.rows = []
+    repo = UnitsRepository(db_connection=conn)
+
+    await repo.list_units(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        occupant="tenant",
+    )
+    tenant_query = conn.fetch_calls[0][0]
+    tenant_args = conn.fetch_calls[0][1]
+    assert "role_type = $3::contact_role_type" in tenant_query
+    assert tenant_args[2] == "Tenant"
+    assert tenant_query.count("role_type = $") == 1
+
+    await repo.list_units(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        occupant="owner",
+    )
+    owner_query = conn.fetch_calls[1][0]
+    owner_args = conn.fetch_calls[1][1]
+    assert owner_query.count("role_type = $") == 2
+    assert owner_args[2] == "Owner"
+    assert owner_args[3] == "Tenant"
+
+
+@pytest.mark.asyncio
 async def test_get_units_registry_summary():
     """Summary query returns sold and unsold counts."""
     conn = _FakeConn(row={"total": 2, "sold_count": 1, "unsold_count": 1})
