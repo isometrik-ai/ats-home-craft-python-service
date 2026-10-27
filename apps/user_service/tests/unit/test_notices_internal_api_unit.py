@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import BackgroundTasks
 from starlette.requests import Request
 
 from apps.user_service.app.api.notices_internal import (
@@ -34,6 +35,7 @@ async def test_publish_due_notices_internal():
     ):
         response = await publish_due_notices_internal(
             request=_request(),
+            background_tasks=BackgroundTasks(),
             db_connection=MagicMock(),
         )
 

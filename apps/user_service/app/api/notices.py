@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Request
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -229,6 +229,7 @@ async def get_project_notice(
 )
 async def create_project_notice(
     request: Request,
+    background_tasks: BackgroundTasks,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
     body: CreateNoticeRequest = Body(...),
     db_connection: asyncpg.Connection = Depends(db_uow),
@@ -243,7 +244,11 @@ async def create_project_notice(
         request=request,
     )
     service = NoticesService(db_connection=db_connection, user_context=user_context)
-    data = await service.create_notice(project_id=project_id, body=body)
+    data = await service.create_notice(
+        project_id=project_id,
+        body=body,
+        background_tasks=background_tasks,
+    )
     set_audit_context(
         request,
         user_context,
@@ -280,6 +285,7 @@ async def create_project_notice(
 )
 async def update_project_notice(
     request: Request,
+    background_tasks: BackgroundTasks,
     project_id: str = Path(..., description="Project identifier (UUID string)."),
     notice_id: str = Path(...),
     body: UpdateNoticeRequest = Body(...),
@@ -299,6 +305,7 @@ async def update_project_notice(
         project_id=project_id,
         notice_id=notice_id,
         body=body,
+        background_tasks=background_tasks,
     )
     set_audit_context(
         request,

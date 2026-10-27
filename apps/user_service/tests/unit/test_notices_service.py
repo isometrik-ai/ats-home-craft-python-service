@@ -365,7 +365,7 @@ async def test_dispatch_publish_push_skips_missing_notice():
     svc.push_dispatcher = MagicMock()
     svc.push_dispatcher.send_to_user = AsyncMock()
 
-    await svc._dispatch_publish_push(
+    await svc.dispatch_publish_push(
         project_id=PROJECT_ID,
         notice_id=NOTICE_ID,
         title="Hello",
@@ -457,6 +457,29 @@ async def test_create_notice_publish_now_dispatches_push():
     )
     await svc.create_notice(project_id=PROJECT_ID, body=body)
     svc.repo.insert_notice.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_notice_publish_now_queues_push():
+    """Success: a live create returns before push delivery when a background queue is set."""
+    svc = _service()
+    _stub_create_repo(svc, recipient_groups=["Owner"])
+    background_tasks = MagicMock()
+
+    body = CreateNoticeRequest(
+        title="Pool closure",
+        description="Closed tomorrow",
+        recipient_groups=[NoticeRecipientGroup.OWNER],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    await svc.create_notice(
+        project_id=PROJECT_ID,
+        body=body,
+        background_tasks=background_tasks,
+    )
+
+    background_tasks.add_task.assert_called_once()
+    svc.push_dispatcher.send_to_user.assert_not_awaited()
 
 
 @pytest.mark.asyncio

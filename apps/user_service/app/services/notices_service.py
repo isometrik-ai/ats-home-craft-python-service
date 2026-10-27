@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
+from fastapi import BackgroundTasks
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
 from apps.user_service.app.schemas.enums import (
@@ -56,12 +57,44 @@ from apps.user_service.app.services.push_notification_dispatch import (
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.notice_targeting_utils import expand_recipient_groups
+from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
     ValidationException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("notices_service")
+
+
+async def dispatch_notice_publish_push(
+    organization_id: str,
+    project_id: str,
+    notice_id: str,
+    title: str,
+    occurrence_at: datetime | None = None,
+) -> None:
+    """Send publish pushes after the request transaction has committed."""
+    try:
+        async with UnitOfWork() as connection:
+            service = NoticesService(
+                db_connection=connection,
+                user_context=UserContext(
+                    user_id="system",
+                    email="",
+                    organization_id=organization_id,
+                ),
+            )
+            await service.dispatch_publish_push(
+                project_id=project_id,
+                notice_id=notice_id,
+                title=title,
+                occurrence_at=occurrence_at,
+            )
+    except Exception:  # pylint: disable=broad-exception-caught
+        logger.exception("notice publish push failed notice_id=%s", notice_id)
 
 
 class NoticesService:
@@ -157,6 +190,7 @@ class NoticesService:
         *,
         project_id: str,
         body: CreateNoticeRequest,
+        background_tasks: BackgroundTasks | None = None,
     ) -> NoticeDetailResponse:
         """Create draft, scheduled, or live notice."""
         self._validate_content(body.title, body.description)
@@ -236,15 +270,16 @@ class NoticesService:
                 confirm_pin_replace=body.confirm_pin_replace,
             )
 
+        detail = await self.get_notice(project_id=project_id, notice_id=notice_id)
         if status == NoticeStatus.LIVE.value:
-            await self._dispatch_publish_push(
+            await self._enqueue_publish_push(
+                background_tasks=background_tasks,
                 project_id=project_id,
                 notice_id=notice_id,
                 title=body.title.strip(),
                 occurrence_at=fired_at,
             )
-
-        return await self.get_notice(project_id=project_id, notice_id=notice_id)
+        return detail
 
     async def update_notice(
         self,
@@ -252,6 +287,7 @@ class NoticesService:
         project_id: str,
         notice_id: str,
         body: UpdateNoticeRequest,
+        background_tasks: BackgroundTasks | None = None,
     ) -> NoticeDetailResponse:
         """Update draft or scheduled notice."""
         existing = await self.repo.fetch_notice_by_id(
@@ -379,7 +415,8 @@ class NoticesService:
 
         updated = await self.get_notice(project_id=project_id, notice_id=notice_id)
         if fields.get("status") == NoticeStatus.LIVE.value:
-            await self._dispatch_publish_push(
+            await self._enqueue_publish_push(
+                background_tasks=background_tasks,
                 project_id=project_id,
                 notice_id=notice_id,
                 title=updated.title,
@@ -669,7 +706,7 @@ class NoticesService:
                 notice_id=notice_id,
             )
             if row:
-                await self._dispatch_publish_push(
+                await self.dispatch_publish_push(
                     project_id=str(row["project_id"]),
                     notice_id=notice_id,
                     title=str(row["title"]),
@@ -1477,7 +1514,34 @@ class NoticesService:
             },
         }
 
-    async def _dispatch_publish_push(
+    async def _enqueue_publish_push(
+        self,
+        *,
+        background_tasks: BackgroundTasks | None,
+        project_id: str,
+        notice_id: str,
+        title: str,
+        occurrence_at: datetime | None,
+    ) -> None:
+        """Queue publish pushes so the API can return before delivery finishes."""
+        if background_tasks is not None:
+            background_tasks.add_task(
+                dispatch_notice_publish_push,
+                self.organization_id,
+                project_id,
+                notice_id,
+                title,
+                occurrence_at,
+            )
+            return
+        await self.dispatch_publish_push(
+            project_id=project_id,
+            notice_id=notice_id,
+            title=title,
+            occurrence_at=occurrence_at,
+        )
+
+    async def dispatch_publish_push(
         self,
         *,
         project_id: str,

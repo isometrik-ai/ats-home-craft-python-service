@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from apps.user_service.app.jobs.publish_scheduled_notices import (
+    dispatch_due_notice_pushes,
     expire_notice_pins,
     publish_scheduled_notices,
 )
@@ -72,6 +73,27 @@ async def test_publish_scheduled_notices_dispatches_push():
 
     assert result == [NOTICE]
     assert push.send_to_user.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_publish_scheduled_notices_queues_push():
+    """Success: publish-due returns before push delivery when a background queue is set."""
+    conn = MagicMock()
+    background_tasks = MagicMock()
+    with patch(
+        "apps.user_service.app.jobs.publish_scheduled_notices.NoticesRepository"
+    ) as repo_cls:
+        repo = repo_cls.return_value
+        repo.claim_due_notice_sends = AsyncMock(
+            return_value=[{"id": NOTICE, "fired_at": None, "repeating": False}]
+        )
+        result = await publish_scheduled_notices(conn, background_tasks=background_tasks)
+
+    assert result == [NOTICE]
+    background_tasks.add_task.assert_called_once()
+    queued = background_tasks.add_task.call_args.args
+    assert queued[0] is dispatch_due_notice_pushes
+    assert queued[1] == [{"id": NOTICE, "fired_at": None, "repeating": False}]
 
 
 @pytest.mark.asyncio
