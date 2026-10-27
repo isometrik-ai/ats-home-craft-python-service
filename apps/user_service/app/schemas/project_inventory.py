@@ -489,6 +489,13 @@ class ListProjectUnitsFilterQuery(BaseModel):
     tower_id: str | None = None
     config_id: str | None = None
     status: UnitStatus | None = None
+    has_tenant: bool | None = Field(
+        default=None,
+        description=(
+            "When true, only units with an active tenant assignment. "
+            "When false, only units with no active tenant. Omit to include both."
+        ),
+    )
 
 
 class ListProjectUnitsQuery(ListProjectUnitsFilterQuery):

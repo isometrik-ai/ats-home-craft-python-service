@@ -115,6 +115,32 @@ async def test_list_units_applies_registry_filters():
     assert "::unit_status" in list_query
     assert "two_wheeler_parking_entitlement" in list_query
     assert "four_wheeler_parking_entitlement" in list_query
+    assert "Tenant" not in list_query
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("has_tenant", "expects_not"),
+    [(True, False), (False, True)],
+)
+async def test_list_units_filters_by_active_tenant(has_tenant: bool, expects_not: bool):
+    """has_tenant limits the registry to units with or without an active tenant."""
+    conn = _FakeConn(row={"total": 0, "sold_count": 0, "unsold_count": 0})
+    conn.rows = []
+    repo = UnitsRepository(db_connection=conn)
+
+    await repo.list_units(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        has_tenant=has_tenant,
+    )
+
+    list_query = " ".join(conn.fetch_calls[0][0].split())
+    count_query = " ".join(conn.fetchrow_calls[0][0].split())
+    for query in (list_query, count_query):
+        assert "role_type = 'Tenant'::contact_role_type" in query
+        assert "cr_tenant.ended_at IS NULL" in query
+        assert ("NOT EXISTS (" in query) is expects_not
 
 
 @pytest.mark.asyncio

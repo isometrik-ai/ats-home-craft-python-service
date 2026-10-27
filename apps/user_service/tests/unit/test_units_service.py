@@ -365,12 +365,28 @@ async def test_list_units_returns_paginated_payload():
         1,
     )
 
-    result = await service.list_units(project_id="proj-1", page=1, page_size=20)
+    result = await service.list_units(
+        project_id="proj-1",
+        page=1,
+        page_size=20,
+        has_tenant=True,
+    )
 
     assert result["total"] == 1
     assert result["items"][0]["property_type"] == "residential"
     assert "summary" not in result
-    service.units_repo.list_units.assert_awaited_once()
+    service.units_repo.list_units.assert_awaited_once_with(
+        organization_id="org-1",
+        project_id="proj-1",
+        search=None,
+        property_type=None,
+        tower_id=None,
+        config_id=None,
+        status=None,
+        has_tenant=True,
+        page=1,
+        page_size=20,
+    )
 
 
 @pytest.mark.asyncio

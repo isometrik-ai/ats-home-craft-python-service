@@ -2632,7 +2632,9 @@ async def bulk_create_units(
         "Each item includes `two_wheeler_parking_entitlement` and "
         "`four_wheeler_parking_entitlement` from the unit config. "
         "Supports search by unit code/label/owner name and filters for property type, "
-        "tower, config, and unit status."
+        "tower, config, unit status, and `has_tenant`. "
+        "`has_tenant=true` returns units with an active tenant; "
+        "`has_tenant=false` returns units with no active tenant."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )
@@ -2660,6 +2662,7 @@ async def list_units(
         tower_id=query.tower_id,
         config_id=query.config_id,
         status=query.status.value if query.status else None,
+        has_tenant=query.has_tenant,
         page=query.page,
         page_size=query.page_size,
     )
@@ -2726,6 +2729,7 @@ async def get_units_registry_summary(
         tower_id=query.tower_id,
         config_id=query.config_id,
         status=query.status.value if query.status else None,
+        has_tenant=query.has_tenant,
     )
     data = UnitListSummary.model_validate(summary).model_dump()
     return success_response(
