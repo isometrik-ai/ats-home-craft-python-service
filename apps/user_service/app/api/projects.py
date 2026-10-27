@@ -2660,7 +2660,7 @@ async def list_units(
         tower_id=query.tower_id,
         config_id=query.config_id,
         status=query.status.value if query.status else None,
-        tenant_id=query.tenant_id,
+        tenant_id=str(query.tenant_id) if query.tenant_id else None,
         page=query.page,
         page_size=query.page_size,
     )
@@ -2727,7 +2727,7 @@ async def get_units_registry_summary(
         tower_id=query.tower_id,
         config_id=query.config_id,
         status=query.status.value if query.status else None,
-        tenant_id=query.tenant_id,
+        tenant_id=str(query.tenant_id) if query.tenant_id else None,
     )
     data = UnitListSummary.model_validate(summary).model_dump()
     return success_response(

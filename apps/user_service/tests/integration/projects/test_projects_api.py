@@ -1796,6 +1796,17 @@ async def test_list_units(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_list_units_rejects_malformed_tenant_id(client):
+    """GET /projects/{id}/units rejects a non-UUID tenant_id before the handler."""
+
+    res = await client.get(
+        f"/v1/projects/{PROJECT_ID}/units",
+        params={"tenant_id": "not-a-uuid"},
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_get_unit_detail(monkeypatch, client):
     """GET unit detail returns full unit payload."""
 

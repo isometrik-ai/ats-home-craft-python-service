@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -489,7 +490,7 @@ class ListProjectUnitsFilterQuery(BaseModel):
     tower_id: str | None = None
     config_id: str | None = None
     status: UnitStatus | None = None
-    tenant_id: str | None = Field(
+    tenant_id: UUID | None = Field(
         default=None,
         description=(
             "Optional contact id. When set, only units where this contact is the "
