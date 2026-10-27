@@ -139,8 +139,8 @@ async def test_create_project_notice(monkeypatch, client):
     """POST create returns new notice."""
     _patch_admin_access(monkeypatch)
 
-    async def fake_create_notice(_self, *, project_id: str, body):
-        del _self
+    async def fake_create_notice(_self, *, project_id: str, body, background_tasks=None):
+        del _self, background_tasks
         assert project_id == PROJECT_ID
         assert body.publish_mode == NoticePublishMode.DRAFT
         return _fake_detail()
@@ -164,8 +164,8 @@ async def test_create_project_notice_all_recipients_success(monkeypatch, client)
     """POST create accepts All and forwards the select-all shortcut."""
     _patch_admin_access(monkeypatch)
 
-    async def fake_create_notice(_self, *, project_id: str, body):
-        del _self
+    async def fake_create_notice(_self, *, project_id: str, body, background_tasks=None):
+        del _self, background_tasks
         assert project_id == PROJECT_ID
         assert body.recipient_groups == [NoticeRecipientInputGroup.ALL]
         return _fake_detail(
@@ -195,8 +195,8 @@ async def test_create_project_notice_with_unit_ids_success(monkeypatch, client):
     tower_id = "11111111-1111-4111-8111-111111111111"
     unit_id = "55555555-5555-4555-8555-555555555555"
 
-    async def fake_create_notice(_self, *, project_id: str, body):
-        del _self
+    async def fake_create_notice(_self, *, project_id: str, body, background_tasks=None):
+        del _self, background_tasks
         assert project_id == PROJECT_ID
         assert body.unit_ids == [unit_id]
         assert body.scope_type == NoticeScopeType.BY_TOWER
@@ -225,8 +225,8 @@ async def test_create_project_notice_invalid_recipient_group_fails(monkeypatch, 
     _patch_admin_access(monkeypatch)
     called = {"create": False}
 
-    async def fake_create_notice(_self, *, project_id: str, body):
-        del _self, project_id, body
+    async def fake_create_notice(_self, *, project_id: str, body, background_tasks=None):
+        del _self, project_id, body, background_tasks
         called["create"] = True
         return _fake_detail()
 
@@ -249,8 +249,10 @@ async def test_update_live_notice_conflict(monkeypatch, client):
     """PATCH live notice returns 409."""
     _patch_admin_access(monkeypatch)
 
-    async def fake_update_notice(_self, *, project_id: str, notice_id: str, body):
-        del _self, project_id, notice_id, body
+    async def fake_update_notice(
+        _self, *, project_id: str, notice_id: str, body, background_tasks=None
+    ):
+        del _self, project_id, notice_id, body, background_tasks
         raise ConflictException(
             message_key="notices.errors.not_editable",
             custom_code=CustomStatusCode.CONFLICT,

@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
+from fastapi import BackgroundTasks
 
 from apps.user_service.app.db.repositories.notices_repository import NoticesRepository
 from apps.user_service.app.schemas.enums import (
@@ -56,12 +57,16 @@ from apps.user_service.app.services.push_notification_dispatch import (
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.notice_targeting_utils import expand_recipient_groups
+from libs.shared_db.drivers.asyncpg_client import AcquireConnection, get_pool
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
     ValidationException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("notices_service")
 
 
 class NoticesService:
@@ -157,6 +162,7 @@ class NoticesService:
         *,
         project_id: str,
         body: CreateNoticeRequest,
+        background_tasks: BackgroundTasks | None = None,
     ) -> NoticeDetailResponse:
         """Create draft, scheduled, or live notice."""
         self._validate_content(body.title, body.description)
@@ -242,6 +248,7 @@ class NoticesService:
                 notice_id=notice_id,
                 title=body.title.strip(),
                 occurrence_at=fired_at,
+                background_tasks=background_tasks,
             )
 
         return await self.get_notice(project_id=project_id, notice_id=notice_id)
@@ -252,6 +259,7 @@ class NoticesService:
         project_id: str,
         notice_id: str,
         body: UpdateNoticeRequest,
+        background_tasks: BackgroundTasks | None = None,
     ) -> NoticeDetailResponse:
         """Update draft or scheduled notice."""
         existing = await self.repo.fetch_notice_by_id(
@@ -384,6 +392,7 @@ class NoticesService:
                 notice_id=notice_id,
                 title=updated.title,
                 occurrence_at=fired_at,
+                background_tasks=background_tasks,
             )
         return updated
 
@@ -654,6 +663,7 @@ class NoticesService:
         self,
         *,
         project_id: str | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> list[str]:
         """Promote scheduled notices and re-send live repeats that are due."""
         sends = await self.repo.claim_due_notice_sends(
@@ -674,6 +684,7 @@ class NoticesService:
                     notice_id=notice_id,
                     title=str(row["title"]),
                     occurrence_at=send["fired_at"] if send["repeating"] else None,
+                    background_tasks=background_tasks,
                 )
         return published_ids
 
@@ -1484,56 +1495,130 @@ class NoticesService:
         notice_id: str,
         title: str,
         occurrence_at: datetime | None = None,
+        background_tasks: BackgroundTasks | None = None,
     ) -> None:
-        """Send push notifications when a notice goes live."""
-        recipient_groups = await self.repo.list_recipient_groups(
-            organization_id=self.organization_id,
-            notice_id=notice_id,
-        )
-        unit_ids = await self.repo.list_unit_ids(
-            organization_id=self.organization_id,
-            notice_id=notice_id,
-        )
-        towers = await self.repo.list_towers_for_notice(
-            organization_id=self.organization_id,
-            notice_id=notice_id,
-        )
-        notice_row = await self.repo.fetch_notice_by_id(
+        """Send push when a notice goes live, or defer until after the HTTP response."""
+        if background_tasks is not None:
+            background_tasks.add_task(
+                dispatch_notice_publish_push_background,
+                organization_id=self.organization_id,
+                project_id=project_id,
+                notice_id=notice_id,
+                title=title,
+                occurrence_at=occurrence_at,
+            )
+            return
+        await dispatch_notice_publish_push(
+            self.db_connection,
             organization_id=self.organization_id,
             project_id=project_id,
             notice_id=notice_id,
+            title=title,
+            occurrence_at=occurrence_at,
+            repo=self.repo,
+            recipient_service=self.recipient_service,
+            push_dispatcher=self.push_dispatcher,
         )
-        if notice_row is None:
-            return
-        unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
-        tower_ids = [str(tower["tower_id"]) for tower in towers]
-        user_ids: set[str] = set(
-            await self.recipient_service.resolve_recipient_user_ids(
-                organization_id=self.organization_id,
+
+
+async def dispatch_notice_publish_push(
+    db_connection: asyncpg.Connection,
+    *,
+    organization_id: str,
+    project_id: str,
+    notice_id: str,
+    title: str,
+    occurrence_at: datetime | None = None,
+    repo: NoticesRepository | None = None,
+    recipient_service: NoticeRecipientResolutionService | None = None,
+    push_dispatcher: PushNotificationDispatcher | None = None,
+) -> None:
+    """Resolve recipients and send push notifications for a live notice."""
+    repo = repo or NoticesRepository(db_connection=db_connection)
+    recipient_service = recipient_service or NoticeRecipientResolutionService(
+        db_connection=db_connection
+    )
+    push_dispatcher = push_dispatcher or PushNotificationDispatcher(db_connection=db_connection)
+
+    recipient_groups = await repo.list_recipient_groups(
+        organization_id=organization_id,
+        notice_id=notice_id,
+    )
+    unit_ids = await repo.list_unit_ids(
+        organization_id=organization_id,
+        notice_id=notice_id,
+    )
+    towers = await repo.list_towers_for_notice(
+        organization_id=organization_id,
+        notice_id=notice_id,
+    )
+    notice_row = await repo.fetch_notice_by_id(
+        organization_id=organization_id,
+        project_id=project_id,
+        notice_id=notice_id,
+    )
+    if notice_row is None:
+        return
+    unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
+    tower_ids = [str(tower["tower_id"]) for tower in towers]
+    user_ids: set[str] = set(
+        await recipient_service.resolve_recipient_user_ids(
+            organization_id=organization_id,
+            project_id=project_id,
+            notice_id=notice_id,
+            recipient_groups=recipient_groups,
+            scope_type=str(notice_row["scope_type"]),
+            tower_ids=tower_ids,
+            unit_ids=unit_ids,
+            require_unpaid_invoice=unpaid_only,
+        )
+    )
+    for user_id in user_ids:
+        push_fields = NoticesService._notice_publish_push_fields(
+            project_id=project_id,
+            notice_id=notice_id,
+            recipient_user_id=user_id,
+            occurrence_at=occurrence_at,
+        )
+        await push_dispatcher.send_to_user(
+            organization_id=organization_id,
+            recipient_user_id=user_id,
+            message_key="notifications.push.notices.published",
+            notification_type="notice_published",
+            feed_type="notices",
+            params={"title": title},
+            data=push_fields["data"],
+            entity=push_fields["entity"],
+            options=push_fields["options"],
+        )
+
+
+async def dispatch_notice_publish_push_background(
+    *,
+    organization_id: str,
+    project_id: str,
+    notice_id: str,
+    title: str,
+    occurrence_at: datetime | None = None,
+) -> None:
+    """Best-effort publish push using a dedicated DB connection."""
+    try:
+        pool = await get_pool()
+        async with AcquireConnection(pool) as conn:
+            await dispatch_notice_publish_push(
+                conn,
+                organization_id=organization_id,
                 project_id=project_id,
                 notice_id=notice_id,
-                recipient_groups=recipient_groups,
-                scope_type=str(notice_row["scope_type"]),
-                tower_ids=tower_ids,
-                unit_ids=unit_ids,
-                require_unpaid_invoice=unpaid_only,
-            )
-        )
-        for user_id in user_ids:
-            push_fields = self._notice_publish_push_fields(
-                project_id=project_id,
-                notice_id=notice_id,
-                recipient_user_id=user_id,
+                title=title,
                 occurrence_at=occurrence_at,
             )
-            await self.push_dispatcher.send_to_user(
-                organization_id=self.organization_id,
-                recipient_user_id=user_id,
-                message_key="notifications.push.notices.published",
-                notification_type="notice_published",
-                feed_type="notices",
-                params={"title": title},
-                data=push_fields["data"],
-                entity=push_fields["entity"],
-                options=push_fields["options"],
-            )
+    except Exception:
+        logger.exception(
+            "notice_publish_push_background_failed",
+            extra={
+                "organization_id": organization_id,
+                "project_id": project_id,
+                "notice_id": notice_id,
+            },
+        )

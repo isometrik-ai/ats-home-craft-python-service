@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import BackgroundTasks
 from pydantic import ValidationError
 
 from apps.user_service.app.schemas.enums import (
@@ -424,6 +425,56 @@ async def test_create_notice_draft():
     detail = await svc.create_notice(project_id=PROJECT_ID, body=body)
     assert detail.title == "Pool closure"
     svc.repo.insert_notice.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_create_notice_publish_now_defers_push_until_background_runs():
+    """HTTP path schedules push; delivery runs when background tasks execute."""
+    svc = _service()
+    svc.setup_service = MagicMock()
+    svc.setup_service.ensure_project = AsyncMock()
+    svc.repo.allocate_sequence_number = AsyncMock(return_value=2)
+    svc.repo.insert_notice = AsyncMock(
+        return_value=_notice_detail_row(status=NoticeStatus.LIVE.value)
+    )
+    svc.repo.replace_recipients = AsyncMock()
+    svc.repo.replace_towers = AsyncMock()
+    svc.repo.replace_attachments = AsyncMock()
+    svc.repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
+    svc.repo.list_towers_for_notice = AsyncMock(return_value=[])
+    svc.repo.list_attachments = AsyncMock(return_value=[])
+    svc.repo.fetch_notice_by_id = AsyncMock(
+        return_value=_notice_detail_row(status=NoticeStatus.LIVE.value)
+    )
+    svc.push_dispatcher = MagicMock()
+    svc.push_dispatcher.send_to_user = AsyncMock()
+
+    body = CreateNoticeRequest(
+        title="Pool closure",
+        description="Closed tomorrow",
+        recipient_groups=[NoticeRecipientGroup.OWNER],
+        publish_mode=NoticePublishMode.NOW,
+    )
+    background_tasks = BackgroundTasks()
+    with patch(
+        "apps.user_service.app.services.notices_service.dispatch_notice_publish_push_background",
+        new_callable=AsyncMock,
+    ) as bg_push:
+        await svc.create_notice(
+            project_id=PROJECT_ID,
+            body=body,
+            background_tasks=background_tasks,
+        )
+        svc.push_dispatcher.send_to_user.assert_not_awaited()
+        bg_push.assert_not_awaited()
+        await background_tasks()
+        bg_push.assert_awaited_once_with(
+            organization_id="org-1",
+            project_id=PROJECT_ID,
+            notice_id=NOTICE_ID,
+            title="Pool closure",
+            occurrence_at=None,
+        )
 
 
 @pytest.mark.asyncio

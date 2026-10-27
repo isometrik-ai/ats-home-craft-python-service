@@ -41,28 +41,15 @@ async def test_publish_scheduled_notices_dispatches_push():
     with (
         patch("apps.user_service.app.jobs.publish_scheduled_notices.NoticesRepository") as repo_cls,
         patch(
-            "apps.user_service.app.jobs.publish_scheduled_notices.NoticeRecipientResolutionService"
-        ) as recipient_cls,
-        patch(
-            "apps.user_service.app.jobs.publish_scheduled_notices.PushNotificationDispatcher"
-        ) as push_cls,
+            "apps.user_service.app.jobs.publish_scheduled_notices.dispatch_notice_publish_push",
+            new_callable=AsyncMock,
+        ) as dispatch_push,
     ):
         repo = repo_cls.return_value
         repo.claim_due_notice_sends = AsyncMock(
             return_value=[{"id": NOTICE, "fired_at": None, "repeating": False}]
         )
         repo.list_notices_published_since = AsyncMock(return_value=[notice_row])
-        repo.list_recipient_groups = AsyncMock(return_value=["Owner"])
-        repo.list_contact_recipient_ids = AsyncMock(return_value=[])
-        repo.list_unit_ids = AsyncMock(return_value=[])
-        repo.list_towers_for_notice = AsyncMock(return_value=[])
-        repo.fetch_notice_by_id = AsyncMock(return_value=notice_row)
-
-        recipient = recipient_cls.return_value
-        recipient.resolve_recipient_user_ids = AsyncMock(return_value=["user-1", "user-2"])
-
-        push = push_cls.return_value
-        push.send_to_user = AsyncMock()
 
         result = await publish_scheduled_notices(
             conn,
@@ -71,7 +58,14 @@ async def test_publish_scheduled_notices_dispatches_push():
         )
 
     assert result == [NOTICE]
-    assert push.send_to_user.await_count == 2
+    dispatch_push.assert_awaited_once_with(
+        conn,
+        organization_id=ORG,
+        project_id=PROJECT,
+        notice_id=NOTICE,
+        title="Pool closure",
+        occurrence_at=None,
+    )
 
 
 @pytest.mark.asyncio
@@ -80,25 +74,20 @@ async def test_publish_scheduled_notices_skips_missing_notice_rows():
     with (
         patch("apps.user_service.app.jobs.publish_scheduled_notices.NoticesRepository") as repo_cls,
         patch(
-            "apps.user_service.app.jobs.publish_scheduled_notices.NoticeRecipientResolutionService"
-        ),
-        patch(
-            "apps.user_service.app.jobs.publish_scheduled_notices.PushNotificationDispatcher"
-        ) as push_cls,
+            "apps.user_service.app.jobs.publish_scheduled_notices.dispatch_notice_publish_push",
+            new_callable=AsyncMock,
+        ) as dispatch_push,
     ):
         repo = repo_cls.return_value
         repo.claim_due_notice_sends = AsyncMock(
             return_value=[{"id": NOTICE, "fired_at": None, "repeating": False}]
         )
         repo.list_notices_published_since = AsyncMock(return_value=[])
-        repo.fetch_notice_by_id = AsyncMock(return_value=None)
-        push = push_cls.return_value
-        push.send_to_user = AsyncMock()
 
         result = await publish_scheduled_notices(conn)
 
     assert result == [NOTICE]
-    push.send_to_user.assert_not_awaited()
+    dispatch_push.assert_not_awaited()
 
 
 @pytest.mark.asyncio
