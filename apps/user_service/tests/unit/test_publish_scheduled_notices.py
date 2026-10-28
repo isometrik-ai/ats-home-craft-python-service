@@ -94,6 +94,7 @@ async def test_publish_scheduled_notices_queues_push():
     queued = background_tasks.add_task.call_args.args
     assert queued[0] is dispatch_due_notice_pushes
     assert queued[1] == [{"id": NOTICE, "fired_at": None, "repeating": False}]
+    assert queued[2] is conn
 
 
 @pytest.mark.asyncio

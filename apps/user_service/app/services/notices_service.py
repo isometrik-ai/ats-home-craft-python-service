@@ -57,7 +57,6 @@ from apps.user_service.app.services.push_notification_dispatch import (
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from apps.user_service.app.utils.notice_targeting_utils import expand_recipient_groups
-from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
 from libs.shared_utils.http_exceptions import (
     ConflictException,
     NotFoundException,
@@ -74,25 +73,29 @@ async def dispatch_notice_publish_push(
     project_id: str,
     notice_id: str,
     title: str,
+    db_connection: asyncpg.Connection,
     occurrence_at: datetime | None = None,
 ) -> None:
-    """Send publish pushes after the request transaction has committed."""
+    """Send publish pushes after the HTTP response, on the request connection.
+
+    FastAPI runs this before the request transaction commits. A new connection
+    cannot see the notice yet, so the push must use the connection that saved it.
+    """
     try:
-        async with UnitOfWork() as connection:
-            service = NoticesService(
-                db_connection=connection,
-                user_context=UserContext(
-                    user_id="system",
-                    email="",
-                    organization_id=organization_id,
-                ),
-            )
-            await service.dispatch_publish_push(
-                project_id=project_id,
-                notice_id=notice_id,
-                title=title,
-                occurrence_at=occurrence_at,
-            )
+        service = NoticesService(
+            db_connection=db_connection,
+            user_context=UserContext(
+                user_id="system",
+                email="",
+                organization_id=organization_id,
+            ),
+        )
+        await service.dispatch_publish_push(
+            project_id=project_id,
+            notice_id=notice_id,
+            title=title,
+            occurrence_at=occurrence_at,
+        )
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("notice publish push failed notice_id=%s", notice_id)
 
@@ -1535,6 +1538,7 @@ class NoticesService:
                 project_id,
                 notice_id,
                 title,
+                self.db_connection,
                 occurrence_at,
             )
             return
@@ -1572,6 +1576,7 @@ class NoticesService:
             notice_id=notice_id,
         )
         if notice_row is None:
+            logger.warning("notice publish push skipped missing notice_id=%s", notice_id)
             return
         unpaid_only = str(notice_row.get("category") or "") == NoticeCategory.INVOICE_UNPAID.value
         tower_ids = [str(tower["tower_id"]) for tower in towers]
