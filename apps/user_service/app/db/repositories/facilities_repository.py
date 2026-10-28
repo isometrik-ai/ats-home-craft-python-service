@@ -43,6 +43,7 @@ _FACILITY_INSERT_COLUMNS: tuple[str, ...] = (
     "sort_order",
     "is_bookable",
     "booking_archetype",
+    "photo_paths",
 )
 
 

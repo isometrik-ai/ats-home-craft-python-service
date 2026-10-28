@@ -55,4 +55,5 @@ def serialize_facility_row(row: dict[str, Any]) -> dict[str, Any]:
             out[key] = str(raw.value)
         else:
             out[key] = str(raw)
+    out["photo_paths"] = [str(path) for path in (out.get("photo_paths") or []) if path]
     return out

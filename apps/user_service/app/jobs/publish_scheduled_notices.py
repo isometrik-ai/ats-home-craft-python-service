@@ -16,7 +16,6 @@ from apps.user_service.app.services.notices_service import NoticesService
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
-from libs.shared_db.drivers.asyncpg_uow import UnitOfWork
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("publish_scheduled_notices")
@@ -43,6 +42,7 @@ async def publish_scheduled_notices(
         background_tasks.add_task(
             dispatch_due_notice_pushes,
             [_send_payload(send) for send in sends],
+            db_connection,
         )
         return published_ids
 
@@ -59,14 +59,20 @@ def _send_payload(send: Any) -> dict[str, Any]:
     }
 
 
-async def dispatch_due_notice_pushes(sends: list[dict[str, Any]]) -> None:
-    """Send publish pushes after the publish-due transaction has committed."""
+async def dispatch_due_notice_pushes(
+    sends: list[dict[str, Any]],
+    db_connection: asyncpg.Connection,
+) -> None:
+    """Send publish pushes after the HTTP response, on the request connection.
+
+    FastAPI runs this before the request transaction commits. A new connection
+    cannot see the claimed notices yet.
+    """
     if not sends:
         return
     try:
-        async with UnitOfWork() as connection:
-            sends_by_id = {str(send["id"]): send for send in sends}
-            await _dispatch_claimed_pushes(connection, sends_by_id)
+        sends_by_id = {str(send["id"]): send for send in sends}
+        await _dispatch_claimed_pushes(db_connection, sends_by_id)
     except Exception:  # pylint: disable=broad-exception-caught
         logger.exception("due notice publish push failed")
 

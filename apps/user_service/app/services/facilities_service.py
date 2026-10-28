@@ -105,6 +105,7 @@ class FacilitiesService:
         data["extra_attributes"] = body.extra_attributes or {}
         if body.booking_archetype:
             data["booking_archetype"] = body.booking_archetype.value
+        data["photo_paths"] = list(body.photo_paths)
         return data
 
     def _serialize_update_facility(self, body: UpdateFacilityRequest) -> dict[str, Any]:
@@ -124,6 +125,8 @@ class FacilitiesService:
             data["numbering_pattern"] = body.numbering_pattern.value
         if body.booking_archetype:
             data["booking_archetype"] = body.booking_archetype.value
+        if body.photo_paths is not None:
+            data["photo_paths"] = list(body.photo_paths)
         return data
 
     async def _resolve_tower_has_wings(

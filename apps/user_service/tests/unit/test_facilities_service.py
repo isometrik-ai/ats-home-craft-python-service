@@ -178,6 +178,71 @@ async def test_create_facility_non_parking_skips_slots():
 
 
 @pytest.mark.asyncio
+async def test_create_facility_persists_photo_paths():
+    """Create stores gallery paths and returns photo_paths."""
+    svc = _service()
+    photo_paths = ["org/facilities/gym-1.jpg", "org/facilities/gym-2.jpg"]
+    svc.facilities_repo.insert_facility = AsyncMock(
+        return_value={
+            "id": FACILITY_ID,
+            "name": "Gym",
+            "facility_type": "sports",
+            "photo_paths": photo_paths,
+        }
+    )
+    body = CreateFacilityRequest(
+        name="Gym",
+        facility_type=FacilityType.SPORTS,
+        location_type=FacilityLocationType.OUTDOOR_STANDALONE,
+        photo_paths=photo_paths,
+    )
+
+    result = await svc.create_facility(project_id=PROJECT_ID, body=body)
+
+    payload = svc.facilities_repo.insert_facility.await_args.args[0]
+    assert payload["photo_paths"] == photo_paths
+    assert result["photo_paths"] == photo_paths
+
+
+def test_create_facility_rejects_invalid_photo_path():
+    """Empty storage paths are rejected on create."""
+    with pytest.raises(ValidationException) as exc_info:
+        CreateFacilityRequest(
+            name="Gym",
+            facility_type=FacilityType.SPORTS,
+            location_type=FacilityLocationType.OUTDOOR_STANDALONE,
+            photo_paths=[""],
+        )
+    assert exc_info.value.message_key == "project_setup.errors.invalid_facility_photo_path"
+
+
+@pytest.mark.asyncio
+async def test_update_facility_replaces_photo_paths():
+    """PATCH photo_paths replaces the stored gallery paths."""
+    svc = _service()
+    photo_paths = ["org/facilities/gym-3.jpg"]
+    svc.facilities_repo.update_facility = AsyncMock(
+        return_value={
+            "id": FACILITY_ID,
+            "name": "Gym",
+            "facility_type": "sports",
+            "location_type": "outdoor_standalone",
+            "photo_paths": photo_paths,
+        }
+    )
+
+    result = await svc.update_facility(
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        body=UpdateFacilityRequest(photo_paths=photo_paths),
+    )
+
+    patch = svc.facilities_repo.update_facility.await_args.kwargs["update_data"]
+    assert patch["photo_paths"] == photo_paths
+    assert result["photo_paths"] == photo_paths
+
+
+@pytest.mark.asyncio
 async def test_list_facilities_forwards_search_to_repository():
     """list_facilities passes search through to the repository."""
     svc = _service()

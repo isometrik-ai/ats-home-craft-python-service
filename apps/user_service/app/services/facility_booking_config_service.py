@@ -150,6 +150,7 @@ class FacilityBookingConfigService:
         policies = row.get("policies") or {}
         pricing = row.get("pricing") or {}
         setup = row.get("setup") or {}
+        photo_paths = [str(path) for path in (row.get("facility_photo_paths") or []) if path]
         return BookableFacilityResponse(
             id=str(row["facility_id"]),
             name=str(row.get("facility_name") or ""),
@@ -174,6 +175,7 @@ class FacilityBookingConfigService:
             ],
             tower_id=_sid(row.get("facility_tower_id")),
             location_notes=row.get("facility_location_notes"),
+            photo_paths=photo_paths,
         ).model_dump(mode="json")
 
     async def list_bookable_facilities(

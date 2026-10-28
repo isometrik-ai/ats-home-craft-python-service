@@ -510,6 +510,7 @@ async def test_create_notice_publish_now_queues_push():
     )
 
     background_tasks.add_task.assert_called_once()
+    assert background_tasks.add_task.call_args.args[5] is svc.db_connection
     svc.push_dispatcher.send_to_user.assert_not_awaited()
 
 

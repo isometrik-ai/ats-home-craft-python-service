@@ -76,6 +76,30 @@ async def test_insert_facility_with_extra_attributes_and_casts():
 
 
 @pytest.mark.asyncio
+async def test_insert_facility_includes_photo_paths():
+    """Insert writes photo_paths when provided."""
+    photos = ["org/facilities/club-1.jpg"]
+    conn = _FakeConn(row={"id": FACILITY_ID, "photo_paths": photos})
+    repo = FacilitiesRepository(db_connection=conn)
+
+    inserted = await repo.insert_facility(
+        {
+            "organization_id": ORG_ID,
+            "project_id": PROJECT_ID,
+            "name": "Clubhouse",
+            "status": "active",
+            "location_type": "tower",
+            "photo_paths": photos,
+        }
+    )
+
+    assert inserted["photo_paths"] == photos
+    query, args = conn.fetchrow_calls[0]
+    assert "photo_paths" in query
+    assert photos in args
+
+
+@pytest.mark.asyncio
 async def test_insert_facility_extra_attributes_none_serializes_empty_object():
     """None extra_attributes is stored as empty JSON object."""
     conn = _FakeConn(row={"id": FACILITY_ID})

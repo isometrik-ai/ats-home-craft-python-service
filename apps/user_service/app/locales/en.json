@@ -426,6 +426,7 @@
       "facility_starting_slot_number_invalid": "Starting slot number must be at least 1 for parking facilities.",
       "facility_not_bookable_type": "Parking and utility facilities cannot be marked bookable.",
       "facility_has_upcoming_bookings": "This facility has upcoming reservations and cannot be changed or deleted.",
+      "invalid_facility_photo_path": "One or more facility photo paths are invalid.",
       "community_admin_not_org_member": "The selected community admin must be an active member of this organization."
     },
     "success": {
