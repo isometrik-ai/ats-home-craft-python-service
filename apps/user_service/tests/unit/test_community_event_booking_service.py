@@ -23,6 +23,10 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.community_event_booking_service import (
     CommunityEventBookingService,
 )
+from apps.user_service.app.services.push_notification_service import (
+    PushNotificationSendResult,
+    PushNotificationSendStatus,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -53,7 +57,9 @@ def _service() -> CommunityEventBookingService:
     svc.notifications.notify_booking_waitlisted = AsyncMock()
     svc.notifications.notify_waitlist_promoted = AsyncMock()
     svc.notifications.notify_payment_received = AsyncMock()
-    svc.notifications.notify_tickets_resent = AsyncMock(return_value=True)
+    svc.notifications.notify_tickets_resent = AsyncMock(
+        return_value=PushNotificationSendResult(status=PushNotificationSendStatus.SENT)
+    )
     return svc
 
 
@@ -727,7 +733,7 @@ async def test_resend_tickets_rejects_missing_recipient():
     svc = _service()
     svc.repo.fetch_booking_by_id = AsyncMock(return_value=_issued_booking())
     svc.repo.fetch_event_by_id = AsyncMock(return_value=_resendable_event())
-    svc.notifications.notify_tickets_resent = AsyncMock(return_value=False)
+    svc.notifications.notify_tickets_resent = AsyncMock(return_value=None)
     svc.repo.insert_audit_log = AsyncMock()
 
     with pytest.raises(ConflictException) as exc_info:
@@ -737,6 +743,26 @@ async def test_resend_tickets_rejects_missing_recipient():
             booking_id=BOOKING_ID,
         )
     assert exc_info.value.message_key == "community_events.errors.tickets_recipient_unavailable"
+    svc.repo.insert_audit_log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resend_tickets_rejects_when_push_skipped():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(return_value=_issued_booking())
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=_resendable_event())
+    svc.notifications.notify_tickets_resent = AsyncMock(
+        return_value=PushNotificationSendResult(status=PushNotificationSendStatus.SKIPPED)
+    )
+    svc.repo.insert_audit_log = AsyncMock()
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.resend_tickets(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
+        )
+    assert exc_info.value.message_key == "community_events.errors.tickets_not_delivered"
     svc.repo.insert_audit_log.assert_not_awaited()
 
 

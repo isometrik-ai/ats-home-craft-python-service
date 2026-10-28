@@ -526,6 +526,13 @@ async def test_list_bookings():
 
     svc = _service()
     now = datetime.now(timezone.utc)
+    svc.repo.fetch_event_by_id = AsyncMock(
+        return_value={
+            "id": EVENT_ID,
+            "publish_status": CommunityEventPublishStatus.PUBLISHED.value,
+            "record_status": "active",
+        }
+    )
     svc.repo.list_bookings_for_event = AsyncMock(
         return_value=(
             [
@@ -558,6 +565,52 @@ async def test_list_bookings():
     assert items[0].tickets_issued is True
     assert items[0].can_resend_tickets is True
     assert [ticket.code for ticket in items[0].tickets] == ["BKG-1-A1", "BKG-1-A2"]
+
+
+@pytest.mark.asyncio
+async def test_list_bookings_hides_resend_when_event_cancelled():
+    from apps.user_service.app.schemas.community_events import (
+        CommunityEventBookingListQuery,
+    )
+
+    svc = _service()
+    now = datetime.now(timezone.utc)
+    svc.repo.fetch_event_by_id = AsyncMock(
+        return_value={
+            "id": EVENT_ID,
+            "publish_status": CommunityEventPublishStatus.CANCELLED.value,
+            "record_status": "active",
+        }
+    )
+    svc.repo.list_bookings_for_event = AsyncMock(
+        return_value=(
+            [
+                {
+                    "id": "booking-1",
+                    "display_code": "BKG-1",
+                    "contact_id": "contact-1",
+                    "adult_tickets": 2,
+                    "child_tickets": 0,
+                    "total_tickets": 2,
+                    "total_amount_minor": 0,
+                    "currency": "INR",
+                    "booking_status": "confirmed",
+                    "payment_status": "paid",
+                    "paid_at": now,
+                    "booked_at": now,
+                }
+            ],
+            1,
+        )
+    )
+    items, total = await svc.list_bookings(
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+        query=CommunityEventBookingListQuery(),
+    )
+    assert total == 1
+    assert items[0].tickets_issued is True
+    assert items[0].can_resend_tickets is False
 
 
 @pytest.mark.asyncio

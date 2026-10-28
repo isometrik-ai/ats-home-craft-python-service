@@ -740,6 +740,16 @@ class CommunityEventsService:
     ) -> tuple[list[CommunityEventBookingListItemResponse], int]:
         """List bookings for an event."""
         offset = (query.page - 1) * query.page_size
+        event = await self.repo.fetch_event_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
+        if not event:
+            raise NotFoundException(
+                message_key="community_events.errors.event_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
         rows, total = await self.repo.list_bookings_for_event(
             organization_id=self.organization_id,
             project_id=project_id,
@@ -749,11 +759,14 @@ class CommunityEventsService:
             limit=query.page_size,
             offset=offset,
         )
-        items = [self._booking_list_item(r) for r in rows]
+        items = [self._booking_list_item(r, event=event) for r in rows]
         return items, total
 
     @staticmethod
-    def _booking_list_item(row: dict[str, Any]) -> CommunityEventBookingListItemResponse:
+    def _booking_list_item(
+        row: dict[str, Any],
+        event: dict[str, Any] | None = None,
+    ) -> CommunityEventBookingListItemResponse:
         """Map a booking row to admin list item."""
         issued = tickets_are_issued(row)
         return CommunityEventBookingListItemResponse(
@@ -771,7 +784,7 @@ class CommunityEventsService:
             paid_at=row.get("paid_at"),
             booked_at=row["booked_at"],
             tickets_issued=issued,
-            can_resend_tickets=can_resend_event_tickets(row),
+            can_resend_tickets=can_resend_event_tickets(row, event),
             tickets=[EventTicketItemResponse(**item) for item in ticket_items_for_booking(row)],
         )
 

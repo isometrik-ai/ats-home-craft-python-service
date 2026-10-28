@@ -1392,6 +1392,7 @@
       "tickets_not_issued": "Tickets have not been issued for this booking yet.",
       "tickets_not_resendable": "Tickets can only be resent for a confirmed booking on a published or completed event.",
       "tickets_recipient_unavailable": "This resident has no linked app account to receive tickets.",
+      "tickets_not_delivered": "Tickets could not be delivered to this resident.",
       "booking_already_cancelled": "This booking has already been cancelled.",
       "booking_not_valid_for_gate": "This booking is not valid for gate entry.",
       "booking_not_valid_for_payment": "This booking is not eligible for online payment.",

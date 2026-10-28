@@ -19,6 +19,10 @@ from apps.user_service.app.services.community_event_notification_service import 
     ticket_push_data,
     tickets_are_issued,
 )
+from apps.user_service.app.services.push_notification_service import (
+    PushNotificationSendResult,
+    PushNotificationSendStatus,
+)
 
 ORG = "11111111-1111-1111-1111-111111111111"
 EVENT = "22222222-2222-2222-2222-222222222222"
@@ -28,7 +32,9 @@ BOOKING = "33333333-3333-3333-3333-333333333333"
 def _service() -> CommunityEventNotificationService:
     svc = CommunityEventNotificationService(db_connection=MagicMock())
     svc.push_dispatcher = MagicMock()
-    svc.push_dispatcher.send_to_user = AsyncMock()
+    svc.push_dispatcher.send_to_user = AsyncMock(
+        return_value=PushNotificationSendResult(status=PushNotificationSendStatus.SENT)
+    )
     svc.contacts_repo = MagicMock()
     return svc
 
@@ -190,7 +196,8 @@ async def test_notify_tickets_resent_replays_same_payload():
             "gate_qr_token": "original-qr",
         },
     )
-    assert sent is True
+    assert sent is not None
+    assert sent.status == PushNotificationSendStatus.SENT
     call_kwargs = svc.push_dispatcher.send_to_user.await_args.kwargs
     assert call_kwargs["message_key"] == "notifications.push.community_events.tickets_resent"
     assert call_kwargs["params"]["ticket_codes"] == "BKG-36-A1, BKG-36-A2"
@@ -207,8 +214,25 @@ async def test_notify_tickets_resent_returns_false_without_user():
         event={"id": EVENT, "title": "Fest"},
         booking={"id": BOOKING, "display_code": "BKG-1"},
     )
-    assert sent is False
+    assert sent is None
     svc.push_dispatcher.send_to_user.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_notify_tickets_resent_returns_skipped_result():
+    svc = _service()
+    svc.contacts_repo.get_contact_details = AsyncMock(return_value={"user_id": "user-1"})
+    svc.push_dispatcher.send_to_user = AsyncMock(
+        return_value=PushNotificationSendResult(status=PushNotificationSendStatus.SKIPPED)
+    )
+    result = await svc.notify_tickets_resent(
+        organization_id=ORG,
+        contact_id="contact-1",
+        event={"id": EVENT, "title": "Fest"},
+        booking={"id": BOOKING, "display_code": "BKG-1"},
+    )
+    assert result is not None
+    assert result.status == PushNotificationSendStatus.SKIPPED
 
 
 def test_ticket_items_stable_adult_and_child_codes() -> None:

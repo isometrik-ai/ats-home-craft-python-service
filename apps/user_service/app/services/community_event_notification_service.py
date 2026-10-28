@@ -16,6 +16,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
+from apps.user_service.app.services.push_notification_service import (
+    PushNotificationSendResult,
+)
 from libs.shared_utils.logger import get_logger
 
 logger = get_logger("community_event_notifications")
@@ -253,16 +256,16 @@ class CommunityEventNotificationService:
         contact_id: str,
         event: dict[str, Any],
         booking: dict[str, Any],
-    ) -> bool:
-        """Replay the original ticket payload. Returns False when no linked user."""
+    ) -> PushNotificationSendResult | None:
+        """Replay the original ticket payload. None when the contact has no linked user."""
         contact = await self.contacts_repo.get_contact_details(
             organization_id=organization_id,
             contact_id=contact_id,
         )
         if not contact or not contact.get("user_id"):
-            return False
+            return None
         payload = ticket_push_data(event=event, booking=booking)
-        await self.push_dispatcher.send_to_user(
+        return await self.push_dispatcher.send_to_user(
             organization_id=organization_id,
             recipient_user_id=str(contact["user_id"]),
             message_key="notifications.push.community_events.tickets_resent",
@@ -276,7 +279,6 @@ class CommunityEventNotificationService:
             entity={"type": "community_event", "id": payload.get("event_id", "")},
             options={},
         )
-        return True
 
     async def notify_event_reminder(
         self,

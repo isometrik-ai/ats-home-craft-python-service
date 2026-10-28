@@ -41,6 +41,9 @@ from apps.user_service.app.services.community_event_notification_service import 
     can_resend_event_tickets,
     ticket_items_for_booking,
 )
+from apps.user_service.app.services.push_notification_service import (
+    PushNotificationSendStatus,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -775,15 +778,20 @@ class CommunityEventBookingService:
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
-        sent = await self.notifications.notify_tickets_resent(
+        result = await self.notifications.notify_tickets_resent(
             organization_id=self.organization_id,
             contact_id=str(booking["contact_id"]),
             event=event,
             booking=booking,
         )
-        if not sent:
+        if result is None:
             raise ConflictException(
                 message_key="community_events.errors.tickets_recipient_unavailable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        if result.status != PushNotificationSendStatus.SENT:
+            raise ConflictException(
+                message_key="community_events.errors.tickets_not_delivered",
                 custom_code=CustomStatusCode.CONFLICT,
             )
 
