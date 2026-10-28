@@ -22,7 +22,8 @@ _CONFIG_SELECT = """
         f.active AS facility_active,
         f.tower_id AS facility_tower_id,
         f.location_notes AS facility_location_notes,
-        f.sort_order AS facility_sort_order
+        f.sort_order AS facility_sort_order,
+        f.photo_paths AS facility_photo_paths
     FROM facility_booking_configs c
     INNER JOIN facilities f ON f.id = c.facility_id
 """

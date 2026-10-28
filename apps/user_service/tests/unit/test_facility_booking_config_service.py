@@ -80,6 +80,7 @@ def _config_row() -> dict:
         "setup": defaults.setup.model_dump(mode="json"),
         "description": "Outdoor pool",
         "version": 2,
+        "facility_photo_paths": ["org/facilities/pool-1.jpg"],
     }
 
 
@@ -272,6 +273,7 @@ async def test_list_bookable_facilities_and_workspace() -> None:
     cards = await svc.list_bookable_facilities(project_id=PROJECT_ID)
     assert cards[0]["name"] == "Club Pool"
     assert cards[0]["units"][0]["name"] == "Lane 1"
+    assert cards[0]["photo_paths"] == ["org/facilities/pool-1.jpg"]
 
     svc.inventory_repo.load_all = AsyncMock(
         return_value={

@@ -384,6 +384,7 @@ class BookableFacilityResponse(BaseModel):
     units: list[BookingUnitSummary] = Field(default_factory=list)
     tower_id: str | None = None
     location_notes: str | None = None
+    photo_paths: list[str] = Field(default_factory=list)
 
 
 class StaffReservationListQuery(BaseModel):

@@ -109,3 +109,18 @@ def test_serialize_facility_row_enum_values():
 
     assert result["parking_vehicle_category"] == "two_wheeler"
     assert result["parking_user_type"] == "visitors"
+
+
+def test_serialize_facility_row_includes_photo_paths():
+    row = {
+        "id": "facility-1",
+        "name": "Clubhouse",
+        "facility_type": "recreation",
+        "parking_vehicle_category": None,
+        "parking_user_type": None,
+        "photo_paths": ["org/facilities/club-1.jpg", "org/facilities/club-2.jpg"],
+    }
+
+    result = serialize_facility_row(row)
+
+    assert result["photo_paths"] == ["org/facilities/club-1.jpg", "org/facilities/club-2.jpg"]

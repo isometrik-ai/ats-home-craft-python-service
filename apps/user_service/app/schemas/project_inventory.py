@@ -27,6 +27,25 @@ from apps.user_service.app.schemas.enums import (
     UnitOccupantAssignment,
     UnitStatus,
 )
+from libs.shared_utils.http_exceptions import ValidationException
+from libs.shared_utils.status_codes import CustomStatusCode
+
+_FACILITY_PHOTO_MAX = 10
+_FACILITY_PHOTO_PATH_MAX = 500
+
+
+def _validate_facility_photo_paths(photo_paths: list[str] | None) -> list[str] | None:
+    """Validate optional facility gallery storage paths."""
+    if photo_paths is None:
+        return photo_paths
+    for path in photo_paths:
+        if not path or len(path) > _FACILITY_PHOTO_PATH_MAX:
+            raise ValidationException(
+                message_key="project_setup.errors.invalid_facility_photo_path",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+    return photo_paths
+
 
 # ---------------------------------------------------------------------------
 # Unit configs
@@ -268,6 +287,13 @@ class CreateFacilityRequest(BaseModel):
     sort_order: int = Field(default=0, ge=0)
     is_bookable: bool = False
     booking_archetype: FacilityBookingArchetype | None = None
+    photo_paths: list[str] = Field(default_factory=list, max_length=_FACILITY_PHOTO_MAX)
+
+    @field_validator("photo_paths")
+    @classmethod
+    def validate_photo_paths(cls, photo_paths: list[str]) -> list[str]:
+        """Validate storage paths for facility gallery images."""
+        return _validate_facility_photo_paths(photo_paths) or []
 
 
 class UpdateFacilityRequest(BaseModel):
@@ -299,6 +325,13 @@ class UpdateFacilityRequest(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
     is_bookable: bool | None = None
     booking_archetype: FacilityBookingArchetype | None = None
+    photo_paths: list[str] | None = Field(default=None, max_length=_FACILITY_PHOTO_MAX)
+
+    @field_validator("photo_paths")
+    @classmethod
+    def validate_photo_paths(cls, photo_paths: list[str] | None) -> list[str] | None:
+        """Validate storage paths when replacing the facility gallery."""
+        return _validate_facility_photo_paths(photo_paths)
 
 
 class FacilityListItemResponse(BaseModel):
@@ -317,6 +350,7 @@ class FacilityListItemResponse(BaseModel):
     facility_subtype: str | None = None
     is_bookable: bool = False
     booking_archetype: FacilityBookingArchetype | None = None
+    photo_paths: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
