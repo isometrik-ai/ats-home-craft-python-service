@@ -53,6 +53,7 @@ def _service() -> CommunityEventBookingService:
     svc.notifications.notify_booking_waitlisted = AsyncMock()
     svc.notifications.notify_waitlist_promoted = AsyncMock()
     svc.notifications.notify_payment_received = AsyncMock()
+    svc.notifications.notify_tickets_resent = AsyncMock(return_value=True)
     return svc
 
 
@@ -609,3 +610,143 @@ async def test_promote_waitlist_noops_when_capacity_full():
     await svc._promote_waitlist(event_id=EVENT_ID)
 
     svc.repo.fetch_oldest_waitlisted_booking.assert_not_called()
+
+
+def _issued_booking(**overrides) -> dict:
+    now = datetime.now(timezone.utc)
+    base = {
+        "id": BOOKING_ID,
+        "project_id": PROJECT_ID,
+        "event_id": EVENT_ID,
+        "contact_id": CONTACT_ID,
+        "display_code": "BKG-36",
+        "adult_tickets": 2,
+        "child_tickets": 0,
+        "total_tickets": 2,
+        "total_amount_minor": 22000,
+        "currency": "INR",
+        "booking_status": CommunityEventBookingStatus.CONFIRMED.value,
+        "payment_status": CommunityEventPaymentStatus.PAID.value,
+        "gate_qr_token": "original-qr",
+        "booked_at": now,
+        "paid_at": now,
+        "contact_name": "Kate Bell",
+    }
+    base.update(overrides)
+    return base
+
+
+def _resendable_event(**overrides) -> dict:
+    base = {
+        "id": EVENT_ID,
+        "project_id": PROJECT_ID,
+        "title": "Brazil fest",
+        "publish_status": CommunityEventPublishStatus.PUBLISHED.value,
+        "record_status": CommunityEventRecordStatus.ACTIVE.value,
+    }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_resend_tickets_replays_existing_codes_and_qr():
+    svc = _service()
+    booking = _issued_booking()
+    svc.repo.fetch_booking_by_id = AsyncMock(return_value=booking)
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=_resendable_event())
+    svc.repo.insert_audit_log = AsyncMock()
+    svc.repo.update_booking_fields = AsyncMock()
+
+    result = await svc.resend_tickets(
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+        booking_id=BOOKING_ID,
+    )
+
+    assert result["gate_qr_token"] == "original-qr"
+    assert result["display_code"] == "BKG-36"
+    svc.repo.update_booking_fields.assert_not_called()
+    svc.notifications.notify_tickets_resent.assert_awaited_once()
+    notify_kwargs = svc.notifications.notify_tickets_resent.await_args.kwargs
+    assert notify_kwargs["booking"]["gate_qr_token"] == "original-qr"
+    audit_kwargs = svc.repo.insert_audit_log.await_args.kwargs
+    assert audit_kwargs["action"] == "tickets_resent"
+    assert audit_kwargs["payload"]["ticket_codes"] == ["BKG-36-A1", "BKG-36-A2"]
+    assert audit_kwargs["payload"]["gate_qr_token"] == "original-qr"
+
+
+@pytest.mark.asyncio
+async def test_resend_tickets_rejects_pending_payment():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(
+        return_value=_issued_booking(payment_status=CommunityEventPaymentStatus.PENDING.value)
+    )
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=_resendable_event())
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.resend_tickets(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
+        )
+    assert exc_info.value.message_key == "community_events.errors.tickets_not_issued"
+    svc.notifications.notify_tickets_resent.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resend_tickets_rejects_waitlisted_and_cancelled_event():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(
+        return_value=_issued_booking(booking_status=CommunityEventBookingStatus.WAITLISTED.value)
+    )
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=_resendable_event())
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.resend_tickets(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
+        )
+    assert exc_info.value.message_key == "community_events.errors.tickets_not_resendable"
+
+    svc.repo.fetch_booking_by_id = AsyncMock(return_value=_issued_booking())
+    svc.repo.fetch_event_by_id = AsyncMock(
+        return_value=_resendable_event(publish_status=CommunityEventPublishStatus.CANCELLED.value)
+    )
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.resend_tickets(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
+        )
+    assert exc_info.value.message_key == "community_events.errors.tickets_not_resendable"
+
+
+@pytest.mark.asyncio
+async def test_resend_tickets_rejects_missing_recipient():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(return_value=_issued_booking())
+    svc.repo.fetch_event_by_id = AsyncMock(return_value=_resendable_event())
+    svc.notifications.notify_tickets_resent = AsyncMock(return_value=False)
+    svc.repo.insert_audit_log = AsyncMock()
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.resend_tickets(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
+        )
+    assert exc_info.value.message_key == "community_events.errors.tickets_recipient_unavailable"
+    svc.repo.insert_audit_log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resend_tickets_not_found():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(return_value=None)
+    with pytest.raises(NotFoundException):
+        await svc.resend_tickets(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
+        )

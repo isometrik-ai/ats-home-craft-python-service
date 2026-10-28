@@ -82,6 +82,7 @@ Each event has:
 | Book on behalf (walk-in / clubhouse)                                    | `POST /projects/{project_id}/community-events/{id}/bookings`                                                                     |
 | Mark booking paid                                                       | `POST .../bookings/{booking_id}/mark-paid`                                                                                       |
 | Mark waived (optional)                                                  | `POST .../bookings/{booking_id}/mark-waived`                                                                                     |
+| Resend issued tickets                                                   | `POST .../bookings/{booking_id}/resend-tickets`                                                                                  |
 | Facility picker                                                         | `GET /projects/{project_id}/facilities?facility_types=events,sports,recreation,services&status=active` (existing, extend filter) |
 | Export                                                                  | `GET /projects/{project_id}/community-events/export`                                                                             |
 | Upload cover / gallery                                                  | Presigned URL → paths in create/PATCH body                                                                                       |

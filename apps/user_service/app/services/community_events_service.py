@@ -29,6 +29,7 @@ from apps.user_service.app.schemas.community_events import (
     CommunityEventMediaResponse,
     CommunityEventSummaryResponse,
     CreateCommunityEventRequest,
+    EventTicketItemResponse,
     MarkBookingPaidRequest,
     MarkBookingWaivedRequest,
     UpdateCommunityEventRequest,
@@ -53,6 +54,9 @@ from apps.user_service.app.services.community_event_facility_hold import (
 )
 from apps.user_service.app.services.community_event_notification_service import (
     CommunityEventNotificationService,
+    can_resend_event_tickets,
+    ticket_items_for_booking,
+    tickets_are_issued,
 )
 from apps.user_service.app.services.project_setup_service import ProjectSetupService
 from apps.user_service.app.utils.common_utils import UserContext, validate_uuid_format
@@ -751,6 +755,7 @@ class CommunityEventsService:
     @staticmethod
     def _booking_list_item(row: dict[str, Any]) -> CommunityEventBookingListItemResponse:
         """Map a booking row to admin list item."""
+        issued = tickets_are_issued(row)
         return CommunityEventBookingListItemResponse(
             id=str(row["id"]),
             display_code=str(row["display_code"]),
@@ -765,6 +770,9 @@ class CommunityEventsService:
             payment_status=str(row.get("payment_status") or ""),
             paid_at=row.get("paid_at"),
             booked_at=row["booked_at"],
+            tickets_issued=issued,
+            can_resend_tickets=can_resend_event_tickets(row),
+            tickets=[EventTicketItemResponse(**item) for item in ticket_items_for_booking(row)],
         )
 
     async def create_booking_on_behalf(
@@ -813,6 +821,21 @@ class CommunityEventsService:
             event_id=event_id,
             booking_id=booking_id,
             body=body,
+        )
+        return self._booking_list_item(row)
+
+    async def resend_booking_tickets(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        booking_id: str,
+    ) -> CommunityEventBookingListItemResponse:
+        """Replay issued tickets for a booking."""
+        row = await self.booking_service.resend_tickets(
+            project_id=project_id,
+            event_id=event_id,
+            booking_id=booking_id,
         )
         return self._booking_list_item(row)
 

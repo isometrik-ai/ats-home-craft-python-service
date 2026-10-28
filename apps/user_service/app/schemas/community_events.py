@@ -259,6 +259,13 @@ class CommunityEventDetailResponse(BaseModel):
     updated_at: datetime
 
 
+class EventTicketItemResponse(BaseModel):
+    """One adult or child ticket card derived from a booking."""
+
+    code: str
+    ticket_type: str
+
+
 class CommunityEventBookingListItemResponse(BaseModel):
     """Admin booking row."""
 
@@ -275,6 +282,9 @@ class CommunityEventBookingListItemResponse(BaseModel):
     payment_status: str
     paid_at: datetime | None = None
     booked_at: datetime
+    tickets_issued: bool = False
+    can_resend_tickets: bool = False
+    tickets: list[EventTicketItemResponse] = Field(default_factory=list)
 
 
 class ResidentEventListQuery(BaseModel):

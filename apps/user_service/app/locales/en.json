@@ -1105,6 +1105,10 @@
           "title": "Payment received",
           "body": "Payment recorded for {title}"
         },
+        "tickets_resent": {
+          "title": "Your event tickets",
+          "body": "Your tickets for {title} — {ticket_codes}"
+        },
         "reminder": {
           "title": "Event tomorrow",
           "body": "Reminder: {title} is coming up soon"
@@ -1385,6 +1389,9 @@
       "booking_closed": "Booking is closed for this event.",
       "booking_not_found": "The booking could not be found.",
       "booking_not_pending": "Only pending payments can be marked paid.",
+      "tickets_not_issued": "Tickets have not been issued for this booking yet.",
+      "tickets_not_resendable": "Tickets can only be resent for a confirmed booking on a published or completed event.",
+      "tickets_recipient_unavailable": "This resident has no linked app account to receive tickets.",
       "booking_already_cancelled": "This booking has already been cancelled.",
       "booking_not_valid_for_gate": "This booking is not valid for gate entry.",
       "booking_not_valid_for_payment": "This booking is not eligible for online payment.",
@@ -1421,6 +1428,7 @@
       "booking_cancelled": "Event booking cancelled successfully.",
       "booking_marked_paid": "Booking marked as paid successfully.",
       "booking_marked_waived": "Booking payment waived successfully.",
+      "tickets_resent": "Tickets resent successfully.",
       "booking_verified": "Booking verified successfully.",
       "complete_past_completed": "Past events marked as completed.",
       "reminders_sent": "Event reminders sent successfully."

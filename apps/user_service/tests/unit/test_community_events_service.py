@@ -555,6 +555,9 @@ async def test_list_bookings():
     )
     assert total == 1
     assert items[0].display_code == "BKG-1"
+    assert items[0].tickets_issued is True
+    assert items[0].can_resend_tickets is True
+    assert [ticket.code for ticket in items[0].tickets] == ["BKG-1-A1", "BKG-1-A2"]
 
 
 @pytest.mark.asyncio
@@ -628,6 +631,15 @@ async def test_mark_booking_paid_and_waived_delegates():
         body=MarkBookingWaivedRequest(payment_notes="Comp"),
     )
     assert waived.payment_status == "paid"
+
+    svc.booking_service.resend_tickets = AsyncMock(return_value=booking_row)
+    resent = await svc.resend_booking_tickets(
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+        booking_id="booking-1",
+    )
+    assert resent.can_resend_tickets is True
+    assert [ticket.code for ticket in resent.tickets] == ["BKG-1-A1", "BKG-1-A2"]
 
 
 @pytest.mark.asyncio

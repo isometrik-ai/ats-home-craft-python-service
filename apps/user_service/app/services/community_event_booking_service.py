@@ -38,6 +38,8 @@ from apps.user_service.app.schemas.enums import (
 )
 from apps.user_service.app.services.community_event_notification_service import (
     CommunityEventNotificationService,
+    can_resend_event_tickets,
+    ticket_items_for_booking,
 )
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
@@ -731,6 +733,75 @@ class CommunityEventBookingService:
             payment_status=str(booking.get("payment_status") or ""),
             booking_status=str(booking.get("booking_status") or ""),
         )
+
+    async def resend_tickets(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        booking_id: str,
+    ) -> dict[str, Any]:
+        """Replay issued tickets for a booking without minting new codes or QR."""
+        booking = await self.repo.fetch_booking_by_id(
+            organization_id=self.organization_id,
+            booking_id=booking_id,
+            event_id=event_id,
+        )
+        if not booking or str(booking.get("project_id")) != project_id:
+            raise NotFoundException(
+                message_key="community_events.errors.booking_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        event = await self.repo.fetch_event_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
+        if not event:
+            raise NotFoundException(
+                message_key="community_events.errors.event_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        if str(booking.get("payment_status")) == CommunityEventPaymentStatus.PENDING.value:
+            raise ConflictException(
+                message_key="community_events.errors.tickets_not_issued",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        if not can_resend_event_tickets(booking, event):
+            raise ConflictException(
+                message_key="community_events.errors.tickets_not_resendable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        sent = await self.notifications.notify_tickets_resent(
+            organization_id=self.organization_id,
+            contact_id=str(booking["contact_id"]),
+            event=event,
+            booking=booking,
+        )
+        if not sent:
+            raise ConflictException(
+                message_key="community_events.errors.tickets_recipient_unavailable",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        ticket_items = ticket_items_for_booking(booking)
+        await self.repo.insert_audit_log(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+            booking_id=booking_id,
+            action=CommunityEventAuditAction.TICKETS_RESENT.value,
+            actor_user_id=self.user_context.user_id,
+            payload={
+                "display_code": booking.get("display_code"),
+                "ticket_codes": [item["code"] for item in ticket_items],
+                "gate_qr_token": booking.get("gate_qr_token"),
+            },
+        )
+        return booking
 
     @staticmethod
     def validate_facility_for_event(facility: dict[str, Any] | None) -> None:

@@ -23,6 +23,7 @@ from apps.user_service.app.api.community_events import (
     mark_community_event_booking_paid,
     mark_community_event_booking_waived,
     publish_community_event,
+    resend_community_event_tickets,
     restore_community_event,
     update_community_event,
 )
@@ -334,6 +335,14 @@ async def test_event_write_endpoints(mock_events_cls, mock_access):
     events.mark_booking_waived = AsyncMock(
         return_value=MagicMock(model_dump=lambda **_: {"id": BOOKING_ID})
     )
+    events.resend_booking_tickets = AsyncMock(
+        return_value=MagicMock(
+            model_dump=lambda **_: {
+                "id": BOOKING_ID,
+                "tickets": [{"code": "BKG-36-A1", "ticket_type": "adult"}],
+            }
+        )
+    )
 
     body = CreateCommunityEventRequest(
         title="Summer fest",
@@ -426,6 +435,16 @@ async def test_event_write_endpoints(mock_events_cls, mock_access):
             event_id=EVENT_ID,
             booking_id=BOOKING_ID,
             body=MarkBookingWaivedRequest(payment_notes="Comp"),
+            db_connection=db,
+            current_user=user,
+        )
+    ).status_code == 200
+    assert (
+        await resend_community_event_tickets(
+            request=_request(),
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
             db_connection=db,
             current_user=user,
         )

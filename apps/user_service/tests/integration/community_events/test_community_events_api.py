@@ -102,3 +102,60 @@ async def test_export_community_event_revenue_report_event_not_found(client, mon
     body = response.json()
     assert body["status"] == "error"
     assert body["message"] == "The event could not be found."
+
+
+@pytest.mark.asyncio
+async def test_resend_community_event_tickets_success(client, monkeypatch) -> None:
+    """POST resend-tickets returns the original ticket cards."""
+    _patch_admin_access(monkeypatch)
+    from datetime import datetime, timezone
+
+    from apps.user_service.app.schemas.community_events import (
+        CommunityEventBookingListItemResponse,
+        EventTicketItemResponse,
+    )
+
+    now = datetime.now(timezone.utc)
+
+    async def fake_resend(_self, *, project_id, event_id, booking_id):
+        del _self
+        assert project_id == PROJECT_ID
+        assert event_id == EVENT_ID
+        assert booking_id == "33333333-3333-3333-3333-333333333333"
+        return CommunityEventBookingListItemResponse(
+            id=booking_id,
+            display_code="BKG-36",
+            contact_id="44444444-4444-4444-4444-444444444444",
+            contact_name="Kate Bell",
+            adult_tickets=2,
+            child_tickets=0,
+            total_tickets=2,
+            total_amount_minor=22000,
+            currency="INR",
+            booking_status="confirmed",
+            payment_status="paid",
+            paid_at=now,
+            booked_at=now,
+            tickets_issued=True,
+            can_resend_tickets=True,
+            tickets=[
+                EventTicketItemResponse(code="BKG-36-A1", ticket_type="adult"),
+                EventTicketItemResponse(code="BKG-36-A2", ticket_type="adult"),
+            ],
+        )
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.community_events_service.CommunityEventsService.resend_booking_tickets",
+        fake_resend,
+    )
+
+    response = await client.post(
+        f"/v1/projects/{PROJECT_ID}/community-events/{EVENT_ID}"
+        "/bookings/33333333-3333-3333-3333-333333333333/resend-tickets"
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["message"] == "Tickets resent successfully."
+    assert body["data"]["display_code"] == "BKG-36"
+    assert [ticket["code"] for ticket in body["data"]["tickets"]] == ["BKG-36-A1", "BKG-36-A2"]
+    assert body["data"]["can_resend_tickets"] is True
