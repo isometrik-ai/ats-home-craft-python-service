@@ -77,6 +77,9 @@ _FAKE_MY_PROJECT = {
     "project_role_id": COMMUNITY_ADMIN_ROLE_ID,
     "role_slug": "community_admin",
     "role_name": "Community Admin",
+    "community_admin_email": "admin@example.com",
+    "community_admin_phone_number": "9876543210",
+    "community_admin_phone_isd_code": "+91",
 }
 
 _FAKE_PROJECT_STATUS = {
@@ -400,6 +403,9 @@ async def test_list_my_projects(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"][0]["id"] == PROJECT_ID
     assert body["data"][0]["role_slug"] == "community_admin"
+    assert body["data"][0]["community_admin_email"] == "admin@example.com"
+    assert body["data"][0]["community_admin_phone_number"] == "9876543210"
+    assert body["data"][0]["community_admin_phone_isd_code"] == "+91"
 
 
 @pytest.mark.asyncio

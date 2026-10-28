@@ -478,7 +478,14 @@ async def test_list_my_projects(mock_service_cls, mock_extract):
     )
     assert empty.status_code == 200
 
-    my_row = {**_project_summary(), "project_role_id": ROLE_ID, "role_slug": "admin"}
+    my_row = {
+        **_project_summary(),
+        "project_role_id": ROLE_ID,
+        "role_slug": "admin",
+        "community_admin_email": "admin@example.com",
+        "community_admin_phone_number": "9876543210",
+        "community_admin_phone_isd_code": "+91",
+    }
     service.list_my_projects = AsyncMock(return_value={"items": [my_row], "total": 1})
     populated = await list_my_projects(
         request=_request(),
@@ -491,6 +498,10 @@ async def test_list_my_projects(mock_service_cls, mock_extract):
         page_size=20,
     )
     assert populated.status_code == 200
+    payload = populated.body.decode()
+    assert "community_admin_email" in payload
+    assert "community_admin_phone_number" in payload
+    assert "community_admin_phone_isd_code" in payload
 
 
 @pytest.mark.asyncio
