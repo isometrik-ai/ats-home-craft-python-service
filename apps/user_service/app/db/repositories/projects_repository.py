@@ -375,7 +375,10 @@ class ProjectsRepository(BaseRepository):
               p.updated_at,
               pm.project_role_id::text AS project_role_id,
               pr.slug AS role_slug,
-              pr.name AS role_name
+              pr.name AS role_name,
+              ca.email AS community_admin_email,
+              ca.phone_number AS community_admin_phone_number,
+              ca.phone_isd_code AS community_admin_phone_isd_code
             FROM projects p
             INNER JOIN project_members pm
               ON pm.project_id = p.id
@@ -383,6 +386,10 @@ class ProjectsRepository(BaseRepository):
             INNER JOIN project_roles pr
               ON pr.id = pm.project_role_id
              AND pr.project_id = pm.project_id
+            LEFT JOIN organization_members ca
+              ON ca.user_id = p.community_admin_user_id
+             AND ca.organization_id = p.organization_id
+             AND ca.status != 'deleted'
             WHERE {where_sql}
             ORDER BY p.created_at DESC
             OFFSET ${next_param} LIMIT ${next_param + 1}
