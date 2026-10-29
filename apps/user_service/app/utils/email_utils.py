@@ -1594,6 +1594,27 @@ def send_templated_email(
         return False
 
 
+def send_community_event_booking_email(
+    *,
+    email: str,
+    template: str,
+    body_context: dict[str, str],
+    attachments: list[dict[str, str]] | None = None,
+) -> bool:
+    """Send community event booking confirmation or waitlist email."""
+    labels = {
+        "community_event_booking_confirmed": "Community event booking confirmation",
+        "community_event_booking_waitlisted": "Community event waitlist",
+    }
+    return send_templated_email(
+        email=email,
+        template=template,
+        body_context=body_context,
+        attachments=attachments,
+        email_type=labels.get(template, "Community event booking"),
+    )
+
+
 def send_unit_allotment_welcome_email(
     *,
     email: str,

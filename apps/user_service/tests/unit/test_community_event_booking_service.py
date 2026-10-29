@@ -609,3 +609,51 @@ async def test_promote_waitlist_noops_when_capacity_full():
     await svc._promote_waitlist(event_id=EVENT_ID)
 
     svc.repo.fetch_oldest_waitlisted_booking.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_resend_ticket_sends_email_only():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(
+        return_value={
+            "id": BOOKING_ID,
+            "display_code": "BKG-501",
+            "project_id": PROJECT_ID,
+            "contact_id": CONTACT_ID,
+            "booking_status": CommunityEventBookingStatus.CONFIRMED.value,
+            "gate_qr_token": "token",
+        }
+    )
+    svc.repo.fetch_event_by_id = AsyncMock(return_value={"id": EVENT_ID, "title": "Fest"})
+    svc.notifications.send_ticket_email = AsyncMock(return_value="jane@example.com")
+    svc.repo.insert_audit_log = AsyncMock()
+
+    result = await svc.resend_ticket(
+        project_id=PROJECT_ID,
+        event_id=EVENT_ID,
+        booking_id=BOOKING_ID,
+    )
+
+    assert result["email"] == "jane@example.com"
+    assert result["display_code"] == "BKG-501"
+    svc.notifications.send_ticket_email.assert_awaited_once()
+    svc.notifications.notify_booking_confirmed.assert_not_called()
+    svc.repo.insert_audit_log.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resend_ticket_rejects_waitlisted():
+    svc = _service()
+    svc.repo.fetch_booking_by_id = AsyncMock(
+        return_value={
+            "id": BOOKING_ID,
+            "project_id": PROJECT_ID,
+            "booking_status": CommunityEventBookingStatus.WAITLISTED.value,
+        }
+    )
+    with pytest.raises(ConflictException):
+        await svc.resend_ticket(
+            project_id=PROJECT_ID,
+            event_id=EVENT_ID,
+            booking_id=BOOKING_ID,
+        )

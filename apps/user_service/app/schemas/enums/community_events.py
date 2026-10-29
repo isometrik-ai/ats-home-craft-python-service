@@ -78,6 +78,7 @@ class CommunityEventAuditAction(str, Enum):
     MARKED_PAID = "marked_paid"
     MARKED_WAIVED = "marked_waived"
     GATE_VERIFIED = "gate_verified"
+    TICKET_RESENT = "ticket_resent"
 
 
 class CommunityEventPublishMode(str, Enum):

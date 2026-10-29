@@ -1,0 +1,32 @@
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  Hello {{.first_name}},
+</p>
+<p style="margin:0 0 16px 0;font-size:15px;line-height:1.7;color:#374151;">
+  You are on the waitlist for <strong>{{.event_title}}</strong> at
+  <strong>{{.project_name}}</strong>.
+</p>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px 0;border-top:1px solid #e5e7eb;">
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;width:130px;border-bottom:1px solid #e5e7eb;vertical-align:top;">Booking</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.display_code}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;border-bottom:1px solid #e5e7eb;vertical-align:top;">When</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.event_when}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;border-bottom:1px solid #e5e7eb;vertical-align:top;">Venue</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.venue}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;border-bottom:1px solid #e5e7eb;vertical-align:top;">Tickets</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;border-bottom:1px solid #e5e7eb;vertical-align:top;">{{.tickets_label}}</td>
+  </tr>
+  <tr>
+    <td style="padding:12px 0;font-size:14px;color:#6b7280;vertical-align:top;">Amount</td>
+    <td style="padding:12px 0;font-size:14px;color:#111827;vertical-align:top;">{{.amount_label}}</td>
+  </tr>
+</table>
+<p style="margin:0;font-size:15px;line-height:1.7;color:#374151;">
+  {{.qr_note}} We will email your confirmed tickets if a spot opens up.
+</p>

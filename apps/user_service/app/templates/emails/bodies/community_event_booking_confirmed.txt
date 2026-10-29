@@ -1,0 +1,16 @@
+Hello {{.first_name}},
+
+Your tickets for {{.event_title}} at {{.project_name}} are confirmed.
+
+Booking  : {{.display_code}}
+When     : {{.event_when}}
+Venue    : {{.venue}}
+Tickets  : {{.tickets_label}}
+Amount   : {{.amount_label}}
+Payment  : {{.payment_label}}
+
+{{.qr_note}}
+
+Show booking {{.display_code}} and the attached ticket PDF at the gate.
+
+{{.app_name}}

@@ -10,7 +10,15 @@ from apps.user_service.app.db.repositories.contacts_repository import ContactsRe
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
+from apps.user_service.app.utils.community_event_email_helpers import (
+    build_booking_email_body_context,
+    build_ticket_attachments,
+    contact_booking_email,
+)
+from apps.user_service.app.utils.email_utils import send_community_event_booking_email
+from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.logger import get_logger
+from libs.shared_utils.status_codes import CustomStatusCode
 
 logger = get_logger("community_event_notifications")
 
@@ -98,7 +106,7 @@ class CommunityEventNotificationService:
         event: dict[str, Any],
         booking: dict[str, Any],
     ) -> None:
-        """Notify resident on confirmed booking."""
+        """Notify resident on confirmed booking (push + ticket email)."""
         params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
@@ -111,6 +119,37 @@ class CommunityEventNotificationService:
                 "title": params["title"],
             },
         )
+        await self._send_booking_email(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            event=event,
+            booking=booking,
+            template="community_event_booking_confirmed",
+        )
+
+    async def send_ticket_email(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        event: dict[str, Any],
+        booking: dict[str, Any],
+    ) -> str:
+        """Send one confirmation email with tickets. No push. Raises if it cannot send."""
+        email = await self._send_booking_email(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            event=event,
+            booking=booking,
+            template="community_event_booking_confirmed",
+            require_send=True,
+        )
+        if not email:
+            raise ValidationException(
+                message_key="community_events.errors.ticket_email_not_sent",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return email
 
     async def notify_booking_waitlisted(
         self,
@@ -120,7 +159,7 @@ class CommunityEventNotificationService:
         event: dict[str, Any],
         booking: dict[str, Any],
     ) -> None:
-        """Notify resident when waitlisted."""
+        """Notify resident when waitlisted (push + email, no ticket PDF)."""
         params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
@@ -133,6 +172,13 @@ class CommunityEventNotificationService:
                 "title": params["title"],
             },
         )
+        await self._send_booking_email(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            event=event,
+            booking=booking,
+            template="community_event_booking_waitlisted",
+        )
 
     async def notify_waitlist_promoted(
         self,
@@ -142,7 +188,7 @@ class CommunityEventNotificationService:
         event: dict[str, Any],
         booking: dict[str, Any],
     ) -> None:
-        """Notify resident when promoted from waitlist."""
+        """Notify resident when promoted from waitlist (push + ticket email)."""
         params = _event_title_params(event)
         await self._send_to_contact(
             organization_id=organization_id,
@@ -154,6 +200,13 @@ class CommunityEventNotificationService:
                 "booking_id": str(booking["id"]),
                 "title": params["title"],
             },
+        )
+        await self._send_booking_email(
+            organization_id=organization_id,
+            contact_id=contact_id,
+            event=event,
+            booking=booking,
+            template="community_event_booking_confirmed",
         )
 
     async def notify_payment_received(
@@ -217,3 +270,85 @@ class CommunityEventNotificationService:
                 "title": params["title"],
             },
         )
+
+    async def _send_booking_email(
+        self,
+        *,
+        organization_id: str,
+        contact_id: str,
+        event: dict[str, Any],
+        booking: dict[str, Any],
+        template: str,
+        require_send: bool = False,
+    ) -> str | None:
+        """Send booking email. Failures must not block the booking flow unless required."""
+        try:
+            contact = await self.contacts_repo.get_contact_details(
+                organization_id=organization_id,
+                contact_id=contact_id,
+            )
+            email = contact_booking_email(contact)
+            if not email or not contact:
+                logger.info(
+                    "community event booking email skipped (no address) contact_id=%s",
+                    contact_id,
+                )
+                if require_send:
+                    raise ValidationException(
+                        message_key="community_events.errors.resident_email_missing",
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
+                return None
+            project_name = await self._project_name(
+                organization_id=organization_id,
+                project_id=str(event.get("project_id") or booking.get("project_id") or ""),
+            )
+            body_context = build_booking_email_body_context(
+                contact=contact,
+                event=event,
+                booking=booking,
+                project_name=project_name,
+            )
+            attachments: list[dict[str, str]] = []
+            if template == "community_event_booking_confirmed":
+                attachments = build_ticket_attachments(booking=booking, event=event)
+            sent = send_community_event_booking_email(
+                email=email,
+                template=template,
+                body_context=body_context,
+                attachments=attachments or None,
+            )
+            if not sent:
+                if require_send:
+                    raise ValidationException(
+                        message_key="community_events.errors.ticket_email_not_sent",
+                        custom_code=CustomStatusCode.VALIDATION_ERROR,
+                    )
+                return None
+            return email
+        except ValidationException:
+            raise
+        except Exception as exc:
+            logger.warning("community event booking email failed: %s", exc)
+            if require_send:
+                raise ValidationException(
+                    message_key="community_events.errors.ticket_email_not_sent",
+                    custom_code=CustomStatusCode.VALIDATION_ERROR,
+                ) from exc
+            return None
+
+    async def _project_name(self, *, organization_id: str, project_id: str) -> str:
+        """Project display name for email copy."""
+        if not project_id:
+            return ""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT name
+            FROM projects
+            WHERE organization_id = $1::uuid
+              AND id = $2::uuid
+            """,
+            organization_id,
+            project_id,
+        )
+        return str(row["name"]) if row and row.get("name") else ""

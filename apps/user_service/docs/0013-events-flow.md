@@ -80,6 +80,7 @@ Each event has:
 | Download revenue report (Revenue tab)                                   | `GET /projects/{project_id}/community-events/{id}/revenue/export`                                                                |
 | Export RSVPs / bookings CSV                                             | `GET /projects/{project_id}/community-events/{id}/bookings/export`                                                               |
 | Book on behalf (walk-in / clubhouse)                                    | `POST /projects/{project_id}/community-events/{id}/bookings`                                                                     |
+| Resend ticket email                                                     | `POST .../bookings/{booking_id}/resend-ticket`                                                                                   |
 | Mark booking paid                                                       | `POST .../bookings/{booking_id}/mark-paid`                                                                                       |
 | Mark waived (optional)                                                  | `POST .../bookings/{booking_id}/mark-waived`                                                                                     |
 | Facility picker                                                         | `GET /projects/{project_id}/facilities?facility_types=events,sports,recreation,services&status=active` (existing, extend filter) |
@@ -611,6 +612,29 @@ Service transaction:
 Phase 1 copy: resident is **not blocked** from booking when payment pending — gate/admin verifies
 paid status via admin mark-paid after offline collection.
 
+**Confirmation email:** a confirmed booking (resident, admin on-behalf, or waitlist promotion)
+sends a transactional email with ticket counts, booking code (`BKG-{n}`), an inline gate QR,
+and a printable ticket PDF + QR PNG attached. Waitlisted bookings get an email without a QR.
+Email failure is logged and does not fail the booking.
+
+Staff can resend that same ticket email (no push) with:
+
+```http
+POST /v1/projects/{project_id}/community-events/{event_id}/bookings/{booking_id}/resend-ticket
+```
+
+Requires community-events **edit** permission. Only **confirmed** bookings can be resent.
+Waitlisted and cancelled bookings return `409 booking_not_confirmed`. Missing resident email
+or a send failure returns `422`. Success response:
+
+```json
+{
+  "booking_id": "…",
+  "display_code": "BKG-501",
+  "email": "jane@example.com"
+}
+```
+
 ### 5.5 View / cancel my booking
 
 ```http
@@ -694,6 +718,9 @@ ______________________________________________________________________
 | `child_tickets_not_allowed` | 422  | Child count when mode = not_applicable                    |
 | `facility_not_eligible`     | 422  | Facility type not in events, sports, recreation, services |
 | `booking_not_pending`       | 409  | mark-paid on non-pending row                              |
+| `booking_not_confirmed`     | 409  | resend-ticket on waitlisted/cancelled booking             |
+| `resident_email_missing`    | 422  | resend-ticket when the resident has no email              |
+| `ticket_email_not_sent`     | 422  | resend-ticket when the mail provider fails                |
 | `invalid_project_context`   | 403  | Resident not an active member of the project              |
 
 ______________________________________________________________________
