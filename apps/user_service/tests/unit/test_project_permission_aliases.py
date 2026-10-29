@@ -1,6 +1,9 @@
 """Unit tests for project permission alias helpers."""
 
 from libs.shared_utils.common_query import (
+    APP_ACCESS_EDIT,
+    APP_ACCESS_OVERRIDE,
+    APP_ACCESS_VIEW,
     COMPANIES_MANAGEMENT_EDIT,
     CONTACTS_MANAGEMENT_EDIT,
     DAILY_HELP_MANAGEMENT_DELETE,
@@ -283,3 +286,33 @@ def test_leads_view_uses_org_ceiling_without_project_catalog():
 def test_settings_edit_is_checked_directly_on_org_role():
     ceiling = org_ceiling_permission_codes(SETTINGS_MANAGEMENT_EDIT)
     assert ceiling == frozenset({SETTINGS_MANAGEMENT_EDIT})
+
+
+def test_app_access_codes_are_project_only():
+    """App access is a project permission, not an org DEFAULT_PERMISSIONS row."""
+    org_codes = {entry[0] for entry in DEFAULT_PERMISSIONS}
+    assert APP_ACCESS_VIEW not in org_codes
+    assert APP_ACCESS_EDIT not in org_codes
+    assert APP_ACCESS_OVERRIDE not in org_codes
+    project_codes = {entry[0] for entry in DEFAULT_PROJECT_PERMISSIONS}
+    assert {APP_ACCESS_VIEW, APP_ACCESS_EDIT, APP_ACCESS_OVERRIDE}.issubset(project_codes)
+
+
+def test_app_access_view_ceiling_is_view_set():
+    ceiling = org_ceiling_permission_codes(APP_ACCESS_VIEW)
+    assert APP_ACCESS_VIEW in ceiling
+    assert PROJECTS_MANAGEMENT_VIEW in ceiling
+    assert PROJECTS_MANAGEMENT_VIEW_ASSIGNED in ceiling
+
+
+def test_app_access_edit_and_override_use_edit_ceiling():
+    for code in (APP_ACCESS_EDIT, APP_ACCESS_OVERRIDE):
+        ceiling = org_ceiling_permission_codes(code)
+        assert code in ceiling
+        assert PROJECTS_MANAGEMENT_EDIT in ceiling
+
+
+def test_app_access_satisfiers_are_exact():
+    assert project_permission_satisfiers(APP_ACCESS_VIEW) == frozenset({APP_ACCESS_VIEW})
+    assert project_permission_satisfiers(APP_ACCESS_EDIT) == frozenset({APP_ACCESS_EDIT})
+    assert project_permission_satisfiers(APP_ACCESS_OVERRIDE) == frozenset({APP_ACCESS_OVERRIDE})

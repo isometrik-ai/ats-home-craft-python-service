@@ -39,6 +39,9 @@ from apps.user_service.app.schemas.enums import (
 from apps.user_service.app.services.community_event_notification_service import (
     CommunityEventNotificationService,
 )
+from apps.user_service.app.utils.app_access_guard import (
+    ensure_resident_project_not_held,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -160,6 +163,12 @@ class CommunityEventBookingService:
     ) -> BookEventResponse:
         """Create resident booking with capacity/waitlist handling."""
         await self._ensure_resident_project(contact_id=contact_id, project_id=project_id)
+        await ensure_resident_project_not_held(
+            self.db_connection,
+            organization_id=self.organization_id,
+            contact_id=contact_id,
+            project_id=project_id,
+        )
 
         event = await self.repo.fetch_resident_event_by_id(
             organization_id=self.organization_id,
@@ -479,6 +488,13 @@ class CommunityEventBookingService:
                 raise ValidationException(
                     message_key="community_events.errors.invalid_project_context",
                     custom_code=CustomStatusCode.FORBIDDEN,
+                )
+            if not admin_user_id:
+                await ensure_resident_project_not_held(
+                    self.db_connection,
+                    organization_id=self.organization_id,
+                    contact_id=contact_id,
+                    project_id=str(booking["project_id"]),
                 )
 
         was_confirmed = (

@@ -1276,6 +1276,33 @@
       "payment_recorded": "Payment recorded successfully."
     }
   },
+  "app_access": {
+    "errors": {
+      "version_conflict": "Someone else changed this rule. Reload and try again.",
+      "condition_required": "Turn on amount or days overdue before enabling the hold.",
+      "invalid_amount": "Enter a valid outstanding amount.",
+      "invalid_days": "Days overdue must be between 1 and 365.",
+      "invalid_match_mode": "Choose whether both conditions or either condition must match.",
+      "invalid_override": "Choose hold or release.",
+      "invalid_status": "That access status is not valid.",
+      "nothing_to_hold": "There is nothing outstanding to hold.",
+      "unit_not_found": "The unit could not be found.",
+      "unit_held": "This unit is on hold until outstanding dues are paid."
+    },
+    "hold": {
+      "rule": "This unit is on hold because outstanding dues are past due.",
+      "manual": "This unit is on hold. Contact your society office for help.",
+      "none": "This unit is not on hold."
+    },
+    "success": {
+      "rule_retrieved": "App access rule retrieved successfully.",
+      "rule_saved": "App access rule saved successfully.",
+      "units_retrieved": "App access units retrieved successfully.",
+      "override_saved": "App access override saved successfully.",
+      "override_cleared": "App access override removed successfully.",
+      "status_retrieved": "App access status retrieved successfully."
+    }
+  },
   "parking_allotment": {
     "errors": {
       "slot_not_found": "The parking slot could not be found.",

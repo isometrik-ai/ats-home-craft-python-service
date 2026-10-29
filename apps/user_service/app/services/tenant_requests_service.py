@@ -79,6 +79,7 @@ from apps.user_service.app.services.units_service import (
     format_primary_contact_phone,
     serialize_unit_list_item,
 )
+from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -754,6 +755,17 @@ class TenantRequestsService:
             )
         return unit
 
+    async def _ensure_owner_unit_not_held(self, *, unit_id: str, project_id: str) -> None:
+        """Block owner writes when the unit is on hold."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        await ensure_resident_unit_not_held(
+            self.db_connection,
+            organization_id=org_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+
     async def _assert_no_active_tenant_on_unit(self, *, unit_id: str) -> None:
         """Reject new tenant requests while the unit still has an active tenant."""
         org_id = self.user_context.organization_id
@@ -883,6 +895,9 @@ class TenantRequestsService:
             owner_contact_id=owner_contact_id,
             unit_id=body.unit_id,
         )
+        await self._ensure_owner_unit_not_held(
+            unit_id=body.unit_id, project_id=str(unit["project_id"])
+        )
         await self._assert_no_active_tenant_on_unit(unit_id=body.unit_id)
         phones_payload = [phone.model_dump(exclude_none=True) for phone in body.phones]
         emails_payload = [email.model_dump(exclude_none=True) for email in (body.emails or [])]
@@ -963,6 +978,9 @@ class TenantRequestsService:
         unit = await self._assert_owner_access(
             owner_contact_id=owner_contact_id,
             unit_id=body.unit_id,
+        )
+        await self._ensure_owner_unit_not_held(
+            unit_id=body.unit_id, project_id=str(unit["project_id"])
         )
         active_tenant_id = await self._assert_active_tenant_on_unit(unit_id=body.unit_id)
         active_approved = await self.repo.find_active_approved_for_unit(
@@ -1241,6 +1259,9 @@ class TenantRequestsService:
         """Cancel an in-flight tenant request."""
         row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
         await self._assert_owner_owns_request(row=row, owner_contact_id=owner_contact_id)
+        await self._ensure_owner_unit_not_held(
+            unit_id=str(row["unit_id"]), project_id=str(row["project_id"])
+        )
         if row.get("status") not in _INFLIGHT_STATUSES:
             raise ValidationException(
                 message_key="tenant_requests.errors.invalid_status_transition",
@@ -1275,6 +1296,9 @@ class TenantRequestsService:
         """Replace a rejected document and resubmit the request for review."""
         row = await self._get_request_or_raise(tenant_request_id=tenant_request_id)
         await self._assert_owner_owns_request(row=row, owner_contact_id=owner_contact_id)
+        await self._ensure_owner_unit_not_held(
+            unit_id=str(row["unit_id"]), project_id=str(row["project_id"])
+        )
         if row.get("status") not in {
             TenantRequestStatus.AWAITING_RESUBMISSION.value,
             TenantRequestStatus.PENDING_REVIEW.value,
@@ -1346,6 +1370,9 @@ class TenantRequestsService:
         await self._assert_owner_access(
             owner_contact_id=owner_contact_id,
             unit_id=str(row["unit_id"]),
+        )
+        await self._ensure_owner_unit_not_held(
+            unit_id=str(row["unit_id"]), project_id=str(row["project_id"])
         )
         org_id = self.user_context.organization_id
         assert org_id

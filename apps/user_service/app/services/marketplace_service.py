@@ -32,6 +32,7 @@ from apps.user_service.app.services.marketplace_geo import (
     MARKETPLACE_NEARBY_RADIUS_KM,
     haversine_km,
 )
+from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -190,6 +191,12 @@ class MarketplaceService:
                 message_key="contact_onboarding.errors.unit_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await ensure_resident_unit_not_held(
+            self.db_connection,
+            organization_id=org_id,
+            project_id=str(unit["project_id"]),
+            unit_id=unit_id,
+        )
         return dict(unit)
 
     async def _ensure_listing_visible_on_board(

@@ -88,6 +88,7 @@ from apps.user_service.app.services.project_setup_service import ProjectSetupSer
 from apps.user_service.app.services.push_notification_dispatch import (
     PushNotificationDispatcher,
 )
+from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     ConflictException,
@@ -310,6 +311,12 @@ class DailyHelpService:
             )
         project_id = str(unit_row["project_id"])
         await self._ensure_project(project_id=project_id)
+        await ensure_resident_unit_not_held(
+            self.db_connection,
+            organization_id=self.organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
         return project_id
 
     async def _resolve_created_by_name(self, user_id: str | None) -> str | None:

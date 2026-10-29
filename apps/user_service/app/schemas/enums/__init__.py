@@ -2,6 +2,7 @@
 
 # ruff: noqa: F403, F405
 
+from apps.user_service.app.schemas.enums.app_access import *
 from apps.user_service.app.schemas.enums.audit import *
 from apps.user_service.app.schemas.enums.auth_org import *
 from apps.user_service.app.schemas.enums.billing_notices import *
@@ -15,6 +16,10 @@ from apps.user_service.app.schemas.enums.property import *
 from apps.user_service.app.schemas.enums.resident_services import *
 
 __all__ = [
+    "AppAccessBlockedBy",
+    "AppAccessMatchMode",
+    "AppAccessOverrideKind",
+    "AppAccessStatus",
     "AuditLogActionType",
     "AuditLogRiskLevel",
     "UserStatus",

@@ -21,6 +21,7 @@ from apps.user_service.app.schemas.pets import (
     UpdatePetRequest,
 )
 from apps.user_service.app.services.pet_catalog_service import PetCatalogService
+from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.user_utils import build_full_name
 from libs.shared_utils.http_exceptions import (
@@ -506,6 +507,12 @@ class PetsService:
                 message_key="contact_onboarding.errors.unit_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await ensure_resident_unit_not_held(
+            self.db_connection,
+            organization_id=org_id,
+            project_id=str(unit["project_id"]),
+            unit_id=unit_id,
+        )
         return unit
 
     async def _validate_unit_for_project(

@@ -7,6 +7,9 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.db.repositories.app_access_repository import (
+    AppAccessRepository,
+)
 from apps.user_service.app.db.repositories.organization_member_repository import (
     OrganizationMemberRepository,
 )
@@ -36,6 +39,7 @@ from apps.user_service.app.services.push_notification_dispatch import (
     contact_display_name,
     unit_label_from_row,
 )
+from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from libs.shared_utils.http_exceptions import (
     NotFoundException,
@@ -77,6 +81,22 @@ class WalkInService:
         if self._push_dispatcher is None:
             self._push_dispatcher = PushNotificationDispatcher(db_connection=self.db_connection)
         return self._push_dispatcher
+
+    async def _ensure_visit_unit_not_held(self, *, unit_id: str) -> None:
+        """Block resident approve/reject when the flat is on hold."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        unit = await AppAccessRepository(self.db_connection).unit_project(
+            organization_id=org_id, unit_id=unit_id
+        )
+        if unit is None:
+            return
+        await ensure_resident_unit_not_held(
+            self.db_connection,
+            organization_id=org_id,
+            project_id=str(unit["project_id"]),
+            unit_id=unit_id,
+        )
 
     def _walk_in_push_data(
         self,
@@ -1104,6 +1124,7 @@ class WalkInService:
                 message_key="walk_in.errors.unit_not_accessible",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        await self._ensure_visit_unit_not_held(unit_id=str(visit_unit["unit_id"]))
         updated = await self.repo.update_visit_unit_status(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
@@ -1177,6 +1198,7 @@ class WalkInService:
                 message_key="walk_in.errors.unit_not_accessible",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        await self._ensure_visit_unit_not_held(unit_id=str(visit_unit["unit_id"]))
         updated = await self.repo.update_visit_unit_status(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
