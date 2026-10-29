@@ -167,6 +167,10 @@ async def test_list_projects_for_member_joins_project_members():
     assert "pm.status = 'active'" in count_query
     assert "INNER JOIN project_roles pr" in list_query
     assert "role_slug" in list_query
+    assert "LEFT JOIN organization_members ca" in list_query
+    assert "community_admin_email" in list_query
+    assert "community_admin_phone_number" in list_query
+    assert "community_admin_phone_isd_code" in list_query
 
 
 @pytest.mark.asyncio

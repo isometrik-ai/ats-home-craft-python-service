@@ -2,6 +2,9 @@
 
 The fixture is produced by running the Clubhouse engine with a fixed clock and
 converting inputs/outputs to ATS snake_case (validation messages -> error codes).
+
+To refresh expected quote copy after pricing-label changes, run this module:
+``python -m apps.user_service.tests.unit.facility_booking.test_facility_booking_golden``.
 """
 
 from __future__ import annotations
@@ -251,6 +254,26 @@ def test_validate_draft_parity() -> None:
     assert not mismatches, mismatches[:10]
 
 
+def _rewrite_expected_quotes() -> None:
+    """Rewrite golden quote copy from the current pricing engine."""
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    _, facilities, _, _ = _world()
+    fixture["expected"]["quotes"] = [
+        [
+            index,
+            pricing.quote_booking(facilities[_draft(index).facility_id], _draft(index)).model_dump(
+                mode="json"
+            ),
+        ]
+        for index, _expected in fixture["expected"]["quotes"]
+    ]
+    FIXTURE_PATH.write_text(
+        json.dumps(fixture, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    _fixture.cache_clear()
+
+
 def test_quote_parity() -> None:
     _, facilities, _, _ = _world()
     for index, expected in _fixture()["expected"]["quotes"]:
@@ -291,3 +314,8 @@ def test_cancel_quote_parity() -> None:
         _assert_close(
             {k: v for k, v in expected.items() if k != "id"}, quote.model_dump(mode="json"), r.id
         )
+
+
+if __name__ == "__main__":
+    _rewrite_expected_quotes()
+    print(f"Updated quotes in {FIXTURE_PATH.name}")

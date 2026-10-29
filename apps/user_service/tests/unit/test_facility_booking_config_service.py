@@ -286,6 +286,7 @@ async def test_list_bookable_facilities_and_workspace() -> None:
     )
     workspace = await svc.get_workspace(project_id=PROJECT_ID, facility_id=FACILITY_ID)
     assert workspace["config"]["facility_id"] == FACILITY_ID
+    assert workspace["config"]["photo_paths"] == ["org/facilities/pool-1.jpg"]
     assert workspace["unit_count"] == 0
 
 

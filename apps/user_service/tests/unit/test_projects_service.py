@@ -435,6 +435,9 @@ async def test_list_my_projects_includes_role():
         project_role_id="role-1",
         role_slug="community_admin",
         role_name="Community Admin",
+        community_admin_email="admin@example.com",
+        community_admin_phone_number="9876543210",
+        community_admin_phone_isd_code="+91",
     )
     service = _service(projects_repo=_FakeProjectsRepo(projects=[row]))
     with _patch_unit_counts_by_property_type():
@@ -445,7 +448,11 @@ async def test_list_my_projects_includes_role():
             page=1,
             page_size=20,
         )
-    assert result["items"][0]["role_slug"] == "community_admin"
+    item = result["items"][0]
+    assert item["role_slug"] == "community_admin"
+    assert item["community_admin_email"] == "admin@example.com"
+    assert item["community_admin_phone_number"] == "9876543210"
+    assert item["community_admin_phone_isd_code"] == "+91"
 
 
 @pytest.mark.asyncio

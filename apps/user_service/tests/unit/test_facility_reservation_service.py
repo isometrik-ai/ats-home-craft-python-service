@@ -96,6 +96,7 @@ def _reservation_row(*, status: str = FacilityReservationStatus.PENDING_APPROVAL
         "host_contact_id": "c1",
         "facility_id": "f1",
         "facility_name": "Hall",
+        "photo_paths": ["org/facilities/hall-1.jpg"],
         "archetype": "day_range",
         "unit_id": None,
         "unit_name": None,
@@ -481,6 +482,7 @@ async def test_get_reservation_success():
     _mock_get_reservation_flow(svc, _reservation_row())
     result = await svc.get_reservation(project_id=PROJECT_ID, reservation_id=RESERVATION_ID)
     assert result["host_name"] == "Ada"
+    assert result["photo_paths"] == ["org/facilities/hall-1.jpg"]
 
 
 @pytest.mark.asyncio

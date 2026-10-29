@@ -48,6 +48,10 @@ from apps.user_service.app.services.facility_booking.types import (
 HOURS_PER_DAY = 8
 DAYS_PER_MONTH = 30
 
+HOURLY_RATE = "Hourly Rate"
+FULL_DAY_RATE = "Full Day Rate"
+NIGHTLY_RATE = "Nightly Rate"
+
 # Ledger entry types that count towards what a resident has paid for a reservation.
 PAID_ENTRY_TYPES: frozenset[str] = frozenset({"charge", "deposit", "balance", "adjustment"})
 
@@ -126,6 +130,21 @@ def _factor_suffix(
     return ""
 
 
+def _rental_label(facility: FacilitySnapshot, rate_type: str) -> str:
+    """Resident-facing quote label: facility rental plus rate type."""
+    return f"{facility.name} Rental — {rate_type}"
+
+
+def _qty_at_rate(quantity: str, rate: str) -> str:
+    """Join billed quantity and unit rate, e.g. ``4 hrs at ₹625/hr``."""
+    return f"{quantity} at {rate}"
+
+
+def _day_word(count: int) -> str:
+    """Singular or plural day noun for quote details."""
+    return "day" if count == 1 else "days"
+
+
 def party_of(draft: BookingDraft) -> tuple[int, int, int]:
     """Return (residents incl. host, guests, players)."""
     guests = sum(
@@ -178,11 +197,13 @@ def _slot_lines(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) 
     mins = draft.end_min - draft.start_min
     factor, band = _mult_factor(facility, draft.start_min, draft.local_date)
     hour_rate = ts_round(effective_hour_rate(facility))
-    detail = f"{fmt_hours(mins)} @ {money(hour_rate)}/hr{_rate_basis_note(facility, money)}"
+    detail = _qty_at_rate(
+        fmt_hours(mins), f"{money(hour_rate)}/hr{_rate_basis_note(facility, money)}"
+    )
     detail += _factor_suffix(facility, factor, band, draft.local_date)
     lines = [
         PriceLine(
-            label=f"{facility.name} hire",
+            label=_rental_label(facility, HOURLY_RATE),
             detail=detail,
             amount=ts_round(hour_rate * (mins / 60) * factor),
         )
@@ -230,11 +251,13 @@ def _duration_lines(
     mins = draft.end_min - draft.start_min
     factor, band = _mult_factor(facility, draft.start_min, draft.local_date)
     hour_rate = ts_round(effective_hour_rate(facility))
-    detail = f"{fmt_hours(mins)} @ {money(hour_rate)}/hr{_rate_basis_note(facility, money)}"
+    detail = _qty_at_rate(
+        fmt_hours(mins), f"{money(hour_rate)}/hr{_rate_basis_note(facility, money)}"
+    )
     detail += _factor_suffix(facility, factor, band, draft.local_date)
     lines = [
         PriceLine(
-            label=f"{facility.name} hire",
+            label=_rental_label(facility, HOURLY_RATE),
             detail=detail,
             amount=ts_round(hour_rate * (mins / 60) * factor),
         )
@@ -281,12 +304,13 @@ def _room_lines(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) 
         notes.append(room_type)
     if season:
         notes.append(f"{season.name} ×{season.multiplier:g}")
-    detail = f"{money(base_rate)}/night"
+    night_word = "night" if nights == 1 else "nights"
+    detail = _qty_at_rate(f"{nights} {night_word}", f"{money(base_rate)}/night")
     if notes:
         detail += f" ({' · '.join(notes)})"
     return [
         PriceLine(
-            label=f"{facility.name} — {nights} night{'s' if nights > 1 else ''}",
+            label=_rental_label(facility, NIGHTLY_RATE),
             detail=detail,
             amount=ts_round(rate * nights),
         )
@@ -296,7 +320,7 @@ def _room_lines(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) 
 def _day_range_lines(
     facility: FacilitySnapshot, draft: BookingDraft, money: _Money
 ) -> list[PriceLine]:
-    """Price lines for day-range / venue hire bookings."""
+    """Price lines for day-range / venue rental bookings."""
     pricing = facility.pricing
     _, guests, _ = party_of(draft)
     hourly = (
@@ -309,7 +333,6 @@ def _day_range_lines(
     lines: list[PriceLine] = []
     if draft.end_local_date != draft.local_date:
         days = each_date(draft.local_date, draft.end_local_date)
-        plural = "s" if len(days) > 1 else ""
         day_mins = draft.end_min - draft.start_min
         full_day = draft.start_min <= first_hours.open and draft.end_min >= max(
             first_hours.close, first_hours.open + 60
@@ -317,14 +340,17 @@ def _day_range_lines(
         if full_day:
             total_days = sum(ts_round(day_rate * day_multiplier(facility, day)) for day in days)
             weekend_days = sum(1 for day in days if day_multiplier(facility, day) != 1)
-            detail = f"{money(day_rate)}/day{_rate_basis_note(facility, money)}"
+            quantity = f"{len(days)} {_day_word(len(days))}"
+            detail = _qty_at_rate(
+                quantity, f"{money(day_rate)}/day{_rate_basis_note(facility, money)}"
+            )
             if weekend_days > 0:
                 detail += (
                     f" · {weekend_days} weekend/holiday day(s) ×{pricing.weekend_multiplier:g}"
                 )
             lines.append(
                 PriceLine(
-                    label=f"{facility.name} hire — {len(days)} day{plural}, full day",
+                    label=_rental_label(facility, FULL_DAY_RATE),
                     detail=detail,
                     amount=total_days,
                 )
@@ -336,24 +362,22 @@ def _day_range_lines(
                 if len(days) > 1
                 else "single window across all days"
             )
-            hire_label = (
-                f"{facility.name} hire — {len(days)} day{plural} × {fmt_hours(day_mins)}/day"
-            )
+            quantity = f"{len(days)} {_day_word(len(days))} × {fmt_hours(day_mins)}/day"
             lines.append(
                 PriceLine(
-                    label=hire_label,
-                    detail=f"{money(hourly)}/hr · {spread}",
+                    label=_rental_label(facility, HOURLY_RATE),
+                    detail=f"{_qty_at_rate(quantity, f'{money(hourly)}/hr')} · {spread}",
                     amount=ts_round(hourly * (day_mins / 60) * mult_sum),
                 )
             )
     elif draft.start_min <= first_hours.open and draft.end_min >= first_hours.close:
         day_mult = day_multiplier(facility, draft.local_date)
-        detail = f"{money(day_rate)}/day{_rate_basis_note(facility, money)}"
+        detail = _qty_at_rate("1 day", f"{money(day_rate)}/day{_rate_basis_note(facility, money)}")
         if day_mult != 1:
             detail += f" (×{day_mult:g})"
         lines.append(
             PriceLine(
-                label=f"{facility.name} hire — full day",
+                label=_rental_label(facility, FULL_DAY_RATE),
                 detail=detail,
                 amount=ts_round(day_rate * day_mult),
             )
@@ -362,14 +386,14 @@ def _day_range_lines(
         mins = draft.end_min - draft.start_min
         billable = max(mins, (pricing.min_billable_hours or 0) * 60)
         factor, band = _mult_factor(facility, draft.start_min, draft.local_date)
-        detail = fmt_hours(billable)
+        quantity = fmt_hours(billable)
         if billable > mins:
-            detail += f" (min {pricing.min_billable_hours} hrs)"
-        detail += f" @ {money(hourly)}/hr"
+            quantity += f" (min {pricing.min_billable_hours} hrs)"
+        detail = _qty_at_rate(quantity, f"{money(hourly)}/hr")
         detail += _factor_suffix(facility, factor, band, draft.local_date)
         lines.append(
             PriceLine(
-                label=f"{facility.name} hire — hourly",
+                label=_rental_label(facility, HOURLY_RATE),
                 detail=detail,
                 amount=ts_round(hourly * (billable / 60) * factor),
             )

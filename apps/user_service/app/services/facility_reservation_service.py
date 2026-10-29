@@ -312,10 +312,12 @@ class FacilityReservationService:
         engine = engine_reservation(row, participants)
         can_move, blocked = availability.can_reschedule(snapshot, engine, now)
         quote = row.get("quote") or {}
+        photo_paths = [str(path) for path in (row.get("photo_paths") or []) if path]
         return FacilityReservationResponse(
             id=str(row["id"]),
             facility_id=str(row["facility_id"]),
             facility_name=str(row.get("facility_name") or ""),
+            photo_paths=photo_paths,
             archetype=row["archetype"],
             unit_id=str(row["unit_id"]) if row.get("unit_id") else None,
             unit_name=row.get("unit_name"),

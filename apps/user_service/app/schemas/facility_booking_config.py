@@ -272,6 +272,7 @@ class FacilityBookingConfigResponse(BaseModel):
     facility_id: str
     facility_name: str
     facility_type: str
+    photo_paths: list[str] = Field(default_factory=list)
     archetype: FacilityBookingArchetype
     description: str
     slot_minutes: int
