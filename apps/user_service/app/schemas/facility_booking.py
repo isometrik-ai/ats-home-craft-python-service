@@ -325,6 +325,7 @@ class FacilityReservationResponse(BaseModel):
     id: str
     facility_id: str
     facility_name: str
+    photo_paths: list[str] = Field(default_factory=list)
     archetype: FacilityBookingArchetype
     unit_id: str | None = None
     unit_name: str | None = None

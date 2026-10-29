@@ -28,6 +28,7 @@ _RESERVATION_SELECT = """
     SELECT
         r.*,
         f.name AS facility_name,
+        f.photo_paths AS photo_paths,
         f.booking_archetype::text AS archetype,
         u.name AS unit_name,
         NULLIF(BTRIM(CONCAT_WS(' ', c.first_name, c.last_name)), '') AS host_name
