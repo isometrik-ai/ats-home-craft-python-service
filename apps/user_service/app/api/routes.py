@@ -2,6 +2,8 @@
 
 from fastapi import APIRouter
 
+from apps.user_service.app.api.app_access import router as app_access_router
+from apps.user_service.app.api.app_access import unit_router as app_access_unit_router
 from apps.user_service.app.api.audit_logs import router as audit_logs_router
 from apps.user_service.app.api.auth import router as auth_router
 from apps.user_service.app.api.community_events import router as community_events_router
@@ -133,6 +135,8 @@ router.include_router(community_events_internal_router)
 router.include_router(facility_booking_admin_router)
 router.include_router(facility_booking_resident_router)
 router.include_router(fee_configuration_router)
+router.include_router(app_access_router)
+router.include_router(app_access_unit_router)
 router.include_router(fee_billing_internal_router)
 router.include_router(fee_invoices_router)
 router.include_router(fee_invoice_unit_router)

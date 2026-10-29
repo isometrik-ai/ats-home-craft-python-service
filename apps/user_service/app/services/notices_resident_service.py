@@ -25,6 +25,9 @@ from apps.user_service.app.schemas.notices import (
 from apps.user_service.app.services.notice_recipient_resolution_service import (
     NoticeRecipientResolutionService,
 )
+from apps.user_service.app.utils.app_access_guard import (
+    ensure_resident_project_not_held,
+)
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     ForbiddenException,
@@ -152,6 +155,13 @@ class NoticesResidentService:
                 message_key="notices.errors.not_flash",
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
+        if contact_id:
+            await ensure_resident_project_not_held(
+                self.db_connection,
+                organization_id=self.organization_id,
+                contact_id=contact_id,
+                project_id=str(context["project_id"]),
+            )
         identity = self._like_identity_kwargs(contact_id, contact_user_id)
         await self.repo.upsert_flash_response(
             organization_id=self.organization_id,
@@ -271,6 +281,18 @@ class NoticesResidentService:
             notice_id=notice_id,
             increment_view=False,
         )
+        if contact_id:
+            context = await self.repo.fetch_notice_visibility_context(
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+            )
+            if context:
+                await ensure_resident_project_not_held(
+                    self.db_connection,
+                    organization_id=self.organization_id,
+                    contact_id=contact_id,
+                    project_id=str(context["project_id"]),
+                )
         await self.repo.upsert_like(
             organization_id=self.organization_id,
             notice_id=notice_id,
@@ -298,6 +320,18 @@ class NoticesResidentService:
             notice_id=notice_id,
             increment_view=False,
         )
+        if contact_id:
+            context = await self.repo.fetch_notice_visibility_context(
+                organization_id=self.organization_id,
+                notice_id=notice_id,
+            )
+            if context:
+                await ensure_resident_project_not_held(
+                    self.db_connection,
+                    organization_id=self.organization_id,
+                    contact_id=contact_id,
+                    project_id=str(context["project_id"]),
+                )
         await self.repo.delete_like(
             organization_id=self.organization_id,
             notice_id=notice_id,

@@ -127,6 +127,10 @@ FINANCE_MANAGEMENT_VIEW = "finance_management.view"
 FINANCE_MANAGEMENT_EDIT = "finance_management.edit"
 FINANCE_MANAGEMENT_ADMIN = "finance_management.admin"
 
+APP_ACCESS_VIEW = "app_access.view"
+APP_ACCESS_EDIT = "app_access.edit"
+APP_ACCESS_OVERRIDE = "app_access.override"
+
 DEFAULT_PERMISSIONS = [
     # User Management
     (
@@ -622,6 +626,24 @@ DEFAULT_PROJECT_PERMISSIONS = [
         "Administer Finance",
         "Generate invoices, run billing scheduler, and manage escalations",
         "finance",
+    ),
+    (
+        APP_ACCESS_VIEW,
+        "View App Access Control",
+        "View the app access rule and unit hold list",
+        "app_access",
+    ),
+    (
+        APP_ACCESS_EDIT,
+        "Edit App Access Rule",
+        "Create and update the project app access rule",
+        "app_access",
+    ),
+    (
+        APP_ACCESS_OVERRIDE,
+        "Override App Access",
+        "Block now, release, or return a unit to the rule",
+        "app_access",
     ),
     (
         WORK_ORDER_MANAGEMENT_MANAGE,

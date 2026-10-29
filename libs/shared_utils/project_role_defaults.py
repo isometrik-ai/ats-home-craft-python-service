@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass
 
 from libs.shared_utils.common_query import (
+    APP_ACCESS_EDIT,
+    APP_ACCESS_OVERRIDE,
+    APP_ACCESS_VIEW,
     BUSINESS_DASHBOARD_VIEW,
     COMMUNITY_EVENTS_MANAGEMENT_EDIT,
     COMMUNITY_EVENTS_MANAGEMENT_VIEW,
@@ -169,6 +172,9 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             FINANCE_MANAGEMENT_VIEW,
             FINANCE_MANAGEMENT_EDIT,
             FINANCE_MANAGEMENT_ADMIN,
+            APP_ACCESS_VIEW,
+            APP_ACCESS_EDIT,
+            APP_ACCESS_OVERRIDE,
             WORK_ORDER_MANAGEMENT_MANAGE,
             BUSINESS_DASHBOARD_VIEW,
             CONTACTS_MANAGEMENT_VIEW,
@@ -216,6 +222,9 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             FINANCE_MANAGEMENT_VIEW,
             FINANCE_MANAGEMENT_EDIT,
             FINANCE_MANAGEMENT_ADMIN,
+            APP_ACCESS_VIEW,
+            APP_ACCESS_EDIT,
+            APP_ACCESS_OVERRIDE,
             WORK_ORDER_MANAGEMENT_MANAGE,
         }
     ),
@@ -244,6 +253,7 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             PETS_MANAGEMENT_VIEW,
             RESIDENT_MANAGEMENT_VIEW,
             FINANCE_MANAGEMENT_VIEW,
+            APP_ACCESS_VIEW,
             WORK_ORDER_MANAGEMENT_MANAGE,
         }
     ),
@@ -265,6 +275,7 @@ DEFAULT_PROJECT_ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
             RESIDENT_MANAGEMENT_VIEW,
             MARKETPLACE_MANAGEMENT_VIEW,
             FINANCE_MANAGEMENT_VIEW,
+            APP_ACCESS_VIEW,
             WORK_ORDER_MANAGEMENT_MANAGE,
         }
     ),

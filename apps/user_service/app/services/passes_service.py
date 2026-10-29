@@ -27,6 +27,7 @@ from apps.user_service.app.schemas.passes import (
     CreatePassRequest,
     UpdatePassRequest,
 )
+from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
 from apps.user_service.app.utils.pass_event_actor_labels import (
     enrich_pass_event_actor_labels,
@@ -296,6 +297,12 @@ class PassesService:
                 message_key="passes.errors.unit_not_owned",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        await ensure_resident_unit_not_held(
+            self.db_connection,
+            organization_id=org_id,
+            project_id=str(unit["project_id"]),
+            unit_id=unit_id,
+        )
         return unit
 
     async def _get_owned_pass_row(self, *, contact_id: str, pass_id: str) -> dict[str, Any]:

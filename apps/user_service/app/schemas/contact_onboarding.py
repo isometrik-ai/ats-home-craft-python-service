@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from apps.user_service.app.schemas.app_access import OnboardingAppAccess
 from apps.user_service.app.schemas.common import Email, Phone
 from apps.user_service.app.schemas.contacts import (
     CommunicationPreferences,
@@ -599,6 +600,7 @@ class OnboardingStatusResponse(BaseModel):
     requires_default_unit: bool = False
     prompts: list[OnboardingPromptResponse] = Field(default_factory=list)
     is_completed: bool
+    app_access: OnboardingAppAccess | None = None
 
 
 class OnboardingReviewResponse(BaseModel):

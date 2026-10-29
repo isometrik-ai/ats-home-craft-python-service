@@ -60,6 +60,7 @@ from apps.user_service.app.utils.audit_context import set_audit_context
 from apps.user_service.app.utils.common_utils import handle_api_exceptions
 from apps.user_service.app.utils.facility_booking_access import (
     ensure_resident_booking_access,
+    ensure_resident_booking_not_held,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
 from libs.shared_utils.response_factory import list_response, success_response
@@ -425,6 +426,13 @@ async def quote_reservation(
         project_id=project_id,
         request=request,
     )
+    await ensure_resident_booking_not_held(
+        db_connection=db_connection,
+        organization_id=str(user_context.organization_id),
+        contact_id=str(contact["id"]),
+        project_id=project_id,
+        unit_id=getattr(body, "host_unit_id", None),
+    )
     data = await FacilityAvailabilityService(
         db_connection=db_connection, user_context=user_context
     ).evaluate_draft(project_id=project_id, body=body, host_contact_id=str(contact["id"]))
@@ -487,6 +495,13 @@ async def create_reservation(
         db_connection=db_connection,
         project_id=project_id,
         request=request,
+    )
+    await ensure_resident_booking_not_held(
+        db_connection=db_connection,
+        organization_id=str(user_context.organization_id),
+        contact_id=str(contact["id"]),
+        project_id=project_id,
+        unit_id=body.host_unit_id,
     )
     data = await FacilityReservationService(
         db_connection=db_connection, user_context=user_context
@@ -680,6 +695,12 @@ async def get_cancel_quote(
         project_id=project_id,
         request=request,
     )
+    await ensure_resident_booking_not_held(
+        db_connection=db_connection,
+        organization_id=str(user_context.organization_id),
+        contact_id=str(contact["id"]),
+        project_id=project_id,
+    )
     data = await FacilityReservationService(
         db_connection=db_connection, user_context=user_context
     ).cancel_quote(
@@ -712,6 +733,12 @@ async def cancel_reservation(
         db_connection=db_connection,
         project_id=project_id,
         request=request,
+    )
+    await ensure_resident_booking_not_held(
+        db_connection=db_connection,
+        organization_id=str(user_context.organization_id),
+        contact_id=str(contact["id"]),
+        project_id=project_id,
     )
     data = await FacilityReservationService(
         db_connection=db_connection, user_context=user_context
@@ -747,6 +774,12 @@ async def reschedule_reservation(
         db_connection=db_connection,
         project_id=project_id,
         request=request,
+    )
+    await ensure_resident_booking_not_held(
+        db_connection=db_connection,
+        organization_id=str(user_context.organization_id),
+        contact_id=str(contact["id"]),
+        project_id=project_id,
     )
     data = await FacilityReservationService(
         db_connection=db_connection, user_context=user_context
@@ -856,6 +889,12 @@ async def pay_my_invoice(
         project_id=project_id,
         request=request,
     )
+    await ensure_resident_booking_not_held(
+        db_connection=db_connection,
+        organization_id=str(user_context.organization_id),
+        contact_id=str(contact["id"]),
+        project_id=project_id,
+    )
     data = await FacilityBookingBillingService(
         db_connection=db_connection, user_context=user_context
     ).pay_invoice(
@@ -919,6 +958,12 @@ async def top_up_my_wallet(
         db_connection=db_connection,
         project_id=project_id,
         request=request,
+    )
+    await ensure_resident_booking_not_held(
+        db_connection=db_connection,
+        organization_id=str(user_context.organization_id),
+        contact_id=str(contact["id"]),
+        project_id=project_id,
     )
     data = await FacilityBookingBillingService(
         db_connection=db_connection, user_context=user_context

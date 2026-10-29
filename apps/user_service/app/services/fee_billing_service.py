@@ -516,6 +516,7 @@ class FeeBillingService:
         db_connection: asyncpg.Connection,
         repository: FeeBillingRepository | None = None,
     ) -> None:
+        self.db_connection = db_connection
         self.repo = repository or FeeBillingRepository(db_connection)
         self.mailer = None
         self.outbound: list[dict[str, Any]] = []
@@ -742,6 +743,11 @@ class FeeBillingService:
             },
         )
         await self._email_new_invoice(invoice, lines=lines, invoice_id=invoice_id)
+        await self._refresh_app_access(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
         return invoice_id
 
     async def _email_new_invoice(
@@ -1012,6 +1018,11 @@ class FeeBillingService:
                 }
             )
         await self._apply_credits(organization_id=organization_id, project_id=project_id)
+        await self._refresh_app_access(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=str(invoice["unit_id"]),
+        )
         amount_paid = money(already + applied)
         credit = await self.repo.unit_credit(
             organization_id=organization_id,
@@ -1154,6 +1165,11 @@ class FeeBillingService:
             actor_user_id=actor_user_id,
             detail={"invoice_number": invoice.get("invoice_number")},
         )
+        await self._refresh_app_access(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=str(invoice["unit_id"]),
+        )
         return await self.invoice_detail(
             organization_id=organization_id,
             project_id=project_id,
@@ -1242,3 +1258,17 @@ class FeeBillingService:
             unit_id=unit_id,
         )
         return build_outstanding_summary(invoices, credit=credit)
+
+    async def _refresh_app_access(
+        self, *, organization_id: str, project_id: str, unit_id: str
+    ) -> None:
+        """Re-evaluate the unit hold after invoice, payment, or cancel."""
+        if self.db_connection is None:
+            return
+        from apps.user_service.app.services.app_access_service import AppAccessService
+
+        await AppAccessService(self.db_connection).evaluate_unit(
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )

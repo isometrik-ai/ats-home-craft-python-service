@@ -13,6 +13,10 @@ from apps.user_service.app.db.repositories.contact_units_repository import (
 from apps.user_service.app.db.repositories.facility_staff_assignments_repository import (
     FacilityStaffAssignmentsRepository,
 )
+from apps.user_service.app.utils.app_access_guard import (
+    ensure_resident_project_not_held,
+    ensure_resident_unit_not_held,
+)
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     ensure_staff_project_access,
@@ -63,6 +67,31 @@ async def ensure_resident_booking_access(
             custom_code=CustomStatusCode.FORBIDDEN,
         )
     return user_context, contact
+
+
+async def ensure_resident_booking_not_held(
+    *,
+    db_connection: asyncpg.Connection,
+    organization_id: str,
+    contact_id: str,
+    project_id: str,
+    unit_id: str | None = None,
+) -> None:
+    """Hold-check the host unit, or the contact's unit in the project."""
+    if unit_id:
+        await ensure_resident_unit_not_held(
+            db_connection,
+            organization_id=organization_id,
+            project_id=project_id,
+            unit_id=unit_id,
+        )
+        return
+    await ensure_resident_project_not_held(
+        db_connection,
+        organization_id=organization_id,
+        contact_id=contact_id,
+        project_id=project_id,
+    )
 
 
 async def ensure_can_operate_facility(

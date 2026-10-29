@@ -7,6 +7,10 @@ from typing import Any
 
 import asyncpg
 
+from apps.user_service.app.db.repositories.app_access_repository import (
+    AppAccessRepository,
+)
+from apps.user_service.app.services.app_access_service import AppAccessService
 from apps.user_service.app.services.fee_billing_service import FeeBillingService
 from apps.user_service.app.services.fee_invoice_mail import (
     collect_fee_invoice_messages,
@@ -64,5 +68,10 @@ async def issue_due_fee_invoices(
     run_date = datetime.now(timezone.utc).date()
     service = FeeBillingService(db_connection)
     result = await service.issue_due(run_date=run_date)
+    access = AppAccessService(db_connection)
+    for organization_id, project_id in await AppAccessRepository(
+        db_connection
+    ).list_project_ids_to_evaluate():
+        await access.evaluate_project(organization_id=organization_id, project_id=project_id)
     reminders = await claim_due_fee_invoice_reminders(db_connection, today=run_date)
     return result, service.outbound, reminders

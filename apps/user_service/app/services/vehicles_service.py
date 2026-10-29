@@ -48,6 +48,7 @@ from apps.user_service.app.services.units_service import (
     format_primary_contact_phone,
     serialize_unit_list_item,
 )
+from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import (
     UserContext,
     format_iso_datetime,
@@ -419,6 +420,13 @@ class VehiclesService:
             raise NotFoundException(
                 message_key="contact_onboarding.errors.unit_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if require_active_unit:
+            await ensure_resident_unit_not_held(
+                self.db_connection,
+                organization_id=org_id,
+                project_id=str(unit["project_id"]),
+                unit_id=unit_id,
             )
         return unit
 

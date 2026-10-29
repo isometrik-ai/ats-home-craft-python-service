@@ -20,7 +20,7 @@ ______________________________________________________________________
 
 ## Flow guides (Context & Change Guide)
 
-Listed in ADR order (`0001`–`0018`). Flow filenames use the same prefix as their primary ADR where applicable.
+Listed in ADR order (`0001`–`0019`). Flow filenames use the same prefix as their primary ADR where applicable.
 
 | Domain              | Guide                                                                | ADR                                                                                                 |
 | ------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -43,6 +43,7 @@ Listed in ADR order (`0001`–`0018`). Flow filenames use the same prefix as the
 | Facility booking    | [0016-facility-booking-flow.md](./0016-facility-booking-flow.md)     | [0016](./adr/0016-facility-booking.md)                                                              |
 | Fee configuration   | [0017-fee-configuration-flow.md](./0017-fee-configuration-flow.md)   | [0017](./adr/0017-fee-configuration.md)                                                             |
 | Buy & sell          | [0018-buy-and-sell-flow.md](./0018-buy-and-sell-flow.md)             | [0018](./adr/0018-buy-and-sell.md)                                                                  |
+| App access control  | [0019-app-access-control-flow.md](./0019-app-access-control-flow.md) | [0019](./adr/0019-app-access-control.md)                                                            |
 
 Full ADR index: [adr/README.md](./adr/README.md)
 

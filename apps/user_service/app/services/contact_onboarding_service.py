@@ -293,6 +293,11 @@ class ContactOnboardingService:
             review_complete=review_complete,
         )
 
+        from apps.user_service.app.services.app_access_service import AppAccessService
+
+        app_access = await AppAccessService(
+            self.db_connection, user_context=self.user_context
+        ).onboarding_app_access(organization_id=org_id, contact_id=contact_id)
         return {
             "profile_complete": profile_complete,
             "pending_unit_count": len(pending_self_units),
@@ -300,6 +305,7 @@ class ContactOnboardingService:
             "requires_default_unit": requires_default,
             "prompts": prompts,
             "is_completed": is_completed,
+            "app_access": app_access,
         }
 
     async def get_profile(self, *, contact_id: str) -> dict[str, Any]:
