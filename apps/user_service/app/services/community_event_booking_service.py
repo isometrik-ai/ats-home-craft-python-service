@@ -454,6 +454,60 @@ class CommunityEventBookingService:
 
         return booking
 
+    async def resend_ticket(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        booking_id: str,
+    ) -> dict[str, str]:
+        """Admin resend of the confirmation email (one mail, no push)."""
+        booking = await self.repo.fetch_booking_by_id(
+            organization_id=self.organization_id,
+            booking_id=booking_id,
+            event_id=event_id,
+        )
+        if not booking or str(booking.get("project_id")) != project_id:
+            raise NotFoundException(
+                message_key="community_events.errors.booking_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if str(booking.get("booking_status")) != CommunityEventBookingStatus.CONFIRMED.value:
+            raise ConflictException(
+                message_key="community_events.errors.booking_not_confirmed",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        event = await self.repo.fetch_event_by_id(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+        )
+        if not event:
+            raise NotFoundException(
+                message_key="community_events.errors.event_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        email = await self.notifications.send_ticket_email(
+            organization_id=self.organization_id,
+            contact_id=str(booking["contact_id"]),
+            event=event,
+            booking=booking,
+        )
+        await self.repo.insert_audit_log(
+            organization_id=self.organization_id,
+            project_id=project_id,
+            event_id=event_id,
+            booking_id=booking_id,
+            action=CommunityEventAuditAction.TICKET_RESENT.value,
+            actor_user_id=self.user_context.user_id,
+            payload={"email": email},
+        )
+        return {
+            "booking_id": str(booking["id"]),
+            "display_code": str(booking["display_code"]),
+            "email": email,
+        }
+
     async def cancel_booking(
         self,
         *,
@@ -575,7 +629,7 @@ class CommunityEventBookingService:
             return
 
         gate_token = uuid.uuid4().hex
-        await self.repo.update_booking_fields(
+        updated = await self.repo.update_booking_fields(
             organization_id=self.organization_id,
             booking_id=str(waitlisted["id"]),
             fields={
@@ -593,7 +647,7 @@ class CommunityEventBookingService:
             organization_id=self.organization_id,
             contact_id=str(waitlisted["contact_id"]),
             event=event,
-            booking=waitlisted,
+            booking=updated or {**waitlisted, "gate_qr_token": gate_token},
         )
 
     async def mark_paid(

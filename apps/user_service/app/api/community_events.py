@@ -657,6 +657,58 @@ async def mark_community_event_booking_paid(
     )
 
 
+@handle_api_exceptions("resend community event ticket email")
+@router.post(
+    "/{project_id}/community-events/{event_id}/bookings/{booking_id}/resend-ticket",
+    status_code=http_status.HTTP_200_OK,
+    summary="Resend ticket confirmation email",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("30/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    table_name="community_event_bookings",
+    category="COMMUNITY_EVENTS",
+)
+async def resend_community_event_ticket(
+    request: Request,
+    project_id: str = Path(...),
+    event_id: str = Path(...),
+    booking_id: str = Path(...),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Send one ticket confirmation email to the resident. No push."""
+    user_context = await ensure_staff_project_access(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=COMMUNITY_EVENTS_MANAGEMENT_EDIT,
+        request=request,
+    )
+    service = CommunityEventsService(db_connection=db_connection, user_context=user_context)
+    data = await service.resend_ticket(
+        project_id=project_id,
+        event_id=event_id,
+        booking_id=booking_id,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        project_id=project_id,
+        table="community_event_bookings",
+        requested_id=booking_id,
+        description=f"Resent ticket email: {data.display_code}",
+        new_data=data.model_dump(mode="json"),
+    )
+    return success_response(
+        request=request,
+        message_key="community_events.success.ticket_resent",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data.model_dump(mode="json"),
+    )
+
+
 @handle_api_exceptions("mark community event booking waived")
 @router.post(
     "/{project_id}/community-events/{event_id}/bookings/{booking_id}/mark-waived",

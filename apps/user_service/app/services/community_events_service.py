@@ -31,6 +31,7 @@ from apps.user_service.app.schemas.community_events import (
     CreateCommunityEventRequest,
     MarkBookingPaidRequest,
     MarkBookingWaivedRequest,
+    ResendTicketResponse,
     UpdateCommunityEventRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -781,6 +782,25 @@ class CommunityEventsService:
             body=body,
         )
         return self._booking_list_item(row)
+
+    async def resend_ticket(
+        self,
+        *,
+        project_id: str,
+        event_id: str,
+        booking_id: str,
+    ) -> ResendTicketResponse:
+        """Admin resend of the resident ticket email."""
+        row = await self.booking_service.resend_ticket(
+            project_id=project_id,
+            event_id=event_id,
+            booking_id=booking_id,
+        )
+        return ResendTicketResponse(
+            booking_id=row["booking_id"],
+            display_code=row["display_code"],
+            email=row["email"],
+        )
 
     async def mark_booking_paid(
         self,

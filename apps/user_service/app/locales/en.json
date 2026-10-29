@@ -1428,6 +1428,9 @@
       "adult_price_required": "Adult ticket price is required for paid events.",
       "invalid_project_context": "You do not have access to events in the selected project.",
       "mark_paid_not_applicable": "Mark paid is only available for paid events.",
+      "booking_not_confirmed": "Tickets can only be resent for confirmed bookings.",
+      "resident_email_missing": "This resident has no email address on file.",
+      "ticket_email_not_sent": "The ticket email could not be sent. Try again.",
       "zero_amount_booking": "This booking has no payable amount.",
       "organization_required": "Organization context is required."
     },
@@ -1447,6 +1450,7 @@
       "booking_retrieved": "Event booking retrieved successfully.",
       "booking_cancelled": "Event booking cancelled successfully.",
       "booking_marked_paid": "Booking marked as paid successfully.",
+      "ticket_resent": "Ticket email sent successfully.",
       "booking_marked_waived": "Booking payment waived successfully.",
       "booking_verified": "Booking verified successfully.",
       "complete_past_completed": "Past events marked as completed.",

@@ -277,6 +277,14 @@ class CommunityEventBookingListItemResponse(BaseModel):
     booked_at: datetime
 
 
+class ResendTicketResponse(BaseModel):
+    """Admin resend ticket email result."""
+
+    booking_id: str
+    display_code: str
+    email: str
+
+
 class ResidentEventListQuery(BaseModel):
     """Resident events list."""
 

@@ -1,0 +1,15 @@
+Hello {{.first_name}},
+
+You are on the waitlist for {{.event_title}} at {{.project_name}}.
+
+Booking  : {{.display_code}}
+When     : {{.event_when}}
+Venue    : {{.venue}}
+Tickets  : {{.tickets_label}}
+Amount   : {{.amount_label}}
+
+{{.qr_note}}
+
+We will email your confirmed tickets if a spot opens up.
+
+{{.app_name}}

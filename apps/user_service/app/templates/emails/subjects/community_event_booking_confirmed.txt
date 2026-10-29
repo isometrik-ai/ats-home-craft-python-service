@@ -1,0 +1,1 @@
+Tickets confirmed for {{.event_title}} ({{.display_code}})

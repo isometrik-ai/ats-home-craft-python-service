@@ -126,11 +126,13 @@ class FacilityBookingConfigService:
 
     def _serialize_config(self, row: dict[str, Any]) -> dict[str, Any]:
         """Map a config DB row to the API response shape."""
+        photo_paths = [str(path) for path in (row.get("facility_photo_paths") or []) if path]
         return FacilityBookingConfigResponse(
             id=str(row["id"]),
             facility_id=str(row["facility_id"]),
             facility_name=str(row.get("facility_name") or ""),
             facility_type=str(row.get("facility_type") or ""),
+            photo_paths=photo_paths,
             archetype=row["archetype"],
             description=row.get("description") or "",
             slot_minutes=int(row["slot_minutes"]),
