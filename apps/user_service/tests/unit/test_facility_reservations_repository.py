@@ -155,6 +155,7 @@ async def test_get_reservation_decodes_jsonb_and_for_update() -> None:
     assert found is not None
     assert found["quote"] == {"total": 10}
     query, args = conn.fetchrow_calls[0]
+    assert "f.photo_paths AS photo_paths" in query
     assert "FOR UPDATE" not in query
     assert args == (RESERVATION_ID, ORG_ID, PROJECT_ID)
 
