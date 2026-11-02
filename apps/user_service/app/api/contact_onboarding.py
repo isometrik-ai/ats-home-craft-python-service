@@ -18,6 +18,8 @@ from apps.user_service.app.schemas.contact_onboarding import (
     CompleteOnboardingApiResponse,
     CompleteOnboardingRequest,
     CompleteProfileRequest,
+    ConfirmPhoneChangeApiResponse,
+    ConfirmPhoneChangeRequest,
     ConfirmPropertiesRequest,
     ContactOnboardingMessageApiResponse,
     ContactProfileApiResponse,
@@ -37,6 +39,8 @@ from apps.user_service.app.schemas.contact_onboarding import (
     OnboardingStatusApiResponse,
     RemoveHouseholdMemberApiResponse,
     ResubmitVehicleRequest,
+    SendPhoneChangeApiResponse,
+    SendPhoneChangeRequest,
     SetDefaultUnitApiResponse,
     SetDefaultUnitRequest,
     UpdateHouseholdMemberRequest,
@@ -65,6 +69,7 @@ from apps.user_service.app.utils.common_utils import (
     handle_api_exceptions,
 )
 from libs.shared_middleware.jwt_auth import get_user_from_auth
+from libs.shared_utils.http_exceptions import UnauthorizedException
 from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.session_context_cache import (
     extract_session_id_from_access_token,
@@ -465,6 +470,131 @@ async def complete_profile(
     return success_response(
         request=request,
         message_key="contact_onboarding.success.profile_updated",
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+PHONE_SEND_SUCCESS_RESPONSES = _ok_response(
+    SendPhoneChangeApiResponse,
+    "OTP sent to the new phone, or the phone is already verified on the account.",
+)
+PHONE_CONFIRM_SUCCESS_RESPONSES = _ok_response(
+    ConfirmPhoneChangeApiResponse,
+    "Phone verified and saved on the contact.",
+)
+
+
+def _access_token(request: Request) -> str:
+    """Return the bearer token stored by the auth middleware."""
+    token = getattr(request.state, "access_token", None)
+    if not isinstance(token, str) or not token:
+        raise UnauthorizedException(
+            message_key="errors.authentication_failed",
+            custom_code=CustomStatusCode.UNAUTHORIZED,
+        )
+    return token
+
+
+@handle_api_exceptions("send contact phone change otp")
+@router.post(
+    "/phone/send",
+    status_code=http_status.HTTP_200_OK,
+    summary="Send login phone change OTP",
+    response_model=None,
+    responses=PHONE_SEND_SUCCESS_RESPONSES,
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contacts",
+    category="CONTACT_ONBOARDING",
+)
+async def send_phone_change(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
+    body: SendPhoneChangeRequest = Body(...),
+):
+    """Text an OTP when the number is not already linked to another user."""
+    user_context, _ = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=sb_client,
+    )
+    data = await service.send_phone_change(
+        user_id=user_context.user_id,
+        body=body,
+        access_token=_access_token(request),
+    )
+    message_key = (
+        "contact_onboarding.success.phone_change_already_verified"
+        if data["already_verified"]
+        else "contact_onboarding.success.phone_change_otp_sent"
+    )
+    return success_response(
+        request=request,
+        message_key=message_key,
+        custom_code=CustomStatusCode.SUCCESS,
+        data=data,
+    )
+
+
+@handle_api_exceptions("confirm contact phone change")
+@router.post(
+    "/phone/confirm",
+    status_code=http_status.HTTP_200_OK,
+    summary="Confirm login phone change",
+    response_model=None,
+    responses=PHONE_CONFIRM_SUCCESS_RESPONSES,
+)
+@limiter.limit("10/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "audit_required"],
+    table_name="contacts",
+    category="CONTACT_ONBOARDING",
+)
+async def confirm_phone_change(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
+    body: ConfirmPhoneChangeRequest = Body(...),
+):
+    """Verify the SMS code and save the number on the contact."""
+    user_context, contact = await extract_onboarding_contact_context(
+        current_user, db_connection, request=request
+    )
+    service = _service(
+        db_connection=db_connection,
+        user_context=user_context,
+        sb_client=sb_client,
+    )
+    data = await service.confirm_phone_change(
+        contact_id=str(contact["id"]),
+        user_id=user_context.user_id,
+        body=body,
+    )
+    set_audit_context(
+        request,
+        user_context,
+        table="contacts",
+        requested_id=str(contact["id"]),
+        description=f"Confirmed phone change for contact: {contact['id']}",
+        risk_level="high",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="contact_onboarding.success.phone_change_confirmed",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
     )
