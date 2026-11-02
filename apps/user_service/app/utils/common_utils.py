@@ -65,7 +65,8 @@ class UserContext:
     """User context extracted and validated from JWT token."""
 
     user_id: str
-    email: str
+    email: str | None = None
+    phone: str | None = None
     organization_id: str | None = None
     user_type: str | None = None
     project_member_role: str | None = None
@@ -196,6 +197,7 @@ async def extract_user_context(
     try:
         user_id = current_user.get("sub")
         email = current_user.get("email")
+        phone = current_user.get("phone")
 
         # Validation: Ensure required fields are present
         if not user_id:
@@ -205,11 +207,11 @@ async def extract_user_context(
                 params={"error": "user ID not found"},
             )
 
-        if not email:
+        if not email and not phone:
             raise ValidationException(
                 message_key="errors.invalid_token",
                 custom_code=CustomStatusCode.INVALID_DATA,
-                params={"error": "email not found"},
+                params={"error": "email or phone not found"},
             )
 
         organization_id = None
@@ -242,6 +244,7 @@ async def extract_user_context(
         return UserContext(
             user_id=user_id,
             email=email,
+            phone=phone,
             organization_id=organization_id,
             user_type=user_type,
         )
