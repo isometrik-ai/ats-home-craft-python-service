@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
+import uuid
 from typing import Any
 
 import asyncpg
-from supabase import AsyncClient
+from supabase import AsyncClient, ClientOptions, create_async_client
+from supabase_auth.errors import AuthApiError, AuthSessionMissingError
 
 from apps.user_service.app.db.repositories.contact_onboarding_repository import (
     CONTACT_LEVEL_STEP_KEYS,
@@ -21,14 +24,21 @@ from apps.user_service.app.db.repositories.contacts_repository import ContactsRe
 from apps.user_service.app.db.repositories.daily_help_repository import (
     DailyHelpRepository,
 )
+from apps.user_service.app.db.repositories.organization_member_repository import (
+    OrganizationMemberRepository,
+)
 from apps.user_service.app.db.repositories.pets_repository import PetsRepository
 from apps.user_service.app.db.repositories.units_repository import UnitsRepository
+from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
+from apps.user_service.app.schemas.common import Phone
 from apps.user_service.app.schemas.contact_onboarding import (
     CompleteOnboardingRequest,
     CompleteProfileRequest,
+    ConfirmPhoneChangeRequest,
     CreateHouseholdMemberRequest,
     HouseholdSummaryCountsResponse,
+    SendPhoneChangeRequest,
     UpdateHouseholdMemberRequest,
 )
 from apps.user_service.app.schemas.contacts import (
@@ -57,12 +67,20 @@ from apps.user_service.app.utils.common_utils import (
 from apps.user_service.app.utils.contact_session_utils import (
     revoke_contact_portal_sessions,
 )
+from libs.shared_config.app_settings import shared_settings
+from libs.shared_db.supabase_db.auth_repository import get_user_by_id, update_phone
 from libs.shared_utils.http_exceptions import (
+    BadRequestException,
     ConflictException,
     NotFoundException,
+    ServiceUnavailableException,
+    UnauthorizedException,
     ValidationException,
 )
+from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
+
+logger = get_logger("contact-onboarding-service")
 
 TERMINAL_STEP_STATUSES = {
     SetupStepStatus.COMPLETED.value,
@@ -320,6 +338,38 @@ class ContactOnboardingService:
         return await contacts_service.get_contact_details(contact_id=contact_id)
 
     @staticmethod
+    def _phones_with_existing_primary(
+        existing_phones: list[Any],
+        submitted_phones: list[Phone],
+    ) -> list[Phone]:
+        """Keep the stored primary phone and replace only the non-primary numbers."""
+        primary_item = next(
+            (
+                item
+                for item in existing_phones
+                if isinstance(item, dict) and item.get("is_primary") is True
+            ),
+            None,
+        )
+        stored_number = str((primary_item or {}).get("phone_number") or "").strip()
+        if not isinstance(primary_item, dict) or not stored_number:
+            return list(submitted_phones)
+
+        primary = Phone(
+            phone_number=str(primary_item.get("phone_number") or ""),
+            phone_isd_code=str(primary_item.get("phone_isd_code") or ""),
+            label=primary_item.get("label"),
+            is_primary=True,
+        )
+        primary_key = re.sub(r"\D", "", f"{primary.phone_isd_code}{primary.phone_number}")
+        secondary = [
+            phone
+            for phone in submitted_phones
+            if re.sub(r"\D", "", f"{phone.phone_isd_code}{phone.phone_number}") != primary_key
+        ]
+        return [primary, *secondary]
+
+    @staticmethod
     def _to_update_contact_request(body: CompleteProfileRequest) -> UpdateContactRequest:
         """Map onboarding profile payload to the shared contact update request."""
         return UpdateContactRequest(**body.model_dump(exclude_unset=True))
@@ -340,9 +390,20 @@ class ContactOnboardingService:
             user_context=self.user_context,
             supabase_client=self.supabase_client,
         )
+        update_body = self._to_update_contact_request(body)
+        if body.phones is not None:
+            existing_phones = await self.contacts_repo.get_contact_phones_for_update(
+                contact_id=contact_id,
+                organization_id=org_id,
+            )
+            update_body.phones = self._phones_with_existing_primary(
+                existing_phones or [],
+                body.phones,
+            )
         await contacts_service.update_contact(
             contact_id=contact_id,
-            body=self._to_update_contact_request(body),
+            body=update_body,
+            sync_login_phone=False,
         )
         profile = await contacts_service.get_contact_details(contact_id=contact_id)
 
@@ -352,6 +413,236 @@ class ContactOnboardingService:
             step_key=ContactOnboardingStep.COMPLETE_PROFILE.value,
         )
         return profile
+
+    async def send_phone_change(
+        self,
+        *,
+        user_id: str,
+        body: SendPhoneChangeRequest,
+        access_token: str,
+    ) -> dict[str, Any]:
+        """Text an OTP when the number is free. Skip sending if Auth already has it."""
+        phone_isd_code, phone_number, phone_digits, e164 = self._phone_parts(
+            phone_isd_code=body.phone_isd_code,
+            phone_number=body.phone_number,
+        )
+        del phone_isd_code, phone_number
+        await self._assert_phone_available(user_id=user_id, phone_digits=phone_digits, e164=e164)
+        if await self._current_auth_phone_digits(user_id) == phone_digits:
+            return {"otp_sent": False, "already_verified": True}
+
+        await self._request_auth_phone_change(access_token=access_token, e164=e164)
+        return {"otp_sent": True, "already_verified": False}
+
+    async def confirm_phone_change(
+        self,
+        *,
+        contact_id: str,
+        user_id: str,
+        body: ConfirmPhoneChangeRequest,
+    ) -> dict[str, Any]:
+        """Verify the SMS code, then store the number as the contact primary phone.
+
+        A retry whose Auth phone already matches skips the code and only writes the contact.
+        """
+        phone_isd_code, phone_number, phone_digits, e164 = self._phone_parts(
+            phone_isd_code=body.phone_isd_code,
+            phone_number=body.phone_number,
+        )
+        await self._assert_phone_available(user_id=user_id, phone_digits=phone_digits, e164=e164)
+        if await self._current_auth_phone_digits(user_id) != phone_digits:
+            code = (body.code or "").strip()
+            if not code:
+                raise BadRequestException(
+                    message_key="contact_onboarding.errors.phone_otp_required",
+                    custom_code=CustomStatusCode.BAD_REQUEST,
+                )
+            await self._verify_phone_change_otp(e164=e164, code=code)
+
+        await self._save_contact_primary_phone(
+            contact_id=contact_id,
+            phone_isd_code=phone_isd_code,
+            phone_number=phone_number,
+        )
+        await self._sync_auth_phone_metadata(
+            user_id=user_id,
+            phone_isd_code=phone_isd_code,
+            phone_number=phone_number,
+        )
+        return {"phone_isd_code": phone_isd_code, "phone_number": phone_number}
+
+    @staticmethod
+    def _phone_parts(*, phone_isd_code: str, phone_number: str) -> tuple[str, str, str, str]:
+        """Return stored ISD, national number, digits-only full number, and E.164."""
+        isd_digits = re.sub(r"\D", "", phone_isd_code or "")
+        number_digits = re.sub(r"\D", "", phone_number or "")
+        if not isd_digits or not number_digits:
+            raise BadRequestException(
+                message_key="contact_onboarding.errors.phone_invalid",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+        phone_digits = f"{isd_digits}{number_digits}"
+        return f"+{isd_digits}", number_digits, phone_digits, f"+{phone_digits}"
+
+    async def _assert_phone_available(self, *, user_id: str, phone_digits: str, e164: str) -> None:
+        """Reject a number that already belongs to a different auth user."""
+        user_repo = UserRepository(self.db_connection)
+        for candidate in (phone_digits, e164):
+            existing = await user_repo.get_auth_user_by_phone(candidate)
+            if existing and str(existing["id"]) != user_id:
+                raise ConflictException(
+                    message_key="clients.errors.phone_number_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                )
+
+    async def _require_supabase(self) -> AsyncClient:
+        """Return the service-role client used for auth user reads and metadata writes."""
+        if self.supabase_client is None:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+        return self.supabase_client
+
+    async def _current_auth_phone_digits(self, user_id: str) -> str:
+        """Return the digits-only phone currently stored on the auth user."""
+        client = await self._require_supabase()
+        auth_user = await get_user_by_id(client, user_id)
+        if not auth_user:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+        return re.sub(r"\D", "", str(auth_user.get("phone") or ""))
+
+    async def _anon_auth_client(self) -> AsyncClient:
+        """Return a fresh anon client so this request does not change the shared one."""
+        return await create_async_client(
+            shared_settings.supabase.url,
+            shared_settings.supabase.anon_key,
+            options=ClientOptions(persist_session=False, auto_refresh_token=False),
+        )
+
+    async def _request_auth_phone_change(self, *, access_token: str, e164: str) -> None:
+        """Ask Supabase Auth to send the phone-change OTP through the SMS hook."""
+        if not access_token:
+            raise UnauthorizedException(
+                message_key="errors.authentication_failed",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            )
+        client = await self._anon_auth_client()
+        try:
+            await client.auth.set_session(access_token, "")
+            await client.auth.update_user({"phone": e164})
+        except AuthApiError as exc:
+            logger.error("Phone change rejected: code=%s", exc.code)
+            if exc.code in {"phone_exists", "user_already_exists"}:
+                raise ConflictException(
+                    message_key="clients.errors.phone_number_already_exists",
+                    custom_code=CustomStatusCode.CONFLICT,
+                ) from exc
+            raise BadRequestException(
+                message_key="contact_onboarding.errors.phone_change_failed",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            ) from exc
+        except AuthSessionMissingError as exc:
+            raise UnauthorizedException(
+                message_key="errors.authentication_failed",
+                custom_code=CustomStatusCode.UNAUTHORIZED,
+            ) from exc
+
+    async def _verify_phone_change_otp(self, *, e164: str, code: str) -> None:
+        """Confirm the phone-change OTP with Supabase Auth."""
+        anon_client = await self._anon_auth_client()
+        try:
+            await anon_client.auth.verify_otp(
+                {"phone": e164, "token": code, "type": "phone_change"}
+            )
+        except AuthApiError as exc:
+            logger.error("Phone change OTP rejected: %s", exc.code)
+            raise BadRequestException(
+                message_key="contact_onboarding.errors.phone_otp_invalid",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            ) from exc
+
+    async def _save_contact_primary_phone(
+        self,
+        *,
+        contact_id: str,
+        phone_isd_code: str,
+        phone_number: str,
+    ) -> None:
+        """Replace the contact's primary phone, keeping other numbers on the list."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        existing = await self.contacts_repo.get_contact_phones_for_update(
+            contact_id=contact_id,
+            organization_id=org_id,
+        )
+        if existing is None:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        phones = [dict(item) for item in existing if isinstance(item, dict)]
+        primary = next((item for item in phones if item.get("is_primary") is True), None)
+        if primary is None and phones:
+            primary = phones[0]
+        if primary is None:
+            phones.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "phone_isd_code": phone_isd_code,
+                    "phone_number": phone_number,
+                    "is_primary": True,
+                }
+            )
+        else:
+            for item in phones:
+                item["is_primary"] = item is primary
+            primary["phone_isd_code"] = phone_isd_code
+            primary["phone_number"] = phone_number
+            primary["is_primary"] = True
+
+        updated = await self.contacts_repo.update_contact(
+            contact_id=contact_id,
+            organization_id=org_id,
+            update_data={"phones": phones},
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.contact_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+    async def _sync_auth_phone_metadata(
+        self,
+        *,
+        user_id: str,
+        phone_isd_code: str,
+        phone_number: str,
+    ) -> None:
+        """Store the phone on auth metadata and organization membership."""
+        client = await self._require_supabase()
+        auth_user = await get_user_by_id(client, user_id)
+        updated = await update_phone(
+            client,
+            user_id,
+            auth_user.get("user_metadata") or {},
+            phone_number,
+            phone_isd_code,
+        )
+        if not updated:
+            raise ServiceUnavailableException(
+                message_key="contacts.errors.auth_user_creation_failed",
+                custom_code=CustomStatusCode.EXTERNAL_SERVICE_ERROR,
+            )
+        await OrganizationMemberRepository(self.db_connection).update_user_phone_by_user_id(
+            user_id,
+            phone_number,
+            phone_isd_code,
+        )
 
     async def get_review(self, *, contact_id: str) -> dict[str, Any]:
         """Aggregate contact, units, vehicles, and household for the review screen."""

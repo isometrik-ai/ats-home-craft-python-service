@@ -177,12 +177,20 @@ class TestEmailTemplateSchemaValidators:
 class TestContactOnboardingSchemaValidators:
     """Contact onboarding request validation branches."""
 
-    def test_complete_profile_primary_phone_required(self) -> None:
+    def test_complete_profile_rejects_primary_phone(self) -> None:
         with pytest.raises(ValidationException):
             CompleteProfileRequest(
                 first_name="Jane",
-                phones=[_phone(primary=False), _phone(primary=False)],
+                phones=[_phone(primary=True)],
             )
+
+    def test_complete_profile_allows_non_primary_phones(self) -> None:
+        request = CompleteProfileRequest(
+            first_name="Jane",
+            phones=[_phone(primary=False), _phone(primary=False)],
+        )
+        assert request.phones is not None
+        assert all(phone.is_primary is False for phone in request.phones)
 
     def test_create_vehicle_invalid_photo_path(self) -> None:
         with pytest.raises(ValidationException):

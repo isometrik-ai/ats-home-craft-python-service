@@ -14,7 +14,9 @@ from apps.user_service.app.schemas.common import Phone
 from apps.user_service.app.schemas.contact_onboarding import (
     CompleteOnboardingRequest,
     CompleteProfileRequest,
+    ConfirmPhoneChangeRequest,
     CreateHouseholdMemberRequest,
+    SendPhoneChangeRequest,
     UpdateHouseholdMemberRequest,
 )
 from apps.user_service.app.schemas.enums import (
@@ -32,6 +34,7 @@ from apps.user_service.app.services.contact_onboarding_service import (
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
+    BadRequestException,
     ConflictException,
     NotFoundException,
     ValidationException,
@@ -784,8 +787,56 @@ async def test_complete_profile_updates_contact_and_step(monkeypatch):
     result = await svc.complete_profile(contact_id="contact-1", body=body)
 
     assert result["id"] == "contact-1"
-    update_body = contacts_service.update_contact.await_args.kwargs["body"]
-    assert update_body.middle_name == "Q"
+    update_kwargs = contacts_service.update_contact.await_args.kwargs
+    assert update_kwargs["body"].middle_name == "Q"
+    assert update_kwargs["sync_login_phone"] is False
+
+
+def test_complete_profile_rejects_primary_phone():
+    """Profile edits cannot mark a phone as the login number."""
+    with pytest.raises(ValidationException) as exc_info:
+        CompleteProfileRequest(
+            first_name="Jane",
+            phones=[Phone(phone_number="9893085852", phone_isd_code="+91", is_primary=True)],
+        )
+
+    assert exc_info.value.message_key == "contact_onboarding.errors.primary_phone_not_allowed"
+
+
+@pytest.mark.asyncio
+async def test_complete_profile_keeps_existing_primary_phone(monkeypatch):
+    """Extra numbers are saved, and the stored primary phone stays in place."""
+    repo = _FakeOnboardingRepo()
+    svc = _service(onboarding_repo=repo)
+    svc.contacts_repo.get_contact_phones_for_update = AsyncMock(
+        return_value=[
+            {"phone_number": "9000000000", "phone_isd_code": "+91", "is_primary": True},
+        ]
+    )
+    contacts_service = MagicMock()
+    contacts_service.update_contact = AsyncMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"id": "contact-1"})
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+
+    await svc.complete_profile(
+        contact_id="contact-1",
+        body=CompleteProfileRequest(
+            first_name="Jane",
+            phones=[
+                Phone(phone_number="9000000000", phone_isd_code="+91", is_primary=False),
+                Phone(phone_number="9893085852", phone_isd_code="+91", is_primary=False),
+            ],
+        ),
+    )
+
+    saved = contacts_service.update_contact.await_args.kwargs["body"].phones
+    assert [(phone.phone_number, phone.is_primary) for phone in saved] == [
+        ("9000000000", True),
+        ("9893085852", False),
+    ]
     assert ContactOnboardingStep.COMPLETE_PROFILE.value in repo.complete_step_calls
 
 
@@ -1278,3 +1329,143 @@ async def test_get_status_accepts_legacy_contact_type_argument():
 
     assert result["profile_complete"] is True
     svc._ensure_onboarding.assert_awaited_once()
+
+
+def _phone_service(
+    monkeypatch,
+    *,
+    owner_id: str | None,
+    current_phone: str,
+) -> ContactOnboardingService:
+    """Service whose auth phone lookup and ownership check are stubbed."""
+    svc = _service()
+    svc.supabase_client = MagicMock()
+
+    class _Users:
+        async def get_auth_user_by_phone(self, _phone: str):
+            if owner_id is None:
+                return None
+            return {"id": owner_id}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.UserRepository",
+        lambda _db: _Users(),
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.get_user_by_id",
+        AsyncMock(return_value={"phone": current_phone, "user_metadata": {}}),
+    )
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_send_phone_change_rejects_number_owned_by_another_user(monkeypatch):
+    """Send refuses a phone that already belongs to a different auth user."""
+    svc = _phone_service(monkeypatch, owner_id="other-user", current_phone="911111111111")
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.send_phone_change(
+            user_id="user-1",
+            body=SendPhoneChangeRequest(phone_isd_code="+91", phone_number="9893085852"),
+            access_token="token",
+        )
+
+    assert exc_info.value.message_key == "clients.errors.phone_number_already_exists"
+
+
+@pytest.mark.asyncio
+async def test_send_phone_change_requests_otp(monkeypatch):
+    """Send asks Auth to text the code when the number is free."""
+    svc = _phone_service(monkeypatch, owner_id=None, current_phone="911111111111")
+    requested = AsyncMock()
+    monkeypatch.setattr(svc, "_request_auth_phone_change", requested)
+
+    result = await svc.send_phone_change(
+        user_id="user-1",
+        body=SendPhoneChangeRequest(phone_isd_code="+91", phone_number="9893085852"),
+        access_token="token",
+    )
+
+    assert result == {"otp_sent": True, "already_verified": False}
+    requested.assert_awaited_once_with(access_token="token", e164="+919893085852")
+
+
+@pytest.mark.asyncio
+async def test_send_phone_change_skips_otp_when_already_current(monkeypatch):
+    """Send does not text a number Auth already has for this user."""
+    svc = _phone_service(monkeypatch, owner_id="user-1", current_phone="+919893085852")
+
+    result = await svc.send_phone_change(
+        user_id="user-1",
+        body=SendPhoneChangeRequest(phone_isd_code="+91", phone_number="9893085852"),
+        access_token="token",
+    )
+
+    assert result == {"otp_sent": False, "already_verified": True}
+
+
+@pytest.mark.asyncio
+async def test_confirm_phone_change_requires_code_until_auth_matches(monkeypatch):
+    """Confirm asks for the SMS code before Auth has the new number."""
+    svc = _phone_service(monkeypatch, owner_id=None, current_phone="911111111111")
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await svc.confirm_phone_change(
+            contact_id="contact-1",
+            user_id="user-1",
+            body=ConfirmPhoneChangeRequest(phone_isd_code="+91", phone_number="9893085852"),
+        )
+
+    assert exc_info.value.message_key == "contact_onboarding.errors.phone_otp_required"
+
+
+@pytest.mark.asyncio
+async def test_confirm_phone_change_verifies_then_saves(monkeypatch):
+    """Confirm verifies the code, then writes the contact and auth metadata."""
+    svc = _phone_service(monkeypatch, owner_id=None, current_phone="911111111111")
+    verify = AsyncMock()
+    save = AsyncMock()
+    sync = AsyncMock()
+    monkeypatch.setattr(svc, "_verify_phone_change_otp", verify)
+    monkeypatch.setattr(svc, "_save_contact_primary_phone", save)
+    monkeypatch.setattr(svc, "_sync_auth_phone_metadata", sync)
+
+    result = await svc.confirm_phone_change(
+        contact_id="contact-1",
+        user_id="user-1",
+        body=ConfirmPhoneChangeRequest(
+            phone_isd_code="+91",
+            phone_number="9893085852",
+            code="561166",
+        ),
+    )
+
+    assert result == {"phone_isd_code": "+91", "phone_number": "9893085852"}
+    verify.assert_awaited_once_with(e164="+919893085852", code="561166")
+    save.assert_awaited_once()
+    sync.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_confirm_phone_change_retries_without_code_after_auth_update(monkeypatch):
+    """A retry after Auth already has the number updates the contact without a new OTP."""
+    svc = _phone_service(monkeypatch, owner_id="user-1", current_phone="919893085852")
+    verify = AsyncMock()
+    save = AsyncMock()
+    sync = AsyncMock()
+    monkeypatch.setattr(svc, "_verify_phone_change_otp", verify)
+    monkeypatch.setattr(svc, "_save_contact_primary_phone", save)
+    monkeypatch.setattr(svc, "_sync_auth_phone_metadata", sync)
+
+    await svc.confirm_phone_change(
+        contact_id="contact-1",
+        user_id="user-1",
+        body=ConfirmPhoneChangeRequest(phone_isd_code="+91", phone_number="9893085852"),
+    )
+
+    verify.assert_not_awaited()
+    save.assert_awaited_once_with(
+        contact_id="contact-1",
+        phone_isd_code="+91",
+        phone_number="9893085852",
+    )

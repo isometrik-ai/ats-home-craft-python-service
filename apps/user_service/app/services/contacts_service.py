@@ -2058,6 +2058,7 @@ class ContactsService:
         *,
         contact_id: str,
         body: UpdateContactRequest,
+        sync_login_phone: bool = True,
     ) -> dict[str, Any]:
         """Patch a contact and optionally apply one company association change.
 
@@ -2095,6 +2096,9 @@ class ContactsService:
                 current=current,
                 phones=body.phones,
             )
+            if not sync_login_phone:
+                sync_auth_phone = False
+                primary_phone = None
 
         sync_auth_email = False
         new_primary_email: str | None = None

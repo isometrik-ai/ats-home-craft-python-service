@@ -174,6 +174,63 @@ class ClaimPropertiesResponse(BaseModel):
     requires_default_unit: bool = False
 
 
+class SendPhoneChangeRequest(BaseModel):
+    """Ask Auth to text an OTP to a new login phone."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone_isd_code: str = Field(..., min_length=1, max_length=5)
+    phone_number: str = Field(..., min_length=1, max_length=15)
+
+
+class SendPhoneChangeResponse(BaseModel):
+    """Result of requesting a login-phone OTP."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    otp_sent: bool
+    already_verified: bool = False
+
+
+class SendPhoneChangeApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/phone/send."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: SendPhoneChangeResponse
+
+
+class ConfirmPhoneChangeRequest(BaseModel):
+    """Confirm the SMS code and save the login phone on the contact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone_isd_code: str = Field(..., min_length=1, max_length=5)
+    phone_number: str = Field(..., min_length=1, max_length=15)
+    code: str | None = Field(None, min_length=4, max_length=10)
+
+
+class ConfirmPhoneChangeResponse(BaseModel):
+    """Login phone stored on the contact."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    phone_isd_code: str
+    phone_number: str
+
+
+class ConfirmPhoneChangeApiResponse(BaseModel):
+    """API envelope for POST /contact-onboarding/phone/confirm."""
+
+    status: str
+    message: str
+    statusCode: int
+    code: str
+    data: ConfirmPhoneChangeResponse
+
+
 class CompleteProfileRequest(BaseModel):
     """Complete profile step payload."""
 
@@ -194,10 +251,15 @@ class CompleteProfileRequest(BaseModel):
     @field_validator("phones")
     @classmethod
     def validate_primary_phone(cls, phones: list[Phone] | None) -> list[Phone] | None:
-        """Validate exactly one primary phone."""
+        """Profile edits may add extra numbers only. The login phone uses phone confirm."""
         if phones is None:
             return phones
-        return _validate_exactly_one_primary_phone(phones)
+        if any(phone.is_primary for phone in phones):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.primary_phone_not_allowed",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return phones
 
 
 class CreateVehicleRequest(BaseModel):

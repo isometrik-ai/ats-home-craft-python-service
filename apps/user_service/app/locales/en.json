@@ -735,7 +735,12 @@
       "invitation_already_declined": "This household invitation has already been declined.",
       "invitation_not_found": "No pending household invitation was found.",
       "invitation_not_pending": "No pending household invitation to revoke.",
-      "onboarding_not_completed_use_confirm": "Use property confirm during onboarding; claim is for after onboarding is complete."
+      "onboarding_not_completed_use_confirm": "Use property confirm during onboarding; claim is for after onboarding is complete.",
+      "primary_phone_not_allowed": "The primary phone cannot be changed here. Verify the new number first.",
+      "phone_invalid": "Enter a valid phone number with country code.",
+      "phone_otp_required": "Enter the code sent to this phone number.",
+      "phone_otp_invalid": "That code is invalid or has expired.",
+      "phone_change_failed": "The verification code could not be sent. Try again."
     },
     "success": {
       "status_retrieved": "Onboarding status retrieved successfully.",
@@ -743,6 +748,9 @@
       "properties_confirmed": "Properties confirmed successfully.",
       "properties_claimed": "Properties claimed successfully.",
       "profile_updated": "Profile updated successfully.",
+      "phone_change_otp_sent": "Verification code sent successfully.",
+      "phone_change_already_verified": "This phone number is already verified on your account.",
+      "phone_change_confirmed": "Phone number updated successfully.",
       "profile_retrieved": "Profile retrieved successfully.",
       "vehicles_retrieved": "Vehicles retrieved successfully.",
       "vehicle_retrieved": "Vehicle retrieved successfully.",
