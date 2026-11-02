@@ -17,6 +17,7 @@ class FeeInvoiceStatus(str, Enum):
     PAID = "paid"
     OVERDUE = "overdue"
     CANCELLED = "cancelled"
+    CARRIED_FORWARD = "carried_forward"
 
 
 class FeePaymentMode(str, Enum):

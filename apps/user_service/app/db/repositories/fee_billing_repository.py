@@ -439,8 +439,9 @@ class FeeBillingRepository(BaseRepository):  # pylint: disable=too-many-public-m
             filters.append("i.status IN ('issued', 'partial') AND i.due_date < $3::date")
         elif status == "paid":
             filters.append("i.status = 'paid'")
-        elif status == "cancelled":
-            filters.append("i.status = 'cancelled'")
+        elif status in {"cancelled", "carried_forward"}:
+            args.append(status)
+            filters.append(f"i.status = ${len(args)}")
         elif status is not None:
             args.append(status)
             filters.append(f"i.status = ${len(args)} AND i.due_date >= $3::date")
@@ -898,7 +899,7 @@ async def fetch_collection_rows(
     filters = [
         "i.organization_id = $1::uuid",
         "i.project_id = $2::uuid",
-        "i.status <> 'cancelled'",
+        "i.status NOT IN ('cancelled', 'carried_forward')",
     ]
     args: list[Any] = [organization_id, project_id]
     if billing_months:

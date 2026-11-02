@@ -13,6 +13,7 @@ from apps.user_service.app.services.fee_configuration_labels import (
 )
 
 _ZERO = Decimal("0.00")
+_CLOSED_STATUSES = frozenset({"paid", "cancelled", "carried_forward"})
 
 
 def started_months(due_date: date, as_of: date) -> int:
@@ -46,9 +47,26 @@ def late_fee_drafts(
     return grouped
 
 
+def arrears_drafts(
+    invoices: list[dict[str, Any]], run_date: date
+) -> dict[str, list[dict[str, Any]]]:
+    """Unpaid overdue invoices to copy onto the next fee-head invoice."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for invoice in invoices:
+        if invoice.get("status") in _CLOSED_STATUSES:
+            continue
+        if invoice["invoice_date"] >= run_date or invoice["due_date"] >= run_date:
+            continue
+        line = _arrears_line(invoice, run_date)
+        if line is None:
+            continue
+        grouped.setdefault(str(invoice["unit_id"]), []).append(line)
+    return grouped
+
+
 def invoice_status(stored: str, due_on: date, as_of: date) -> str:
     """Overdue when the due date has passed and the invoice is still open."""
-    if stored in {"paid", "cancelled"}:
+    if stored in _CLOSED_STATUSES:
         return stored
     if due_on < as_of:
         return "overdue"
@@ -86,8 +104,11 @@ def build_unit_balance(
     if latest is not None:
         for line in latest.get("lines") or []:
             amount = money(line["line_total"])
-            if line.get("line_role") == "late_fee":
+            role = line.get("line_role") or "charge"
+            if role == "late_fee":
                 late_fee = money(late_fee + amount)
+            elif role == "arrears":
+                arrears = money(arrears + amount)
             else:
                 current = money(current + amount)
     owed = money(sum((_outstanding(invoice) for invoice in open_invoices), _ZERO))
@@ -159,7 +180,7 @@ def build_collection_summary(
     open_count = 0
     overdue_count = 0
     for row in rows:
-        if row.get("status") == "cancelled":
+        if row.get("status") in {"cancelled", "carried_forward"}:
             continue
         total = money(row["total_amount"])
         paid = money(row.get("amount_paid") or 0)
@@ -258,6 +279,45 @@ def _lines_for_invoice(invoice: dict[str, Any], run_date: date) -> list[dict[str
         if draft is not None:
             drafts.append(draft)
     return drafts
+
+
+def _arrears_line(invoice: dict[str, Any], run_date: date) -> dict[str, Any] | None:
+    """One arrears line for the unpaid total, or None when nothing remains."""
+    outstanding = _outstanding(invoice)
+    if outstanding <= 0:
+        return None
+    source = _arrears_source_line(invoice)
+    if source is None or not source.get("fee_head_id"):
+        return None
+    number = str(invoice.get("invoice_number") or "").strip()
+    label = number or str(source.get("description") or "Fee")
+    return {
+        "fee_head_id": str(source["fee_head_id"]),
+        "kind": source.get("kind") or "maintenance",
+        "fee_head_version": int(source.get("fee_head_version") or 1),
+        "description": f"Arrears — {label}"[:240],
+        "area_or_quantity": None,
+        "rate": outstanding,
+        "minimum_amount": None,
+        "taxable_amount": outstanding,
+        "tax_amount": _ZERO,
+        "line_total": outstanding,
+        "due_within_days": 0,
+        "line_role": "arrears",
+        "source_invoice_id": str(invoice["id"]),
+        "source_line_id": None,
+        "started_months": started_months(invoice["due_date"], run_date),
+        "days_overdue": days_overdue(invoice["due_date"], run_date),
+    }
+
+
+def _arrears_source_line(invoice: dict[str, Any]) -> dict[str, Any] | None:
+    """Fee head identity for an arrears line, from a charge or any stored line."""
+    charges = invoice_charge_lines(invoice)
+    if charges:
+        return charges[0]
+    lines = invoice.get("lines") or []
+    return lines[0] if lines else None
 
 
 def _line_draft(
@@ -443,7 +503,7 @@ def _outstanding(invoice: dict[str, Any]) -> Decimal:
 
 def _is_open(invoice: dict[str, Any]) -> bool:
     """True when the invoice still asks the unit to pay."""
-    if invoice.get("status") == "cancelled":
+    if invoice.get("status") in _CLOSED_STATUSES:
         return False
     return _outstanding(invoice) > 0
 

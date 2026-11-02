@@ -109,7 +109,7 @@ def _unit(**overrides: Any) -> dict[str, Any]:
     return payload
 
 
-class FakeFeeBillingRepository:
+class FakeFeeBillingRepository:  # pylint: disable=too-many-public-methods
     """In-memory stand-in that records inserts and honours the invoice unique key."""
 
     def __init__(
@@ -229,7 +229,7 @@ class FakeFeeBillingRepository:
             for invoice in self.prior_invoices
             if invoice["due_date"] < before
             and invoice["invoice_date"] < before
-            and invoice.get("status") != "cancelled"
+            and invoice.get("status") not in {"cancelled", "carried_forward"}
         ]
 
     async def get_invoice(
@@ -306,7 +306,7 @@ class FakeFeeBillingRepository:
                 continue
             if invoice.get("project_id") != project_id:
                 continue
-            if invoice.get("status") == "cancelled":
+            if invoice.get("status") in {"cancelled", "carried_forward"}:
                 continue
             seen.add(invoice_id)
             paid = sum(
@@ -618,6 +618,7 @@ def _prior_invoice(**overrides: Any) -> dict[str, Any]:
         "organization_id": ORG_ID,
         "project_id": PROJECT_ID,
         "unit_id": "unit-1",
+        "invoice_number": "INV-A-101-20261001",
         "due_date": date(2026, 10, 6),
         "invoice_date": date(2026, 10, 1),
         "billing_month": date(2026, 10, 1),
@@ -662,9 +663,14 @@ async def test_next_invoice_adds_one_month_of_interest():
     await _service(fake).issue_due(run_date=date(2026, 11, 1))
 
     late = next(line for line in fake.lines if line["line_role"] == "late_fee")
+    arrears = next(line for line in fake.lines if line["line_role"] == "arrears")
     assert late["line_total"] == Decimal("27.00")
     assert late["source_invoice_id"] == "inv-oct"
-    assert fake.invoices[0]["total_amount"] == Decimal("1527")
+    assert arrears["line_total"] == Decimal("1770.00")
+    assert arrears["source_invoice_id"] == "inv-oct"
+    assert arrears["description"] == "Arrears — INV-A-101-20261001"
+    assert fake.invoices[0]["total_amount"] == Decimal("3297")
+    assert fake.prior_invoices[0]["status"] == "carried_forward"
 
 
 async def test_late_fee_waits_for_the_next_head_invoice():
@@ -680,11 +686,22 @@ async def test_late_fee_waits_for_the_next_head_invoice():
 
     await _service(fake).issue_due(run_date=date(2026, 11, 15))
     roles = [line["line_role"] for line in fake.lines]
-    assert roles == ["charge", "late_fee"]
+    assert roles == ["charge", "late_fee", "arrears"]
     late = next(line for line in fake.lines if line["line_role"] == "late_fee")
     assert late["line_total"] == Decimal("27.00")
     assert fake.invoices[0]["invoice_day"] == 15
-    assert fake.invoices[0]["total_amount"] == Decimal("1527")
+    assert fake.invoices[0]["total_amount"] == Decimal("3297")
+
+
+async def test_maintenance_skips_overdue_club():
+    """A maintenance invoice does not take club late fee or club arrears."""
+    fake = FakeFeeBillingRepository([_head()], [_unit()])
+    fake.prior_invoices = [_prior_invoice()]
+    await _service(fake).issue_due(run_date=date(2026, 11, 1))
+
+    assert [line["kind"] for line in fake.lines] == ["maintenance"]
+    assert [line["line_role"] for line in fake.lines] == ["charge"]
+    assert fake.prior_invoices[0]["status"] == "issued"
 
 
 async def test_payment_on_the_due_date_adds_no_late_fee():
@@ -763,8 +780,8 @@ async def test_flat_late_fee_uses_the_step_reached():
 
 
 async def test_balance_splits_arrears_late_fee_and_current():
-    """Amount due is the open October invoice plus November's late fee and charges."""
-    october = _prior_invoice()
+    """Amount due is arrears copied onto November plus that invoice's late fee and charges."""
+    october = _prior_invoice(status="carried_forward")
     november = {
         "id": "inv-nov",
         "organization_id": ORG_ID,
@@ -774,7 +791,7 @@ async def test_balance_splits_arrears_late_fee_and_current():
         "invoice_date": date(2026, 11, 1),
         "due_date": date(2026, 11, 11),
         "status": "issued",
-        "total_amount": Decimal("1527.00"),
+        "total_amount": Decimal("3297.00"),
         "payments": [],
         "lines": [
             {
@@ -788,6 +805,12 @@ async def test_balance_splits_arrears_late_fee_and_current():
                 "kind": "club",
                 "description": "Late fee — Clubhouse membership.",
                 "line_total": Decimal("27.00"),
+            },
+            {
+                "line_role": "arrears",
+                "kind": "club",
+                "description": "Arrears — INV-A-101-20261001",
+                "line_total": Decimal("1770.00"),
             },
         ],
     }
@@ -1292,6 +1315,22 @@ async def test_payment_rejects_a_cancelled_invoice():
     """A cancelled invoice cannot take a new receipt."""
     fake = FakeFeeBillingRepository([], [])
     fake.stored_invoices["inv-oct"] = _issued_invoice(status="cancelled")
+    with pytest.raises(ConflictException):
+        await _service(fake).record_payment(
+            organization_id=ORG_ID,
+            project_id=PROJECT_ID,
+            invoice_id="inv-oct",
+            amount=Decimal("100"),
+            paid_on=date(2026, 10, 12),
+            mode="cash",
+            reference=None,
+        )
+
+
+async def test_payment_rejects_a_carried_invoice():
+    """A carried-forward invoice cannot take a new receipt."""
+    fake = FakeFeeBillingRepository([], [])
+    fake.stored_invoices["inv-oct"] = _issued_invoice(status="carried_forward")
     with pytest.raises(ConflictException):
         await _service(fake).record_payment(
             organization_id=ORG_ID,

@@ -1260,6 +1260,7 @@
       "invoice_not_cancellable": "Only an unpaid invoice can be cancelled.",
       "invoice_not_remindable": "Only an unpaid invoice can be reminded.",
       "invoice_cancelled": "This invoice is cancelled.",
+      "invoice_carried_forward": "This invoice was carried to a later invoice.",
       "invalid_payment": "Enter a payment amount greater than 0.",
       "payment_exceeds_outstanding": "The payment is more than the amount still outstanding.",
       "unit_not_accessible": "You do not have access to invoices for this unit."

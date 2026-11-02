@@ -118,7 +118,7 @@ async def list_fee_invoices(
     unit_id: str | None = Query(default=None, description="Limit the list to one unit."),
     status: FeeInvoiceStatus | None = Query(
         default=None,
-        description="issued, partial, paid, overdue, or cancelled.",
+        description="issued, partial, paid, overdue, cancelled, or carried_forward.",
     ),
     months: list[date] | None = Query(
         default=None,
@@ -267,7 +267,7 @@ async def list_resident_fee_invoices(
     *,
     status: FeeInvoiceStatus | None = Query(
         default=None,
-        description="issued, partial, paid, overdue, or cancelled.",
+        description="issued, partial, paid, overdue, cancelled, or carried_forward.",
     ),
     months: list[date] | None = Query(
         default=None,

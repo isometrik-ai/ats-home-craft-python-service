@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import asyncpg
@@ -27,11 +27,11 @@ from libs.shared_utils.logger import get_logger
 logger = get_logger("issue_due_fee_invoices")
 
 
-async def run_due_fee_invoices() -> None:
-    """Issue today's invoices, then send the issue and reminder mail and push."""
+async def run_due_fee_invoices(run_date: date | None = None) -> None:
+    """Issue invoices for the run date, then send the issue and reminder mail and push."""
     try:
         async with UnitOfWork() as connection:
-            result, notices, reminders = await issue_due_fee_invoices(connection)
+            result, notices, reminders = await issue_due_fee_invoices(connection, run_date=run_date)
             messages = await collect_fee_invoice_messages(connection, notices)
             messages.extend(await collect_fee_invoice_reminders(connection, reminders))
         if messages:
@@ -63,9 +63,10 @@ async def _push_invoice_notices(
 
 async def issue_due_fee_invoices(
     db_connection: asyncpg.Connection,
+    run_date: date | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Issue invoices due today, and return new invoices plus today's reminders."""
-    run_date = datetime.now(timezone.utc).date()
+    """Issue invoices due on the run date, and return new invoices plus reminders."""
+    run_date = run_date or datetime.now(timezone.utc).date()
     service = FeeBillingService(db_connection)
     result = await service.issue_due(run_date=run_date)
     access = AppAccessService(db_connection)

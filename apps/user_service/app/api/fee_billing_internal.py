@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from datetime import date
+
+from fastapi import APIRouter, BackgroundTasks, Query, Request
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -24,12 +26,16 @@ router = APIRouter(prefix="/internal/fee-billing", tags=["Fee billing (Internal)
 async def issue_due_fee_invoices_internal(
     request: Request,
     background_tasks: BackgroundTasks,
+    run_date: date | None = Query(
+        default=None,
+        description="Bill as this UTC date. Omit to use today.",
+    ),
 ):
-    """Queue today's invoice run. Billing and mail happen after this response."""
-    background_tasks.add_task(run_due_fee_invoices)
+    """Queue the invoice run. Billing and mail happen after this response."""
+    background_tasks.add_task(run_due_fee_invoices, run_date)
     return success_response(
         request=request,
         message_key="fee_billing.success.issue_due_started",
         custom_code=CustomStatusCode.SUCCESS,
-        data={"accepted": True},
+        data={"accepted": True, "run_date": run_date.isoformat() if run_date else None},
     )
