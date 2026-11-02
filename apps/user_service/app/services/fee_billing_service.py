@@ -31,6 +31,7 @@ from apps.user_service.app.services.fee_configuration_labels import (
 )
 from apps.user_service.app.services.fee_invoice_mail import invoice_unit_context
 from apps.user_service.app.services.fee_late_fee import (
+    arrears_drafts,
     billing_today,
     build_collection_summary,
     build_outstanding_summary,
@@ -283,6 +284,22 @@ def _collect_head_units(
             drafts[(str(unit["id"]), invoice_day)].append(payload)
 
 
+def _charge_kinds(lines: list[dict[str, Any]]) -> set[str]:
+    """Kinds billed as charges on this draft invoice."""
+    return {
+        str(line["kind"])
+        for line in lines
+        if (line.get("line_role") or "charge") == "charge" and line.get("kind")
+    }
+
+
+def _lines_for_kinds(lines: list[dict[str, Any]], kinds: set[str]) -> list[dict[str, Any]]:
+    """Keep late-fee and arrears lines that match a charge kind on the invoice."""
+    if not kinds:
+        return []
+    return [line for line in lines if str(line.get("kind") or "") in kinds]
+
+
 def _invoice_amounts(lines: list[dict[str, Any]]) -> dict[str, Decimal]:
     """Taxable, tax, half-up total, and the paise round-off."""
     taxable = money(sum((line["taxable_amount"] for line in lines), Decimal("0")))
@@ -460,8 +477,8 @@ def _reminder_line(line: dict[str, Any]) -> dict[str, str | None]:
 
 
 def _amount_still_due(row: dict[str, Any], total: Decimal, paid: Decimal) -> Decimal:
-    """Nothing is due once the invoice is cancelled."""
-    if row.get("status") == "cancelled":
+    """Nothing is due once the invoice is cancelled or carried forward."""
+    if row.get("status") in {"cancelled", "carried_forward"}:
         return money(0)
     return money(total - paid)
 
@@ -585,7 +602,12 @@ class FeeBillingService:
             key = (unit_id, run_date.day)
             if key not in drafts:
                 continue
-            drafts[key].extend(lines)
+            drafts[key].extend(_lines_for_kinds(lines, _charge_kinds(drafts[key])))
+        for unit_id, lines in arrears_drafts(priors, run_date).items():
+            key = (unit_id, run_date.day)
+            if key not in drafts:
+                continue
+            drafts[key].extend(_lines_for_kinds(lines, _charge_kinds(drafts[key])))
         if not skips and not drafts:
             return [], _empty_skip_counts()
         created, counts = await self._persist(
@@ -742,6 +764,12 @@ class FeeBillingService:
                 "total_amount": money_str(invoice["total_amount"]),
             },
         )
+        await self._close_carried_invoices(
+            lines,
+            organization_id=organization_id,
+            project_id=project_id,
+            carried_to=str(invoice.get("invoice_number") or invoice_id),
+        )
         await self._email_new_invoice(invoice, lines=lines, invoice_id=invoice_id)
         await self._refresh_app_access(
             organization_id=organization_id,
@@ -749,6 +777,38 @@ class FeeBillingService:
             unit_id=unit_id,
         )
         return invoice_id
+
+    async def _close_carried_invoices(
+        self,
+        lines: list[dict[str, Any]],
+        *,
+        organization_id: str,
+        project_id: str,
+        carried_to: str,
+    ) -> None:
+        """Close overdue invoices whose balance was copied onto this invoice."""
+        seen: set[str] = set()
+        for line in lines:
+            if line.get("line_role") != "arrears":
+                continue
+            source_id = str(line.get("source_invoice_id") or "")
+            if not source_id or source_id in seen:
+                continue
+            seen.add(source_id)
+            await self.repo.update_invoice_status(
+                invoice_id=source_id,
+                status="carried_forward",
+            )
+            await self._record_activity(
+                organization_id=organization_id,
+                project_id=project_id,
+                invoice_id=source_id,
+                event="carried_forward",
+                detail={
+                    "amount": money_str(line["line_total"]),
+                    "carried_to": carried_to,
+                },
+            )
 
     async def _email_new_invoice(
         self,
@@ -964,6 +1024,11 @@ class FeeBillingService:
         if invoice.get("status") == "cancelled":
             raise ConflictException(
                 message_key="fee_billing.errors.invoice_cancelled",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        if invoice.get("status") == "carried_forward":
+            raise ConflictException(
+                message_key="fee_billing.errors.invoice_carried_forward",
                 custom_code=CustomStatusCode.CONFLICT,
             )
         paid = money(amount)
