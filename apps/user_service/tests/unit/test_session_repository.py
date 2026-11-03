@@ -83,6 +83,7 @@ def test_build_session_filters_includes_search():
     assert "us.user_id = $1" in where
     # search now includes auth.users fallback
     assert "COALESCE(om.email, au.email)" in where
+    assert "us.user_id::text" in where
     assert params[0] == "u1"
     assert params[-1] == "%abc%"
 
@@ -171,6 +172,7 @@ def test_build_org_session_filters_search():
     )
 
     assert "us.organization_id = $1" in where
+    assert "us.user_id::text" in where
     assert "us.ip_address::text" in where
     assert params[-1] == "%desk%"
 
