@@ -92,6 +92,7 @@ class FacilityAvailabilityService:
         range_start: date,
         range_end: date,
         host_contact_id: str | None = None,
+        exclude_reservation_id: str | None = None,
     ) -> tuple[AvailabilityContext, Any]:
         """Build availability context for a date range (optionally scoped to a host)."""
         snapshot, config = await self.load_snapshot(
@@ -121,6 +122,10 @@ class FacilityAvailabilityService:
             weekly_pool = [
                 engine_reservation(row, weekly_parts.get(str(row["id"]))) for row in weekly_rows
             ]
+        if exclude_reservation_id:
+            excluded = str(exclude_reservation_id)
+            active = [row for row in active if row.id != excluded]
+            weekly_pool = [row for row in weekly_pool if row.id != excluded]
         now = await self.config_service.local_now(project_id)
         return (
             AvailabilityContext(facility=snapshot, active=active, now=now, weekly_pool=weekly_pool),
