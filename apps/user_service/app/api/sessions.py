@@ -61,7 +61,10 @@ async def get_sessions_list(
     db_connection: asyncpg.Connection = Depends(db_conn),
     search: str | None = Query(
         None,
-        description="Search term to filter sessions by user email or IP address (case-insensitive)",
+        description=(
+            "Search term to filter sessions by user id, email, name, IP address, "
+            "or user agent (case-insensitive, partial match)"
+        ),
     ),
     page: int = Query(1, ge=1, description="The page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
@@ -157,7 +160,10 @@ async def get_organization_sessions(
     db_connection: asyncpg.Connection = Depends(db_conn),
     search: str | None = Query(
         None,
-        description="Search term to filter sessions by user email or IP address (case-insensitive)",
+        description=(
+            "Search term to filter sessions by user id, email, name, IP address, "
+            "or user agent (case-insensitive, partial match)"
+        ),
     ),
     page: int = Query(1, ge=1, description="The page number for pagination"),
     page_size: int = Query(20, ge=1, le=100, description="The number of items per page"),
