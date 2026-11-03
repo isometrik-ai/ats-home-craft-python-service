@@ -129,7 +129,7 @@ class SessionRepository:
             params.append(filters.login_method)
             param_index += 1
 
-        # Handle search (email/name) across organization_members + auth.users
+        # Handle search (email/name/user id) across organization_members + auth.users
         if include_search and filters.search:
             search_term = f"%{filters.search}%"
             param_placeholder = f"${param_index}"
@@ -155,6 +155,7 @@ class SessionRepository:
                                 ''
                             )
                         ) LIKE LOWER({param_placeholder})
+                        OR LOWER({table_prefix}user_id::text) LIKE LOWER({param_placeholder})
                     )
                     """
                 ).strip()
@@ -316,6 +317,7 @@ class SessionRepository:
                                 ''
                             )
                         ) LIKE LOWER({param_placeholder})
+                        OR LOWER(us.user_id::text) LIKE LOWER({param_placeholder})
                         OR LOWER(us.ip_address::text) LIKE LOWER({param_placeholder})
                         OR LOWER(us.user_agent) LIKE LOWER({param_placeholder})
                     )
