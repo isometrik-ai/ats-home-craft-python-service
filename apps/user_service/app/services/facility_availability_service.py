@@ -32,6 +32,7 @@ from apps.user_service.app.services.facility_booking.snapshot import (
 )
 from apps.user_service.app.services.facility_booking.types import (
     BookingDraft,
+    EngineReservation,
     Participant,
 )
 from apps.user_service.app.services.facility_booking_config_service import (
@@ -41,6 +42,15 @@ from apps.user_service.app.services.project_setup_service import ProjectSetupSer
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
+
+
+def _excluding_reservations(
+    reservations: list[EngineReservation], exclude_ids: frozenset[str]
+) -> list[EngineReservation]:
+    """Drop reservations omitted from conflict checks (e.g. the row being rescheduled)."""
+    if not exclude_ids:
+        return reservations
+    return [reservation for reservation in reservations if reservation.id not in exclude_ids]
 
 
 class FacilityAvailabilityService:
@@ -92,6 +102,7 @@ class FacilityAvailabilityService:
         range_start: date,
         range_end: date,
         host_contact_id: str | None = None,
+        exclude_reservation_ids: frozenset[str] | None = None,
     ) -> tuple[AvailabilityContext, Any]:
         """Build availability context for a date range (optionally scoped to a host)."""
         snapshot, config = await self.load_snapshot(
@@ -106,6 +117,8 @@ class FacilityAvailabilityService:
         ids = [str(row["id"]) for row in active_rows]
         participants = await self.reservations_repo.participants_by_reservation(ids)
         active = [engine_reservation(row, participants.get(str(row["id"]))) for row in active_rows]
+        exclude_ids = exclude_reservation_ids or frozenset()
+        active = _excluding_reservations(active, exclude_ids)
         weekly_pool = active
         if host_contact_id:
             week_start, week_end = week_bounds(range_start)
@@ -118,9 +131,10 @@ class FacilityAvailabilityService:
             )
             weekly_ids = [str(row["id"]) for row in weekly_rows]
             weekly_parts = await self.reservations_repo.participants_by_reservation(weekly_ids)
-            weekly_pool = [
-                engine_reservation(row, weekly_parts.get(str(row["id"]))) for row in weekly_rows
-            ]
+            weekly_pool = _excluding_reservations(
+                [engine_reservation(row, weekly_parts.get(str(row["id"]))) for row in weekly_rows],
+                exclude_ids,
+            )
         now = await self.config_service.local_now(project_id)
         return (
             AvailabilityContext(facility=snapshot, active=active, now=now, weekly_pool=weekly_pool),

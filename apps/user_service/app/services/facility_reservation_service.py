@@ -146,12 +146,14 @@ class FacilityReservationService:
         )
         draft = self.availability.draft(body, host_contact_id=host_contact_id)
         await self.reservations_repo.lock_facility(body.facility_id)
+        exclude_ids = frozenset({rescheduled_from_id}) if rescheduled_from_id is not None else None
         ctx, _ = await self.availability.build_context(
             project_id=project_id,
             facility_id=body.facility_id,
             range_start=draft.local_date,
             range_end=draft.end_local_date,
             host_contact_id=host_contact_id,
+            exclude_reservation_ids=exclude_ids,
         )
         if not ctx.facility.accepting_bookings:
             raise ValidationException(

@@ -10,6 +10,7 @@ import pytest
 from apps.user_service.app.schemas.enums import (
     FacilityBookingArchetype,
     FacilityParticipantKind,
+    FacilityReservationStatus,
 )
 from apps.user_service.app.schemas.facility_booking import (
     ParticipantInput,
@@ -27,6 +28,7 @@ from libs.shared_utils.http_exceptions import NotFoundException, ValidationExcep
 PROJECT_ID = "11111111-1111-1111-1111-111111111111"
 FACILITY_ID = "33333333-3333-3333-3333-333333333333"
 CONTACT_ID = "44444444-4444-4444-4444-444444444444"
+RESERVATION_ID = "826e54ff-c255-44ae-bcf8-5c4b550b5db3"
 ORG_ID = "22222222-2222-2222-2222-222222222222"
 
 
@@ -105,6 +107,71 @@ async def test_load_snapshot_success() -> None:
     snapshot, row = await svc.load_snapshot(project_id=PROJECT_ID, facility_id=FACILITY_ID)
     assert snapshot.id == FACILITY_ID
     assert row["facility_id"] == FACILITY_ID
+
+
+@pytest.mark.asyncio
+async def test_build_context_excludes_reservation_being_rescheduled() -> None:
+    """Reschedule validation must not treat the current booking as a conflict."""
+    svc = _service()
+    defaults = default_booking_config(FacilityBookingArchetype.DAY_RANGE)
+    config = {
+        "facility_id": FACILITY_ID,
+        "facility_name": "Multipurpose Hall",
+        "archetype": FacilityBookingArchetype.DAY_RANGE.value,
+        "slot_minutes": defaults.slot_minutes,
+        "default_hours": [item.model_dump() for item in defaults.default_hours],
+        "pricing": defaults.pricing.model_dump(),
+        "policies": defaults.policies.model_dump(),
+        "setup": defaults.setup.model_dump(),
+        "description": "",
+        "accepting_bookings": True,
+    }
+    svc.config_repo.get_config = AsyncMock(return_value=config)
+    svc.inventory_repo.load_all = AsyncMock(return_value=_empty_inventory())
+    existing = {
+        "id": RESERVATION_ID,
+        "facility_id": FACILITY_ID,
+        "unit_id": None,
+        "local_date": date(2026, 11, 7),
+        "end_local_date": date(2026, 11, 8),
+        "start_min": 1344,
+        "end_min": 1404,
+        "host_contact_id": CONTACT_ID,
+        "status": FacilityReservationStatus.CONFIRMED.value,
+        "quote": {"total": 0},
+    }
+    svc.reservations_repo.list_active_in_range = AsyncMock(return_value=[existing])
+    svc.reservations_repo.participants_by_reservation = AsyncMock(return_value={RESERVATION_ID: []})
+    draft = ReservationDraftRequest(
+        facility_id=FACILITY_ID,
+        local_date=date(2026, 11, 6),
+        end_local_date=date(2026, 11, 8),
+        start_min=1344,
+        end_min=1404,
+        participants=[
+            ParticipantInput(
+                kind=FacilityParticipantKind.RESIDENT, contact_id=CONTACT_ID, name="Ada"
+            )
+        ],
+    )
+    without_exclude = await svc.evaluate_draft(
+        project_id=PROJECT_ID, body=draft, host_contact_id=CONTACT_ID
+    )
+    assert without_exclude["ok"] is False
+    assert any(err["code"] == "facility_busy" for err in without_exclude["errors"])
+
+    ctx, _ = await svc.build_context(
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        range_start=date(2026, 11, 6),
+        range_end=date(2026, 11, 8),
+        host_contact_id=CONTACT_ID,
+        exclude_reservation_ids=frozenset({RESERVATION_ID}),
+    )
+    from apps.user_service.app.services.facility_booking import availability
+
+    validation = availability.validate_draft(ctx, svc.draft(draft, host_contact_id=CONTACT_ID))
+    assert validation.ok is True
 
 
 @pytest.mark.asyncio
