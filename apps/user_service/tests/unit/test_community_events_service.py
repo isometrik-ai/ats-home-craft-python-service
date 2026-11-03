@@ -79,6 +79,7 @@ def _service() -> CommunityEventsService:
     svc.facility_hold = MagicMock()
     svc.facility_hold.ensure = AsyncMock()
     svc.facility_hold.release = AsyncMock()
+    svc.repo.fetch_event_rsvp_summary = AsyncMock(return_value={})
     return svc
 
 
@@ -422,6 +423,55 @@ async def test_get_event_success():
     svc.repo.list_gallery = AsyncMock(return_value=[])
     detail = await svc.get_event(project_id=PROJECT_ID, event_id=EVENT_ID)
     assert detail.display_code == "EVT-1"
+
+
+@pytest.mark.asyncio
+async def test_get_event_rsvp_summary_confirmed_only():
+    svc = _service()
+    svc.repo.fetch_event_by_id = AsyncMock(
+        return_value=_event_row(total_capacity=150, tickets_booked=1)
+    )
+    svc.repo.list_gallery = AsyncMock(return_value=[])
+    svc.repo.fetch_event_rsvp_summary = AsyncMock(
+        return_value={
+            "bookings": 1,
+            "tickets": 1,
+            "confirmed_adults": 1,
+            "confirmed_child": 0,
+            "cancelled_tickets": 2,
+            "waitlisted_tickets": 0,
+        }
+    )
+    detail = await svc.get_event(project_id=PROJECT_ID, event_id=EVENT_ID)
+    summary = detail.rsvp_summary
+    assert summary.bookings == 1
+    assert summary.tickets == 1
+    assert summary.total_capacity == 150
+    assert summary.confirmed_adults == 1
+    assert summary.confirmed_child == 0
+    assert summary.cancelled_tickets == 2
+    assert summary.waitlisted_tickets == 0
+    assert summary.seats_left == 149
+    assert summary.fill_rate == 1
+
+
+def test_rsvp_summary_unlimited_capacity():
+    summary = CommunityEventsService._rsvp_summary(
+        {"total_capacity": None},
+        {
+            "bookings": 2,
+            "tickets": 3,
+            "confirmed_adults": 2,
+            "confirmed_child": 1,
+            "cancelled_tickets": 0,
+            "waitlisted_tickets": 4,
+        },
+    )
+    assert summary.confirmed_adults == 2
+    assert summary.confirmed_child == 1
+    assert summary.waitlisted_tickets == 4
+    assert summary.seats_left is None
+    assert summary.fill_rate is None
 
 
 @pytest.mark.asyncio

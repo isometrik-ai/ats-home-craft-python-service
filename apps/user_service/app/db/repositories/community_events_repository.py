@@ -287,6 +287,62 @@ class CommunityEventsRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def fetch_event_rsvp_summary(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        event_id: str,
+    ) -> dict[str, int]:
+        """Booking ticket counts for the admin RSVP card."""
+        row = await self.db_connection.fetchrow(
+            """
+            SELECT
+              COALESCE(COUNT(*) FILTER (
+                WHERE b.booking_status = 'confirmed'::community_event_booking_status
+              ), 0) AS bookings,
+              COALESCE(SUM(b.total_tickets) FILTER (
+                WHERE b.booking_status = 'confirmed'::community_event_booking_status
+              ), 0) AS tickets,
+              COALESCE(SUM(b.adult_tickets) FILTER (
+                WHERE b.booking_status = 'confirmed'::community_event_booking_status
+              ), 0) AS confirmed_adults,
+              COALESCE(SUM(b.child_tickets) FILTER (
+                WHERE b.booking_status = 'confirmed'::community_event_booking_status
+              ), 0) AS confirmed_child,
+              COALESCE(SUM(b.total_tickets) FILTER (
+                WHERE b.booking_status = 'cancelled'::community_event_booking_status
+              ), 0) AS cancelled_tickets,
+              COALESCE(SUM(b.total_tickets) FILTER (
+                WHERE b.booking_status = 'waitlisted'::community_event_booking_status
+              ), 0) AS waitlisted_tickets
+            FROM community_event_bookings b
+            WHERE b.organization_id = $1::uuid
+              AND b.project_id = $2::uuid
+              AND b.event_id = $3::uuid
+            """,
+            organization_id,
+            project_id,
+            event_id,
+        )
+        if not row:
+            return {
+                "bookings": 0,
+                "tickets": 0,
+                "confirmed_adults": 0,
+                "confirmed_child": 0,
+                "cancelled_tickets": 0,
+                "waitlisted_tickets": 0,
+            }
+        return {
+            "bookings": int(row["bookings"] or 0),
+            "tickets": int(row["tickets"] or 0),
+            "confirmed_adults": int(row["confirmed_adults"] or 0),
+            "confirmed_child": int(row["confirmed_child"] or 0),
+            "cancelled_tickets": int(row["cancelled_tickets"] or 0),
+            "waitlisted_tickets": int(row["waitlisted_tickets"] or 0),
+        }
+
     async def fetch_resident_event_by_id(
         self,
         *,

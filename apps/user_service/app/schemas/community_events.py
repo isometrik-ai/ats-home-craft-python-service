@@ -216,6 +216,20 @@ class CommunityEventListItemResponse(BaseModel):
     cover_image_path: str | None = None
 
 
+class CommunityEventRsvpSummary(BaseModel):
+    """Per-event RSVP card. Ticket splits are confirmed bookings only."""
+
+    bookings: int = 0
+    tickets: int = 0
+    total_capacity: int | None = None
+    confirmed_adults: int = 0
+    confirmed_child: int = 0
+    cancelled_tickets: int = 0
+    waitlisted_tickets: int = 0
+    seats_left: int | None = None
+    fill_rate: int | None = None
+
+
 class CommunityEventDetailResponse(BaseModel):
     """Admin event detail."""
 
@@ -251,6 +265,7 @@ class CommunityEventDetailResponse(BaseModel):
     bookings_count: int
     paid_bookings_count: int
     revenue_collected_minor: int
+    rsvp_summary: CommunityEventRsvpSummary = Field(default_factory=CommunityEventRsvpSummary)
     published_at: datetime | None = None
     completed_at: datetime | None = None
     cancelled_at: datetime | None = None

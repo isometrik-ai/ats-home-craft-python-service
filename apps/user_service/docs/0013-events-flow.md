@@ -69,7 +69,7 @@ Each event has:
 | + New Event drawer                                                      | `POST /projects/{project_id}/community-events`                                                                                   |
 | Save as draft                                                           | `POST` with `{ "publish_mode": "draft" }`                                                                                        |
 | Create & publish                                                        | `POST` with `{ "publish_mode": "publish" }`                                                                                      |
-| View event                                                              | `GET /projects/{project_id}/community-events/{id}`                                                                               |
+| View event                                                              | `GET /projects/{project_id}/community-events/{id}` (includes `rsvp_summary`)                                                     |
 | Edit (draft or no bookings)                                             | `PATCH /projects/{project_id}/community-events/{id}`                                                                             |
 | Publish draft                                                           | `POST /projects/{project_id}/community-events/{id}/publish`                                                                      |
 | Mark completed                                                          | `POST /projects/{project_id}/community-events/{id}/complete`                                                                     |
@@ -412,7 +412,19 @@ Drafts may omit facility, capacity, and booking deadline until ready.
 
 ### 4.4 Bookings management & mark paid
 
-Admin opens event detail → **Bookings** tab:
+Admin opens event detail → **Bookings** tab. The RSVP card comes from event detail
+(`GET .../community-events/{event_id}` → `rsvp_summary`):
+
+| Card field         | Source                                                         |
+| ------------------ | -------------------------------------------------------------- |
+| Bookings           | Confirmed booking rows                                         |
+| Tickets            | Confirmed `total_tickets` / `total_capacity`                   |
+| Confirmed adults   | `confirmed_adults` — confirmed bookings only                   |
+| Confirmed child    | `confirmed_child` — confirmed bookings only                    |
+| Cancelled tickets  | Sum of `total_tickets` on cancelled bookings                   |
+| Waitlisted tickets | Sum of `total_tickets` on waitlisted bookings                  |
+| Seats left         | `total_capacity - tickets` (`null` when capacity is unlimited) |
+| Fill rate          | Rounded percent of capacity filled (`null` when unlimited)     |
 
 ```http
 GET /v1/projects/{project_id}/community-events/{event_id}/bookings?payment_status=&booking_status=
