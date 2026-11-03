@@ -14,7 +14,6 @@ from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.users import (
     PatchUserRequest,
-    UpdateUserEmailRequest,
     UpdateUserProfileRequest,
     UserListResponse,
 )
@@ -155,67 +154,6 @@ async def get_user_profile(
     )
 
 
-@handle_api_exceptions("update user email")
-@router.put(
-    "/{user_id}/email",
-    response_model=None,
-    status_code=http_status.HTTP_200_OK,
-    description="Update user email",
-    summary="Update user email",
-    responses={
-        http_status.HTTP_200_OK: {"description": "User email updated successfully"},
-        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
-        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
-        http_status.HTTP_500_INTERNAL_SERVER_ERROR: {"description": "Internal server error"},
-        http_status.HTTP_503_SERVICE_UNAVAILABLE: {"description": "Service unavailable"},
-        http_status.HTTP_429_TOO_MANY_REQUESTS: {"description": "Too many requests"},
-        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
-    },
-)
-@limiter.limit("100/minute")
-@audit_api_call(
-    action_type="UPDATE",
-    data_classification="confidential",
-    compliance_tags=[
-        "gdpr",  # Updating user email involves personal information
-        "pii",  # Email updates contain personally identifiable information
-        "audit_required",  # Email updates must be logged for compliance and security audits
-    ],
-    table_name="organization_members",
-    category="USER_EMAIL_UPDATE",
-)
-async def update_user_email(
-    request: Request,
-    db_connection: asyncpg.Connection = Depends(db_conn),
-    current_user: dict = Depends(get_user_from_auth),
-    sb_client: AsyncClient = Depends(supabase_service),
-    body: UpdateUserEmailRequest = Body(...),
-    user_id: str = Path(..., description="The ID of the user to update"),
-):
-    """Update user email."""
-    user_context = await check_permissions(
-        current_user,
-        db_connection,
-        SETTINGS_USERS_MANAGE,
-    )
-
-    # Create service and delegate all business logic to service
-    user_service = UserService(
-        user_context=user_context, db_connection=db_connection, sb_client=sb_client
-    )
-    result = await user_service.update_user_email(user_id, user_context.organization_id, body.email)
-
-    # Set old values for audit comparison
-    set_audit_old_data_from_user(request, result["current_user_data"])
-
-    return success_response(
-        request=request,
-        message_key="users.success.email_updated",
-        custom_code=CustomStatusCode.UPDATED,
-        status_code=http_status.HTTP_200_OK,
-    )
-
-
 @handle_api_exceptions("patch user")
 @router.patch(
     "/{user_id}",
@@ -223,7 +161,10 @@ async def update_user_email(
     status_code=http_status.HTTP_200_OK,
     description=(
         "Partially update an organization member. "
-        "Supported fields may grow over time; today only role assignment is applied."
+        "Supports role, email, phone, and profile fields. "
+        "Send only the fields to change. "
+        "Self-service profile remains PUT /users/profile; "
+        "self-service email/phone OTP stays on their own APIs."
     ),
     summary="Patch organization member",
     responses={
@@ -253,11 +194,16 @@ async def patch_user(
     request: Request,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
     body: PatchUserRequest = Body(...),
     user_id: str = Path(..., description="Organization member user id (auth user id)"),
 ):
     """Patch an org member; delegates to ``UserService.patch_organization_member``."""
-    user_context = await extract_user_context(current_user, db_connection)
+    user_context = await check_permissions(
+        current_user,
+        db_connection,
+        SETTINGS_USERS_MANAGE,
+    )
 
     request.state.audit_user_context = {
         "user_id": user_context.user_id,
@@ -270,7 +216,9 @@ async def patch_user(
     request.state.audit_description = f"Organization member patch: {user_id}"
     request.state.audit_risk_level = "medium"
 
-    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    user_service = UserService(
+        user_context=user_context, db_connection=db_connection, sb_client=sb_client
+    )
     result = await user_service.patch_organization_member(user_id, body)
 
     set_audit_old_data_from_user(request, result["current_user_data"])
@@ -442,7 +390,7 @@ async def unban_user(
 
 @handle_api_exceptions("update user profile")
 @router.put(
-    "/update",
+    "/profile",
     response_model=None,
     status_code=http_status.HTTP_200_OK,
     description="Update user profile",

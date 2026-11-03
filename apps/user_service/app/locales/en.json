@@ -305,11 +305,12 @@
       "cannot_change_member_role": "You do not have permission to change member roles.",
       "cannot_change_admin_user_role": "You cannot change the role of an administrator.",
       "cannot_change_organization_creator_role": "Only the organization creator can change this member's role.",
+      "phone_number_already_exists": "A user with this phone number already exists.",
+      "email_already_exists": "A user with this email already exists.",
       "push_device_registration_failed": "Push device registration failed. Please try again.",
       "invalid_device_id": "Device identifier is required."
     },
     "success": {
-      "email_updated": "User email updated successfully",
       "member_patched": "Member updated successfully",
       "user_banned": "User banned successfully",
       "user_unbanned": "User unbanned successfully",

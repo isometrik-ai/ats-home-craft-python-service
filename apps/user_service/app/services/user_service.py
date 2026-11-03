@@ -17,6 +17,7 @@ from apps.user_service.app.db.repositories.organization_repository import (
     OrganizationRepository,
 )
 from apps.user_service.app.db.repositories.role_repository import RoleRepository
+from apps.user_service.app.db.repositories.user_repository import UserRepository
 from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
@@ -55,9 +56,11 @@ from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.auth_repository import (
     get_user_by_id,
     update_metadata,
+    update_phone,
 )
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
+    ConflictException,
     ForbiddenException,
     NotFoundException,
     ValidationException,
@@ -412,16 +415,172 @@ class UserService:  # pylint: disable=too-many-public-methods
             "current_user_data": current_user_data,
         }
 
+    _MEMBER_PROFILE_PATCH_FIELDS = frozenset(
+        {
+            "first_name",
+            "last_name",
+            "salutation",
+            "timezone",
+            "avatar_url",
+            "gender",
+            "dob",
+            "blood_group",
+            "designation",
+        }
+    )
+
     async def patch_organization_member(
         self, target_user_id: str, patch: PatchUserRequest
     ) -> dict[str, Any]:
-        """Apply PATCH fields that are set on ``patch`` (extend with new branches over time)."""
-        if patch.role_id is not None:
-            return await self.update_organization_member_role(target_user_id, patch.role_id)
-        raise ValidationException(
-            message_key="users.errors.no_fields_provided_for_update",
-            custom_code=CustomStatusCode.INVALID_DATA,
+        """Apply set PATCH fields: role, email, phone, then profile."""
+        organization_id = self.user_context.organization_id
+        if not organization_id:
+            raise ValidationException(
+                message_key="organizations.errors.user_not_a_member_of_any_organization",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+
+        profile_body = self._profile_request_from_member_patch(patch)
+        has_update = any(
+            [
+                patch.role_id is not None,
+                patch.email is not None,
+                patch.phone_number is not None,
+                profile_body is not None,
+            ]
         )
+        if not has_update:
+            raise ValidationException(
+                message_key="users.errors.no_fields_provided_for_update",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+
+        audit_data: dict[str, Any] = {}
+        current_user_data: dict[str, Any] | None = None
+
+        if patch.role_id is not None:
+            role_result = await self.update_organization_member_role(target_user_id, patch.role_id)
+            current_user_data = role_result["current_user_data"]
+            audit_data.update(role_result["audit_data"])
+
+        if patch.email is not None:
+            email_result = await self.update_user_email(
+                target_user_id, organization_id, str(patch.email)
+            )
+            current_user_data = current_user_data or email_result["current_user_data"]
+            audit_data["email"] = str(patch.email)
+
+        if patch.phone_number is not None and patch.phone_isd_code is not None:
+            phone_result = await self.update_organization_member_phone(
+                target_user_id,
+                organization_id,
+                patch.phone_number,
+                patch.phone_isd_code,
+            )
+            current_user_data = current_user_data or phone_result["current_user_data"]
+            audit_data.update(phone_result["audit_data"])
+
+        if profile_body is not None:
+            profile_result = await self.update_user_profile(
+                target_user_id, organization_id, profile_body
+            )
+            current_user_data = current_user_data or profile_result["current_user_data"]
+            audit_data.update(profile_result["audit_data"])
+
+        return {
+            "audit_data": audit_data,
+            "current_user_data": current_user_data or {},
+        }
+
+    @classmethod
+    def _profile_request_from_member_patch(
+        cls, patch: PatchUserRequest
+    ) -> UpdateUserProfileRequest | None:
+        """Build a self-profile payload from the admin member patch fields."""
+        profile_data = patch.model_dump(
+            include=cls._MEMBER_PROFILE_PATCH_FIELDS,
+            exclude_unset=True,
+        )
+        if not profile_data:
+            return None
+        return UpdateUserProfileRequest.model_validate(profile_data)
+
+    async def update_organization_member_phone(
+        self,
+        user_id: str,
+        organization_id: str,
+        phone_number: str,
+        phone_isd_code: str,
+    ) -> dict[str, Any]:
+        """Update a member's phone on organization_members and Auth (admin, no OTP)."""
+        current_user_data = await self.organization_member_repository.get_user_profile_by_id(
+            user_id=user_id, organization_id=organization_id
+        )
+        if not current_user_data:
+            raise NotFoundException(
+                message_key="users.errors.organization_user_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        phone_taken = await self.check_phone_exists_for_other_user(
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
+        if phone_taken or await self._auth_phone_taken_by_other_user(
+            phone_isd_code=phone_isd_code,
+            phone_number=phone_number,
+            user_id=user_id,
+        ):
+            raise ConflictException(
+                message_key="users.errors.phone_number_already_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        updated = await self.update_user_info(
+            user_id,
+            organization_id,
+            {"phone_number": phone_number, "phone_isd_code": phone_isd_code},
+        )
+        if not updated:
+            raise NotFoundException(
+                message_key="users.errors.organization_user_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        user_data = await get_user_by_id(self.supabase_client, user_id)
+        _, metadata, _, _ = self._extract_auth_user_contact(
+            user_data, fallback_email=str(current_user_data.get("email") or "")
+        )
+        await update_phone(
+            self.supabase_client,
+            user_id,
+            metadata,
+            phone_number,
+            phone_isd_code,
+        )
+
+        return {
+            "current_user_data": current_user_data,
+            "audit_data": {
+                "user_id": user_id,
+                "phone_number": phone_number,
+                "phone_isd_code": phone_isd_code,
+            },
+        }
+
+    async def _auth_phone_taken_by_other_user(
+        self,
+        *,
+        phone_isd_code: str,
+        phone_number: str,
+        user_id: str,
+    ) -> bool:
+        """True when another auth.users row already has this E.164-style phone."""
+        full_phone = f"{phone_isd_code}{phone_number}".strip()
+        user_repository = UserRepository(self.organization_member_repository.db_connection)
+        return await user_repository.phone_exists_for_other_user(full_phone, user_id)
 
     async def validate_member_custom_fields_for_create(
         self,
@@ -594,6 +753,7 @@ class UserService:  # pylint: disable=too-many-public-methods
 
         Raises:
             NotFoundException: If user not found in organization
+            ConflictException: If another org member or auth user already has this email
         """
         # Get current user data for audit (before update)
         current_user_data = await self.organization_member_repository.get_user_profile_by_id(
@@ -604,6 +764,21 @@ class UserService:  # pylint: disable=too-many-public-methods
             raise NotFoundException(
                 message_key="users.errors.organization_user_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
+            )
+
+        current_email = str(current_user_data.get("email") or "").strip().lower()
+        normalized_email = new_email.strip().lower()
+        if normalized_email == current_email:
+            return {"current_user_data": current_user_data}
+
+        if await self._email_taken_by_other_user(
+            email=normalized_email,
+            organization_id=organization_id,
+            user_id=user_id,
+        ):
+            raise ConflictException(
+                message_key="users.errors.email_already_exists",
+                custom_code=CustomStatusCode.CONFLICT,
             )
 
         # Update in organization_members table
@@ -627,6 +802,30 @@ class UserService:  # pylint: disable=too-many-public-methods
         )
 
         return {"current_user_data": current_user_data}
+
+    async def _email_taken_by_other_user(
+        self,
+        *,
+        email: str,
+        organization_id: str,
+        user_id: str,
+    ) -> bool:
+        """True when another org member or auth user already owns this email."""
+        org_taken = await self.organization_member_repository.check_email_exists_for_other_user(
+            email=email,
+            organization_id=organization_id,
+            user_id=user_id,
+        )
+        if org_taken:
+            return True
+        return await self._auth_email_taken_by_other_user(email=email, user_id=user_id)
+
+    async def _auth_email_taken_by_other_user(self, *, email: str, user_id: str) -> bool:
+        """True when another auth.users row already has this email."""
+        user_repository = UserRepository(self.organization_member_repository.db_connection)
+        existing_user = await user_repository.get_auth_user_by_email(email)
+        existing_user_id = str((existing_user or {}).get("id") or "")
+        return bool(existing_user_id and existing_user_id != str(user_id))
 
     async def get_organization_member_status_by_email(self, email: str) -> str | None:
         """Get organization member status by email.

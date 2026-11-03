@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from apps.user_service.app.schemas.users import (
@@ -18,6 +19,7 @@ from apps.user_service.app.services.user_service import UserService
 from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
+    ConflictException,
     NotFoundException,
     ValidationException,
 )
@@ -57,6 +59,7 @@ class _FakeOrgMemberRepo:
         self.suspend_ok = suspend_ok
         self.revoke_ok = revoke_ok
         self.db_connection = MagicMock()
+        self.db_connection.fetchrow = AsyncMock(return_value=None)
         self.last_suspend: tuple[str, str] | None = None
         self.last_email_update: dict[str, Any] | None = None
 
@@ -71,6 +74,11 @@ class _FakeOrgMemberRepo:
         return self.user_exists
 
     async def check_phone_exists_for_other_user(self, **kwargs) -> bool:
+        """Return False by default."""
+        del kwargs
+        return False
+
+    async def check_email_exists_for_other_user(self, **kwargs) -> bool:
         """Return False by default."""
         del kwargs
         return False
@@ -111,7 +119,11 @@ class _FakeOrgMemberRepo:
 
     async def update_user_info(self, user_id: str, organization_id: str, update_data: dict):
         """Record member info update."""
-        del user_id, organization_id, update_data
+        self.last_info_update = {
+            "user_id": user_id,
+            "organization_id": organization_id,
+            "update_data": update_data,
+        }
         return {"ok": True}
 
     async def get_user_role_id(self, user_id: str, organization_id: str | None):
@@ -340,6 +352,18 @@ async def test_update_user_email_success(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_user_email_conflict():
+    """update_user_email rejects an email already used by another member."""
+    repo = _FakeOrgMemberRepo(profile=_profile())
+    repo.check_email_exists_for_other_user = AsyncMock(return_value=True)
+    svc = _service(member_repo=repo)
+
+    with pytest.raises(ConflictException) as exc:
+        await svc.update_user_email(MEMBER_ID, ORG_ID, "taken@example.com")
+    assert exc.value.message_key == "users.errors.email_already_exists"
+
+
+@pytest.mark.asyncio
 async def test_update_user_email_not_found():
     """update_user_email raises when member missing."""
     svc = _service(member_repo=_FakeOrgMemberRepo(profile=None))
@@ -487,6 +511,12 @@ async def test_transform_users_empty():
     assert await svc.transform_users([], ORG_ID) == []
 
 
+def test_patch_user_request_requires_phone_pair():
+    """PatchUserRequest rejects a phone number without an ISD code."""
+    with pytest.raises(ValidationError):
+        PatchUserRequest(phone_number="9876543210")
+
+
 @pytest.mark.asyncio
 async def test_patch_organization_member_no_fields():
     """patch_organization_member rejects patch without supported fields."""
@@ -494,6 +524,103 @@ async def test_patch_organization_member_no_fields():
     patch = PatchUserRequest.model_construct(role_id=None)
     with pytest.raises(ValidationException):
         await svc.patch_organization_member(MEMBER_ID, patch)
+
+
+@pytest.mark.asyncio
+async def test_patch_organization_member_profile_fields(monkeypatch):
+    """patch_organization_member applies profile fields through update_user_profile."""
+    repo = _FakeOrgMemberRepo(profile=_profile())
+    svc = _service(member_repo=repo)
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.update_metadata",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(svc, "_update_isometrik_user_if_needed", AsyncMock())
+    monkeypatch.setattr(
+        svc,
+        "get_user_profile_by_id",
+        AsyncMock(return_value=_profile(first_name="Updated", designation="Manager")),
+    )
+
+    result = await svc.patch_organization_member(
+        MEMBER_ID,
+        PatchUserRequest(first_name="Updated", designation="Manager"),
+    )
+
+    assert result["current_user_data"]["first_name"] == "Member"
+    assert result["audit_data"]["first_name"] == "Updated"
+    assert result["audit_data"]["designation"] == "Manager"
+
+
+@pytest.mark.asyncio
+async def test_patch_organization_member_email(monkeypatch):
+    """patch_organization_member applies email through update_user_email."""
+    repo = _FakeOrgMemberRepo(profile=_profile())
+    svc = _service(member_repo=repo)
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.update_supabase_user_email",
+        AsyncMock(),
+    )
+
+    result = await svc.patch_organization_member(
+        MEMBER_ID, PatchUserRequest(email="new@example.com")
+    )
+
+    assert repo.last_email_update["new_email"] == "new@example.com"
+    assert result["audit_data"]["email"] == "new@example.com"
+
+
+@pytest.mark.asyncio
+async def test_patch_organization_member_email_conflict():
+    """patch_organization_member rejects an email already used by another member."""
+    repo = _FakeOrgMemberRepo(profile=_profile())
+    repo.check_email_exists_for_other_user = AsyncMock(return_value=True)
+    svc = _service(member_repo=repo)
+
+    with pytest.raises(ConflictException) as exc:
+        await svc.patch_organization_member(MEMBER_ID, PatchUserRequest(email="taken@example.com"))
+    assert exc.value.message_key == "users.errors.email_already_exists"
+
+
+@pytest.mark.asyncio
+async def test_patch_organization_member_phone(monkeypatch):
+    """patch_organization_member updates org member and Auth phone."""
+    repo = _FakeOrgMemberRepo(profile=_profile())
+    svc = _service(member_repo=repo)
+    monkeypatch.setattr(svc, "_auth_phone_taken_by_other_user", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.get_user_by_id",
+        AsyncMock(return_value={"user_metadata": {}}),
+    )
+    update_phone = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.update_phone",
+        update_phone,
+    )
+
+    result = await svc.patch_organization_member(
+        MEMBER_ID,
+        PatchUserRequest(phone_number="9876543210", phone_isd_code="+91"),
+    )
+
+    assert repo.last_info_update["update_data"]["phone_number"] == "9876543210"
+    assert result["audit_data"]["phone_isd_code"] == "+91"
+    update_phone.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_patch_organization_member_phone_conflict():
+    """patch_organization_member rejects a phone already used in the org."""
+    repo = _FakeOrgMemberRepo(profile=_profile())
+    repo.check_phone_exists_for_other_user = AsyncMock(return_value=True)
+    svc = _service(member_repo=repo)
+
+    with pytest.raises(ConflictException) as exc:
+        await svc.patch_organization_member(
+            MEMBER_ID,
+            PatchUserRequest(phone_number="9876543210", phone_isd_code="+91"),
+        )
+    assert exc.value.message_key == "users.errors.phone_number_already_exists"
 
 
 def test_extract_auth_user_contact_from_dict():
