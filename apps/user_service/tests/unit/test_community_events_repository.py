@@ -143,6 +143,32 @@ async def test_fetch_event_variants():
 
 
 @pytest.mark.asyncio
+async def test_fetch_event_rsvp_summary_confirmed_filters():
+    conn = _FakeConn(
+        row={
+            "bookings": 1,
+            "tickets": 1,
+            "confirmed_adults": 1,
+            "confirmed_child": 0,
+            "cancelled_tickets": 2,
+            "waitlisted_tickets": 0,
+        }
+    )
+    repo = CommunityEventsRepository(db_connection=conn)
+    summary = await repo.fetch_event_rsvp_summary(
+        organization_id=ORG,
+        project_id=PROJECT,
+        event_id=EVENT,
+    )
+    assert summary["confirmed_adults"] == 1
+    assert summary["confirmed_child"] == 0
+    assert summary["cancelled_tickets"] == 2
+    query = conn.fetchrow_calls[-1][0]
+    assert "confirmed_adults" in query
+    assert "booking_status = 'confirmed'" in query
+
+
+@pytest.mark.asyncio
 async def test_list_events_tabs_and_search():
     conn = _FakeConn(row={"total": 1}, rows=[_event_row()])
     repo = CommunityEventsRepository(db_connection=conn)

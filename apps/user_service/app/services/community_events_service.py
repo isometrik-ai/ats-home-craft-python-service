@@ -27,6 +27,7 @@ from apps.user_service.app.schemas.community_events import (
     CommunityEventListQuery,
     CommunityEventMediaInput,
     CommunityEventMediaResponse,
+    CommunityEventRsvpSummary,
     CommunityEventSummaryResponse,
     CreateCommunityEventRequest,
     MarkBookingPaidRequest,
@@ -137,6 +138,29 @@ class CommunityEventsService:
         return label
 
     @staticmethod
+    def _rsvp_summary(row: dict[str, Any], stats: dict[str, Any]) -> CommunityEventRsvpSummary:
+        """Build the admin RSVP card from live booking counts."""
+        tickets = int(stats.get("tickets") or 0)
+        capacity = row.get("total_capacity")
+        capacity_int = int(capacity) if capacity is not None else None
+        seats_left = None
+        fill_rate = None
+        if capacity_int is not None:
+            seats_left = max(0, capacity_int - tickets)
+            fill_rate = 0 if capacity_int <= 0 else min(100, round(tickets * 100 / capacity_int))
+        return CommunityEventRsvpSummary(
+            bookings=int(stats.get("bookings") or 0),
+            tickets=tickets,
+            total_capacity=capacity_int,
+            confirmed_adults=int(stats.get("confirmed_adults") or 0),
+            confirmed_child=int(stats.get("confirmed_child") or 0),
+            cancelled_tickets=int(stats.get("cancelled_tickets") or 0),
+            waitlisted_tickets=int(stats.get("waitlisted_tickets") or 0),
+            seats_left=seats_left,
+            fill_rate=fill_rate,
+        )
+
+    @staticmethod
     def _derive_booking_state(row: dict[str, Any]) -> str:
         """Admin list booking state label."""
         if str(row.get("publish_status")) != CommunityEventPublishStatus.PUBLISHED.value:
@@ -182,10 +206,16 @@ class CommunityEventsService:
         self,
         *,
         row: dict[str, Any],
+        project_id: str,
     ) -> CommunityEventDetailResponse:
         """Map DB row to admin detail."""
         gallery_rows = await self.repo.list_gallery(
             organization_id=self.organization_id,
+            event_id=str(row["id"]),
+        )
+        rsvp_stats = await self.repo.fetch_event_rsvp_summary(
+            organization_id=self.organization_id,
+            project_id=project_id,
             event_id=str(row["id"]),
         )
         category = str(row.get("category") or "")
@@ -222,6 +252,7 @@ class CommunityEventsService:
             bookings_count=int(row.get("bookings_count") or 0),
             paid_bookings_count=int(row.get("paid_bookings_count") or 0),
             revenue_collected_minor=int(row.get("revenue_collected_minor") or 0),
+            rsvp_summary=self._rsvp_summary(row, rsvp_stats or {}),
             published_at=row.get("published_at"),
             completed_at=row.get("completed_at"),
             cancelled_at=row.get("cancelled_at"),
@@ -357,7 +388,7 @@ class CommunityEventsService:
                 message_key="community_events.errors.event_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
-        return await self._serialize_detail(row=row)
+        return await self._serialize_detail(row=row, project_id=project_id)
 
     async def create_event(
         self,
