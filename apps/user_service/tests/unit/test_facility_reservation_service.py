@@ -461,6 +461,7 @@ async def test_create_resident_confirmed_flow():
     assert result["id"] == RESERVATION_ID
     svc.notifier.confirmed.assert_awaited_once()
     svc.ledger.post.assert_awaited_once()
+    assert svc.availability.build_context.await_args.kwargs["exclude_reservation_id"] is None
 
 
 @pytest.mark.asyncio
@@ -709,6 +710,11 @@ async def test_reschedule_creates_linked_reservation():
         )
     assert result["id"] == "new-id"
     svc.notifier.rescheduled.assert_awaited_once()
+    update = svc.reservations_repo.update_reservation.await_args.kwargs["update_data"]
+    assert update == {
+        "status": FacilityReservationStatus.RESCHEDULED.value,
+        "rescheduled_to_id": "new-id",
+    }
 
 
 @pytest.mark.asyncio

@@ -413,6 +413,59 @@ def test_validate_draft_day_range_and_room_branches():
     assert any(err.code == "invalid_time_range" for err in day_result.errors)
 
 
+def test_day_range_reschedule_ignores_same_reservation():
+    """Extending a multi-day booking must not treat the current reservation as a clash."""
+    defaults = default_booking_config(FacilityBookingArchetype.DAY_RANGE)
+    facility = FacilitySnapshot(
+        id="fac-day",
+        name="Multipurpose Hall",
+        archetype=FacilityBookingArchetype.DAY_RANGE.value,
+        slot_minutes=60,
+        hours=[DayHours(open=8 * 60, close=22 * 60, closed=False) for _ in range(7)],
+        pricing=defaults.pricing,
+        policies=defaults.policies,
+        setup=defaults.setup,
+        units=[],
+        closures={},
+        maintenance=[],
+        schedules=[],
+        slot_blocks=[],
+    )
+    current = EngineReservation(
+        id="res-1",
+        facility_id="fac-day",
+        unit_id=None,
+        local_date=date(2026, 11, 7),
+        end_local_date=date(2026, 11, 8),
+        start_min=8 * 60,
+        end_min=22 * 60,
+        host_contact_id="host-1",
+        status="confirmed",
+    )
+    draft = BookingDraft(
+        facility_id="fac-day",
+        unit_id=None,
+        local_date=date(2026, 11, 6),
+        end_local_date=date(2026, 11, 8),
+        start_min=8 * 60,
+        end_min=22 * 60,
+        host_contact_id="host-1",
+        participants=[],
+    )
+    now = datetime(2026, 11, 3, 10, 0, 0)
+    conflicted = availability.validate_draft(
+        availability.AvailabilityContext(facility=facility, active=[current], now=now),
+        draft,
+    )
+    assert any(err.code == "facility_busy" for err in conflicted.errors)
+
+    allowed = availability.validate_draft(
+        availability.AvailabilityContext(facility=facility, active=[], now=now),
+        draft,
+    )
+    assert not any(err.code == "facility_busy" for err in allowed.errors)
+
+
 def test_next_availability_returns_none_when_no_free_days():
     """next_availability returns None when lookahead finds no bookable day."""
     defaults = default_booking_config(FacilityBookingArchetype.DURATION)

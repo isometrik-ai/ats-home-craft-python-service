@@ -152,6 +152,7 @@ class FacilityReservationService:
             range_start=draft.local_date,
             range_end=draft.end_local_date,
             host_contact_id=host_contact_id,
+            exclude_reservation_id=rescheduled_from_id,
         )
         if not ctx.facility.accepting_bookings:
             raise ValidationException(

@@ -124,6 +124,41 @@ async def test_build_context_with_weekly_pool() -> None:
     svc.reservations_repo.list_weekly_pool.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_build_context_excludes_reservation() -> None:
+    """Reschedule validation ignores the reservation being moved."""
+    svc = _service()
+    config = _config_row()
+    svc.config_repo.get_config = AsyncMock(return_value=config)
+    svc.inventory_repo.load_all = AsyncMock(return_value=_empty_inventory())
+    keep = {
+        "id": "keep-1",
+        "facility_id": FACILITY_ID,
+        "unit_id": None,
+        "local_date": date(2026, 11, 7),
+        "end_local_date": date(2026, 11, 8),
+        "start_min": 480,
+        "end_min": 1320,
+        "host_contact_id": CONTACT_ID,
+        "status": "confirmed",
+        "quote": {},
+        "host_name": "Ada",
+    }
+    moving = {**keep, "id": "move-1"}
+    svc.reservations_repo.list_active_in_range = AsyncMock(return_value=[moving, keep])
+    svc.reservations_repo.participants_by_reservation = AsyncMock(return_value={})
+
+    ctx, _ = await svc.build_context(
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        range_start=date(2026, 11, 6),
+        range_end=date(2026, 11, 8),
+        exclude_reservation_id="move-1",
+    )
+
+    assert [row.id for row in ctx.active] == ["keep-1"]
+
+
 def test_draft_maps_participants() -> None:
     body = _draft_body()
     draft = FacilityAvailabilityService.draft(body, host_contact_id=CONTACT_ID)
