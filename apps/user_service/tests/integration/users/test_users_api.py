@@ -78,48 +78,6 @@ async def test_get_user_profile(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-async def test_update_user_email(monkeypatch, client):
-    """Update user email."""
-
-    async def fake_check_permissions(current_user, db_connection, permission_codes):
-        del current_user, db_connection, permission_codes
-        return _ctx()
-
-    async def fake_update_email(self, user_id, organization_id, new_email):
-        del self
-        assert user_id == "u2"
-        assert organization_id == "org-1"
-        assert new_email == "new@example.com"
-        return {
-            "current_user_data": {
-                "user_id": "u2",
-                "email": "old@example.com",
-                "full_name": "Old User",
-                "first_name": "Old",
-                "last_name": "User",
-                "phone": None,
-                "timezone": "UTC",
-                "avatar_url": None,
-                "status": OrganizationMemberStatus.ACTIVE.value,
-                "role_id": "",
-                "organization_id": "org-1",
-            }
-        }
-
-    monkeypatch.setattr(
-        "apps.user_service.app.api.users.check_permissions",
-        fake_check_permissions,
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.UserService.update_user_email",
-        fake_update_email,
-    )
-
-    res = await client.put("/v1/users/u2/email", json={"email": "new@example.com"})
-    assert_success(res, 200)
-
-
-@pytest.mark.asyncio
 async def test_update_user_profile(monkeypatch, client):
     """Update own profile."""
 
@@ -171,7 +129,7 @@ async def test_update_user_profile(monkeypatch, client):
         fake_update_profile,
     )
 
-    res = await client.put("/v1/users/update", json={"first_name": "New"})
+    res = await client.put("/v1/users/profile", json={"first_name": "New"})
     body = assert_success(res, 200)
     assert body["message"]
 
@@ -283,16 +241,18 @@ async def test_get_users_list_empty(monkeypatch, client):
 
 @pytest.mark.asyncio
 async def test_patch_user(monkeypatch, client):
-    """PATCH /users/{user_id} updates organization member role."""
+    """PATCH /users/{user_id} updates organization member fields."""
 
-    async def fake_extract(current_user, db_connection):
-        del current_user, db_connection
+    async def fake_check_permissions(current_user, db_connection, permission_codes):
+        del current_user, db_connection, permission_codes
         return _ctx()
 
     async def fake_patch(self, user_id, body):
         del self
         assert user_id == "u2"
         assert body.role_id == "role-123"
+        assert body.first_name == "Updated"
+        assert body.email == "new@example.com"
         return {
             "audit_data": {"user_id": "u2", "role_id": "role-123"},
             "current_user_data": {
@@ -311,15 +271,22 @@ async def test_patch_user(monkeypatch, client):
         }
 
     monkeypatch.setattr(
-        "apps.user_service.app.api.users.extract_user_context",
-        fake_extract,
+        "apps.user_service.app.api.users.check_permissions",
+        fake_check_permissions,
     )
     monkeypatch.setattr(
         "apps.user_service.app.services.user_service.UserService.patch_organization_member",
         fake_patch,
     )
 
-    res = await client.patch("/v1/users/u2", json={"role_id": "role-123"})
+    res = await client.patch(
+        "/v1/users/u2",
+        json={
+            "role_id": "role-123",
+            "first_name": "Updated",
+            "email": "new@example.com",
+        },
+    )
     assert_success(res, 200)
 
 

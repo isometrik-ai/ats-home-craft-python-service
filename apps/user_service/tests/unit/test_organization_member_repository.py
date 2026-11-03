@@ -296,6 +296,21 @@ async def test_check_user_membership_by_user_id():
 
 
 @pytest.mark.asyncio
+async def test_check_email_exists_for_other_user_exclude_self():
+    """Email uniqueness check excludes the current member."""
+    conn = _async_mock_conn(row={"id": "m1"})
+    repo = OrganizationMemberRepository(db_connection=conn)
+
+    exists = await repo.check_email_exists_for_other_user("a@b.com", "org-1", "u1")
+
+    assert exists is True
+    query, args = _sql_args(conn.fetchrow)
+    assert "LOWER(email) = LOWER($1)" in query
+    assert "user_id != $4" in query
+    assert args[-1] == "u1"
+
+
+@pytest.mark.asyncio
 async def test_check_phone_exists_for_other_user_exclude_self():
     """Phone check excludes current user when user_id provided."""
     conn = _async_mock_conn(row={"id": "m1"})

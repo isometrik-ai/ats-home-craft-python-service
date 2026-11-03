@@ -271,40 +271,64 @@ class UserProfileData(BaseModel):
     )
 
 
-class UpdateUserEmailRequest(BaseModel):
-    """Request model for creating a new user
-
-    Attributes:
-        email (EmailStr): User's email address (required)
-    """
-
-    email: EmailStr = Field(..., description="User's New Updated email address")
-
-
 class PatchUserRequest(BaseModel):
-    """Request body for PATCH ``/users/{user_id}``."""
+    """Admin PATCH body for ``/users/{user_id}``.
+
+    Send only the fields to change. Role assignment still uses creator/admin
+    rules; identity and profile fields require ``users_management.edit``.
+    """
 
     role_id: str | None = Field(
         default=None,
-        description=("RBAC role UUID to assign in the organization"),
+        description="RBAC role UUID to assign in the organization",
+    )
+    email: EmailStr | None = Field(default=None, description="Updated email address")
+    phone_number: str | None = Field(
+        default=None, description="Updated phone number (without ISD code)"
+    )
+    phone_isd_code: str | None = Field(
+        default=None, description="Updated phone ISD code (e.g., '+91')"
+    )
+    first_name: str | None = Field(default=None, description="Updated first name")
+    last_name: str | None = Field(default=None, description="Updated last name")
+    salutation: str | None = Field(default=None, description="Updated salutation")
+    timezone: str | None = Field(default=None, description="Updated timezone preference")
+    avatar_url: str | None = Field(default=None, description="Updated avatar path")
+    gender: Gender | None = Field(default=None, description="Updated gender")
+    dob: str | None = Field(default=None, description="Updated date of birth (YYYY-MM-DD)")
+    blood_group: BloodGroup | None = Field(default=None, description="Updated blood group")
+    designation: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Updated job title or designation",
     )
 
     @model_validator(mode="after")
     def require_at_least_one_patch_value(self) -> "PatchUserRequest":
-        """Reject empty bodies and all-null payloads.
-
-        Remains valid when more optional fields are added later.
-        """
+        """Reject empty bodies, all-null payloads, and a partial phone pair."""
         if not self.model_fields_set or not any(
             getattr(self, name) is not None for name in self.model_fields_set
         ):
             raise ValueError("At least one field must be provided in the request body.")
+
+        phone_provided = "phone_number" in self.model_fields_set
+        isd_provided = "phone_isd_code" in self.model_fields_set
+        if phone_provided != isd_provided or (
+            phone_provided and (not self.phone_number or not self.phone_isd_code)
+        ):
+            raise ValueError("phone_number and phone_isd_code must be provided together.")
         return self
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "role_id": "550e8400-e29b-41d4-a716-446655440000",
+                "email": "updated.user@example.com",
+                "phone_number": "9876543210",
+                "phone_isd_code": "+91",
+                "first_name": "Updated",
+                "last_name": "User",
+                "designation": "Community Manager",
             }
         }
     )

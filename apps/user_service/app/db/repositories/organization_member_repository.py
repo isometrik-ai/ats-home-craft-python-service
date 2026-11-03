@@ -446,6 +446,31 @@ class OrganizationMemberRepository:
         )
         return row is not None
 
+    async def check_email_exists_for_other_user(
+        self,
+        email: str,
+        organization_id: str,
+        user_id: str,
+    ) -> bool:
+        """True when another non-deleted member in the org already has this email."""
+        query = """
+            SELECT id
+            FROM organization_members
+            WHERE LOWER(email) = LOWER($1)
+            AND organization_id = $2
+            AND status != $3
+            AND user_id != $4
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(
+            query,
+            email,
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+            user_id,
+        )
+        return row is not None
+
     async def get_active_membership_isometrik_user_id(
         self,
         user_id: str,
