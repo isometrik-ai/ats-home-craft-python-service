@@ -278,6 +278,8 @@ class PatchUserRequest(BaseModel):
     rules; identity and profile fields require ``users_management.edit``.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     role_id: str | None = Field(
         default=None,
         description="RBAC role UUID to assign in the organization",
@@ -318,20 +320,6 @@ class PatchUserRequest(BaseModel):
         ):
             raise ValueError("phone_number and phone_isd_code must be provided together.")
         return self
-
-    model_config = ConfigDict(
-        json_schema_extra={
-            "example": {
-                "role_id": "550e8400-e29b-41d4-a716-446655440000",
-                "email": "updated.user@example.com",
-                "phone_number": "9876543210",
-                "phone_isd_code": "+91",
-                "first_name": "Updated",
-                "last_name": "User",
-                "designation": "Community Manager",
-            }
-        }
-    )
 
 
 class CreateUserRequest(BaseModel):
