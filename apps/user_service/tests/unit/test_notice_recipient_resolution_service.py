@@ -209,7 +209,7 @@ async def test_estimate_reach_staff_uses_project_staff_listing():
 
 @pytest.mark.asyncio
 async def test_estimate_reach_security_uses_project_security_role():
-    """Security reach counts security, security_*, and roles named Security*."""
+    """Security reach matches the security slug, security_* slugs, or a Security* name."""
     db = MagicMock()
     db.fetch = AsyncMock(return_value=[{"user_id": "guard-1"}])
     service = NoticeRecipientResolutionService(db_connection=db)
@@ -227,7 +227,7 @@ async def test_estimate_reach_security_uses_project_security_role():
     query = db.fetch.await_args.args[0]
     assert "pr.slug = 'security'" in query
     assert "pr.slug ~ '^security_'" in query
-    assert "position('security' in lower(btrim(pr.name))) > 0" in query
+    assert "lower(btrim(pr.name)) LIKE 'security%'" in query
     assert "NOT (" not in query
 
 

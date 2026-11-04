@@ -49,13 +49,15 @@ INNER JOIN organization_members om
  AND om.status = 'active'
 """
 
-# Security, Security Guard, Security Manager, and any security_* role.
+# Exact security slug, security_* slugs, or a name that starts with "security".
+# A prefix match keeps Security Guard and Security Manager without treating
+# names such as "Insecurity Analyst" as security.
 _SECURITY_SLUG = ProjectMemberRole.SECURITY.value
 _SECURITY_ROLE_MATCH = f"""
 (
   pr.slug = '{_SECURITY_SLUG}'
   OR pr.slug ~ '^{_SECURITY_SLUG}_'
-  OR position('{_SECURITY_SLUG}' in lower(btrim(pr.name))) > 0
+  OR lower(btrim(pr.name)) LIKE '{_SECURITY_SLUG}%'
 )
 """
 
