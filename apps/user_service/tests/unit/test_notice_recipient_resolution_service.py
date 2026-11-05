@@ -10,7 +10,6 @@ from pydantic import ValidationError
 from apps.user_service.app.schemas.enums import (
     NoticeRecipientGroup,
     NoticeRecipientInputGroup,
-    ProjectMemberRole,
 )
 from apps.user_service.app.schemas.notices import (
     CreateNoticeRequest,
@@ -26,19 +25,15 @@ STAFF = NoticeRecipientGroup.STAFF.value
 
 
 @pytest.mark.asyncio
-async def test_estimate_reach_staff_manager_counts_one_not_three():
-    """ATS-458: 1 Staff Manager + 1 Security must not show 3 when Staff Manager is selected.
+async def test_estimate_reach_staff_counts_listed_non_security_members():
+    """Staff reach is every active person on the project staff page except security.
 
-    Example project members:
-    - Alice -> community_admin (Staff Manager)
-    - Bob   -> security
-    - Carol -> accountant (other staff role, excluded)
-
-    Old bug: Staff group counted all non-security roles + security => 3.
-    Expected: Staff Manager selected => 1 (Alice only).
+    Community Admin, Event Manager, Staff Manager, Facility Manager, and
+    Account Manager are Staff. Security, Security Guard, and Security Manager
+    stay in the Security group.
     """
     db = MagicMock()
-    db.fetch = AsyncMock(return_value=[{"user_id": "alice"}])
+    db.fetch = AsyncMock(return_value=[{"user_id": "alice"}, {"user_id": "carol"}])
     service = NoticeRecipientResolutionService(db_connection=db)
 
     total, breakdown = await service.estimate_reach(
@@ -49,9 +44,13 @@ async def test_estimate_reach_staff_manager_counts_one_not_three():
         tower_ids=[],
     )
 
-    assert breakdown == {STAFF: 1}
-    assert total == 1
-    assert db.fetch.await_count == 1
+    assert breakdown == {STAFF: 2}
+    assert total == 2
+    query = db.fetch.await_args.args[0]
+    assert "organization_members om" in query
+    assert "NOT" in query
+    assert "pr.slug = 'security'" in query
+    assert "staff_manager" not in query
 
 
 @pytest.mark.asyncio
@@ -185,8 +184,8 @@ def test_reach_estimate_query_parses_staff_group():
 
 
 @pytest.mark.asyncio
-async def test_estimate_reach_staff_manager_uses_project_members():
-    """Staff Manager reach counts only staff manager project members."""
+async def test_estimate_reach_staff_uses_project_staff_listing():
+    """Staff reach counts active non-security members shown on the staff page."""
     db = MagicMock()
     db.fetch = AsyncMock(return_value=[{"user_id": "staff-1"}])
     service = NoticeRecipientResolutionService(db_connection=db)
@@ -201,13 +200,16 @@ async def test_estimate_reach_staff_manager_uses_project_members():
 
     assert total == 1
     assert breakdown == {STAFF: 1}
-    assert "staff_manager" in db.fetch.await_args.args[4]
-    assert "Staff" in db.fetch.await_args.args[5]
+    query = db.fetch.await_args.args[0]
+    assert "FROM project_members pm" in query
+    assert "organization_members om" in query
+    assert "om.status = 'active'" in query
+    assert "NOT" in query
 
 
 @pytest.mark.asyncio
 async def test_estimate_reach_security_uses_project_security_role():
-    """Security reach counts active project members with security role."""
+    """Security reach matches the security slug, security_* slugs, or a Security* name."""
     db = MagicMock()
     db.fetch = AsyncMock(return_value=[{"user_id": "guard-1"}])
     service = NoticeRecipientResolutionService(db_connection=db)
@@ -222,7 +224,11 @@ async def test_estimate_reach_security_uses_project_security_role():
 
     assert total == 1
     assert breakdown == {"Security": 1}
-    assert ProjectMemberRole.SECURITY.value in db.fetch.await_args.args
+    query = db.fetch.await_args.args[0]
+    assert "pr.slug = 'security'" in query
+    assert "pr.slug ~ '^security_'" in query
+    assert "lower(btrim(pr.name)) LIKE 'security%'" in query
+    assert "NOT (" not in query
 
 
 @pytest.mark.asyncio
@@ -285,7 +291,7 @@ async def test_unpaid_invoice_notice_limits_owners_to_open_invoices():
 
 @pytest.mark.asyncio
 async def test_is_visible_to_contact_staff_manager_checks_project_members():
-    """Staff Manager notices are visible to assigned staff manager project members."""
+    """Staff notices are visible to any non-security member on the staff page."""
     db = MagicMock()
     db.fetchrow = AsyncMock(return_value={"?column?": 1})
     service = NoticeRecipientResolutionService(db_connection=db)
@@ -382,7 +388,7 @@ async def test_is_visible_security_only_notice_hidden_from_staff_user():
 
 @pytest.mark.asyncio
 async def test_resolve_recipient_user_ids_staff_manager_only():
-    """resolve_recipient_user_ids returns staff manager user ids only."""
+    """resolve_recipient_user_ids returns the staff-page user ids for Staff."""
     db = MagicMock()
     db.fetch = AsyncMock(return_value=[{"user_id": "staff-1"}])
     service = NoticeRecipientResolutionService(db_connection=db)
