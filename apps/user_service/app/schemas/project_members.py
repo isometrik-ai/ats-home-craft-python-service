@@ -42,6 +42,8 @@ class ProjectMemberResponse(BaseModel):
     email: str | None = None
     first_name: str | None = None
     last_name: str | None = None
+    phone_number: str | None = None
+    phone_isd_code: str | None = None
     org_role_id: str | None = None
     member_role: str | None = None
 
@@ -62,7 +64,7 @@ class ListProjectMembersQuery(BaseModel):
     search: str | None = Field(
         default=None,
         min_length=1,
-        description="Case-insensitive match on member email or name.",
+        description="Case-insensitive match on member email, name, or phone number.",
     )
 
 

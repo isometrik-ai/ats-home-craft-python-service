@@ -673,6 +673,7 @@ class ProjectsRepository(BaseRepository):
                   om.email ILIKE ${next_param}
                   OR om.first_name ILIKE ${next_param}
                   OR om.last_name ILIKE ${next_param}
+                  OR om.phone_number ILIKE ${next_param}
                 )"""
             )
             args.append(pattern)
@@ -696,6 +697,8 @@ class ProjectsRepository(BaseRepository):
               om.email,
               om.first_name,
               om.last_name,
+              om.phone_number,
+              om.phone_isd_code,
               om.role_id::text AS org_role_id,
               om.member_role
             FROM project_members pm
