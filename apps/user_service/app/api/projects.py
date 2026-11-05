@@ -3945,7 +3945,7 @@ async def get_my_project_permissions(
     summary="List staff assigned to a project",
     description=(
         "Returns project member rows joined with organization member profiles. "
-        "Filter by role, status, or search by name/email."
+        "Filter by role, status, or search by name, email, or phone number."
     ),
     response_model=None,
     responses=PROJECT_MEMBER_LIST_RESPONSES,

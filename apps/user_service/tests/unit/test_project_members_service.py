@@ -242,6 +242,8 @@ async def test_list_members_formats_joined_at_datetime():
                 "status": ProjectMemberStatus.ACTIVE.value,
                 "joined_at": joined,
                 "email": "admin@example.com",
+                "phone_number": "9876543210",
+                "phone_isd_code": "+91",
             }
         ]
     )
@@ -251,3 +253,5 @@ async def test_list_members_formats_joined_at_datetime():
 
     assert len(result) == 1
     assert result[0].joined_at == format_iso_datetime(joined)
+    assert result[0].phone_number == "9876543210"
+    assert result[0].phone_isd_code == "+91"
