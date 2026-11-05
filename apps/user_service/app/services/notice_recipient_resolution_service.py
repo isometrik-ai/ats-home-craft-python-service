@@ -37,14 +37,35 @@ def _unpaid_invoice_filter(project_param: str) -> str:
     """
 
 
+# Same join as the project staff page: active assignment plus an active org profile.
+_LISTED_PROJECT_MEMBER_FROM = """
+FROM project_members pm
+INNER JOIN project_roles pr
+  ON pr.id = pm.project_role_id
+ AND pr.project_id = pm.project_id
+INNER JOIN organization_members om
+  ON om.user_id = pm.user_id
+ AND om.organization_id = pm.organization_id
+ AND om.status = 'active'
+"""
+
+# Exact security slug, security_* slugs, or a name that starts with "security".
+# A prefix match keeps Security Guard and Security Manager without treating
+# names such as "Insecurity Analyst" as security.
+_SECURITY_SLUG = ProjectMemberRole.SECURITY.value
+_SECURITY_ROLE_MATCH = f"""
+(
+  pr.slug = '{_SECURITY_SLUG}'
+  OR pr.slug ~ '^{_SECURITY_SLUG}_'
+  OR lower(btrim(pr.name)) LIKE '{_SECURITY_SLUG}%'
+)
+"""
+
+
 class NoticeRecipientResolutionService:
     """Audience sizing and recipient resolution for notices."""
 
     _STAFF_GROUP = NoticeRecipientGroup.STAFF.value
-    _STAFF_ROLE_SLUGS = (
-        "staff_manager",
-        ProjectMemberRole.COMMUNITY_ADMIN.value,
-    )
 
     def __init__(self, db_connection: asyncpg.Connection) -> None:
         self.db_connection = db_connection
@@ -271,30 +292,12 @@ class NoticeRecipientResolutionService:
         organization_id: str,
         project_id: str,
     ) -> set[str]:
-        """Active project members assigned with staff manager roles."""
-        rows = await self.db_connection.fetch(
-            """
-            SELECT DISTINCT pm.user_id::text AS user_id
-            FROM project_members pm
-            INNER JOIN project_roles pr
-              ON pr.id = pm.project_role_id
-             AND pr.project_id = pm.project_id
-            WHERE pm.organization_id = $1::uuid
-              AND pm.project_id = $2::uuid
-              AND pm.status = $3
-              AND (
-                pr.slug = ANY($4::text[])
-                OR lower(trim(pr.name)) IN (lower($5), lower($6))
-              )
-            """,
-            organization_id,
-            project_id,
-            ProjectMemberStatus.ACTIVE.value,
-            list(self._STAFF_ROLE_SLUGS),
-            self._STAFF_GROUP,
-            "Staff Manager",
+        """Active project staff-page members whose role is not security."""
+        return await self._listed_project_member_user_ids(
+            organization_id=organization_id,
+            project_id=project_id,
+            security=False,
         )
-        return {str(row["user_id"]) for row in rows if row["user_id"]}
 
     async def _project_security_user_ids(
         self,
@@ -302,23 +305,34 @@ class NoticeRecipientResolutionService:
         organization_id: str,
         project_id: str,
     ) -> set[str]:
-        """Active project members assigned with the security role."""
+        """Active project staff-page members with a security role."""
+        return await self._listed_project_member_user_ids(
+            organization_id=organization_id,
+            project_id=project_id,
+            security=True,
+        )
+
+    async def _listed_project_member_user_ids(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        security: bool,
+    ) -> set[str]:
+        """User ids that appear on the project staff page for one audience."""
+        role_filter = _SECURITY_ROLE_MATCH if security else f"NOT {_SECURITY_ROLE_MATCH}"
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT DISTINCT pm.user_id::text AS user_id
-            FROM project_members pm
-            INNER JOIN project_roles pr
-              ON pr.id = pm.project_role_id
-             AND pr.project_id = pm.project_id
+            {_LISTED_PROJECT_MEMBER_FROM}
             WHERE pm.organization_id = $1::uuid
               AND pm.project_id = $2::uuid
               AND pm.status = $3
-              AND pr.slug = $4
+              AND {role_filter}
             """,
             organization_id,
             project_id,
             ProjectMemberStatus.ACTIVE.value,
-            ProjectMemberRole.SECURITY.value,
         )
         return {str(row["user_id"]) for row in rows if row["user_id"]}
 
@@ -419,33 +433,13 @@ class NoticeRecipientResolutionService:
         project_id: str,
         user_id: str,
     ) -> bool:
-        """Return whether the user is an active staff project member."""
-        row = await self.db_connection.fetchrow(
-            """
-            SELECT 1
-            FROM project_members pm
-            INNER JOIN project_roles pr
-              ON pr.id = pm.project_role_id
-             AND pr.project_id = pm.project_id
-            WHERE pm.organization_id = $1::uuid
-              AND pm.project_id = $2::uuid
-              AND pm.user_id = $3::uuid
-              AND pm.status = $4
-              AND (
-                pr.slug = ANY($5::text[])
-                OR lower(trim(pr.name)) IN (lower($6), lower($7))
-              )
-            LIMIT 1
-            """,
-            organization_id,
-            project_id,
-            user_id,
-            ProjectMemberStatus.ACTIVE.value,
-            list(self._STAFF_ROLE_SLUGS),
-            self._STAFF_GROUP,
-            "Staff Manager",
+        """Return whether the user is an active non-security project staff member."""
+        return await self._user_is_listed_project_member(
+            organization_id=organization_id,
+            project_id=project_id,
+            user_id=user_id,
+            security=False,
         )
-        return row is not None
 
     async def _user_is_project_security(
         self,
@@ -454,26 +448,39 @@ class NoticeRecipientResolutionService:
         project_id: str,
         user_id: str,
     ) -> bool:
-        """Return whether the user is an active security project member."""
+        """Return whether the user is an active security project staff member."""
+        return await self._user_is_listed_project_member(
+            organization_id=organization_id,
+            project_id=project_id,
+            user_id=user_id,
+            security=True,
+        )
+
+    async def _user_is_listed_project_member(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        user_id: str,
+        security: bool,
+    ) -> bool:
+        """Return whether this user is on the project staff page for one audience."""
+        role_filter = _SECURITY_ROLE_MATCH if security else f"NOT {_SECURITY_ROLE_MATCH}"
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             SELECT 1
-            FROM project_members pm
-            INNER JOIN project_roles pr
-              ON pr.id = pm.project_role_id
-             AND pr.project_id = pm.project_id
+            {_LISTED_PROJECT_MEMBER_FROM}
             WHERE pm.organization_id = $1::uuid
               AND pm.project_id = $2::uuid
               AND pm.user_id = $3::uuid
               AND pm.status = $4
-              AND pr.slug = $5
+              AND {role_filter}
             LIMIT 1
             """,
             organization_id,
             project_id,
             user_id,
             ProjectMemberStatus.ACTIVE.value,
-            ProjectMemberRole.SECURITY.value,
         )
         return row is not None
 

@@ -318,6 +318,8 @@ async def test_list_members_with_profiles_and_count_by_role():
     assert len(members) == 1
     query, _ = conn.fetch_calls[0]
     assert "organization_members" in query
+    assert "om.phone_number" in query
+    assert "om.phone_isd_code" in query
     assert "pr.slug = $" in query
 
     count = await repo.count_active_members_by_role_slug(
