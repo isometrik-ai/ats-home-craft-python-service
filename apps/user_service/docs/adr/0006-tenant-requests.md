@@ -270,7 +270,9 @@ CREATE TYPE public.tenant_request_event_type AS ENUM (
 | `project_id`                | uuid NOT NULL                  | denormalized from `units`                 |
 | `unit_id`                   | uuid NOT NULL                  | → `units`                                 |
 | `submitted_by_contact_id`   | uuid NOT NULL                  | owner → `contacts`                        |
+| `tenant_prefix`             | text                           | optional salutation snapshot              |
 | `tenant_first_name`         | text NOT NULL                  | snapshot until approval                   |
+| `tenant_middle_name`        | text                           | optional middle name snapshot             |
 | `tenant_last_name`          | text                           |                                           |
 | `tenant_phones`             | jsonb NOT NULL DEFAULT `[]`    | same shape as `contacts.phones`           |
 | `tenant_emails`             | jsonb NOT NULL DEFAULT `[]`    |                                           |

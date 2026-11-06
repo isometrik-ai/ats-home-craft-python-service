@@ -41,7 +41,9 @@ _TENANT_REQUEST_SELECT_COLUMNS = f"""
   tr.project_id::text AS project_id,
   tr.unit_id::text AS unit_id,
   tr.submitted_by_contact_id::text AS submitted_by_contact_id,
+  tr.tenant_prefix,
   tr.tenant_first_name,
+  tr.tenant_middle_name,
   tr.tenant_last_name,
   tr.tenant_phones,
   tr.tenant_emails,
@@ -145,6 +147,8 @@ class TenantRequestsRepository(BaseRepository):
         tenant_contact_id: str | None = None,
         contact_unit_id: str | None = None,
         owner_reason: str | None = None,
+        tenant_prefix: str | None = None,
+        tenant_middle_name: str | None = None,
     ) -> dict[str, Any]:
         """Insert a tenant_requests header row."""
         row = await self.db_connection.fetchrow(
@@ -154,7 +158,9 @@ class TenantRequestsRepository(BaseRepository):
                 project_id,
                 unit_id,
                 submitted_by_contact_id,
+                tenant_prefix,
                 tenant_first_name,
+                tenant_middle_name,
                 tenant_last_name,
                 tenant_phones,
                 tenant_emails,
@@ -170,9 +176,9 @@ class TenantRequestsRepository(BaseRepository):
             )
             VALUES (
                 $1::uuid, $2::uuid, $3::uuid, $4::uuid,
-                $5, $6, $7::jsonb, $8::jsonb, $9::date, $10::date,
-                $11, $12::tenant_request_type, $13::uuid, $14::uuid, $15,
-                $16::tenant_request_status, $17::timestamptz
+                $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11::date, $12::date,
+                $13, $14::tenant_request_type, $15::uuid, $16::uuid, $17,
+                $18::tenant_request_status, $19::timestamptz
             )
             RETURNING id::text AS id
             """,
@@ -180,7 +186,9 @@ class TenantRequestsRepository(BaseRepository):
             project_id,
             unit_id,
             submitted_by_contact_id,
+            tenant_prefix,
             tenant_first_name,
+            tenant_middle_name,
             tenant_last_name,
             json.dumps(tenant_phones),
             json.dumps(tenant_emails),
@@ -773,7 +781,8 @@ class TenantRequestsRepository(BaseRepository):
             idx = len(args)
             filters.append(
                 f"(u.code ILIKE ${idx} OR u.unit_label ILIKE ${idx} "
-                f"OR tr.tenant_first_name ILIKE ${idx} OR tr.tenant_last_name ILIKE ${idx})"
+                f"OR tr.tenant_prefix ILIKE ${idx} OR tr.tenant_first_name ILIKE ${idx} "
+                f"OR tr.tenant_middle_name ILIKE ${idx} OR tr.tenant_last_name ILIKE ${idx})"
             )
         where_extra = f" AND {' AND '.join(filters)}" if filters else ""
         count = await self.db_connection.fetchval(
