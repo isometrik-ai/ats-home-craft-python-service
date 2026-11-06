@@ -68,6 +68,49 @@ def test_build_display_name_includes_initials_and_parts():
     assert name == "Mrs. Lakshmi Devi"
 
 
+def test_build_display_name_omits_blank_last_name():
+    """Display name skips a missing last name."""
+    name = DailyHelpService._build_display_name(
+        initials="Mr.",
+        first_name="Ramya",
+        middle_name=None,
+        last_name=None,
+    )
+    assert name == "Mr. Ramya"
+
+
+def test_resident_submit_accepts_missing_last_name():
+    """Resident submission treats last name as optional."""
+    from pydantic import ValidationError
+
+    from apps.user_service.app.schemas.daily_help import SubmitResidentDailyHelpRequest
+
+    body = SubmitResidentDailyHelpRequest(
+        first_name="Ramya",
+        phone_isd_code="+91",
+        phone_number="9655011223",
+        category_id="cat-1",
+    )
+    assert body.last_name is None
+
+    blank = SubmitResidentDailyHelpRequest(
+        first_name="Ramya",
+        last_name="  ",
+        phone_isd_code="+91",
+        phone_number="9655011223",
+        category_id="cat-1",
+    )
+    assert blank.last_name is None
+
+    with pytest.raises(ValidationError):
+        CreateDailyHelpRequest(
+            first_name="Ramya",
+            phone_isd_code="+91",
+            phone_number="9655011223",
+            category_id="cat-1",
+        )
+
+
 def test_mask_phone_number_hides_all_but_last_four():
     """Resident directory masks phone numbers."""
     assert DailyHelpService._mask_phone_number("9655011223") == "XXXXXX1223"
@@ -1520,6 +1563,45 @@ async def test_submit_resident_profile_sets_contact_and_unit():
     assert insert_kwargs["submitted_unit_id"] == "unit-1"
     assert len(push.org_calls) == 1
     assert push.org_calls[0]["params"]["unit_label"] == "A-1204"
+
+
+@pytest.mark.asyncio
+async def test_submit_resident_profile_allows_missing_last_name():
+    """Resident submit stores no last name and builds display name without it."""
+    from apps.user_service.app.schemas.daily_help import SubmitResidentDailyHelpRequest
+
+    svc = DailyHelpService(db_connection=MagicMock(), user_context=_user_context())
+    _stub_category_lookup(svc)
+    _stub_resident_unit_access(svc)
+    svc.repo = MagicMock()
+    svc.repo.insert_profile = AsyncMock(
+        return_value={
+            "id": "profile-pending",
+            "created_at": datetime.now(timezone.utc),
+        }
+    )
+    svc.repo.insert_document = AsyncMock()
+    svc.repo.insert_event = AsyncMock()
+    svc._resolve_contact_name = AsyncMock(return_value="Resident User")
+    svc._notify_reviewers_submission = AsyncMock()
+
+    result = await svc.submit_resident_profile(
+        contact_id="contact-1",
+        body=SubmitResidentDailyHelpRequest(
+            initials="Mr.",
+            first_name="Ramya",
+            last_name="",
+            phone_isd_code="+91",
+            phone_number="9655011223",
+            category_id="cat-1",
+            unit_id="unit-1",
+        ),
+    )
+
+    assert result.display_name == "Mr. Ramya"
+    insert_kwargs = svc.repo.insert_profile.await_args.kwargs
+    assert insert_kwargs["last_name"] is None
+    assert insert_kwargs["display_name"] == "Mr. Ramya"
 
 
 @pytest.mark.asyncio

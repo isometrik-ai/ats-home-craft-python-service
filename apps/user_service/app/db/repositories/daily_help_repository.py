@@ -163,7 +163,7 @@ class DailyHelpRepository(BaseRepository):
         initials: str | None,
         first_name: str,
         middle_name: str | None,
-        last_name: str,
+        last_name: str | None,
         display_name: str,
         phone_isd_code: str,
         phone_number: str,
