@@ -38,7 +38,9 @@ class CreateTenantRequestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     unit_id: str
+    prefix: str | None = Field(None, max_length=50)
     first_name: str = Field(..., max_length=100)
+    middle_name: str | None = Field(None, max_length=100)
     last_name: str | None = Field(None, max_length=100)
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
     emails: list[Email] | None = Field(None, max_length=20)
@@ -280,7 +282,9 @@ class TenantRequestListItemResponse(BaseModel):
     unit_id: str
     submitted_by_contact_id: str
     owner_name: str | None = None
+    tenant_prefix: str | None = None
     tenant_first_name: str
+    tenant_middle_name: str | None = None
     tenant_last_name: str | None = None
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)
@@ -318,7 +322,9 @@ class TenantRequestResponse(BaseModel):
     unit_label: str | None = None
     submitted_by_contact_id: str
     owner_name: str | None = None
+    tenant_prefix: str | None = None
     tenant_first_name: str
+    tenant_middle_name: str | None = None
     tenant_last_name: str | None = None
     tenant_phones: list[dict[str, Any]] = Field(default_factory=list)
     tenant_emails: list[dict[str, Any]] = Field(default_factory=list)

@@ -87,7 +87,9 @@ def _request_row(**overrides: Any) -> dict[str, Any]:
         "owner_prefix": None,
         "owner_first_name": "Owner",
         "owner_last_name": "One",
+        "tenant_prefix": None,
         "tenant_first_name": "Tenant",
+        "tenant_middle_name": None,
         "tenant_last_name": "User",
         "tenant_phones": [
             {"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}
@@ -221,7 +223,9 @@ class _FakeTenantRequestsRepo:
             project_id=kwargs.get("project_id", PROJECT_ID),
             unit_id=kwargs.get("unit_id", UNIT_ID),
             submitted_by_contact_id=kwargs.get("submitted_by_contact_id", OWNER_ID),
+            tenant_prefix=kwargs.get("tenant_prefix"),
             tenant_first_name=kwargs.get("tenant_first_name", "Tenant"),
+            tenant_middle_name=kwargs.get("tenant_middle_name"),
             tenant_last_name=kwargs.get("tenant_last_name"),
             tenant_phones=kwargs.get("tenant_phones", []),
             tenant_emails=kwargs.get("tenant_emails", []),
@@ -662,10 +666,16 @@ async def test_create_request_success() -> None:
     repo = _FakeTenantRequestsRepo()
     svc = _service(repo=repo)
 
-    response = await svc.create_request(owner_contact_id=OWNER_ID, body=_create_body())
+    body = _create_body().model_copy(update={"prefix": "Mr.", "middle_name": "Kumar"})
+    response = await svc.create_request(owner_contact_id=OWNER_ID, body=body)
 
     assert response.id == REQUEST_ID
+    assert response.tenant_prefix == "Mr."
     assert response.tenant_first_name == "Tenant"
+    assert response.tenant_middle_name == "Kumar"
+    assert response.tenant_last_name == "User"
+    assert repo.last_insert_kwargs["tenant_prefix"] == "Mr."
+    assert repo.last_insert_kwargs["tenant_middle_name"] == "Kumar"
     assert len(repo.events) == 2
 
 
@@ -833,7 +843,9 @@ async def test_sync_after_admin_move_in_creates_owner_visible_request() -> None:
     svc.units_repo.get_unit_owner_contact = AsyncMock(return_value={"contact_id": OWNER_ID})
     svc.contacts_repo.get_contact_details = AsyncMock(
         return_value={
+            "prefix": "Mr.",
             "first_name": "Tenant",
+            "middle_name": "Kumar",
             "last_name": "User",
             "phones": [{"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}],
             "emails": [],
@@ -853,6 +865,8 @@ async def test_sync_after_admin_move_in_creates_owner_visible_request() -> None:
 
     assert repo.row["status"] == TenantRequestStatus.APPROVED.value
     assert repo.row["tenant_contact_id"] == "tenant-contact-1"
+    assert repo.last_insert_kwargs["tenant_prefix"] == "Mr."
+    assert repo.last_insert_kwargs["tenant_middle_name"] == "Kumar"
     assert repo.events[-1]["event_type"] == TenantRequestEventType.APPROVED.value
 
 
@@ -1317,7 +1331,11 @@ async def test_reject_document_not_found() -> None:
 async def test_approve_request_success(mock_contacts_cls: MagicMock) -> None:
     """Admin approve provisions tenant contact and links unit."""
     repo = _FakeTenantRequestsRepo()
-    repo.row = _request_row(status=TenantRequestStatus.READY_TO_APPROVE.value)
+    repo.row = _request_row(
+        status=TenantRequestStatus.READY_TO_APPROVE.value,
+        tenant_prefix="Mr.",
+        tenant_middle_name="Kumar",
+    )
     repo.documents = _documents(doc_status=TenantRequestDocumentStatus.VERIFIED.value)
     mock_contacts_cls.return_value.create_contact = AsyncMock(
         return_value={"contact_id": "tenant-contact-1"}
@@ -1331,7 +1349,13 @@ async def test_approve_request_success(mock_contacts_cls: MagicMock) -> None:
     )
 
     assert response.status == TenantRequestStatus.APPROVED.value
-    mock_contacts_cls.return_value.create_contact.assert_awaited_once()
+    create_call = mock_contacts_cls.return_value.create_contact.await_args
+    assert create_call is not None
+    payload = create_call.args[0]
+    assert payload.prefix == "Mr."
+    assert payload.first_name == "Tenant"
+    assert payload.middle_name == "Kumar"
+    assert payload.last_name == "User"
 
 
 def test_approve_body_defaults_move_in_fee_to_zero() -> None:

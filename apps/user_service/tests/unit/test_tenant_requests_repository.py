@@ -78,6 +78,8 @@ async def test_insert_request_serializes_json_fields():
     assert inserted["id"] == REQUEST_ID
     query, args = conn.fetchrow_calls[0]
     assert "INSERT INTO tenant_requests" in query
+    assert "tenant_prefix" in query
+    assert "tenant_middle_name" in query
     assert "::tenant_request_status" in query
     assert json.dumps(phones) in args
     assert json.dumps(emails) in args
@@ -314,6 +316,8 @@ async def test_list_for_admin_applies_filters():
     assert rows[0]["documents_total_count"] == 2
     count_query, count_args = conn.fetchval_calls[0]
     assert "tr.status = ANY" in count_query
+    assert "tr.tenant_prefix ILIKE" in count_query
+    assert "tr.tenant_middle_name ILIKE" in count_query
     assert "ILIKE" in count_query
     assert "tr.unit_id" in count_query
     assert count_args[1] == PROJECT_ID

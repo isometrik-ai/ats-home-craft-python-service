@@ -596,7 +596,9 @@ class TenantRequestsService:
             unit_id=str(row["unit_id"]),
             submitted_by_contact_id=str(row["submitted_by_contact_id"]),
             owner_name=owner_name or None,
+            tenant_prefix=row.get("tenant_prefix"),
             tenant_first_name=row.get("tenant_first_name") or "",
+            tenant_middle_name=row.get("tenant_middle_name"),
             tenant_last_name=row.get("tenant_last_name"),
             tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
             tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
@@ -654,7 +656,9 @@ class TenantRequestsService:
                 first_name=row.get("owner_first_name"),
                 last_name=row.get("owner_last_name"),
             ),
+            tenant_prefix=row.get("tenant_prefix"),
             tenant_first_name=row.get("tenant_first_name") or "",
+            tenant_middle_name=row.get("tenant_middle_name"),
             tenant_last_name=row.get("tenant_last_name"),
             tenant_phones=parse_json_any(row.get("tenant_phones"), default=[]),
             tenant_emails=parse_json_any(row.get("tenant_emails"), default=[]),
@@ -908,7 +912,9 @@ class TenantRequestsService:
                 project_id=str(unit["project_id"]),
                 unit_id=body.unit_id,
                 submitted_by_contact_id=owner_contact_id,
+                tenant_prefix=body.prefix,
                 tenant_first_name=body.first_name,
+                tenant_middle_name=body.middle_name,
                 tenant_last_name=body.last_name,
                 tenant_phones=phones_payload,
                 tenant_emails=emails_payload,
@@ -1144,7 +1150,9 @@ class TenantRequestsService:
             project_id=project_id,
             unit_id=unit_id,
             submitted_by_contact_id=owner_contact_id,
+            tenant_prefix=tenant.get("prefix"),
             tenant_first_name=str(tenant.get("first_name") or ""),
+            tenant_middle_name=tenant.get("middle_name"),
             tenant_last_name=tenant.get("last_name"),
             tenant_phones=phones if isinstance(phones, list) else [],
             tenant_emails=emails if isinstance(emails, list) else [],
@@ -1600,8 +1608,9 @@ class TenantRequestsService:
             owner = item.owner
             unit = item.unit
             tenant_name = format_contact_display_name(
-                prefix=None,
+                prefix=item.tenant_prefix,
                 first_name=item.tenant_first_name,
+                middle_name=item.tenant_middle_name,
                 last_name=item.tenant_last_name,
             )
             unit_description = ""
@@ -2006,7 +2015,9 @@ class TenantRequestsService:
         create_result = await contacts_service.create_contact(
             CreateContactRequest(
                 portal_access=bool(row.get("portal_access")),
+                prefix=row.get("tenant_prefix"),
                 first_name=row.get("tenant_first_name"),
+                middle_name=row.get("tenant_middle_name"),
                 last_name=row.get("tenant_last_name"),
                 phones=phones,
                 emails=emails or [],

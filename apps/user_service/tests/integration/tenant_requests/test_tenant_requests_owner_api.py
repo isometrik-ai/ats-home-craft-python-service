@@ -27,7 +27,9 @@ UNIT_ID = "880e8400-e29b-41d4-a716-446655440003"
 
 _CREATE_BODY = {
     "unit_id": UNIT_ID,
+    "prefix": "Mr.",
     "first_name": "Tenant",
+    "middle_name": "Kumar",
     "last_name": "User",
     "phones": [{"phone_number": "9876543210", "phone_isd_code": "+91", "is_primary": True}],
     "emails": [{"email": "tenant@example.com", "is_primary": True}],
@@ -162,7 +164,9 @@ async def test_create_tenant_request(monkeypatch, client):
         del _self
         assert owner_contact_id == CONTACT_ID
         assert body.unit_id == UNIT_ID
+        assert body.prefix == "Mr."
         assert body.first_name == "Tenant"
+        assert body.middle_name == "Kumar"
         return _fake_detail()
 
     monkeypatch.setattr(f"{_SERVICE}.create_request", fake_create_request)
