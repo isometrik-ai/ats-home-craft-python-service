@@ -6,7 +6,7 @@ from datetime import date, time
 from decimal import Decimal
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from apps.user_service.app.schemas.enums import (
     DailyHelpAvailabilityPeriod,
@@ -69,6 +69,22 @@ class SubmitResidentDailyHelpRequest(CreateDailyHelpRequest):
         None,
         description="Optional resident unit. When set, links the submission to that flat.",
     )
+    last_name: str | None = Field(
+        None,
+        max_length=100,
+        description="Optional. A blank value is treated as omitted.",
+    )
+
+    @field_validator("last_name", mode="before")
+    @classmethod
+    def omit_blank_last_name(cls, value: Any) -> Any:
+        """Treat a missing or whitespace-only last name as omitted."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            return text or None
+        return value
 
 
 class SetDailyHelpOpenToWorkRequest(BaseModel):
@@ -547,7 +563,7 @@ class DailyHelpDetailResponse(BaseModel):
     initials: str | None = None
     first_name: str
     middle_name: str | None = None
-    last_name: str
+    last_name: str | None = None
     display_name: str
     phone_isd_code: str
     phone_number: str
@@ -664,7 +680,7 @@ class ResidentDailyHelpSubmissionDetailResponse(BaseModel):
     initials: str | None = None
     first_name: str
     middle_name: str | None = None
-    last_name: str
+    last_name: str | None = None
     display_name: str
     phone_isd_code: str
     phone_number: str
@@ -698,7 +714,7 @@ class ResidentDailyHelpDetailResponse(BaseModel):
     initials: str | None = None
     first_name: str
     middle_name: str | None = None
-    last_name: str
+    last_name: str | None = None
     display_name: str
     phone_isd_code: str
     phone_number: str
