@@ -225,7 +225,7 @@ class DailyHelpService:
         initials: str | None,
         first_name: str,
         middle_name: str | None,
-        last_name: str,
+        last_name: str | None,
     ) -> str:
         """Build display name from name parts."""
         parts = [
@@ -234,6 +234,14 @@ class DailyHelpService:
             if part and str(part).strip()
         ]
         return " ".join(parts)
+
+    @staticmethod
+    def _clean_optional_name(value: Any) -> str | None:
+        """Return a trimmed name, or None when the value is blank."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     @staticmethod
     def _format_phone(*, isd_code: str | None, phone_number: str | None) -> str | None:
@@ -603,17 +611,18 @@ class DailyHelpService:
         body: CreateDailyHelpRequest,
     ) -> tuple[str, dict[str, Any]]:
         """Build display name and insert kwargs shared by create/submit/resubmit."""
+        last_name = self._clean_optional_name(body.last_name)
         display_name = self._build_display_name(
             initials=body.initials,
             first_name=body.first_name,
             middle_name=body.middle_name,
-            last_name=body.last_name,
+            last_name=last_name,
         )
         fields = {
             "initials": body.initials,
             "first_name": body.first_name,
             "middle_name": body.middle_name,
-            "last_name": body.last_name,
+            "last_name": last_name,
             "display_name": display_name,
             "phone_isd_code": body.phone_isd_code,
             "phone_number": body.phone_number,
@@ -1039,7 +1048,7 @@ class DailyHelpService:
             initials=row.get("initials"),
             first_name=str(row["first_name"]),
             middle_name=row.get("middle_name"),
-            last_name=str(row["last_name"]),
+            last_name=self._clean_optional_name(row.get("last_name")),
             display_name=str(row["display_name"]),
             phone_isd_code=str(row["phone_isd_code"]),
             phone_number=phone_number,
@@ -1188,7 +1197,7 @@ class DailyHelpService:
             initials=row.get("initials"),
             first_name=str(row["first_name"]),
             middle_name=row.get("middle_name"),
-            last_name=str(row["last_name"]),
+            last_name=self._clean_optional_name(row.get("last_name")),
             display_name=str(row["display_name"]),
             phone_isd_code=str(row["phone_isd_code"]),
             phone_number=phone_number,
