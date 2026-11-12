@@ -229,6 +229,40 @@ class TestContactOnboardingSchemaValidators:
                 relationship=ContactUnitRelationship.CHILD,
             )
 
+    def test_household_member_prefix_and_middle_name_are_optional(self) -> None:
+        request = CreateHouseholdMemberRequest(
+            unit_id="unit-1",
+            first_name="Nitin",
+            last_name="Jangir",
+            phones=[_phone(primary=True)],
+            relationship=ContactUnitRelationship.SPOUSE,
+        )
+        assert request.prefix is None
+        assert request.middle_name is None
+
+        named = CreateHouseholdMemberRequest(
+            unit_id="unit-1",
+            prefix="  Mr.  ",
+            first_name="Nitin",
+            middle_name=" K ",
+            last_name="Jangir",
+            phones=[_phone(primary=True)],
+            relationship=ContactUnitRelationship.SPOUSE,
+        )
+        assert named.prefix == "Mr."
+        assert named.middle_name == "K"
+
+        blank = CreateHouseholdMemberRequest(
+            unit_id="unit-1",
+            prefix="   ",
+            first_name="Nitin",
+            middle_name="",
+            phones=[_phone(primary=True)],
+            relationship=ContactUnitRelationship.CHILD,
+        )
+        assert blank.prefix is None
+        assert blank.middle_name is None
+
     def test_update_household_member_empty_patch(self) -> None:
         with pytest.raises(ValidationException):
             UpdateHouseholdMemberRequest()
