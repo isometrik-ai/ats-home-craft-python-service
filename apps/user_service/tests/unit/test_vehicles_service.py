@@ -1123,6 +1123,124 @@ async def test_review_vehicle_rejects_pending_only():
         await svc.review_vehicle(project_id="p1", vehicle_id="v1", body=body)
 
 
+def _approved_vehicle_row(**overrides: Any) -> dict[str, Any]:
+    """Approved vehicle row used by parking-slot assignment tests."""
+    row = {
+        "id": "v1",
+        "organization_id": "org-1",
+        "project_id": "p1",
+        "contact_id": "c1",
+        "unit_id": "u1",
+        "vehicle_type": "four_wheeler",
+        "registration_number": "MH12AB1234",
+        "photo_paths": [],
+        "status": VehicleStatus.APPROVED.value,
+        "parking_slot_id": None,
+        "approved_by_user_id": "user-1",
+        "status_updated_at": "2026-07-16T10:00:00Z",
+        "created_at": "2026-07-16T09:00:00Z",
+        "updated_at": "2026-07-16T10:00:00Z",
+        "sort_order": 0,
+    }
+    row.update(overrides)
+    return row
+
+
+@pytest.mark.asyncio
+async def test_assign_parking_slot_links_approved_vehicle():
+    """Assignment stores the slot and leaves approval status unchanged."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        AssignVehicleParkingSlotRequest,
+    )
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = _approved_vehicle_row()
+    svc.parking_slots_repo.get_slot.return_value = {"id": "slot-1", "status": "assigned"}
+    svc.parking_allotment_repo.get_active_allotment_by_slot.return_value = {
+        "id": "allot-1",
+        "unit_id": "u1",
+        "parking_slot_id": "slot-1",
+    }
+    svc.repo.update_by_project.return_value = _approved_vehicle_row(parking_slot_id="slot-1")
+    svc.repo.get_detail_by_project.return_value = svc.repo.update_by_project.return_value
+
+    result = await svc.assign_parking_slot(
+        project_id="p1",
+        vehicle_id="v1",
+        body=AssignVehicleParkingSlotRequest(parking_slot_id=" slot-1 "),
+    )
+
+    update_kwargs = svc.repo.update_by_project.await_args.kwargs
+    assert update_kwargs["update_data"] == {"parking_slot_id": "slot-1"}
+    assert result["parking_slot_id"] == "slot-1"
+    assert result["status"] == VehicleStatus.APPROVED.value
+    assert svc._push_dispatcher.contact_calls == []
+
+
+@pytest.mark.asyncio
+async def test_assign_parking_slot_rejects_when_not_approved():
+    """Pending and rejected vehicles cannot receive a slot through this path."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        AssignVehicleParkingSlotRequest,
+    )
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = _approved_vehicle_row(status=VehicleStatus.PENDING.value)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.assign_parking_slot(
+            project_id="p1",
+            vehicle_id="v1",
+            body=AssignVehicleParkingSlotRequest(parking_slot_id="slot-1"),
+        )
+
+    assert exc_info.value.message_key == "contact_onboarding.errors.vehicle_not_approved"
+    svc.repo.update_by_project.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_assign_parking_slot_rejects_when_already_assigned():
+    """A vehicle that already has a slot is not reassigned."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        AssignVehicleParkingSlotRequest,
+    )
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = _approved_vehicle_row(parking_slot_id="slot-existing")
+
+    with pytest.raises(ValidationException) as exc_info:
+        await svc.assign_parking_slot(
+            project_id="p1",
+            vehicle_id="v1",
+            body=AssignVehicleParkingSlotRequest(parking_slot_id="slot-1"),
+        )
+
+    assert (
+        exc_info.value.message_key
+        == "contact_onboarding.errors.vehicle_parking_slot_already_assigned"
+    )
+    svc.parking_slots_repo.get_slot.assert_not_awaited()
+    svc.repo.update_by_project.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_assign_parking_slot_not_found():
+    """Missing vehicle raises not found."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        AssignVehicleParkingSlotRequest,
+    )
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = None
+
+    with pytest.raises(NotFoundException):
+        await svc.assign_parking_slot(
+            project_id="p1",
+            vehicle_id="v1",
+            body=AssignVehicleParkingSlotRequest(parking_slot_id="slot-1"),
+        )
+
+
 @pytest.mark.asyncio
 async def test_list_project_vehicles_passes_search():
     """Admin list passes search filter to repository."""

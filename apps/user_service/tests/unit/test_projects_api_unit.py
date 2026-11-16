@@ -15,6 +15,7 @@ from apps.user_service.app.api.projects import (
     add_project_media,
     add_unit_document,
     assign_project_member,
+    assign_vehicle_parking_slot,
     bulk_create_units,
     complete_project_setup,
     complete_setup_step,
@@ -96,6 +97,7 @@ from apps.user_service.app.api.projects import (
     upsert_floor_inventory,
 )
 from apps.user_service.app.schemas.contact_onboarding import (
+    AssignVehicleParkingSlotRequest,
     DeleteProjectVehicleRequest,
     ReviewVehicleRequest,
     VehicleRequestsExportQuery,
@@ -1581,6 +1583,9 @@ async def test_vehicle_request_handlers(mock_vehicles_cls, mock_access):
     vehicles.list_project_vehicles = AsyncMock(return_value=[{"id": VEHICLE_ID}])
     vehicles.export_project_vehicles_csv = AsyncMock(return_value="id\n1\n")
     vehicles.review_vehicle = AsyncMock(return_value={"id": VEHICLE_ID, "status": "approved"})
+    vehicles.assign_parking_slot = AsyncMock(
+        return_value={"id": VEHICLE_ID, "status": "approved", "parking_slot_id": "slot-1"}
+    )
     vehicles.admin_delete_project_vehicle = AsyncMock(return_value={"id": VEHICLE_ID})
 
     db = MagicMock()
@@ -1632,6 +1637,17 @@ async def test_vehicle_request_handlers(mock_vehicles_cls, mock_access):
             db_connection=db,
             current_user=user,
             body=review_body,
+        )
+    ).status_code == 200
+
+    assert (
+        await assign_vehicle_parking_slot(
+            request=req,
+            project_id=PROJECT_ID,
+            vehicle_id=VEHICLE_ID,
+            db_connection=db,
+            current_user=user,
+            body=AssignVehicleParkingSlotRequest(parking_slot_id="slot-1"),
         )
     ).status_code == 200
 

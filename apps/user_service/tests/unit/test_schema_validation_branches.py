@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.auth import (
 )
 from apps.user_service.app.schemas.common import NoteItem
 from apps.user_service.app.schemas.contact_onboarding import (
+    AssignVehicleParkingSlotRequest,
     CompleteProfileRequest,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
@@ -219,6 +220,14 @@ class TestContactOnboardingSchemaValidators:
                 status=VehicleStatus.PENDING,
                 parking_slot_id="slot-1",
             )
+
+    def test_assign_vehicle_parking_slot_strips_id(self) -> None:
+        request = AssignVehicleParkingSlotRequest(parking_slot_id="  slot-1  ")
+        assert request.parking_slot_id == "slot-1"
+
+    def test_assign_vehicle_parking_slot_rejects_blank_id(self) -> None:
+        with pytest.raises(ValidationException):
+            AssignVehicleParkingSlotRequest(parking_slot_id="   ")
 
     def test_household_member_requires_primary_phone(self) -> None:
         with pytest.raises(ValidationException):
