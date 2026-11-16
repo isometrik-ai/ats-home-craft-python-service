@@ -250,6 +250,27 @@ async def test_update_by_project_with_parking_slot():
 
 
 @pytest.mark.asyncio
+async def test_update_by_project_if_slot_is_null_requires_empty_slot():
+    """Conditional update claims a slot only while parking_slot_id is null."""
+    slot_id = "aa0e8400-e29b-41d4-a716-446655440005"
+    conn = _mock_conn(row=_vehicle_row(parking_slot_id=slot_id))
+    repo = VehiclesRepository(db_connection=conn)
+
+    updated = await repo.update_by_project_if_slot_is_null(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        vehicle_id=VEHICLE_ID,
+        parking_slot_id=slot_id,
+    )
+
+    query, args = _sql_args(conn.fetchrow)
+    assert "parking_slot_id = $1::uuid" in query
+    assert "AND parking_slot_id IS NULL" in query
+    assert args[0] == slot_id
+    assert updated["parking_slot_id"] == slot_id
+
+
+@pytest.mark.asyncio
 async def test_update_by_project_enum_and_photo_casts():
     """update_by_project applies enum casts and text[] for photo_paths."""
     conn = _mock_conn(row=_vehicle_row())

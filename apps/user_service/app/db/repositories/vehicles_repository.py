@@ -585,6 +585,39 @@ class VehiclesRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def update_by_project_if_slot_is_null(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        vehicle_id: str,
+        parking_slot_id: str,
+    ) -> dict[str, Any] | None:
+        """Set parking_slot_id only while it is still null.
+
+        A missing row means another request already linked a slot. The caller
+        raises so the surrounding transaction rolls back that request's allotment.
+        """
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE vehicles
+            SET parking_slot_id = $1::uuid,
+                updated_at = now()
+            WHERE organization_id = $2::uuid
+              AND project_id = $3::uuid
+              AND id = $4::uuid
+              AND deleted_at IS NULL
+              AND parking_slot_id IS NULL
+            RETURNING
+              {self._VEHICLE_RETURNING_COLUMNS}
+            """,
+            parking_slot_id,
+            organization_id,
+            project_id,
+            vehicle_id,
+        )
+        return dict(row) if row else None
+
     async def delete(
         self,
         *,
