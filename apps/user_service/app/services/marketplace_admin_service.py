@@ -19,10 +19,10 @@ from apps.user_service.app.services.marketplace_catalog_service import (
 )
 from apps.user_service.app.services.marketplace_service import (
     _as_utc,
-    _float_or_none,
     _money,
     _now,
     _year,
+    collection_coordinates,
     cover_path,
     flat_label,
     listing_media,
@@ -426,6 +426,7 @@ class MarketplaceAdminService:
         age_years = None
         if year is not None:
             age_years = max(0, _now().year - int(year))
+        collection_latitude, collection_longitude = collection_coordinates(row)
         card.update(
             {
                 "description": row.get("description"),
@@ -440,8 +441,8 @@ class MarketplaceAdminService:
                 "show_flat_number": row.get("show_flat_number"),
                 "seller_role": row.get("seller_role"),
                 "member_since_year": _year(row.get("seller_role_started_at")),
-                "collection_latitude": _float_or_none(row.get("tower_latitude")),
-                "collection_longitude": _float_or_none(row.get("tower_longitude")),
+                "collection_latitude": collection_latitude,
+                "collection_longitude": collection_longitude,
                 "media": listing_media(row),
                 "removal_note": row.get("removal_note"),
                 "listings_from_unit_total": stats["listings_from_unit_total"],
