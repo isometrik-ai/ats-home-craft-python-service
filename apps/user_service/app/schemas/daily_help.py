@@ -12,11 +12,21 @@ from apps.user_service.app.schemas.enums import (
     DailyHelpAvailabilityPeriod,
     DailyHelpCategoryStatus,
     DailyHelpDocumentType,
+    DailyHelpExperienceLabel,
+    DailyHelpRatingAspect,
+    DailyHelpRatingMediaType,
     DailyHelpRatingTrait,
     DailyHelpReviewSort,
     DailyHelpStatus,
 )
 from libs.shared_utils.status_codes import CustomStatusCode
+
+_RATING_PHOTO_MIME_TYPES = frozenset(
+    {"image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"}
+)
+_RATING_VIDEO_MIME_TYPES = frozenset({"video/mp4", "video/quicktime"})
+MAX_DAILY_HELP_RATING_ASPECTS = 4
+MAX_DAILY_HELP_RATING_MEDIA = 5
 
 
 class DailyHelpDocumentInput(BaseModel):
@@ -192,24 +202,117 @@ class ReplaceDailyHelpAvailabilityRequest(BaseModel):
     slots: list[DailyHelpAvailabilitySlotInput] = Field(default_factory=list, max_length=20)
 
 
-class CreateDailyHelpRatingRequest(BaseModel):
-    """Resident rates a daily help profile after a visit."""
+class DailyHelpRatingAspectScore(BaseModel):
+    """One quality star row, such as punctuality or work quality."""
 
     model_config = ConfigDict(extra="forbid")
 
+    aspect: DailyHelpRatingAspect
     stars: Decimal = Field(..., ge=Decimal("0.5"), le=Decimal("5.0"))
-    comment: str | None = Field(None, max_length=2000)
-    traits: list[DailyHelpRatingTrait] = Field(default_factory=list, max_length=10)
 
 
-class UpdateDailyHelpRatingRequest(BaseModel):
-    """Resident updates their existing rating for a daily help profile."""
+class DailyHelpRatingMediaInput(BaseModel):
+    """Photo or video already uploaded; the rating stores the file metadata."""
 
     model_config = ConfigDict(extra="forbid")
 
-    stars: Decimal = Field(..., ge=Decimal("0.5"), le=Decimal("5.0"))
-    comment: str | None = Field(None, max_length=2000)
+    media_type: DailyHelpRatingMediaType
+    file_path: str = Field(..., min_length=1, max_length=2000)
+    file_name: str | None = Field(None, max_length=255)
+    mime_type: str | None = Field(None, max_length=100)
+    file_size_bytes: int | None = Field(None, ge=1)
+    sort_order: int = Field(0, ge=0)
+
+    @field_validator("file_path")
+    @classmethod
+    def strip_file_path(cls, value: str) -> str:
+        """Reject a blank storage path."""
+        text = value.strip()
+        if not text:
+            raise ValueError("file_path is required")
+        return text
+
+    @field_validator("file_name")
+    @classmethod
+    def strip_file_name(cls, value: str | None) -> str | None:
+        """Store a missing file name as null."""
+        if value is None:
+            return None
+        text = value.strip()
+        return text or None
+
+    @field_validator("mime_type", mode="before")
+    @classmethod
+    def normalize_mime_type(cls, value: Any) -> Any:
+        """Compare media types against a lowercase mime type."""
+        if value is None or not isinstance(value, str):
+            return value
+        text = value.strip().lower()
+        return text or None
+
+    @model_validator(mode="after")
+    def mime_matches_media_type(self) -> DailyHelpRatingMediaInput:
+        """Reject a mime type that does not match photo or video."""
+        if not self.mime_type:
+            return self
+        allowed = (
+            _RATING_PHOTO_MIME_TYPES
+            if self.media_type == DailyHelpRatingMediaType.PHOTO
+            else _RATING_VIDEO_MIME_TYPES
+        )
+        if self.mime_type not in allowed:
+            raise ValueError("mime_type does not match media_type")
+        return self
+
+
+class DailyHelpRatingWriteRequest(BaseModel):
+    """Share-your-experience form: overall stars, quality scores, media, and a written review."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stars: Decimal = Field(
+        ...,
+        ge=Decimal("0.5"),
+        le=Decimal("5.0"),
+        description="Overall experience. Whole stars map to Terrible, Bad, Okay, Good, and Great.",
+    )
+    comment: str | None = Field(
+        None,
+        max_length=2000,
+        description="Tell us more about the helper.",
+    )
+    aspects: list[DailyHelpRatingAspectScore] = Field(
+        default_factory=list,
+        max_length=MAX_DAILY_HELP_RATING_ASPECTS,
+        description=(
+            "Star score for each quality: punctuality, work quality, behavior, communication."
+        ),
+    )
+    media: list[DailyHelpRatingMediaInput] = Field(
+        default_factory=list,
+        max_length=MAX_DAILY_HELP_RATING_MEDIA,
+        description="Photos or videos attached to the review.",
+    )
     traits: list[DailyHelpRatingTrait] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def aspects_are_unique(self) -> DailyHelpRatingWriteRequest:
+        """Allow each quality at most once."""
+        seen: set[str] = set()
+        for item in self.aspects:
+            key = item.aspect.value
+            if key in seen:
+                raise ValueError(f"duplicate aspect: {key}")
+            seen.add(key)
+        return self
+
+
+class CreateDailyHelpRatingRequest(DailyHelpRatingWriteRequest):
+    """Resident shares their experience of a daily help profile."""
+
+
+class UpdateDailyHelpRatingRequest(DailyHelpRatingWriteRequest):
+    """Resident replaces their existing experience rating."""
 
 
 class DailyHelpListQuery(BaseModel):
@@ -363,8 +466,36 @@ class DailyHelpRatingSummaryResponse(BaseModel):
     review_count: int = 0
     average_stars: float = 0.0
     star_distribution: dict[str, int] = Field(default_factory=dict)
-    category_averages: dict[str, float] = Field(default_factory=dict)
+    category_averages: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Average quality stars. Ratings without quality scores fall back to trait tags."
+        ),
+    )
     trait_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class DailyHelpRatingAspectResponse(BaseModel):
+    """Stored star score for one quality."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    aspect: str
+    stars: float
+
+
+class DailyHelpRatingMediaResponse(BaseModel):
+    """Photo or video stored on a rating."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    media_type: str
+    file_path: str
+    file_name: str | None = None
+    mime_type: str | None = None
+    file_size_bytes: int | None = None
+    sort_order: int = 0
 
 
 class DailyHelpReviewListQuery(BaseModel):
@@ -390,8 +521,11 @@ class DailyHelpRatingResponse(BaseModel):
 
     id: str
     stars: float
+    experience_label: DailyHelpExperienceLabel
     comment: str | None = None
     traits: list[str] = Field(default_factory=list)
+    aspects: list[DailyHelpRatingAspectResponse] = Field(default_factory=list)
+    media: list[DailyHelpRatingMediaResponse] = Field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -403,8 +537,11 @@ class DailyHelpReviewResponse(BaseModel):
 
     id: str
     stars: float
+    experience_label: DailyHelpExperienceLabel
     comment: str | None = None
     traits: list[str] = Field(default_factory=list)
+    aspects: list[DailyHelpRatingAspectResponse] = Field(default_factory=list)
+    media: list[DailyHelpRatingMediaResponse] = Field(default_factory=list)
     rated_by_contact_id: str | None = None
     rated_by_name: str | None = None
     unit_id: str

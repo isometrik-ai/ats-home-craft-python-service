@@ -19,10 +19,12 @@ UNIT = "44444444-4444-4444-4444-444444444444"
 
 
 class _FakeConn:
-    def __init__(self, *, rows=None, row=None, val=0):
+    def __init__(self, *, rows=None, row=None, val=0, aspect_rows=None, media_rows=None):
         self.rows = rows or []
         self.row = row
         self.val = val
+        self.aspect_rows = aspect_rows or []
+        self.media_rows = media_rows or []
         self.fetch_calls: list[tuple] = []
         self.fetchrow_calls: list[tuple] = []
         self.fetchval_calls: list[tuple] = []
@@ -31,6 +33,10 @@ class _FakeConn:
 
     async def fetch(self, query, *args):
         self.fetch_calls.append((query.strip(), args))
+        if "daily_help_rating_aspects" in query:
+            return self.aspect_rows
+        if "daily_help_rating_media" in query:
+            return self.media_rows
         return self.rows
 
     async def fetchrow(self, query, *args):
@@ -377,6 +383,7 @@ async def test_ratings():
     assert summary["star_distribution"]["5"] == 2
     assert summary["category_averages"]["punctuality"] == 4.5
     assert summary["trait_counts"]["punctual"] == 1
+    assert any("daily_help_rating_aspects" in query for query, _args in conn.fetchrow_calls)
 
     conn.row = {
         "rating_count": 1,
@@ -408,6 +415,74 @@ async def test_ratings():
     )
     assert empty_summary["rating_count"] == 0
     assert empty_summary["review_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_insert_rating_stores_aspects_and_media():
+    conn = _FakeConn(
+        row={
+            "id": "rating-1",
+            "stars": Decimal("5.0"),
+            "comment": "Loved it",
+            "created_at": "now",
+        },
+        rows=[{"trait": "very_punctual"}],
+        aspect_rows=[
+            {
+                "rating_id": "rating-1",
+                "aspect": "punctuality",
+                "stars": Decimal("5.0"),
+            }
+        ],
+        media_rows=[
+            {
+                "rating_id": "rating-1",
+                "id": "media-1",
+                "media_type": "photo",
+                "file_path": "daily-help/ratings/photo-1.jpg",
+                "file_name": "photo-1.jpg",
+                "mime_type": "image/jpeg",
+                "file_size_bytes": 1200,
+                "sort_order": 0,
+            }
+        ],
+    )
+    repo = DailyHelpRepository(db_connection=conn)
+
+    rating = await repo.insert_rating(
+        organization_id=ORG,
+        project_id=PROJECT,
+        profile_id=PROFILE,
+        unit_id=UNIT,
+        rated_by_contact_id="contact-1",
+        stars=Decimal("5.0"),
+        comment="Loved it",
+        traits=["very_punctual"],
+        aspects=[{"aspect": "punctuality", "stars": Decimal("5.0")}],
+        media=[
+            {
+                "media_type": "photo",
+                "file_path": "daily-help/ratings/photo-1.jpg",
+                "file_name": "photo-1.jpg",
+                "mime_type": "image/jpeg",
+                "file_size_bytes": 1200,
+                "sort_order": 0,
+            }
+        ],
+    )
+
+    assert rating["aspects"][0]["aspect"] == "punctuality"
+    assert rating["media"][0]["id"] == "media-1"
+    assert rating["traits"] == ["very_punctual"]
+    aspect_inserts = [
+        call for call in conn.executemany_calls if "daily_help_rating_aspects" in call[0]
+    ]
+    media_inserts = [
+        call for call in conn.executemany_calls if "daily_help_rating_media" in call[0]
+    ]
+    assert aspect_inserts[0][1] == [(ORG, "rating-1", "punctuality", Decimal("5.0"))]
+    assert media_inserts[0][1][0][2] == "photo"
+    assert any("DELETE FROM daily_help_rating_media" in call[0] for call in conn.execute_calls)
 
 
 @pytest.mark.asyncio

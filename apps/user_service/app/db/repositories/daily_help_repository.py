@@ -925,51 +925,50 @@ class DailyHelpRepository(BaseRepository):
         stars: Decimal,
         comment: str | None,
         traits: list[str] | None = None,
+        aspects: list[dict[str, Any]] | None = None,
+        media: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Insert a rating and optional trait tags."""
-        row = await self.db_connection.fetchrow(
-            """
-            INSERT INTO daily_help_ratings (
+        """Insert a rating with trait tags, quality scores, and photo or video rows."""
+        async with self.db_connection.transaction():
+            row = await self.db_connection.fetchrow(
+                """
+                INSERT INTO daily_help_ratings (
+                    organization_id,
+                    project_id,
+                    daily_help_profile_id,
+                    unit_id,
+                    rated_by_contact_id,
+                    stars,
+                    comment
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7
+                )
+                RETURNING id::text AS id, stars, comment, created_at
+                """,
                 organization_id,
                 project_id,
-                daily_help_profile_id,
+                profile_id,
                 unit_id,
                 rated_by_contact_id,
                 stars,
-                comment
+                comment,
             )
-            VALUES (
-                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7
+            rating = dict(row)
+            await self._replace_rating_children(
+                organization_id=organization_id,
+                rating_id=str(rating["id"]),
+                traits=traits or [],
+                aspects=aspects or [],
+                media=media or [],
             )
-            RETURNING id::text AS id, stars, comment, created_at
-            """,
-            organization_id,
-            project_id,
-            profile_id,
-            unit_id,
-            rated_by_contact_id,
-            stars,
-            comment,
-        )
-        rating = dict(row)
-        if traits:
-            await self.db_connection.executemany(
-                """
-                INSERT INTO daily_help_rating_traits (
-                    organization_id,
-                    daily_help_rating_id,
-                    trait
+            rating.update(
+                await self._load_rating_children(
+                    organization_id=organization_id,
+                    rating_id=str(rating["id"]),
                 )
-                VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
-                ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
-                """,
-                [(organization_id, rating["id"], trait) for trait in traits],
             )
-        rating["traits"] = await self.list_rating_traits(
-            organization_id=organization_id,
-            rating_id=str(rating["id"]),
-        )
-        return rating
+            return rating
 
     async def get_rating_by_rater(
         self,
@@ -1003,9 +1002,11 @@ class DailyHelpRepository(BaseRepository):
         if not row:
             return None
         rating = dict(row)
-        rating["traits"] = await self.list_rating_traits(
-            organization_id=organization_id,
-            rating_id=str(rating["id"]),
+        rating.update(
+            await self._load_rating_children(
+                organization_id=organization_id,
+                rating_id=str(rating["id"]),
+            )
         )
         return rating
 
@@ -1019,8 +1020,10 @@ class DailyHelpRepository(BaseRepository):
         stars: Decimal,
         comment: str | None,
         traits: list[str] | None = None,
+        aspects: list[dict[str, Any]] | None = None,
+        media: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
-        """Update stars, comment, and trait tags for an existing rating."""
+        """Replace stars, comment, traits, quality scores, and media on an existing rating."""
         async with self.db_connection.transaction():
             row = await self.db_connection.fetchrow(
                 """
@@ -1044,31 +1047,18 @@ class DailyHelpRepository(BaseRepository):
             if not row:
                 return None
             rating = dict(row)
-            await self.db_connection.execute(
-                """
-                DELETE FROM daily_help_rating_traits
-                WHERE organization_id = $1::uuid
-                  AND daily_help_rating_id = $2::uuid
-                """,
-                organization_id,
-                rating["id"],
-            )
-            if traits:
-                await self.db_connection.executemany(
-                    """
-                    INSERT INTO daily_help_rating_traits (
-                        organization_id,
-                        daily_help_rating_id,
-                        trait
-                    )
-                    VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
-                    ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
-                    """,
-                    [(organization_id, rating["id"], trait) for trait in traits],
-                )
-            rating["traits"] = await self.list_rating_traits(
+            await self._replace_rating_children(
                 organization_id=organization_id,
                 rating_id=str(rating["id"]),
+                traits=traits or [],
+                aspects=aspects or [],
+                media=media or [],
+            )
+            rating.update(
+                await self._load_rating_children(
+                    organization_id=organization_id,
+                    rating_id=str(rating["id"]),
+                )
             )
             return rating
 
@@ -1119,6 +1109,214 @@ class DailyHelpRepository(BaseRepository):
         for row in rows:
             traits_by_rating[str(row["rating_id"])].append(str(row["trait"]))
         return traits_by_rating
+
+    async def list_rating_aspects_batch(
+        self,
+        *,
+        organization_id: str,
+        rating_ids: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """List quality star scores for many ratings, in form order."""
+        unique_ids = [rating_id for rating_id in dict.fromkeys(rating_ids) if rating_id]
+        if not unique_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              daily_help_rating_id::text AS rating_id,
+              aspect::text AS aspect,
+              stars
+            FROM daily_help_rating_aspects
+            WHERE organization_id = $1::uuid
+              AND daily_help_rating_id = ANY($2::uuid[])
+            ORDER BY daily_help_rating_id,
+              CASE aspect::text
+                WHEN 'punctuality' THEN 1
+                WHEN 'work_quality' THEN 2
+                WHEN 'behavior' THEN 3
+                WHEN 'communication' THEN 4
+                ELSE 5
+              END
+            """,
+            organization_id,
+            unique_ids,
+        )
+        aspects_by_rating: dict[str, list[dict[str, Any]]] = {
+            rating_id: [] for rating_id in unique_ids
+        }
+        for row in rows:
+            aspects_by_rating[str(row["rating_id"])].append(
+                {"aspect": str(row["aspect"]), "stars": row["stars"]}
+            )
+        return aspects_by_rating
+
+    async def list_rating_media_batch(
+        self,
+        *,
+        organization_id: str,
+        rating_ids: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """List photos and videos for many ratings."""
+        unique_ids = [rating_id for rating_id in dict.fromkeys(rating_ids) if rating_id]
+        if not unique_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+              id::text AS id,
+              daily_help_rating_id::text AS rating_id,
+              media_type::text AS media_type,
+              file_path,
+              file_name,
+              mime_type,
+              file_size_bytes,
+              sort_order
+            FROM daily_help_rating_media
+            WHERE organization_id = $1::uuid
+              AND daily_help_rating_id = ANY($2::uuid[])
+            ORDER BY daily_help_rating_id, sort_order, created_at, id
+            """,
+            organization_id,
+            unique_ids,
+        )
+        media_by_rating: dict[str, list[dict[str, Any]]] = {
+            rating_id: [] for rating_id in unique_ids
+        }
+        for row in rows:
+            media_by_rating[str(row["rating_id"])].append(
+                {
+                    "id": str(row["id"]),
+                    "media_type": str(row["media_type"]),
+                    "file_path": str(row["file_path"]),
+                    "file_name": row.get("file_name"),
+                    "mime_type": row.get("mime_type"),
+                    "file_size_bytes": row.get("file_size_bytes"),
+                    "sort_order": int(row.get("sort_order") or 0),
+                }
+            )
+        return media_by_rating
+
+    async def _replace_rating_children(
+        self,
+        *,
+        organization_id: str,
+        rating_id: str,
+        traits: list[str],
+        aspects: list[dict[str, Any]],
+        media: list[dict[str, Any]],
+    ) -> None:
+        """Replace trait tags, quality scores, and media for one rating."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM daily_help_rating_traits
+            WHERE organization_id = $1::uuid
+              AND daily_help_rating_id = $2::uuid
+            """,
+            organization_id,
+            rating_id,
+        )
+        if traits:
+            await self.db_connection.executemany(
+                """
+                INSERT INTO daily_help_rating_traits (
+                    organization_id,
+                    daily_help_rating_id,
+                    trait
+                )
+                VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
+                ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
+                """,
+                [(organization_id, rating_id, trait) for trait in traits],
+            )
+
+        await self.db_connection.execute(
+            """
+            DELETE FROM daily_help_rating_aspects
+            WHERE organization_id = $1::uuid
+              AND daily_help_rating_id = $2::uuid
+            """,
+            organization_id,
+            rating_id,
+        )
+        if aspects:
+            await self.db_connection.executemany(
+                """
+                INSERT INTO daily_help_rating_aspects (
+                    organization_id,
+                    daily_help_rating_id,
+                    aspect,
+                    stars
+                )
+                VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_aspect, $4)
+                """,
+                [(organization_id, rating_id, item["aspect"], item["stars"]) for item in aspects],
+            )
+
+        await self.db_connection.execute(
+            """
+            DELETE FROM daily_help_rating_media
+            WHERE organization_id = $1::uuid
+              AND daily_help_rating_id = $2::uuid
+            """,
+            organization_id,
+            rating_id,
+        )
+        if media:
+            await self.db_connection.executemany(
+                """
+                INSERT INTO daily_help_rating_media (
+                    organization_id,
+                    daily_help_rating_id,
+                    media_type,
+                    file_path,
+                    file_name,
+                    mime_type,
+                    file_size_bytes,
+                    sort_order
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3::daily_help_rating_media_type, $4, $5, $6, $7, $8
+                )
+                """,
+                [
+                    (
+                        organization_id,
+                        rating_id,
+                        item["media_type"],
+                        item["file_path"],
+                        item.get("file_name"),
+                        item.get("mime_type"),
+                        item.get("file_size_bytes"),
+                        item.get("sort_order") or 0,
+                    )
+                    for item in media
+                ],
+            )
+
+    async def _load_rating_children(
+        self,
+        *,
+        organization_id: str,
+        rating_id: str,
+    ) -> dict[str, Any]:
+        """Load traits, quality scores, and media for one rating."""
+        traits = await self.list_rating_traits(
+            organization_id=organization_id,
+            rating_id=rating_id,
+        )
+        aspects = await self.list_rating_aspects_batch(
+            organization_id=organization_id,
+            rating_ids=[rating_id],
+        )
+        media = await self.list_rating_media_batch(
+            organization_id=organization_id,
+            rating_ids=[rating_id],
+        )
+        return {
+            "traits": traits,
+            "aspects": aspects.get(rating_id, []),
+            "media": media.get(rating_id, []),
+        }
 
     _WRITTEN_REVIEW_FILTER = """
               AND r.comment IS NOT NULL
@@ -1178,15 +1376,27 @@ class DailyHelpRepository(BaseRepository):
         organization_id: str,
         ratings: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Attach trait tags to rating/review rows."""
+        """Attach trait tags, quality scores, and media to rating/review rows."""
         if not ratings:
             return []
+        rating_ids = [str(rating["id"]) for rating in ratings]
         traits_by_rating = await self.list_rating_traits_batch(
             organization_id=organization_id,
-            rating_ids=[str(rating["id"]) for rating in ratings],
+            rating_ids=rating_ids,
+        )
+        aspects_by_rating = await self.list_rating_aspects_batch(
+            organization_id=organization_id,
+            rating_ids=rating_ids,
+        )
+        media_by_rating = await self.list_rating_media_batch(
+            organization_id=organization_id,
+            rating_ids=rating_ids,
         )
         for rating in ratings:
-            rating["traits"] = traits_by_rating.get(str(rating["id"]), [])
+            rating_id = str(rating["id"])
+            rating["traits"] = traits_by_rating.get(rating_id, [])
+            rating["aspects"] = aspects_by_rating.get(rating_id, [])
+            rating["media"] = media_by_rating.get(rating_id, [])
         return ratings
 
     async def list_ratings_for_profile(
@@ -1330,6 +1540,18 @@ class DailyHelpRepository(BaseRepository):
                 AVG(stars)::numeric(3, 2) AS average_stars
               FROM (
                 SELECT
+                  a.aspect::text AS category,
+                  a.stars
+                FROM daily_help_rating_aspects a
+                JOIN daily_help_ratings r
+                  ON r.id = a.daily_help_rating_id
+                 AND r.organization_id = a.organization_id
+                WHERE a.organization_id = $1::uuid
+                  AND r.daily_help_profile_id = $2::uuid
+
+                UNION ALL
+
+                SELECT
                   {self._RATING_CATEGORY_CASE} AS category,
                   r.stars
                 FROM daily_help_rating_traits rt
@@ -1338,7 +1560,13 @@ class DailyHelpRepository(BaseRepository):
                  AND r.organization_id = rt.organization_id
                 WHERE rt.organization_id = $1::uuid
                   AND r.daily_help_profile_id = $2::uuid
-              ) mapped_traits
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM daily_help_rating_aspects a
+                    WHERE a.daily_help_rating_id = r.id
+                      AND a.organization_id = r.organization_id
+                  )
+              ) mapped_scores
               WHERE category IS NOT NULL
               GROUP BY category
             ),

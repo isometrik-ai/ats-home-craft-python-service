@@ -560,11 +560,35 @@ to the profile before creating or updating a rating (same rule as marking attend
 ```http
 POST /v1/daily-help/{profile_id}/ratings?unit_id={unit_id}
 {
-  "stars": 4.5,
-  "comment": "Very punctual",
+  "stars": 5,
+  "comment": "Always on time and the flat is spotless.",
+  "aspects": [
+    {"aspect": "punctuality", "stars": 5},
+    {"aspect": "work_quality", "stars": 5},
+    {"aspect": "behavior", "stars": 4},
+    {"aspect": "communication", "stars": 5}
+  ],
+  "media": [
+    {
+      "media_type": "photo",
+      "file_path": "daily-help/ratings/photo-1.jpg",
+      "file_name": "photo-1.jpg",
+      "mime_type": "image/jpeg"
+    }
+  ],
   "traits": ["very_punctual", "great_attitude"]
 }
 ```
+
+The body matches the share-your-experience form:
+
+| Field     | Form                        | Notes                                                                                                                                   |
+| --------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `stars`   | Overall row                 | `0.5`–`5.0`. Whole stars read back as Terrible, Bad, Okay, Good, Great                                                                  |
+| `aspects` | What did you love about it? | Up to one score per `punctuality`, `work_quality`, `behavior`, `communication`                                                          |
+| `media`   | Add photo/video             | Up to 5 items. `photo` mime: jpeg, png, webp, heic, heif. `video` mime: mp4, quicktime. Upload the file first and send its storage path |
+| `comment` | Tell us more                | Optional, max 2000 characters. Blank text is stored as null                                                                             |
+| `traits`  | Trait tags                  | Optional. Still accepted alongside aspect scores                                                                                        |
 
 Returns updated **aggregate summary** (`rating_count`, `review_count`, `average_stars`,
 `star_distribution`, `category_averages`, `trait_counts`). Duplicate POST → `409` with
@@ -576,8 +600,9 @@ Returns updated **aggregate summary** (`rating_count`, `review_count`, `average_
 GET /v1/daily-help/{profile_id}/ratings/mine?unit_id={unit_id}
 ```
 
-Returns the resident's own rating (`id`, `stars`, `comment`, `traits`, `created_at`, `updated_at`)
-or `data: null` when not yet rated.
+Returns the resident's own rating (`id`, `stars`, `experience_label`, `comment`, `aspects`,
+`media`, `traits`, `created_at`, `updated_at`) or `data: null` when not yet rated.
+`experience_label` is `terrible`, `bad`, `okay`, `good`, or `great`.
 
 **Update my rating:**
 
@@ -586,11 +611,18 @@ PUT /v1/daily-help/{profile_id}/ratings?unit_id={unit_id}
 {
   "stars": 5.0,
   "comment": "Excellent service",
+  "aspects": [
+    {"aspect": "punctuality", "stars": 5},
+    {"aspect": "work_quality", "stars": 5}
+  ],
+  "media": [],
   "traits": ["exceptional_service"]
 }
 ```
 
-Returns the updated rating object. `404` if no prior rating exists.
+Returns the updated rating object, including `experience_label`, `aspects`, and `media`.
+PUT replaces the whole form: omitted `aspects`, `media`, or `traits` clear those rows.
+`404` if no prior rating exists.
 
 **Profile aggregate (all residents):**
 
@@ -606,14 +638,14 @@ GET /v1/projects/{project_id}/daily-help/{profile_id}/ratings/summary
 
 **Summary fields:**
 
-| Field               | UI mapping                                                                 |
-| ------------------- | -------------------------------------------------------------------------- |
-| `rating_count`      | Total star ratings (e.g. **128 ratings**)                                  |
-| `review_count`      | Ratings with a non-empty comment (e.g. **18 written reviews**)             |
-| `average_stars`     | Overall average (e.g. **4.4**)                                             |
-| `star_distribution` | Counts keyed `"1"`–`"5"` for the admin histogram                           |
-| `category_averages` | `punctuality`, `work_quality`, `behavior`, `communication` from trait tags |
-| `trait_counts`      | Raw trait tag frequency counts                                             |
+| Field               | UI mapping                                                                                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rating_count`      | Total star ratings (e.g. **128 ratings**)                                                                                                     |
+| `review_count`      | Ratings with a non-empty comment (e.g. **18 written reviews**)                                                                                |
+| `average_stars`     | Overall average (e.g. **4.4**)                                                                                                                |
+| `star_distribution` | Counts keyed `"1"`–`"5"` for the admin histogram                                                                                              |
+| `category_averages` | `punctuality`, `work_quality`, `behavior`, `communication`. Uses aspect stars; trait tags are the fallback when a rating has no aspect scores |
+| `trait_counts`      | Raw trait tag frequency counts                                                                                                                |
 
 **Paginated reviews (resident + admin):**
 
@@ -629,7 +661,8 @@ GET /v1/projects/{project_id}/daily-help/{profile_id}/ratings/reviews?stars=3&so
 | `page`      | Page number (default `1`)                                                |
 | `page_size` | Page size (default `20`, max `100`)                                      |
 
-Each review includes reviewer name, unit label, stars, comment, traits, and timestamps.
+Each review includes reviewer name, unit label, stars, `experience_label`, comment, aspect
+scores, photos or videos, traits, and timestamps.
 Both the paginated endpoint and embedded profile `reviews[]` include **written reviews only**
 (ratings with a non-empty comment), matching `review_count` in the summary.
 
