@@ -540,6 +540,52 @@ async def test_update_project_patches_row(monkeypatch):
 
     assert result["old_data"]["name"] == "Sunrise Towers"
     assert result["new_data"]["name"] == "Renamed Towers"
+    org_member_repo.check_user_membership_by_user_id.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_project_ignores_unchanged_community_admin(monkeypatch):
+    """Resending the current admin must not require a fresh org-membership check."""
+    repo = _FakeProjectsRepo(project=_project_row(community_admin_user_id=ADMIN_ID))
+    service = _service(projects_repo=repo)
+    org_member_repo = MagicMock()
+    org_member_repo.check_user_membership_by_user_id = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        "apps.user_service.app.services.projects_service.OrganizationMemberRepository",
+        lambda db_connection: org_member_repo,
+    )
+
+    body = UpdateProjectRequest(
+        name="Renamed Towers",
+        community_admin_user_id=ADMIN_ID.upper(),
+    )
+    result = await service.update_project(project_id=PROJECT_ID, body=body)
+
+    assert result["new_data"]["name"] == "Renamed Towers"
+    assert result["new_data"]["community_admin_user_id"] == ADMIN_ID
+    org_member_repo.check_user_membership_by_user_id.assert_not_awaited()
+    assert repo.upsert_calls == []
+
+
+@pytest.mark.asyncio
+async def test_update_project_rejects_new_community_admin_outside_org(monkeypatch):
+    """Assigning a different community admin still requires active org membership."""
+    other_admin_id = "990e8400-e29b-41d4-a716-446655440099"
+    repo = _FakeProjectsRepo(project=_project_row(community_admin_user_id=ADMIN_ID))
+    service = _service(projects_repo=repo)
+    org_member_repo = MagicMock()
+    org_member_repo.check_user_membership_by_user_id = AsyncMock(return_value=False)
+    monkeypatch.setattr(
+        "apps.user_service.app.services.projects_service.OrganizationMemberRepository",
+        lambda db_connection: org_member_repo,
+    )
+
+    body = UpdateProjectRequest(community_admin_user_id=other_admin_id)
+    with pytest.raises(ValidationException) as exc_info:
+        await service.update_project(project_id=PROJECT_ID, body=body)
+
+    assert exc_info.value.message_key == "project_setup.errors.community_admin_not_org_member"
+    assert repo.upsert_calls == []
 
 
 @pytest.mark.asyncio
