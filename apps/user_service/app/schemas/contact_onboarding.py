@@ -400,6 +400,7 @@ class VehicleParkingAllotmentSummary(BaseModel):
 
     id: str
     slot_number: int
+    slot_code_label: str
     status: str
     facility: VehicleParkingFacilitySummary | None = None
 

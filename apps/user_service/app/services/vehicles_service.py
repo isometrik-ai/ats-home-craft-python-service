@@ -141,6 +141,7 @@ class VehiclesService:
     _PARKING_ROW_KEYS = (
         "parking_slot_row_id",
         "parking_slot_number",
+        "parking_slot_code",
         "parking_slot_status",
         "parking_facility_id",
         "parking_facility_name",
@@ -148,6 +149,7 @@ class VehiclesService:
         "parking_facility_floor_level",
         "parking_facility_wing",
         "parking_facility_tower_id",
+        "parking_facility_tower_code",
     )
 
     _REVIEWER_ROW_KEYS = (
@@ -261,6 +263,14 @@ class VehiclesService:
         return {
             "id": str(slot_id),
             "slot_number": int(slot_number),
+            "slot_code_label": ParkingAllotmentService._build_slot_code_label(
+                {
+                    "tower_code": row.get("parking_facility_tower_code"),
+                    "floor_level": row.get("parking_facility_floor_level"),
+                    "slot_code": row.get("parking_slot_code"),
+                    "slot_number": slot_number,
+                }
+            ),
             "status": row.get("parking_slot_status") or "assigned",
             "facility": facility,
         }

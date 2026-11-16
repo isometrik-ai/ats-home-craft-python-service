@@ -650,6 +650,11 @@ async def get_vehicle_catalog(
     "/vehicles",
     status_code=http_status.HTTP_200_OK,
     summary="List vehicles",
+    description=(
+        "Returns vehicles registered on the requested unit. Each item includes "
+        "`parking_allotment` (slot number, slot_code_label, status, facility) when a "
+        "slot is assigned."
+    ),
     response_model=None,
     responses=VEHICLE_LIST_SUCCESS_RESPONSES,
 )
@@ -737,7 +742,8 @@ async def create_vehicle(
     summary="Get vehicle detail",
     description=(
         "Returns one vehicle registered by the authenticated contact, including "
-        "assigned unit summary and parking slot allotment when approved."
+        "assigned unit summary and parking slot allotment (slot number, slot_code_label, "
+        "status, facility) when approved."
     ),
     response_model=None,
     responses=VEHICLE_DETAIL_SUCCESS_RESPONSES,
