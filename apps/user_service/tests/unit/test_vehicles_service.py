@@ -1161,8 +1161,12 @@ async def test_assign_parking_slot_links_approved_vehicle():
         "unit_id": "u1",
         "parking_slot_id": "slot-1",
     }
-    svc.repo.update_by_project.return_value = _approved_vehicle_row(parking_slot_id="slot-1")
-    svc.repo.get_detail_by_project.return_value = svc.repo.update_by_project.return_value
+    svc.repo.update_by_project_if_slot_is_null.return_value = _approved_vehicle_row(
+        parking_slot_id="slot-1"
+    )
+    svc.repo.get_detail_by_project.return_value = (
+        svc.repo.update_by_project_if_slot_is_null.return_value
+    )
 
     result = await svc.assign_parking_slot(
         project_id="p1",
@@ -1170,8 +1174,8 @@ async def test_assign_parking_slot_links_approved_vehicle():
         body=AssignVehicleParkingSlotRequest(parking_slot_id=" slot-1 "),
     )
 
-    update_kwargs = svc.repo.update_by_project.await_args.kwargs
-    assert update_kwargs["update_data"] == {"parking_slot_id": "slot-1"}
+    update_kwargs = svc.repo.update_by_project_if_slot_is_null.await_args.kwargs
+    assert update_kwargs["parking_slot_id"] == "slot-1"
     assert result["parking_slot_id"] == "slot-1"
     assert result["status"] == VehicleStatus.APPROVED.value
     assert svc._push_dispatcher.contact_calls == []
@@ -1195,7 +1199,7 @@ async def test_assign_parking_slot_rejects_when_not_approved():
         )
 
     assert exc_info.value.message_key == "contact_onboarding.errors.vehicle_not_approved"
-    svc.repo.update_by_project.assert_not_awaited()
+    svc.repo.update_by_project_if_slot_is_null.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1220,7 +1224,7 @@ async def test_assign_parking_slot_rejects_when_already_assigned():
         == "contact_onboarding.errors.vehicle_parking_slot_already_assigned"
     )
     svc.parking_slots_repo.get_slot.assert_not_awaited()
-    svc.repo.update_by_project.assert_not_awaited()
+    svc.repo.update_by_project_if_slot_is_null.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1239,6 +1243,37 @@ async def test_assign_parking_slot_not_found():
             vehicle_id="v1",
             body=AssignVehicleParkingSlotRequest(parking_slot_id="slot-1"),
         )
+
+
+@pytest.mark.asyncio
+async def test_assign_parking_slot_conflict_when_slot_claimed_concurrently():
+    """A lost conditional update is a conflict so the allotment rolls back."""
+    from apps.user_service.app.schemas.contact_onboarding import (
+        AssignVehicleParkingSlotRequest,
+    )
+
+    svc = _service()
+    svc.repo.get_by_project.return_value = _approved_vehicle_row()
+    svc.parking_slots_repo.get_slot.return_value = {"id": "slot-1", "status": "assigned"}
+    svc.parking_allotment_repo.get_active_allotment_by_slot.return_value = {
+        "id": "allot-1",
+        "unit_id": "u1",
+        "parking_slot_id": "slot-1",
+    }
+    svc.repo.update_by_project_if_slot_is_null.return_value = None
+
+    with pytest.raises(ConflictException) as exc_info:
+        await svc.assign_parking_slot(
+            project_id="p1",
+            vehicle_id="v1",
+            body=AssignVehicleParkingSlotRequest(parking_slot_id="slot-1"),
+        )
+
+    assert (
+        exc_info.value.message_key
+        == "contact_onboarding.errors.vehicle_parking_slot_already_assigned"
+    )
+    svc.repo.get_detail_by_project.assert_not_awaited()
 
 
 @pytest.mark.asyncio

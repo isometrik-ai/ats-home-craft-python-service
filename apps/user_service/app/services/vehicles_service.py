@@ -940,16 +940,16 @@ class VehiclesService:
             vehicle_type=str(vehicle.get("vehicle_type") or ""),
             parking_slot_id=parking_slot_id,
         )
-        row = await self.repo.update_by_project(
+        row = await self.repo.update_by_project_if_slot_is_null(
             organization_id=org_id,
             project_id=project_id,
             vehicle_id=vehicle_id,
-            update_data={"parking_slot_id": parking_slot_id},
+            parking_slot_id=parking_slot_id,
         )
         if not row:
-            raise NotFoundException(
-                message_key="contact_onboarding.errors.vehicle_not_found",
-                custom_code=CustomStatusCode.NOT_FOUND,
+            raise ConflictException(
+                message_key="contact_onboarding.errors.vehicle_parking_slot_already_assigned",
+                custom_code=CustomStatusCode.CONFLICT,
             )
         detail = await self.repo.get_detail_by_project(
             organization_id=org_id,
