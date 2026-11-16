@@ -507,6 +507,26 @@ class ReviewVehicleRequest(BaseModel):
         return self
 
 
+class AssignVehicleParkingSlotRequest(BaseModel):
+    """Assign a parking slot to an approved vehicle that does not have one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parking_slot_id: str = Field(..., min_length=1)
+
+    @field_validator("parking_slot_id")
+    @classmethod
+    def strip_parking_slot_id(cls, parking_slot_id: str) -> str:
+        """Reject a blank slot id."""
+        stripped = parking_slot_id.strip()
+        if not stripped:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_slot_id_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return stripped
+
+
 class DeleteProjectVehicleRequest(BaseModel):
     """Admin removes a project vehicle with a documented reason."""
 
