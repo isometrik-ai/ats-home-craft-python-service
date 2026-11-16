@@ -491,3 +491,50 @@ def test_next_availability_returns_none_when_no_free_days():
         )
         is None
     )
+
+
+def test_day_slots_leave_buffer_between_sessions():
+    """A 5-minute buffer shifts the next slot start and keeps the 60-minute session."""
+    defaults = default_booking_config(FacilityBookingArchetype.SLOT)
+    facility = _slot_facility(
+        hours=[DayHours(open=6 * 60, close=22 * 60, closed=False) for _ in range(7)],
+        policies=defaults.policies.model_copy(update={"buffer_minutes": 5, "weekly_cap": 0}),
+    )
+    day = date(2026, 11, 16)
+    now = datetime(2026, 11, 16, 1, 0, 0)
+    view = availability.get_day_availability(
+        availability.AvailabilityContext(facility=facility, active=[], now=now),
+        day,
+    )
+    slots = view.units[0].slots
+    assert (slots[0].start_min, slots[0].end_min) == (360, 420)
+    assert (slots[1].start_min, slots[1].end_min) == (425, 485)
+    assert slots[-1].end_min <= 22 * 60
+    assert all(slot.start_min != 420 for slot in slots)
+
+    draft = BookingDraft(
+        facility_id="fac-1",
+        unit_id="unit-1",
+        local_date=day,
+        end_local_date=day,
+        start_min=425,
+        end_min=485,
+        host_contact_id="host-1",
+        participants=[],
+    )
+    result = availability.validate_draft(
+        availability.AvailabilityContext(facility=facility, active=[], now=now),
+        draft,
+    )
+    assert result.ok
+
+    back_to_back = replace(
+        draft,
+        start_min=420,
+        end_min=480,
+    )
+    rejected = availability.validate_draft(
+        availability.AvailabilityContext(facility=facility, active=[], now=now),
+        back_to_back,
+    )
+    assert "misaligned_slot" in rejected.codes
