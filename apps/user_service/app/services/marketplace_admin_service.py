@@ -52,12 +52,18 @@ class MarketplaceAdminService:
             )
         return str(org_id)
 
-    async def get_admin_summary(self, *, project_id: str | None = None) -> dict[str, int]:
+    async def get_admin_summary(
+        self,
+        *,
+        project_id: str | None = None,
+        tower_id: str | None = None,
+    ) -> dict[str, int]:
         """Active, sold, past, and removed counts for the staff header."""
         await self.repo.expire_due(organization_id=self._org())
         return await self.repo.get_admin_summary(
             organization_id=self._org(),
             project_id=project_id,
+            tower_id=tower_id,
         )
 
     async def list_listings_admin(
@@ -65,7 +71,7 @@ class MarketplaceAdminService:
         *,
         query: AdminMarketplaceListQuery,
     ) -> dict[str, Any]:
-        """Flat staff list: search, status, and category. Optional society filter."""
+        """Flat staff list: search, status, category, tower, and sort."""
         await self.repo.expire_due(organization_id=self._org())
         category_slug = MarketplaceCatalogService.parse_filter(query.category, None)[0]
         rows, total = await self.repo.list_admin_listings(

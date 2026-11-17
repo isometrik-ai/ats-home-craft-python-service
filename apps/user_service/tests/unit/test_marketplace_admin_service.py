@@ -8,7 +8,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from apps.user_service.app.db.repositories.marketplace_repository import (
+    MarketplaceRepository,
+)
 from apps.user_service.app.schemas.enums.marketplace import (
+    MarketplaceAdminSort,
     MarketplaceAdminStatus,
     MarketplaceReportDecision,
 )
@@ -97,6 +101,7 @@ async def test_get_admin_summary_expires_then_counts():
     data = await svc.get_admin_summary()
     svc.repo.expire_due.assert_awaited_once_with(organization_id="org-1")
     assert svc.repo.get_admin_summary.await_args.kwargs["project_id"] is None
+    assert svc.repo.get_admin_summary.await_args.kwargs["tower_id"] is None
     assert data["active_count"] == 12
     assert data["past_count"] == 1
 
@@ -123,7 +128,8 @@ async def test_list_listings_admin_maps_filters():
     assert data["items"][0]["unit_label"] == "B-1104"
     assert data["items"][0]["project_id"] == "project-1"
     assert data["items"][0]["can_remove"] is True
-    assert "tower" not in AdminMarketplaceListQuery.model_fields
+    assert query.tower_id is None
+    assert query.sort == MarketplaceAdminSort.TOWER_UNIT
 
 
 @pytest.mark.asyncio
@@ -259,8 +265,9 @@ async def test_get_admin_summary_filters_project():
             "removed_count": 1,
         }
     )
-    data = await svc.get_admin_summary(project_id="project-1")
+    data = await svc.get_admin_summary(project_id="project-1", tower_id="tower-1")
     assert svc.repo.get_admin_summary.await_args.kwargs["project_id"] == "project-1"
+    assert svc.repo.get_admin_summary.await_args.kwargs["tower_id"] == "tower-1"
     assert data["active_count"] == 4
 
 
@@ -269,9 +276,15 @@ async def test_list_listings_admin_org_wide():
     svc = _admin_service()
     svc.repo.expire_due = AsyncMock()
     svc.repo.list_admin_listings = AsyncMock(return_value=([_listing()], 1))
-    query = AdminMarketplaceListQuery(q="table")
+    query = AdminMarketplaceListQuery(
+        q="table",
+        tower_id="tower-1",
+        sort=MarketplaceAdminSort.PRICE_ASC,
+    )
     data = await svc.list_listings_admin(query=query)
     assert query.project_id is None
+    assert query.tower_id == "tower-1"
+    assert query.sort == MarketplaceAdminSort.PRICE_ASC
     assert svc.repo.list_admin_listings.await_args.kwargs["query"] is query
     assert data["items"][0]["can_remove"] is True
 
@@ -320,6 +333,16 @@ async def test_remove_listing_admin_passes_project_id():
         project_id="project-1",
     )
     assert svc.repo.remove_live_listing_admin.await_args.kwargs["project_id"] == "project-1"
+
+
+def test_admin_listing_order_sql_is_allowlisted():
+    tower_unit = MarketplaceRepository.admin_listing_order_sql("tower_unit")
+    assert "t.sort_order" in tower_unit
+    assert "u.sort_order" in tower_unit
+    assert MarketplaceRepository.admin_listing_order_sql("newest").startswith("l.published_at DESC")
+    assert "price_amount ASC" in MarketplaceRepository.admin_listing_order_sql("price_asc")
+    assert "price_amount DESC" in MarketplaceRepository.admin_listing_order_sql("price_desc")
+    assert MarketplaceRepository.admin_listing_order_sql("not-a-sort") == tower_unit
 
 
 def _report_row(**overrides):
