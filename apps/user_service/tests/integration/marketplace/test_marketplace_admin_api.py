@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from pydantic import ValidationError
 
 from apps.user_service.app.api import marketplace_admin as marketplace_admin_api
-from apps.user_service.app.schemas.enums.marketplace import MarketplaceAdminStatus
+from apps.user_service.app.schemas.enums.marketplace import (
+    MarketplaceAdminSort,
+    MarketplaceAdminStatus,
+)
 from apps.user_service.app.schemas.marketplace import (
     AdminMarketplaceListQuery,
     AdminMarketplaceReportListQuery,
@@ -35,6 +40,7 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.status_codes import CustomStatusCode
 
 PROJECT_ID = "project-1"
+TOWER_ID = "22222222-2222-2222-2222-222222222222"
 LISTING_ID = "listing-1"
 REPORT_ID = "report-1"
 
@@ -72,11 +78,17 @@ def test_admin_status_filter_has_no_committee_option():
     assert values == {"all", "draft", "live", "sold", "past", "removed"}
     query = AdminMarketplaceListQuery(status=MarketplaceAdminStatus.REMOVED)
     assert query.project_id is None
-    assert "tower" not in AdminMarketplaceListQuery.model_fields
-    assert "sort" not in AdminMarketplaceListQuery.model_fields
+    assert query.tower_id is None
+    assert query.sort == MarketplaceAdminSort.TOWER_UNIT
+    assert "tower_id" in AdminMarketplaceListQuery.model_fields
+    assert "sort" in AdminMarketplaceListQuery.model_fields
     assert "group" not in AdminMarketplaceListQuery.model_fields
     with pytest.raises(ValidationError):
         AdminMarketplaceListQuery(status="removed_by_committee")
+    with pytest.raises(ValidationError):
+        AdminMarketplaceListQuery(tower_id="not-a-uuid")
+    parsed = AdminMarketplaceListQuery(tower_id=TOWER_ID)
+    assert parsed.tower_id == UUID(TOWER_ID)
 
 
 def test_marketplace_admin_response_schemas_are_typed():
@@ -145,9 +157,10 @@ async def test_get_marketplace_admin_summary(monkeypatch, client):
         monkeypatch, "apps.user_service.app.api.marketplace_admin"
     )
 
-    async def fake_summary(_self, *, project_id):
+    async def fake_summary(_self, *, project_id, tower_id=None):
         del _self
         assert project_id is None
+        assert tower_id is None
         return {
             "active_count": 12,
             "sold_count": 2,
@@ -173,9 +186,10 @@ async def test_get_marketplace_admin_summary_filters_project(monkeypatch, client
         monkeypatch, "apps.user_service.app.api.marketplace_admin"
     )
 
-    async def fake_summary(_self, *, project_id):
+    async def fake_summary(_self, *, project_id, tower_id=None):
         del _self
         assert project_id == PROJECT_ID
+        assert tower_id is None
         return {
             "active_count": 4,
             "sold_count": 1,
@@ -194,6 +208,62 @@ async def test_get_marketplace_admin_summary_filters_project(monkeypatch, client
     )
     payload = assert_success(response)
     assert payload["data"]["active_count"] == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tower_id", "expected_tower_id"),
+    [
+        (None, None),
+        (TOWER_ID, TOWER_ID),
+    ],
+)
+async def test_get_marketplace_admin_summary_tower_id_success(
+    monkeypatch, client, tower_id, expected_tower_id
+):
+    """GET /summary accepts a missing tower_id and a valid UUID."""
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+
+    async def fake_summary(_self, *, project_id, tower_id=None):
+        del _self
+        assert project_id == PROJECT_ID
+        assert tower_id == expected_tower_id
+        return {
+            "active_count": 5,
+            "sold_count": 0,
+            "past_count": 1,
+            "removed_count": 0,
+        }
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.get_admin_summary",
+        fake_summary,
+    )
+    params = {"project_id": PROJECT_ID}
+    if tower_id is not None:
+        params["tower_id"] = tower_id
+    response = await client.get("/v1/marketplace/admin/summary", params=params)
+    payload = assert_success(response)
+    assert payload["data"]["active_count"] == 5
+    assert payload["data"]["past_count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tower_id", ["not-a-uuid", "tower-1", "12345", ""])
+async def test_get_marketplace_admin_summary_rejects_invalid_tower_id(
+    monkeypatch, client, tower_id
+):
+    """GET /summary returns 422 when tower_id is not a UUID."""
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+    response = await client.get(
+        "/v1/marketplace/admin/summary",
+        params={"tower_id": tower_id},
+    )
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -335,6 +405,8 @@ async def test_list_marketplace_admin_listings(monkeypatch, client):
         assert query.q == "table"
         assert query.status.value == "live"
         assert query.category == "furniture"
+        assert query.tower_id is None
+        assert query.sort == MarketplaceAdminSort.TOWER_UNIT
         return {"items": [_ADMIN_CARD], "total": 1}
 
     monkeypatch.setattr(
@@ -354,6 +426,65 @@ async def test_list_marketplace_admin_listings(monkeypatch, client):
     payload = assert_success(response)
     assert payload["data"][0]["title"] == "Study table with chair"
     assert payload["total"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sort_value",
+    ["tower_unit", "newest", "oldest", "price_asc", "price_desc"],
+)
+async def test_list_marketplace_admin_listings_tower_and_sort_success(
+    monkeypatch, client, sort_value
+):
+    """GET /listings accepts a valid tower UUID with every allowlisted sort."""
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+
+    async def fake_list(_self, *, query):
+        del _self
+        assert query.project_id == PROJECT_ID
+        assert query.tower_id == UUID(TOWER_ID)
+        assert query.sort == MarketplaceAdminSort(sort_value)
+        return {"items": [_ADMIN_CARD], "total": 1}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.marketplace_admin_service.MarketplaceAdminService.list_listings_admin",
+        fake_list,
+    )
+    response = await client.get(
+        "/v1/marketplace/admin/listings",
+        params={
+            "project_id": PROJECT_ID,
+            "tower_id": TOWER_ID,
+            "sort": sort_value,
+        },
+    )
+    payload = assert_success(response)
+    assert payload["total"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"tower_id": "not-a-uuid"},
+        {"tower_id": "tower-1"},
+        {"tower_id": ""},
+        {"sort": "closest"},
+        {"sort": "published_at"},
+        {"tower_id": TOWER_ID, "sort": "nope"},
+    ],
+)
+async def test_list_marketplace_admin_listings_rejects_bad_tower_or_sort(
+    monkeypatch, client, params
+):
+    """GET /listings returns 422 for a bad tower_id or a sort outside the allowlist."""
+    patch_ensure_staff_project_access_optional(
+        monkeypatch, "apps.user_service.app.api.marketplace_admin"
+    )
+    response = await client.get("/v1/marketplace/admin/listings", params=params)
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

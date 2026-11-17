@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from apps.user_service.app.schemas.enums.marketplace import (
+    MarketplaceAdminSort,
     MarketplaceAdminStatus,
     MarketplaceItemCondition,
     MarketplaceListingKind,
@@ -310,9 +311,11 @@ class AdminMarketplaceListQuery(BaseModel):
         json_schema_extra={
             "example": {
                 "project_id": _EXAMPLE_PROJECT_ID,
+                "tower_id": "22222222-2222-2222-2222-222222222222",
                 "q": "table",
                 "status": "live",
                 "category": "furniture",
+                "sort": "tower_unit",
                 "page": 1,
                 "page_size": 20,
             }
@@ -323,12 +326,20 @@ class AdminMarketplaceListQuery(BaseModel):
         default=None,
         description="Optional society filter (UUID). Omit to list the whole organization.",
     )
+    tower_id: UUID | None = Field(
+        default=None,
+        description="Optional tower filter (UUID). Omit for every tower.",
+    )
     q: str | None = Field(
         default=None,
         description="Search item title, resident name, unit, or tower.",
     )
     status: MarketplaceAdminStatus = MarketplaceAdminStatus.ALL
     category: str | None = Field(default=None, description="Catalog category slug.")
+    sort: MarketplaceAdminSort = Field(
+        default=MarketplaceAdminSort.TOWER_UNIT,
+        description="tower_unit (tower then unit), newest, oldest, price_asc, or price_desc.",
+    )
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 
