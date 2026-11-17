@@ -576,7 +576,7 @@ async def create_daily_help_rating(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Submit a resident rating for a daily help profile."""
+    """Submit overall stars, quality scores, optional photos or videos, and a written review."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
@@ -651,7 +651,7 @@ async def update_daily_help_rating(
     db_connection: asyncpg.Connection = Depends(db_uow),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Update stars, comment, and traits on an existing resident rating."""
+    """Replace stars, quality scores, photos or videos, traits, and the written review."""
     user_context, contact = await extract_onboarding_contact_context(
         current_user, db_connection, request=request
     )
