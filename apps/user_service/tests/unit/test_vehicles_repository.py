@@ -71,6 +71,9 @@ async def test_list_details_by_contact_with_unit_filter():
     query, args = _sql_args(conn.fetch)
     assert "FROM vehicles v" in query
     assert "parking_slot_number" in query
+    assert "parking_slot_code" in query
+    assert "parking_facility_tower_code" in query
+    assert "LEFT JOIN towers pt" in query
     assert "unit_code" not in query
     assert "deleted_at IS NULL" in query
     assert args == (ORG_ID, CONTACT_ID, UNIT_ID)
@@ -163,6 +166,8 @@ async def test_get_detail_by_contact():
     query, args = _sql_args(conn.fetchrow)
     assert "unit_code" in query
     assert "parking_slot_number" in query
+    assert "parking_slot_code" in query
+    assert "parking_facility_tower_code" in query
     assert "organization_members approved_by_om" in query
     assert "deleted_at IS NULL" in query
     assert args == (ORG_ID, CONTACT_ID, VEHICLE_ID)
@@ -422,7 +427,9 @@ async def test_list_by_project_with_search():
     assert "u.unit_label" in query
     assert "facility_parking_slots fps" in query
     assert "facilities pf" in query
+    assert "LEFT JOIN towers pt" in query
     assert "parking_slot_number" in query
+    assert "parking_slot_code" in query
     assert args == (ORG_ID, PROJECT_ID, None, None, None, "%MH01%")
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
@@ -47,6 +49,10 @@ OPTIONAL_PROJECT_ID = Query(
     description=(
         "Optional society filter (UUID). Omit to include every project in the organization."
     ),
+)
+OPTIONAL_TOWER_ID = Query(
+    None,
+    description="Optional tower filter (UUID). Omit to include every tower.",
 )
 
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
@@ -118,10 +124,11 @@ REPORT_REVIEW_UPHOLD_SUCCESS_RESPONSES = _ok_response(
 async def get_marketplace_admin_summary(
     request: Request,
     project_id: str | None = OPTIONAL_PROJECT_ID,
+    tower_id: UUID | None = OPTIONAL_TOWER_ID,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Return active, sold, past, and removed counts. Filter with project_id."""
+    """Return active, sold, past, and removed counts. Filter with project_id and tower_id."""
     user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,
@@ -130,7 +137,10 @@ async def get_marketplace_admin_summary(
         request=request,
     )
     service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_admin_summary(project_id=project_id)
+    data = await service.get_admin_summary(
+        project_id=project_id,
+        tower_id=str(tower_id) if tower_id else None,
+    )
     return success_response(
         request=request,
         message_key="marketplace.success.summary_retrieved",
@@ -292,7 +302,7 @@ async def list_marketplace_admin_listings(
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
-    """Paginated listings with search, status, category, and optional project_id."""
+    """Paginated listings with search, status, category, tower, sort, and project_id."""
     user_context = await ensure_staff_project_access_optional(
         current_user=current_user,
         db_connection=db_connection,

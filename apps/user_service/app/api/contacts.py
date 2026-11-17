@@ -939,7 +939,8 @@ async def list_contact_units(
     summary="List vehicles registered by a contact",
     description=(
         "Returns vehicles owned by the contact across their assigned units. "
-        "Optional unit_id filter."
+        "Each item includes `parking_allotment` (slot number, slot_code_label, status, "
+        "facility) when a slot is assigned. Optional unit_id filter."
     ),
     responses=COMMON_ERROR_RESPONSES,
 )

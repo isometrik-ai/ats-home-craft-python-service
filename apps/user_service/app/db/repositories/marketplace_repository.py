@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.marketplace import (
@@ -15,6 +16,15 @@ from apps.user_service.app.schemas.marketplace import (
 from apps.user_service.app.utils.common_utils import serialize_jsonb_param
 
 _LISTING_JSONB = frozenset({"media"})
+
+
+def _optional_uuid_text(value: str | UUID | None) -> str | None:
+    """UUID text for a filter already checked by the API. Blank means no filter."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
 
 _REPORT_AUTO_HIDE_THRESHOLD = 3
 
@@ -60,6 +70,8 @@ _LISTING_COLUMNS = """
     l.created_at,
     l.updated_at,
     p.name AS project_name,
+    p.latitude AS project_latitude,
+    p.longitude AS project_longitude,
     t.name AS tower_name,
     t.latitude AS tower_latitude,
     t.longitude AS tower_longitude,
@@ -758,10 +770,37 @@ class MarketplaceRepository(BaseRepository):
         )
         return int(value or 0)
 
+    @staticmethod
+    def admin_listing_order_sql(sort: str) -> str:
+        """Allowlisted ORDER BY for the staff listings table."""
+        orders = {
+            "tower_unit": (
+                "t.sort_order ASC NULLS LAST, "
+                "t.name ASC NULLS LAST, "
+                "u.sort_order ASC NULLS LAST, "
+                "COALESCE(u.unit_label, u.code, '') ASC, "
+                "l.published_at DESC NULLS LAST, "
+                "l.created_at DESC"
+            ),
+            "newest": "l.published_at DESC NULLS LAST, l.created_at DESC",
+            "oldest": "l.published_at ASC NULLS LAST, l.created_at ASC",
+            "price_asc": (
+                "l.price_amount ASC NULLS FIRST, l.published_at DESC NULLS LAST, l.created_at DESC"
+            ),
+            "price_desc": (
+                "l.price_amount DESC NULLS LAST, l.published_at DESC NULLS LAST, l.created_at DESC"
+            ),
+        }
+        return orders.get(sort, orders["tower_unit"])
+
     async def get_admin_summary(
-        self, *, organization_id: str, project_id: str | None
+        self,
+        *,
+        organization_id: str,
+        project_id: str | None,
+        tower_id: str | None = None,
     ) -> dict[str, int]:
-        """Header counts for posted listings in the org, optionally one society."""
+        """Header counts for posted listings in the org, optionally one society or tower."""
         where = [
             "organization_id = $1::uuid",
             "status <> 'draft'::marketplace_listing_status",
@@ -770,6 +809,10 @@ class MarketplaceRepository(BaseRepository):
         if project_id:
             params.append(project_id)
             where.append(f"project_id = ${len(params)}::uuid")
+        tower = _optional_uuid_text(tower_id)
+        if tower:
+            params.append(tower)
+            where.append(f"tower_id = ${len(params)}::uuid")
         where_sql = " AND ".join(where)
         row = await self.db_connection.fetchrow(
             f"""
@@ -812,7 +855,7 @@ class MarketplaceRepository(BaseRepository):
         query: AdminMarketplaceListQuery,
         category: str | None,
     ) -> tuple[list[dict[str, Any]], int]:
-        """Listings in the org, optionally one society. Flat list, newest first."""
+        """Listings in the org. Optional society and tower filters, with a sort."""
         where = [
             "l.organization_id = $1::uuid",
         ]
@@ -820,6 +863,10 @@ class MarketplaceRepository(BaseRepository):
         if query.project_id:
             params.append(query.project_id)
             where.append(f"l.project_id = ${len(params)}::uuid")
+        tower = _optional_uuid_text(query.tower_id)
+        if tower:
+            params.append(tower)
+            where.append(f"l.tower_id = ${len(params)}::uuid")
         status = query.status.value
         if status == "live":
             where.append("l.status = 'live'::marketplace_listing_status")
@@ -860,7 +907,7 @@ class MarketplaceRepository(BaseRepository):
             SELECT {_ADMIN_LISTING_COLUMNS}
             {_ADMIN_LISTING_JOINS}
             WHERE {where_sql}
-            ORDER BY l.published_at DESC NULLS LAST, l.created_at DESC
+            ORDER BY {self.admin_listing_order_sql(query.sort.value)}
             LIMIT ${limit_idx} OFFSET ${offset_idx}
             """,
             *params,

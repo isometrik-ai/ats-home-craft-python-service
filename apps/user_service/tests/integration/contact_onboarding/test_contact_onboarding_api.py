@@ -264,6 +264,7 @@ _FAKE_VEHICLE_DETAIL = {
     "parking_allotment": {
         "id": "slot-1",
         "slot_number": 12,
+        "slot_code_label": "A-B1-012",
         "status": "assigned",
         "facility": {
             "id": "fac-1",
@@ -434,6 +435,7 @@ async def test_get_vehicle_detail(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"]["registration_number"] == "MH12AB1234"
     assert body["data"]["parking_allotment"]["slot_number"] == 12
+    assert body["data"]["parking_allotment"]["slot_code_label"] == "A-B1-012"
     assert body["data"]["unit"]["code"] == "A-101"
 
 

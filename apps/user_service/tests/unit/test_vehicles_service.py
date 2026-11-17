@@ -367,6 +367,7 @@ async def test_list_project_vehicles_includes_owner_and_unit():
             "parking_slot_id": "slot-1",
             "parking_slot_row_id": "slot-1",
             "parking_slot_number": 12,
+            "parking_slot_code": "SLT-A-12",
             "parking_slot_status": "assigned",
             "parking_facility_id": "fac-1",
             "parking_facility_name": "Basement Parking",
@@ -374,6 +375,7 @@ async def test_list_project_vehicles_includes_owner_and_unit():
             "parking_facility_floor_level": "B1",
             "parking_facility_wing": "A",
             "parking_facility_tower_id": "tower-1",
+            "parking_facility_tower_code": "A",
             "approved_by_user_id": "admin-1",
             "approved_by_salutation": "Mr.",
             "approved_by_first_name": "Amit",
@@ -410,6 +412,7 @@ async def test_list_project_vehicles_includes_owner_and_unit():
     assert "unit" in items[0]
     assert items[0]["parking_allotment"]["id"] == "slot-1"
     assert items[0]["parking_allotment"]["slot_number"] == 12
+    assert items[0]["parking_allotment"]["slot_code_label"] == "A-B1-SLT-A-12"
     assert items[0]["parking_allotment"]["status"] == "assigned"
     assert items[0]["parking_allotment"]["facility"]["name"] == "Basement Parking"
     assert items[0]["parking_allotment"]["facility"]["floor_level"] == "B1"
@@ -456,6 +459,7 @@ async def test_get_vehicle_detail_includes_unit_and_parking():
         "parking_slot_id": "slot-1",
         "parking_slot_row_id": "slot-1",
         "parking_slot_number": 12,
+        "parking_slot_code": "SLT-A-12",
         "parking_slot_status": "assigned",
         "parking_facility_id": "fac-1",
         "parking_facility_name": "Basement Parking",
@@ -463,12 +467,14 @@ async def test_get_vehicle_detail_includes_unit_and_parking():
         "parking_facility_floor_level": "B1",
         "parking_facility_wing": "A",
         "parking_facility_tower_id": "tower-1",
+        "parking_facility_tower_code": "A",
     }
 
     item = await svc.get_vehicle_detail(contact_id="c1", vehicle_id="v1")
 
     assert item["unit"]["code"] == "A-1802"
     assert item["parking_allotment"]["slot_number"] == 12
+    assert item["parking_allotment"]["slot_code_label"] == "A-B1-SLT-A-12"
     assert item["parking_allotment"]["facility"]["name"] == "Basement Parking"
     svc.repo.get_detail_by_contact.assert_awaited_once_with(
         organization_id="org-1",
@@ -640,6 +646,7 @@ async def test_list_vehicles_for_contact():
                 "parking_slot_id": "slot-1",
                 "parking_slot_row_id": "slot-1",
                 "parking_slot_number": 12,
+                "parking_slot_code": "SLT-A-12",
                 "parking_slot_status": "assigned",
                 "parking_facility_id": "fac-1",
                 "parking_facility_name": "Basement Parking",
@@ -647,6 +654,7 @@ async def test_list_vehicles_for_contact():
                 "parking_facility_floor_level": "B1",
                 "parking_facility_wing": "A",
                 "parking_facility_tower_id": "tower-1",
+                "parking_facility_tower_code": "A",
             }
         ]
     )
@@ -657,6 +665,7 @@ async def test_list_vehicles_for_contact():
     assert "unit" not in rows[0]
     assert rows[0]["parking_allotment"]["id"] == "slot-1"
     assert rows[0]["parking_allotment"]["slot_number"] == 12
+    assert rows[0]["parking_allotment"]["slot_code_label"] == "A-B1-SLT-A-12"
     assert rows[0]["parking_allotment"]["facility"]["name"] == "Basement Parking"
 
 
@@ -1344,6 +1353,21 @@ async def test_build_parking_allotment_returns_none_without_slot():
     """Rows without an assigned parking slot skip nested parking summary."""
     svc = _service()
     assert svc._build_parking_allotment({"parking_slot_id": None}) is None
+
+
+def test_build_parking_allotment_slot_code_label_falls_back_to_padded_number():
+    """Missing slot_code and tower still produce a floor-number label."""
+    svc = _service()
+    allotment = svc._build_parking_allotment(
+        {
+            "parking_slot_row_id": "slot-1",
+            "parking_slot_number": 2,
+            "parking_slot_status": "assigned",
+            "parking_facility_floor_level": "B2",
+        }
+    )
+    assert allotment is not None
+    assert allotment["slot_code_label"] == "B2-002"
 
 
 @pytest.mark.asyncio
