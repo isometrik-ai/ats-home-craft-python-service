@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
@@ -122,7 +124,7 @@ REPORT_REVIEW_UPHOLD_SUCCESS_RESPONSES = _ok_response(
 async def get_marketplace_admin_summary(
     request: Request,
     project_id: str | None = OPTIONAL_PROJECT_ID,
-    tower_id: str | None = OPTIONAL_TOWER_ID,
+    tower_id: UUID | None = OPTIONAL_TOWER_ID,
     db_connection: asyncpg.Connection = Depends(db_conn),
     current_user: dict = Depends(get_user_from_auth),
 ):
@@ -135,7 +137,10 @@ async def get_marketplace_admin_summary(
         request=request,
     )
     service = MarketplaceAdminService(db_connection=db_connection, user_context=user_context)
-    data = await service.get_admin_summary(project_id=project_id, tower_id=tower_id)
+    data = await service.get_admin_summary(
+        project_id=project_id,
+        tower_id=str(tower_id) if tower_id else None,
+    )
     return success_response(
         request=request,
         message_key="marketplace.success.summary_retrieved",

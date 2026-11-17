@@ -5,11 +5,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID
 
 import pytest
 
 from apps.user_service.app.db.repositories.marketplace_repository import (
     MarketplaceRepository,
+    _optional_uuid_text,
 )
 from apps.user_service.app.schemas.enums.marketplace import (
     MarketplaceAdminSort,
@@ -21,6 +23,8 @@ from apps.user_service.app.services.marketplace_admin_service import (
     MarketplaceAdminService,
 )
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
+
+_TOWER_ID = UUID("22222222-2222-2222-2222-222222222222")
 
 
 def _admin_service() -> MarketplaceAdminService:
@@ -265,9 +269,9 @@ async def test_get_admin_summary_filters_project():
             "removed_count": 1,
         }
     )
-    data = await svc.get_admin_summary(project_id="project-1", tower_id="tower-1")
+    data = await svc.get_admin_summary(project_id="project-1", tower_id=str(_TOWER_ID))
     assert svc.repo.get_admin_summary.await_args.kwargs["project_id"] == "project-1"
-    assert svc.repo.get_admin_summary.await_args.kwargs["tower_id"] == "tower-1"
+    assert svc.repo.get_admin_summary.await_args.kwargs["tower_id"] == str(_TOWER_ID)
     assert data["active_count"] == 4
 
 
@@ -278,12 +282,12 @@ async def test_list_listings_admin_org_wide():
     svc.repo.list_admin_listings = AsyncMock(return_value=([_listing()], 1))
     query = AdminMarketplaceListQuery(
         q="table",
-        tower_id="tower-1",
+        tower_id=_TOWER_ID,
         sort=MarketplaceAdminSort.PRICE_ASC,
     )
     data = await svc.list_listings_admin(query=query)
     assert query.project_id is None
-    assert query.tower_id == "tower-1"
+    assert query.tower_id == _TOWER_ID
     assert query.sort == MarketplaceAdminSort.PRICE_ASC
     assert svc.repo.list_admin_listings.await_args.kwargs["query"] is query
     assert data["items"][0]["can_remove"] is True
@@ -333,6 +337,12 @@ async def test_remove_listing_admin_passes_project_id():
         project_id="project-1",
     )
     assert svc.repo.remove_live_listing_admin.await_args.kwargs["project_id"] == "project-1"
+
+
+def test_optional_uuid_text_stringifies_uuid():
+    assert _optional_uuid_text(None) is None
+    assert _optional_uuid_text(_TOWER_ID) == str(_TOWER_ID)
+    assert _optional_uuid_text(f"  {str(_TOWER_ID)}  ") == str(_TOWER_ID)
 
 
 def test_admin_listing_order_sql_is_allowlisted():

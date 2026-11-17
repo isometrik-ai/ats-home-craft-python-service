@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.schemas.marketplace import (
@@ -15,6 +16,15 @@ from apps.user_service.app.schemas.marketplace import (
 from apps.user_service.app.utils.common_utils import serialize_jsonb_param
 
 _LISTING_JSONB = frozenset({"media"})
+
+
+def _optional_uuid_text(value: str | UUID | None) -> str | None:
+    """UUID text for a filter already checked by the API. Blank means no filter."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
 
 _REPORT_AUTO_HIDE_THRESHOLD = 3
 
@@ -797,7 +807,7 @@ class MarketplaceRepository(BaseRepository):
         if project_id:
             params.append(project_id)
             where.append(f"project_id = ${len(params)}::uuid")
-        tower = (tower_id or "").strip()
+        tower = _optional_uuid_text(tower_id)
         if tower:
             params.append(tower)
             where.append(f"tower_id = ${len(params)}::uuid")
@@ -851,7 +861,7 @@ class MarketplaceRepository(BaseRepository):
         if query.project_id:
             params.append(query.project_id)
             where.append(f"l.project_id = ${len(params)}::uuid")
-        tower = (query.tower_id or "").strip()
+        tower = _optional_uuid_text(query.tower_id)
         if tower:
             params.append(tower)
             where.append(f"l.tower_id = ${len(params)}::uuid")

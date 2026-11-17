@@ -326,7 +326,7 @@ class AdminMarketplaceListQuery(BaseModel):
         default=None,
         description="Optional society filter (UUID). Omit to list the whole organization.",
     )
-    tower_id: str | None = Field(
+    tower_id: UUID | None = Field(
         default=None,
         description="Optional tower filter (UUID). Omit for every tower.",
     )
