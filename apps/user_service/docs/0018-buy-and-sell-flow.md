@@ -66,16 +66,16 @@ ______________________________________________________________________
 
 From [project-setup-flow.md](./project-setup-flow.md) §3 and [resident onboarding](../../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md):
 
-| Need                           | Source                                                                                       |
-| ------------------------------ | -------------------------------------------------------------------------------------------- |
-| Society name                   | `projects.name` (via listing `project_id` / pickup unit)                                     |
-| Tower count in the header      | `count(*)` from `towers` where `project_id` = viewer's project (from `unit_id`)              |
-| Nearby societies               | `projects.latitude`, `projects.longitude`, same `organization_id`, `status = active`, ≤ 5 km |
-| Tower name and collection pin  | `towers.name`, `towers.latitude`, `towers.longitude`                                         |
-| "Closest to me"                | Distance from the viewer's tower coordinates to the listing's `tower_id` coordinates         |
-| Pickup flat dropdown           | Active `contact_units` → `units.code` / `units.unit_label` + `projects.name`                 |
-| Seller role and "Member since" | Active `contact_roles` on that unit (`started_at` year)                                      |
-| Seller display name and photo  | `contacts.first_name`, `last_name`, `profile_photo_url`                                      |
+| Need                           | Source                                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Society name                   | `projects.name` (via listing `project_id` / pickup unit)                                                                      |
+| Tower count in the header      | `count(*)` from `towers` where `project_id` = viewer's project (from `unit_id`)                                               |
+| Nearby societies               | `projects.latitude`, `projects.longitude`, same `organization_id`, `status = active`, ≤ 5 km                                  |
+| Tower name and collection pin  | `towers.name`, `towers.latitude`, `towers.longitude`. When the tower has no pin, `projects.latitude` and `projects.longitude` |
+| "Closest to me"                | Distance from the viewer's tower coordinates to the listing's `tower_id` coordinates                                          |
+| Pickup flat dropdown           | Active `contact_units` → `units.code` / `units.unit_label` + `projects.name`                                                  |
+| Seller role and "Member since" | Active `contact_roles` on that unit (`started_at` year)                                                                       |
+| Seller display name and photo  | `contacts.first_name`, `last_name`, `profile_photo_url`                                                                       |
 
 `units.code` is the flat label the prototype writes as "B-1104" / "1104". Prefer `unit_label` when it is set, otherwise `code`.
 

@@ -60,6 +60,8 @@ _LISTING_COLUMNS = """
     l.created_at,
     l.updated_at,
     p.name AS project_name,
+    p.latitude AS project_latitude,
+    p.longitude AS project_longitude,
     t.name AS tower_name,
     t.latitude AS tower_latitude,
     t.longitude AS tower_longitude,

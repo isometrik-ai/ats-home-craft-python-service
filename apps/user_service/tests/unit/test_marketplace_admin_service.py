@@ -149,6 +149,28 @@ async def test_get_listing_admin_builds_detail_and_unit_stats():
 
 
 @pytest.mark.asyncio
+async def test_admin_detail_uses_society_pin_when_tower_pin_is_missing():
+    svc = _admin_service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_admin_listing = AsyncMock(
+        return_value=_listing(
+            project_latitude=Decimal("28.6666"),
+            project_longitude=Decimal("77.21745"),
+        )
+    )
+    svc.repo.count_unit_listing_stats = AsyncMock(
+        return_value={
+            "listings_from_unit_total": 0,
+            "listings_from_unit_active": 0,
+            "removed_before_count": 0,
+        }
+    )
+    data = await svc.get_listing_admin(listing_id="listing-1")
+    assert data["collection_latitude"] == 28.6666
+    assert data["collection_longitude"] == 77.21745
+
+
+@pytest.mark.asyncio
 async def test_get_listing_admin_isometrik_id_null_when_contact_has_none():
     svc = _admin_service()
     svc.repo.expire_due = AsyncMock()
