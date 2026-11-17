@@ -130,6 +130,20 @@ def slot_blocks_for(facility: FacilitySnapshot, day: date) -> list[SlotBlock]:
     ]
 
 
+def slot_grid_stride(slot_minutes: int, buffer_minutes: int) -> int:
+    """Minutes from one slot start to the next, with the turnover buffer between them."""
+    return slot_minutes + max(buffer_minutes, 0)
+
+
+def _on_slot_grid(start_min: int, open_min: int, slot_minutes: int, buffer_minutes: int) -> bool:
+    """True when ``start_min`` is a generated slot start for the operating day."""
+    stride = slot_grid_stride(slot_minutes, buffer_minutes)
+    if stride <= 0:
+        return False
+    offset = start_min - open_min
+    return offset >= 0 and offset % stride == 0
+
+
 def _overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
     """True when half-open minute intervals overlap."""
     return a_start < b_end and b_start < a_end
@@ -285,12 +299,15 @@ def get_day_availability(ctx: AvailabilityContext, day: date) -> DayAvailability
             )
             unit_busy = _busy_intervals(facility, unit_active, day, ctx.host_name_of)
             slots: list[SlotView] = []
+            stride = slot_grid_stride(facility.slot_minutes, facility.policies.buffer_minutes)
             start_min = day_hours.open
             while start_min + facility.slot_minutes <= day_hours.close:
                 slots.append(
                     _slot_view(facility, unit, unit_active, unit_busy, day, start_min, flags)
                 )
-                start_min += facility.slot_minutes
+                if stride <= 0:
+                    break
+                start_min += stride
             units.append(UnitDayView(unit=unit_summary(unit), slots=slots))
 
     buffer = facility.policies.buffer_minutes
@@ -462,7 +479,11 @@ def _validate_common(ctx: AvailabilityContext, draft: BookingDraft, issues: _Iss
 
 
 def _validate_slot_schedule(
-    draft: BookingDraft, issues: _Issues, day_hours: DayHours, slot_minutes: int
+    draft: BookingDraft,
+    issues: _Issues,
+    day_hours: DayHours,
+    slot_minutes: int,
+    buffer_minutes: int,
 ) -> None:
     """Time and alignment rules for slot bookings."""
     if day_hours.closed:
@@ -472,7 +493,7 @@ def _validate_slot_schedule(
         issues.add("invalid_time_range", "Invalid time.")
     if start_min < day_hours.open or end_min > day_hours.close:
         issues.add("outside_hours", f"Outside operating hours ({_hours_label(day_hours)}).")
-    if (start_min - day_hours.open) % slot_minutes != 0:
+    if not _on_slot_grid(start_min, day_hours.open, slot_minutes, buffer_minutes):
         issues.add("misaligned_slot", "Pick a valid slot time.")
 
 
@@ -519,7 +540,9 @@ def _validate_slot(
     facility = ctx.facility
     if not draft.unit_id:
         issues.add("unit_required", "Select a court.")
-    _validate_slot_schedule(draft, issues, day_hours, facility.slot_minutes)
+    _validate_slot_schedule(
+        draft, issues, day_hours, facility.slot_minutes, facility.policies.buffer_minutes
+    )
     _validate_slot_conflicts(
         facility,
         draft,
@@ -542,7 +565,9 @@ def _validate_tee(
     if day_hours.closed:
         issues.add("closed_day", "Closed on this day.")
     start_min, end_min = draft.start_min, draft.end_min
-    if (start_min - day_hours.open) % facility.slot_minutes != 0:
+    if not _on_slot_grid(
+        start_min, day_hours.open, facility.slot_minutes, facility.policies.buffer_minutes
+    ):
         issues.add("misaligned_slot", "Pick a valid tee time.")
     if start_min < day_hours.open or end_min > day_hours.close:
         issues.add("outside_hours", "Outside operating hours.")
