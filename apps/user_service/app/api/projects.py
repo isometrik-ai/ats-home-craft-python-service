@@ -4168,7 +4168,8 @@ async def remove_project_member(
     description=(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
         "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
-        "status), `parking_allotment` (slot number, status, facility) when assigned, and "
+        "status), `parking_allotment` (slot number, slot_code_label, status, "
+        "facility) when assigned, and "
         "`approved_by` / `rejected_by` org-member summaries when reviewed, and "
         "`removed_by` (org member or resident) when soft-removed. "
         "Optional `search` matches registration number or unit code/label. "

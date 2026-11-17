@@ -122,18 +122,23 @@ LEFT JOIN facilities pf
     ON pf.id = fps.facility_id
    AND pf.organization_id = fps.organization_id
    AND pf.project_id = fps.project_id
+LEFT JOIN towers pt
+    ON pt.id = pf.tower_id
+   AND pt.organization_id = pf.organization_id
 """
 
 _VEHICLE_PARKING_SELECT_COLUMNS = """
               fps.id::text AS parking_slot_row_id,
               fps.slot_number AS parking_slot_number,
+              fps.slot_code AS parking_slot_code,
               fps.status::text AS parking_slot_status,
               fps.facility_id::text AS parking_facility_id,
               pf.name AS parking_facility_name,
               pf.location_type::text AS parking_facility_location_type,
               pf.floor_level AS parking_facility_floor_level,
               pf.wing AS parking_facility_wing,
-              pf.tower_id::text AS parking_facility_tower_id
+              pf.tower_id::text AS parking_facility_tower_id,
+              pt.code AS parking_facility_tower_code
 """
 
 _VEHICLE_REVIEWER_JOINS = """
