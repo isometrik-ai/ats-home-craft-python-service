@@ -775,6 +775,11 @@ class MarketplaceService:
                 listing=listing,
                 viewer_contact_id=contact_id,
             )
+            await self.repo.increment_view_count(
+                organization_id=self._org(),
+                listing_id=listing_id,
+            )
+            listing["view_count"] = int(listing.get("view_count") or 0) + 1
         return await self._detail(listing, viewer_contact_id=contact_id, viewer_project_id=None)
 
     async def list_listings(
@@ -970,6 +975,7 @@ class MarketplaceService:
                 "seller_role": row.get("seller_role"),
                 "member_since_year": _year(row.get("seller_role_started_at")),
                 "viewer_is_seller": str(row["seller_contact_id"]) == str(viewer_contact_id),
+                "view_count": int(row.get("view_count") or 0),
                 "collection_latitude": collection_latitude,
                 "collection_longitude": collection_longitude,
                 "media": listing_media(row),
@@ -1001,6 +1007,7 @@ class MarketplaceService:
             "sold_at": row.get("sold_at"),
             "sold_type": row.get("sold_type"),
             "removal_note": row.get("removal_note"),
+            "view_count": int(row.get("view_count") or 0),
         }
 
     @staticmethod

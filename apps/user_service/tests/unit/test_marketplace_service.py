@@ -35,6 +35,7 @@ from apps.user_service.app.services.marketplace_service import (
 )
 from libs.shared_utils.http_exceptions import (
     ConflictException,
+    NotFoundException,
     ValidationException,
 )
 
@@ -526,6 +527,7 @@ async def test_my_listings_includes_cover_path():
         page_size=20,
     )
     assert data["items"][0]["cover_path"] == "org/a.jpg"
+    assert data["items"][0]["view_count"] == 0
 
 
 @pytest.mark.asyncio
@@ -542,6 +544,58 @@ async def test_get_listing_detail_includes_seller_isometrik_id():
     assert data["seller_contact_id"] == "seller-1"
     assert data["isometrik_id"] == "6abdf6ad9126be00010e596f"
     assert data["more_from_seller_count"] == 1
+    assert data["view_count"] == 0
+    svc.repo.increment_view_count.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_opening_another_residents_listing_increments_view_count():
+    """A resident opening someone else's live listing counts as one view."""
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_listing = AsyncMock(return_value=_listing(view_count=4))
+    svc.repo.count_reports_for_listing = AsyncMock(return_value=0)
+    svc.repo.increment_view_count = AsyncMock()
+    svc.repo.count_other_live = AsyncMock(return_value=0)
+    svc.repo.is_saved = AsyncMock(return_value=False)
+
+    data = await svc.get_listing(contact_id="buyer-1", listing_id="listing-1")
+
+    assert data["view_count"] == 5
+    assert data["viewer_is_seller"] is False
+    svc.repo.increment_view_count.assert_awaited_once_with(
+        organization_id="org-1",
+        listing_id="listing-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_hidden_listing_does_not_increment_view_count():
+    """Three reports hide the listing, so opening it is not a view."""
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_listing = AsyncMock(return_value=_listing(view_count=2))
+    svc.repo.count_reports_for_listing = AsyncMock(return_value=3)
+    svc.repo.increment_view_count = AsyncMock()
+
+    with pytest.raises(NotFoundException):
+        await svc.get_listing(contact_id="buyer-1", listing_id="listing-1")
+
+    svc.repo.increment_view_count.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_opening_a_sold_listing_as_another_resident_does_not_count():
+    """Only a live listing another resident can open increases the count."""
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_listing = AsyncMock(return_value=_listing(status="sold", view_count=2))
+    svc.repo.increment_view_count = AsyncMock()
+
+    with pytest.raises(NotFoundException):
+        await svc.get_listing(contact_id="buyer-1", listing_id="listing-1")
+
+    svc.repo.increment_view_count.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -677,6 +731,25 @@ async def test_release_for_contact_delete_drops_drafts_removes_live_and_clears_s
     assert "status = 'removed'" in live_sql
     assert "status = 'live'" in live_sql
     assert "DELETE FROM marketplace_saved_items" in saved_sql
+
+
+@pytest.mark.asyncio
+async def test_increment_view_count_adds_one_without_touching_updated_at():
+    """Views use the same +1 counter as notices and do not reorder My listings."""
+    from apps.user_service.app.db.repositories.marketplace_repository import (
+        MarketplaceRepository,
+    )
+
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    repo = MarketplaceRepository(db_connection=conn)
+
+    await repo.increment_view_count(organization_id="org-1", listing_id="listing-1")
+
+    sql = conn.execute.await_args.args[0]
+    assert "view_count = view_count + 1" in sql
+    assert "updated_at" not in sql
+    assert conn.execute.await_args.args[1:] == ("org-1", "listing-1")
 
 
 @pytest.mark.asyncio

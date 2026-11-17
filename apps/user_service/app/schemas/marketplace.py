@@ -73,6 +73,7 @@ _EXAMPLE_ADMIN_CARD = {
     "sold_at": None,
     "removed_at": None,
     "can_remove": True,
+    "view_count": 14,
 }
 
 _EXAMPLE_ADMIN_DETAIL = {
@@ -644,6 +645,13 @@ class MarketplaceAdminListingCard(BaseModel):
     sold_at: str | None = None
     removed_at: str | None = None
     can_remove: bool
+    view_count: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Times a resident opened this listing. The seller's own opens are not counted."
+        ),
+    )
 
 
 class MarketplaceAdminListingDetail(MarketplaceAdminListingCard):

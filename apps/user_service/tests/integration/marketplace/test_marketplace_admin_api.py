@@ -100,6 +100,7 @@ def test_marketplace_admin_response_schemas_are_typed():
         "removed_count",
     }
     assert "can_remove" in MarketplaceAdminListingCard.model_fields
+    assert "view_count" in MarketplaceAdminListingCard.model_fields
     assert "project_id" in MarketplaceAdminListingCard.model_fields
     assert "history" not in MarketplaceAdminListingDetail.model_fields
     assert "removal_note" in MarketplaceAdminListingDetail.model_fields
