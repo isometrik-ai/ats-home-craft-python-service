@@ -33,10 +33,12 @@ from apps.user_service.app.services.facility_booking.availability import (
 )
 from apps.user_service.app.services.facility_booking.money import (
     DEFAULT_CURRENCY_SYMBOL,
+    MAX_DATE_SPAN_DAYS,
     each_date,
     fmt_hours,
     fmt_money,
     js_dow,
+    span_exceeds_cap,
     ts_round,
 )
 from apps.user_service.app.services.facility_booking.types import (
@@ -473,6 +475,16 @@ def quote_booking(
     currency_symbol: str = DEFAULT_CURRENCY_SYMBOL,
 ) -> PriceQuote:
     """Build a full price quote for ``draft`` at ``facility``."""
+    if span_exceeds_cap(draft.local_date, draft.end_local_date):
+        return PriceQuote(
+            lines=[
+                PriceLine(
+                    label="Date range too long",
+                    detail=f"Bookings can cover at most {MAX_DATE_SPAN_DAYS} days.",
+                    amount=0,
+                )
+            ],
+        )
     if facility.setup.price_mode == FacilityPriceMode.INCLUDED:
         return _included_quote()
     money = _Money(currency_symbol)

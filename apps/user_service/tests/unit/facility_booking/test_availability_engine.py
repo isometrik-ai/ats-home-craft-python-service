@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from apps.user_service.app.schemas.enums import FacilityBookingArchetype
 from apps.user_service.app.schemas.facility_booking import DayAvailability, MonthDayView
@@ -12,6 +12,7 @@ from apps.user_service.app.services.facility_booking import availability
 from apps.user_service.app.services.facility_booking.defaults import (
     default_booking_config,
 )
+from apps.user_service.app.services.facility_booking.money import MAX_DATE_SPAN_DAYS
 from apps.user_service.app.services.facility_booking.types import (
     BookingDraft,
     BookingUnit,
@@ -642,3 +643,34 @@ def test_multi_day_slot_rejects_blackout_and_closed_later_days():
         _court_draft(),
     )
     assert "outside_advance_window" in too_far.codes
+
+
+def test_date_span_over_cap_is_rejected_before_partial_checks():
+    """A range each_date would truncate is invalid instead of a silent prefix."""
+    start = date(2026, 11, 16)
+    over = availability.validate_draft(
+        availability.AvailabilityContext(
+            facility=_open_court(),
+            active=[],
+            now=datetime(2026, 11, 16, 9, 0, 0),
+        ),
+        _court_draft(
+            local_date=start,
+            end_local_date=start + timedelta(days=MAX_DATE_SPAN_DAYS),
+        ),
+    )
+    assert over.codes == ["invalid_date_range"]
+    assert "400" in over.errors[0].message
+
+    within = availability.validate_draft(
+        availability.AvailabilityContext(
+            facility=_open_court(),
+            active=[],
+            now=datetime(2026, 11, 16, 9, 0, 0),
+        ),
+        _court_draft(
+            local_date=start,
+            end_local_date=start + timedelta(days=MAX_DATE_SPAN_DAYS - 1),
+        ),
+    )
+    assert "invalid_date_range" not in within.codes

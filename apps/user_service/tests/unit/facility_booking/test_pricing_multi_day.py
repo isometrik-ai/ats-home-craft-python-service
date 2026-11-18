@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 
 from apps.user_service.app.schemas.enums import (
     FacilityBookingArchetype,
@@ -18,6 +18,7 @@ from apps.user_service.app.services.facility_booking import pricing
 from apps.user_service.app.services.facility_booking.defaults import (
     default_booking_config,
 )
+from apps.user_service.app.services.facility_booking.money import MAX_DATE_SPAN_DAYS
 from apps.user_service.app.services.facility_booking.types import (
     BookingDraft,
     BookingUnit,
@@ -169,3 +170,16 @@ def test_duration_and_tee_quotes_repeat_the_daily_window():
     assert tee.lines[0].detail == "₹400/player · 2 days (×1.25, ×1.00)"
     assert tee.lines[1].amount == 1800
     assert tee.lines[1].detail == "₹800/player · 2 days (×1.25, ×1.00)"
+
+
+def test_over_cap_range_is_not_priced_from_a_truncated_prefix():
+    """A span longer than each_date's cap is not billed as the first 400 days."""
+    start = date(2026, 11, 15)
+    quote = pricing.quote_booking(
+        _facility(FacilityBookingArchetype.SLOT),
+        _draft(local_date=start, end_local_date=start + timedelta(days=MAX_DATE_SPAN_DAYS)),
+    )
+    assert quote.total == 0
+    assert quote.due_now == 0
+    assert quote.lines[0].amount == 0
+    assert "400" in (quote.lines[0].detail or "")

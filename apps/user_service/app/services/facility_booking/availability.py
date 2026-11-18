@@ -30,10 +30,12 @@ from apps.user_service.app.schemas.facility_booking import (
 )
 from apps.user_service.app.schemas.facility_booking_config import DayHours
 from apps.user_service.app.services.facility_booking.money import (
+    MAX_DATE_SPAN_DAYS,
     each_date,
     fmt_clock,
     js_dow,
     local_start,
+    span_exceeds_cap,
     ts_round,
 )
 from apps.user_service.app.services.facility_booking.types import (
@@ -465,6 +467,11 @@ def _validate_common(ctx: AvailabilityContext, draft: BookingDraft, issues: _Iss
         issues.add("blackout_date", "Facility is closed on this date.")
     if draft.end_local_date < draft.local_date:
         issues.add("invalid_date_range", "Invalid date range.")
+    elif span_exceeds_cap(draft.local_date, draft.end_local_date):
+        issues.add(
+            "invalid_date_range",
+            f"Bookings can cover at most {MAX_DATE_SPAN_DAYS} days.",
+        )
 
     pool = ctx.weekly_pool if ctx.weekly_pool is not None else ctx.active
     usage = weekly_usage(
@@ -562,7 +569,19 @@ def _validate_each_window_day(
     validate_one: Callable[[AvailabilityContext, BookingDraft, _Issues, DayHours], None],
 ) -> None:
     """Run a one-day validator for every date a repeated daily window occupies."""
+    if span_exceeds_cap(draft.local_date, draft.end_local_date):
+        issues.add(
+            "invalid_date_range",
+            f"Bookings can cover at most {MAX_DATE_SPAN_DAYS} days.",
+        )
+        return
     dates = each_date(draft.local_date, draft.end_local_date)
+    if dates and dates[-1] < draft.end_local_date:
+        issues.add(
+            "invalid_date_range",
+            f"Bookings can cover at most {MAX_DATE_SPAN_DAYS} days.",
+        )
+        return
     if len(dates) <= 1:
         validate_one(ctx, draft, issues, day_hours)
         return
@@ -829,6 +848,8 @@ def validate_draft(ctx: AvailabilityContext, draft: BookingDraft) -> Validation:
     issues = _Issues()
     day_hours = hours_for(facility, draft.local_date)
     _validate_common(ctx, draft, issues)
+    if span_exceeds_cap(draft.local_date, draft.end_local_date):
+        return issues.result()
     if facility.archetype == SLOT:
         _validate_slot(ctx, draft, issues, day_hours)
     elif facility.archetype == TEE_TIME:
