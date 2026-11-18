@@ -533,3 +533,149 @@ def test_serialize_update_facility_maps_enum_fields():
     assert data["status"] == FacilityStatus.INACTIVE.value
     assert data["facility_type"] == FacilityType.SPORTS.value
     assert data["booking_archetype"] == FacilityBookingArchetype.SLOT.value
+
+
+class _Savepoint:
+    """Stand-in for the per-row database savepoint."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+def _import_service() -> FacilitiesService:
+    """Service whose connection can open a savepoint around each imported row."""
+    svc = _service()
+    svc.db_connection.transaction = MagicMock(return_value=_Savepoint())
+    svc.towers_repo.list_towers = AsyncMock(return_value=[])
+    svc.facilities_repo.list_facilities = AsyncMock(return_value=([], 0))
+    return svc
+
+
+@pytest.mark.asyncio
+async def test_import_creates_facility_and_ignores_parking_columns():
+    """A non-parking row is created without parking slots or booking config."""
+    from apps.user_service.tests.unit.test_facilities_workbook_parser import (
+        cells,
+        workbook_bytes,
+    )
+
+    svc = _import_service()
+    payload = workbook_bytes(
+        cells(
+            parking_slots=12,
+            parking_for="Residents",
+            vehicle_type="Four-wheeler",
+        )
+    )
+
+    result = await svc.import_facilities(
+        project_id=PROJECT_ID,
+        payload=payload,
+        filename="Facilities_Template.xlsx",
+    )
+
+    assert result == {"created": 1, "updated": 0, "errors": []}
+    inserted = svc.facilities_repo.insert_facility.await_args.args[0]
+    assert inserted["name"] == "Clubhouse"
+    assert inserted["facility_type"] == FacilityType.RECREATION.value
+    assert inserted["parking_slots"] is None
+    svc.parking_slots_repo.bulk_insert_slots.assert_not_awaited()
+    svc.setup_service.complete_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_import_applies_booking_config_and_renames_units(monkeypatch):
+    """Bookable rows update the default booking config and court names."""
+    from apps.user_service.tests.unit.test_facilities_workbook_parser import (
+        cells,
+        workbook_bytes,
+    )
+
+    svc = _import_service()
+    payload = workbook_bytes(
+        cells(
+            name="Tennis Court 1",
+            facility_type="Sports Court",
+            subtype="Tennis",
+            indoor_outdoor="Outdoor",
+            bookable="Yes",
+            booking_type="Hourly slots",
+            slot_minutes=60,
+            opens="6:00 AM",
+            closes="10:00 PM",
+            resident_rate=500,
+            rate_per="Hour",
+            units="Court A, Court B",
+        )
+    )
+    booking = MagicMock()
+    booking.get_workspace = AsyncMock(
+        return_value={"config": {"version": 3}, "units": [{"id": "unit-1", "name": "Court 1"}]}
+    )
+    booking.update_config = AsyncMock()
+    booking.update_unit = AsyncMock()
+    booking.create_unit = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.facilities_service.FacilityBookingConfigService",
+        lambda **_kwargs: booking,
+    )
+
+    result = await svc.import_facilities(
+        project_id=PROJECT_ID,
+        payload=payload,
+        filename="Facilities_Template.xlsx",
+    )
+
+    assert result["created"] == 1
+    body = booking.update_config.await_args.kwargs["body"]
+    assert body.slot_minutes == 60
+    assert body.pricing.resident_rate == 500
+    assert body.default_hours[0].open == 360
+    assert body.default_hours[0].close == 1320
+    assert booking.update_unit.await_args.kwargs["body"].name == "Court A"
+    assert booking.create_unit.await_args.kwargs["body"].name == "Court B"
+
+
+@pytest.mark.asyncio
+async def test_import_updates_existing_names_and_reports_missing_towers():
+    """A name already on the project is updated. An unknown tower is a row error."""
+    from apps.user_service.tests.unit.test_facilities_workbook_parser import (
+        cells,
+        workbook_bytes,
+    )
+
+    svc = _import_service()
+    svc.facilities_repo.list_facilities = AsyncMock(
+        return_value=([{"id": FACILITY_ID, "name": "Clubhouse"}], 1)
+    )
+    payload = workbook_bytes(cells(name="Clubhouse"), cells(name="Tower Gym", tower="A1"))
+
+    result = await svc.import_facilities(
+        project_id=PROJECT_ID,
+        payload=payload,
+        filename="Facilities_Template.xlsx",
+    )
+
+    assert result["created"] == 0
+    assert result["updated"] == 1
+    assert result["errors"][0]["code"] == "tower_not_found"
+    svc.facilities_repo.insert_facility.assert_not_awaited()
+    svc.facilities_repo.update_facility.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_import_rejects_a_non_xlsx_upload():
+    """The uploaded file must be an xlsx workbook."""
+    svc = _import_service()
+
+    with pytest.raises(ValidationException) as exc:
+        await svc.import_facilities(
+            project_id=PROJECT_ID,
+            payload=b"not-a-workbook",
+            filename="facilities.csv",
+        )
+
+    assert exc.value.message_key == "facilities_imports.errors.xlsx_required"
