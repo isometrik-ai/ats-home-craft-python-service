@@ -1718,3 +1718,114 @@ def test_company_detail_normalizers_cover_uuid_and_non_dict_extra():
     assert isinstance(details["id"], str)
     assert details["additional_data"] == {}
     assert details["sales_intelligence"] is None
+
+
+@pytest.mark.asyncio
+async def test_import_vendors_creates_company_tags_and_contact(monkeypatch):
+    """Service / Industry becomes tags, and a missing contact is created."""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Vendors"
+    sheet.append(
+        [
+            "Company Name *",
+            "Service / Industry",
+            "Company Email *",
+            "Company Phone",
+            "Website",
+            "Contact Person",
+            "Designation",
+            "Contact Mobile",
+            "Contact Email",
+            "Address",
+            "City",
+            "State",
+            "PIN Code",
+            "Billing Method",
+            "Payment Terms",
+            "Notes",
+        ]
+    )
+    sheet.append(
+        [
+            "KIRLOSKER",
+            "DG 750 KVA*1",
+            "vendor@example.com",
+            8806334433,
+            "www.kirloskar.com",
+            "Mr. Virendra",
+            "Service Engineer",
+            9717100415,
+            "virendra@example.com",
+            "Unit 406",
+            "Noida",
+            "Uttar Pradesh",
+            201301,
+            "Invoice",
+            "Net 30",
+            "Under AMC",
+        ]
+    )
+    sheet.append(
+        [
+            "KIRLOSKER",
+            "Lift Service",
+            "vendor@example.com",
+            8806334433,
+            "www.kirloskar.com",
+            "Mr. Virendra",
+            "Service Engineer",
+            9717100415,
+            "virendra@example.com",
+            "Unit 406",
+            "Noida",
+            "Uttar Pradesh",
+            201301,
+            "Invoice",
+            "Net 30",
+            "Under AMC",
+        ]
+    )
+    payload = BytesIO()
+    workbook.save(payload)
+    created_contacts: list[Any] = []
+
+    class _Contacts:
+        def __init__(self, **kwargs):
+            del kwargs
+
+        async def create_contact(self, body):
+            created_contacts.append(body)
+            return {"contact_id": CONTACT_ID}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vendor_import.ContactsService",
+        _Contacts,
+    )
+    service = _service()
+    service.companies_repo.get_company_ids_by_names = AsyncMock(return_value={})
+    service.contacts_repo.get_contact_id_by_email = AsyncMock(return_value=None)
+    service.contacts_repo.get_contact_details_by_phone = AsyncMock(return_value=None)
+    service.create_company = AsyncMock(return_value={"company_id": COMPANY_ID})
+
+    from apps.user_service.app.services.vendor_import import import_vendors
+
+    result = await import_vendors(
+        service,
+        content=payload.getvalue(),
+        filename="Vendors_Template.xlsx",
+    )
+
+    company = service.create_company.await_args.args[0]
+    assert result["created"] == 1
+    assert result["updated"] == 0
+    assert result["errors"] == []
+    assert company.tags == ["DG 750 KVA*1", "Lift Service", "Vendor"]
+    assert created_contacts[0].email == "virendra@example.com"
+    assert created_contacts[0].contact_type.value == "Vendor"
+    assert "Lift Service" in created_contacts[0].tags
+    assert created_contacts[0].company_association.add_association.company_id == COMPANY_ID
