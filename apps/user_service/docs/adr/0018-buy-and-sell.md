@@ -81,7 +81,7 @@ Residents do not get new RBAC codes. Posting requires Owner, Tenant, or Family o
 - **Summary:** `active_count` (`live`), `sold_count`, `past_count` (`expired`), `removed_count`. Drafts are omitted. Same optional `project_id`.
 - **Detail / remove:** `/listings/{id}` — org + listing id. Optional `project_id` further scopes the row.
 - **Remove:** `POST .../listings/{id}/remove` `{ "removal_note" }` on a **live** row → `status = removed`. Permanent; no restore.
-- **Not built:** export, settings, Reported tab, view counts, conversations.
+- **Not built:** export, settings, conversations. `view_count` is on the listing and on the staff card. It increases when a resident opens someone else's listing detail.
 
 ### 3. Listing lifecycle
 

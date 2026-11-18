@@ -132,6 +132,7 @@ async def test_list_listings_admin_maps_filters():
     assert data["items"][0]["unit_label"] == "B-1104"
     assert data["items"][0]["project_id"] == "project-1"
     assert data["items"][0]["can_remove"] is True
+    assert data["items"][0]["view_count"] == 0
     assert query.tower_id is None
     assert query.sort == MarketplaceAdminSort.TOWER_UNIT
 
@@ -156,6 +157,7 @@ async def test_get_listing_admin_builds_detail_and_unit_stats():
     assert "history" not in data
     assert data["can_remove"] is True
     assert data["isometrik_id"] == "6a4fb3e2f96daa0001281d6c"
+    assert data["view_count"] == 0
 
 
 @pytest.mark.asyncio

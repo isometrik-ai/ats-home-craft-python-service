@@ -423,6 +423,7 @@ class MarketplaceAdminService:
             "sold_at": row.get("sold_at"),
             "removed_at": row.get("removed_at"),
             "can_remove": row["status"] in ("live", "draft"),
+            "view_count": int(row.get("view_count") or 0),
         }
 
     def _admin_detail(self, row: dict[str, Any], stats: dict[str, int]) -> dict[str, Any]:

@@ -67,6 +67,7 @@ _LISTING_COLUMNS = """
     l.removal_note,
     l.removed_by_user_id::text AS removed_by_user_id,
     l.media,
+    l.view_count,
     l.created_at,
     l.updated_at,
     p.name AS project_name,
@@ -313,6 +314,27 @@ class MarketplaceRepository(BaseRepository):
             fields.get("kind", "sale"),
         )
         return dict(row)
+
+    async def increment_view_count(
+        self,
+        *,
+        organization_id: str,
+        listing_id: str,
+    ) -> None:
+        """Count one resident open of someone else's listing.
+
+        updated_at is left alone so My listings, which sort by updated_at, stay put.
+        """
+        await self.db_connection.execute(
+            """
+            UPDATE marketplace_listings
+               SET view_count = view_count + 1
+             WHERE organization_id = $1::uuid
+               AND id = $2::uuid
+            """,
+            organization_id,
+            listing_id,
+        )
 
     async def get_listing(self, *, organization_id: str, listing_id: str) -> dict[str, Any] | None:
         """One listing with seller, flat, and tower."""

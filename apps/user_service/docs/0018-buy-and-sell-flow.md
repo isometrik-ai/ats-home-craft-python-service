@@ -132,7 +132,8 @@ CREATE TYPE public.marketplace_sale_rating AS ENUM ('smooth', 'fine', 'had_troub
 | `removal_note`             | text                           | Required when `status = removed` (seller reason)                       |
 | `removed_by_user_id`       | uuid                           | FK `auth.users`. Resident session user on remove                       |
 | `media`                    | jsonb NOT NULL default `[]`    | Ordered image/video metadata. Max 8                                    |
-| `created_at`, `updated_at` | timestamptz                    |                                                                        |
+| `view_count`               | integer NOT NULL default 0     | Resident opens of this listing. The seller's own opens are not counted |
+| `created_at`, `updated_at` | timestamptz                    | A view does not change `updated_at`                                    |
 
 Checks:
 
@@ -294,7 +295,8 @@ Giveaways sort with the chosen `sort`. Price sort puts giveaways (no price) at t
 | Detail line              | Source                                                            |
 | ------------------------ | ----------------------------------------------------------------- |
 | Available                | `status = live`                                                   |
-| Listed 2 days ago        | `published_at` only (no view count, no "people asking")           |
+| Listed 2 days ago        | `published_at`                                                    |
+| Views                    | `view_count`. +1 when another resident opens this detail          |
 | ₹4,500 and struck ₹9,000 | `price_amount`, `original_price_amount`. Giveaway renders as Free |
 | Negotiable               | `negotiable`                                                      |
 | ₹9,000 new · bought 2025 | `original_price_amount`, `purchase_year`                          |
@@ -475,7 +477,7 @@ Prefix: `/v1/marketplace/admin`
 | Row click / drawer                                     | `GET /listings/{listing_id}`                                                                  |
 | Remove (live only)                                     | `POST /listings/{listing_id}/remove` `{ "removal_note" }`                                     |
 
-**Not implemented (hide in client):** Group by tower, Export, Settings, Restore, view counts, conversations.
+**Not implemented (hide in client):** Group by tower, Export, Settings, Restore, conversations.
 
 Status mapping for the mock:
 
@@ -490,6 +492,6 @@ Status mapping for the mock:
 
 Staff `POST .../remove` writes the same `removed` status as the seller. The listing leaves the Active card and appears under Removed. Removal is permanent (no restore).
 
-List card fields: cover, title, category names, price (or Free), resident public name, unit label, tower name, posted time, days left (live), status, `can_remove`.
+List card fields: cover, title, category names, price (or Free), resident public name, unit label, tower name, posted time, days left (live), status, `can_remove`, `view_count` (Activity). Staff reads do not increment the count.
 
 Drawer extra fields: media, description, price/condition/brand/age, collection pin, seller role, `listings_from_unit_total` / `listings_from_unit_active`, `removed_before_count`, `removal_note`, `history[]` derived from `published_at` / `sold_at` / `expires_at` / `removed_at` (no event table). Staff always see the pickup flat.
