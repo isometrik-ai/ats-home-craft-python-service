@@ -1829,3 +1829,137 @@ async def test_import_vendors_creates_company_tags_and_contact(monkeypatch):
     assert created_contacts[0].contact_type.value == "Vendor"
     assert "Lift Service" in created_contacts[0].tags
     assert created_contacts[0].company_association.add_association.company_id == COMPANY_ID
+
+
+def test_name_only_vendor_contact_accepts_later_email():
+    """A later row with the same name and an email joins the name-only contact."""
+    from apps.user_service.app.services import vendor_import as mod
+
+    vendor = {
+        "name": "Acme",
+        "emails": [],
+        "phones": [],
+        "website": None,
+        "tags": [],
+        "address_line1": None,
+        "city": None,
+        "state": None,
+        "postal_code": None,
+        "billing_method": None,
+        "payment_terms": None,
+        "notes": [],
+        "contacts": [],
+        "rows": [],
+    }
+    row = {field: "" for field in set(mod._VENDOR_HEADERS.values())}
+    row["contact_person"] = "Mr. Virendra"
+    mod._merge_vendor_row(vendor, row, 2)
+    row["contact_email"] = "virendra@example.com"
+    row["contact_mobile"] = "9717100415"
+    mod._merge_vendor_row(vendor, row, 3)
+
+    assert len(vendor["contacts"]) == 1
+    assert vendor["contacts"][0]["emails"] == ["virendra@example.com"]
+    assert vendor["contacts"][0]["phones"] == [("+91", "9717100415")]
+
+
+def test_company_names_group_with_lower():
+    """Rows group by lowercased name, matching the companies repository."""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    from apps.user_service.app.services.vendor_import import _group_vendor_sheet
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Vendors"
+    sheet.append(["Company Name", "Service / Industry"])
+    sheet.append(["STRASSE", "Lift"])
+    sheet.append(["strasse", "DG"])
+    sheet.append(["Straße", "HVAC"])
+    payload = BytesIO()
+    workbook.save(payload)
+    vendors = _group_vendor_sheet(payload.getvalue())
+
+    assert [vendor["name"] for vendor in vendors] == ["STRASSE", "Straße"]
+    assert vendors[0]["tags"] == ["Lift", "DG"]
+
+
+def test_existing_company_update_persists_fields():
+    """An existing company patch keeps stored phones and adds imported fields."""
+    from apps.user_service.app.services.vendor_import import (
+        _vendor_company_update_request,
+        _vendor_tags,
+    )
+
+    vendor = {
+        "name": "Acme",
+        "emails": ["vendor@example.com"],
+        "phones": [("+91", "8806334433")],
+        "website": "https://acme.example",
+        "tags": [],
+        "address_line1": "Unit 406",
+        "city": "Noida",
+        "state": None,
+        "postal_code": None,
+        "billing_method": "Invoice",
+        "payment_terms": "Net 30",
+        "notes": ["Under AMC"],
+        "contacts": [],
+        "rows": [],
+    }
+    current = {
+        "email": None,
+        "tags": ["Vendor"],
+        "phones": [
+            {
+                "phone_number": "1111111111",
+                "phone_isd_code": "+91",
+                "label": "work",
+                "is_primary": True,
+            }
+        ],
+        "websites": [],
+        "addresses": [],
+        "billing_preferences": {},
+        "notes": [{"title": "Existing", "content": "Keep me"}],
+    }
+    body = _vendor_company_update_request(
+        vendor,
+        current,
+        _vendor_tags([*current["tags"], "Lift Service"]),
+    )
+
+    assert body is not None
+    assert body.email == "vendor@example.com"
+    assert [phone.phone_number for phone in body.phones] == ["1111111111", "8806334433"]
+    assert body.phones[0].is_primary is True
+    assert body.phones[1].is_primary is False
+    assert body.websites.add[0].url == "https://acme.example"
+    assert body.addresses.add[0].city == "Noida"
+    assert body.billing_preferences.method == "Invoice"
+    assert body.billing_preferences.terms == "Net 30"
+    notes = body.notes or []
+    assert [note.content for note in notes] == ["Keep me", "Under AMC"]
+    assert body.tags == ["Vendor", "Lift Service"]
+
+
+def test_oversized_vendor_workbook_is_rejected():
+    """A sheet that declares more rows than the import cap is rejected."""
+    from apps.user_service.app.services.vendor_import import _vendor_sheet_rows
+
+    class _Sheet:
+        """Worksheet whose declared size exceeds the import cap."""
+
+        title = "Vendors"
+        max_row = 100_000
+        max_column = 10
+
+    class _Book:
+        """Workbook containing the oversized worksheet."""
+
+        worksheets = [_Sheet()]
+
+    with pytest.raises(ValidationException):
+        _vendor_sheet_rows(_Book())

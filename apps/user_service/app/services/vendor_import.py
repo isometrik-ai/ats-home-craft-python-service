@@ -15,11 +15,15 @@ from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
 from apps.user_service.app.schemas.common import (
+    AddressesUpdate,
     AddressInput,
     BillingPreferences,
+    BillingPreferencesUpdate,
     NoteItem,
     Phone,
     Website,
+    WebsiteInput,
+    WebsitesUpdate,
 )
 from apps.user_service.app.schemas.companies import (
     CompanyContactAssociationAdd,
@@ -35,7 +39,7 @@ from apps.user_service.app.schemas.contacts import (
 from apps.user_service.app.schemas.enums import ContactType
 from apps.user_service.app.services.companies_service import CompaniesService
 from apps.user_service.app.services.contacts_service import ContactsService
-from apps.user_service.app.utils.common_utils import coerce_json_list
+from apps.user_service.app.utils.common_utils import coerce_json_list, parse_json_field
 from libs.shared_utils.http_exceptions import ValidationException
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -66,6 +70,11 @@ _VENDOR_HEADERS = {
 }
 _EMAIL_RE = re.compile(r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.IGNORECASE)
 _NAME_PREFIXES = {"mr": "Mr", "mrs": "Mrs", "ms": "Ms", "miss": "Miss", "dr": "Dr", "prof": "Prof"}
+_MAX_WORKBOOK_SHEETS = 20
+_MAX_VENDOR_ROWS = 5000
+_MAX_VENDOR_COLUMNS = 256
+_MAX_HEADER_ROWS = 30
+_MAX_VENDOR_TAGS = 50
 
 
 async def import_vendors(
@@ -81,7 +90,12 @@ async def import_vendors(
     email or mobile already exists, and created through the contact service when
     it does not.
     """
-    _validate_vendor_upload(filename, content)
+    workbook_too_large = len(content) > _MAX_VENDOR_WORKBOOK_BYTES
+    if not filename.lower().endswith(".xlsx") or not content or workbook_too_large:
+        raise ValidationException(
+            message_key="companies.errors.import_workbook_invalid",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
     vendors = _group_vendor_sheet(content)
     if not vendors:
         raise ValidationException(
@@ -97,18 +111,36 @@ async def import_vendors(
     organization_id = service.user_context.organization_id
     assert organization_id
     for vendor in vendors:
-        saved = await _import_one_vendor(
-            service,
-            vendor=vendor,
-            organization_id=organization_id,
-            project_id=project_id,
-            errors=errors,
-        )
-        if saved is None:
+        try:
+            company_id, was_created, linked_ids, has_primary = await _save_vendor_company(
+                service,
+                vendor=vendor,
+                organization_id=organization_id,
+                project_id=project_id,
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.exception("Vendor import failed for %s", vendor["name"])
+            message_key = getattr(exc, "message_key", None)
+            message = (
+                message_key
+                if isinstance(message_key, str) and message_key
+                else (str(exc).strip() or exc.__class__.__name__)
+            )
+            errors.extend(
+                {"row": row_number, "company": vendor["name"], "message": message[:500]}
+                for row_number in vendor["rows"]
+            )
             continue
-        company_id, was_created, saved_contact_ids = saved
+        saved_ids, contact_errors = await _save_vendor_contacts(
+            service,
+            company_id=company_id,
+            vendor=vendor,
+            linked_ids=linked_ids,
+            has_primary=has_primary,
+        )
+        errors.extend(contact_errors)
         company_ids.append(company_id)
-        contact_ids.extend(saved_contact_ids)
+        contact_ids.extend(saved_ids)
         created += int(was_created)
         updated += int(not was_created)
     return {
@@ -118,51 +150,6 @@ async def import_vendors(
         "company_ids": company_ids,
         "contact_ids": contact_ids,
     }
-
-
-async def _import_one_vendor(
-    service: CompaniesService,
-    *,
-    vendor: dict[str, Any],
-    organization_id: str,
-    project_id: str | None,
-    errors: list[dict[str, Any]],
-) -> tuple[str, bool, list[str]] | None:
-    """Save one grouped vendor. Company failures are recorded and skipped."""
-    try:
-        company_id, was_created, linked_ids, has_primary = await _save_vendor_company(
-            service,
-            vendor=vendor,
-            organization_id=organization_id,
-            project_id=project_id,
-        )
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.exception("Vendor import failed for %s", vendor["name"])
-        errors.extend(_vendor_row_errors(vendor, exc))
-        return None
-    saved_ids, contact_errors = await _save_vendor_contacts(
-        service,
-        company_id=company_id,
-        vendor=vendor,
-        linked_ids=linked_ids,
-        has_primary=has_primary,
-    )
-    errors.extend(contact_errors)
-    return company_id, was_created, saved_ids
-
-
-def _validate_vendor_upload(filename: str, content: bytes) -> None:
-    """Reject uploads that are not an .xlsx workbook within the size limit."""
-    if not filename.lower().endswith(".xlsx") or not content:
-        raise ValidationException(
-            message_key="companies.errors.import_workbook_invalid",
-            custom_code=CustomStatusCode.VALIDATION_ERROR,
-        )
-    if len(content) > _MAX_VENDOR_WORKBOOK_BYTES:
-        raise ValidationException(
-            message_key="companies.errors.import_workbook_invalid",
-            custom_code=CustomStatusCode.VALIDATION_ERROR,
-        )
 
 
 async def _save_vendor_company(
@@ -177,7 +164,7 @@ async def _save_vendor_company(
         organization_id=organization_id,
         names=[vendor["name"]],
     )
-    company_id = found.get(vendor["name"].strip().casefold())
+    company_id = found.get(vendor["name"].strip().lower())
     tags = _vendor_tags(vendor["tags"])
     if company_id is None:
         created = await service.create_company(
@@ -191,13 +178,17 @@ async def _save_vendor_company(
         organization_id=organization_id,
     )
     current = dict(current or {})
-    merged = _vendor_tags([*_string_list(current.get("tags")), *vendor["tags"]])
-    if merged != _string_list(current.get("tags")):
-        await service.update_company(
-            company_id=company_id,
-            body=UpdateCompanyRequest(tags=merged),
-        )
-    linked_ids, has_primary = _linked_contact_ids(current.get("contacts"))
+    stored_tags = current.get("tags") if isinstance(current.get("tags"), list) else []
+    stored_tags = [str(item).strip() for item in stored_tags if str(item).strip()]
+    merged = _vendor_tags([*stored_tags, *vendor["tags"]])
+    update_body = _vendor_company_update_request(vendor, current, merged)
+    if update_body is not None:
+        await service.update_company(company_id=company_id, body=update_body)
+    contacts = coerce_json_list(current.get("contacts"))
+    linked_ids = {
+        str(item.get("id")) for item in contacts if isinstance(item, dict) and item.get("id")
+    }
+    has_primary = any(bool(item.get("is_primary")) for item in contacts if isinstance(item, dict))
     await service._link_company_to_project_if_requested(
         company_id=company_id,
         project_id=project_id,
@@ -222,99 +213,62 @@ async def _save_vendor_contacts(
         supabase_client=service.supabase_client,
     )
     for contact in vendor["contacts"]:
-        contact_id, has_primary, error = await _save_one_vendor_contact(
-            service,
-            contacts_service=contacts_service,
-            company_id=company_id,
-            vendor=vendor,
-            contact=contact,
-            linked_ids=linked_ids,
-            has_primary=has_primary,
-        )
-        if error is not None:
-            errors.append(error)
-        if contact_id:
-            saved.append(contact_id)
-    return saved, errors
-
-
-async def _save_one_vendor_contact(
-    service: CompaniesService,
-    *,
-    contacts_service: ContactsService,
-    company_id: str,
-    vendor: dict[str, Any],
-    contact: dict[str, Any],
-    linked_ids: set[str],
-    has_primary: bool,
-) -> tuple[str | None, bool, dict[str, Any] | None]:
-    """Attach one contact and turn a failure into a row error."""
-    try:
-        contact_id, has_primary = await _attach_vendor_contact(
-            service,
-            contacts_service=contacts_service,
-            company_id=company_id,
-            contact=contact,
-            linked_ids=linked_ids,
-            has_primary=has_primary,
-        )
-    except Exception as exc:  # pylint: disable=broad-exception-caught
-        logger.exception("Vendor contact import failed for %s", vendor["name"])
-        return None, has_primary, _contact_row_error(vendor, contact, _import_error_message(exc))
-    if contact_id is None:
-        return (
-            None,
-            has_primary,
-            _contact_row_error(vendor, contact, "Contact has no usable email or mobile number."),
-        )
-    return contact_id, has_primary, None
-
-
-async def _attach_vendor_contact(
-    service: CompaniesService,
-    *,
-    contacts_service: ContactsService,
-    company_id: str,
-    contact: dict[str, Any],
-    linked_ids: set[str],
-    has_primary: bool,
-) -> tuple[str | None, bool]:
-    """Link a contact that already exists, or create it on this company."""
-    existing_id = await _find_vendor_contact_id(service, contact)
-    if existing_id is None and not contact["emails"] and not contact["phones"]:
-        return None, has_primary
-    make_primary = not has_primary
-    if existing_id and existing_id in linked_ids:
-        return existing_id, has_primary
-    if existing_id:
-        await service.update_company(
-            company_id=company_id,
-            body=UpdateCompanyRequest(
-                contact_association=CompanyContactUpdate(
-                    add_associations=[
-                        CompanyContactAssociationAdd(
-                            contact_id=existing_id,
-                            is_primary=make_primary,
-                        )
-                    ]
+        row_error = {
+            "row": contact["rows"][0] if contact["rows"] else None,
+            "company": vendor["name"],
+        }
+        try:
+            existing_id = await _find_vendor_contact_id(service, contact)
+            if existing_id is None and not contact["emails"] and not contact["phones"]:
+                errors.append(
+                    {**row_error, "message": "Contact has no usable email or mobile number."}
                 )
-            ),
-        )
-        linked_ids.add(existing_id)
-        return existing_id, has_primary or make_primary
-
-    created = await contacts_service.create_contact(
-        _vendor_contact_request(
-            contact=contact,
-            company_id=company_id,
-            is_primary=make_primary,
-        )
-    )
-    contact_id = str(created.get("contact_id") or "")
-    if not contact_id:
-        return None, has_primary
-    linked_ids.add(contact_id)
-    return contact_id, True
+                continue
+            make_primary = not has_primary
+            if existing_id and existing_id not in linked_ids:
+                await service.update_company(
+                    company_id=company_id,
+                    body=UpdateCompanyRequest(
+                        contact_association=CompanyContactUpdate(
+                            add_associations=[
+                                CompanyContactAssociationAdd(
+                                    contact_id=existing_id,
+                                    is_primary=make_primary,
+                                )
+                            ]
+                        )
+                    ),
+                )
+                linked_ids.add(existing_id)
+                has_primary = has_primary or make_primary
+            elif existing_id is None:
+                created = await contacts_service.create_contact(
+                    _vendor_contact_request(
+                        contact=contact,
+                        company_id=company_id,
+                        is_primary=make_primary,
+                    )
+                )
+                existing_id = str(created.get("contact_id") or "")
+                if not existing_id:
+                    errors.append(
+                        {**row_error, "message": "Contact has no usable email or mobile number."}
+                    )
+                    continue
+                linked_ids.add(existing_id)
+                has_primary = True
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logger.exception("Vendor contact import failed for %s", vendor["name"])
+            message_key = getattr(exc, "message_key", None)
+            message = (
+                message_key
+                if isinstance(message_key, str) and message_key
+                else (str(exc).strip() or exc.__class__.__name__)
+            )
+            errors.append({**row_error, "message": message[:500]})
+            continue
+        saved.append(existing_id)
+    return saved, errors
 
 
 async def _find_vendor_contact_id(
@@ -380,6 +334,141 @@ def _vendor_company_request(vendor: dict[str, Any], tags: list[str]) -> CreateCo
     )
 
 
+def _vendor_company_update_request(  # pylint: disable=too-many-branches,too-complex
+    vendor: dict[str, Any],
+    current: dict[str, Any],
+    tags: list[str],
+) -> UpdateCompanyRequest | None:
+    """Build a patch for imported fields the stored company does not already have."""
+    payload: dict[str, Any] = {}
+    email = vendor["emails"][0] if vendor["emails"] else None
+    current_email = str(current.get("email") or "").strip()
+    if email and email.casefold() != current_email.casefold():
+        payload["email"] = email
+    stored_tags = current.get("tags") if isinstance(current.get("tags"), list) else []
+    stored_tags = [str(item).strip() for item in stored_tags if str(item).strip()]
+    if tags != stored_tags:
+        payload["tags"] = tags
+
+    phones: list[Phone] = []
+    seen_numbers: set[str] = set()
+    phone_has_primary = False
+    for item in coerce_json_list(current.get("phones")):
+        if not isinstance(item, dict):
+            continue
+        number = str(item.get("phone_number") or "").strip()
+        isd = str(item.get("phone_isd_code") or "").strip()
+        if not number or not isd or number in seen_numbers:
+            continue
+        seen_numbers.add(number)
+        label = str(item.get("label") or "").strip()
+        is_primary = bool(item.get("is_primary")) and not phone_has_primary
+        phone_has_primary = phone_has_primary or is_primary
+        phones.append(
+            Phone(
+                phone_number=number[:15],
+                phone_isd_code=isd[:5],
+                label=label[:20] or None,
+                is_primary=is_primary,
+            )
+        )
+    added_phone = False
+    for isd, number in vendor["phones"]:
+        if number in seen_numbers or len(phones) >= 20:
+            continue
+        seen_numbers.add(number)
+        phones.append(
+            Phone(
+                phone_number=number,
+                phone_isd_code=isd,
+                label="other" if phones else "work",
+                is_primary=not phone_has_primary,
+            )
+        )
+        phone_has_primary = True
+        added_phone = True
+    if added_phone:
+        payload["phones"] = phones
+
+    url = vendor.get("website")
+    stored_sites = [
+        item for item in coerce_json_list(current.get("websites")) if isinstance(item, dict)
+    ]
+    known_urls = {str(item.get("url") or "").strip().casefold() for item in stored_sites}
+    if url and url.casefold() not in known_urls:
+        site_has_primary = any(bool(item.get("is_primary")) for item in stored_sites)
+        payload["websites"] = WebsitesUpdate(
+            add=[WebsiteInput(url=url, type="website", is_primary=not site_has_primary)]
+        )
+
+    address_fields = ("address_line1", "city", "state", "postal_code")
+    if any(vendor[key] for key in address_fields):
+        incoming = tuple(str(vendor.get(key) or "").strip().casefold() for key in address_fields)
+        stored_addresses = [
+            item for item in coerce_json_list(current.get("addresses")) if isinstance(item, dict)
+        ]
+        known_addresses = {
+            tuple(str(item.get(key) or "").strip().casefold() for key in address_fields)
+            for item in stored_addresses
+        }
+        if incoming not in known_addresses:
+            address_has_primary = any(bool(item.get("is_primary")) for item in stored_addresses)
+            payload["addresses"] = AddressesUpdate(
+                add=[
+                    AddressInput(
+                        address_line1=vendor["address_line1"],
+                        city=vendor["city"],
+                        state=vendor["state"],
+                        postal_code=vendor["postal_code"],
+                        country="India",
+                        is_primary=not address_has_primary,
+                    )
+                ]
+            )
+
+    billing = current.get("billing_preferences")
+    if isinstance(billing, str):
+        try:
+            billing = parse_json_field(billing)
+        except (TypeError, ValueError):
+            billing = {}
+    billing = billing if isinstance(billing, dict) else {}
+    billing_payload: dict[str, str] = {}
+    method = vendor["billing_method"]
+    terms = vendor["payment_terms"]
+    if method and str(billing.get("method") or "").strip() != method:
+        billing_payload["method"] = method
+    if terms and str(billing.get("terms") or "").strip() != terms:
+        billing_payload["terms"] = terms
+    if billing_payload:
+        payload["billing_preferences"] = BillingPreferencesUpdate(**billing_payload)
+
+    if vendor["notes"]:
+        notes: list[NoteItem] = []
+        seen_notes: set[str] = set()
+        for raw in coerce_json_list(current.get("notes")):
+            if not isinstance(raw, dict):
+                continue
+            content = str(raw.get("content") or "").strip()
+            title = str(raw.get("title") or "Note").strip() or "Note"
+            if not content or content.casefold() in seen_notes:
+                continue
+            seen_notes.add(content.casefold())
+            notes.append(NoteItem(title=title[:500], content=content[:50000]))
+        added_note = False
+        for content in vendor["notes"]:
+            if content.casefold() in seen_notes:
+                continue
+            seen_notes.add(content.casefold())
+            notes.append(NoteItem(title="Vendor import", content=content))
+            added_note = True
+        if added_note:
+            payload["notes"] = notes
+    if not payload:
+        return None
+    return UpdateCompanyRequest(**payload)
+
+
 def _vendor_contact_request(
     *,
     contact: dict[str, Any],
@@ -415,7 +504,7 @@ def _vendor_contact_request(
     )
 
 
-def _group_vendor_sheet(payload: bytes) -> list[dict[str, Any]]:
+def _group_vendor_sheet(payload: bytes) -> list[dict[str, Any]]:  # pylint: disable=too-complex
     """Fold the Vendors sheet into one record per company name."""
     try:
         workbook = load_workbook(BytesIO(payload), read_only=True, data_only=True)
@@ -444,70 +533,78 @@ def _group_vendor_sheet(payload: bytes) -> list[dict[str, Any]]:
                 break
             continue
         blank_run = 0
-        mapped = _map_vendor_row(header, values)
+        mapped = {name: "" for name in set(_VENDOR_HEADERS.values())}
+        for index, field_name in header.items():
+            if index < len(values):
+                mapped[field_name] = _cell_text(values[index])
         name = " ".join(mapped["company_name"].split())[:200]
         if not name:
             continue
-        vendor = companies.get(name.casefold())
+        name_key = name.strip().lower()
+        vendor = companies.get(name_key)
         if vendor is None:
-            vendor = _empty_vendor(name)
-            companies[name.casefold()] = vendor
+            vendor = {
+                "name": name,
+                "emails": [],
+                "phones": [],
+                "website": None,
+                "tags": [],
+                "address_line1": None,
+                "city": None,
+                "state": None,
+                "postal_code": None,
+                "billing_method": None,
+                "payment_terms": None,
+                "notes": [],
+                "contacts": [],
+                "rows": [],
+            }
+            companies[name_key] = vendor
         _merge_vendor_row(vendor, mapped, first_data_row + offset)
     return list(companies.values())
 
 
-def _map_vendor_row(header: dict[int, str], values: tuple[Any, ...]) -> dict[str, str]:
-    """Read one worksheet row into the known vendor fields."""
-    mapped = {name: "" for name in set(_VENDOR_HEADERS.values())}
-    for index, field_name in header.items():
-        if index < len(values):
-            mapped[field_name] = _cell_text(values[index])
-    return mapped
-
-
-def _empty_vendor(name: str) -> dict[str, Any]:
-    """Return a grouped vendor with empty collected fields."""
-    return {
-        "name": name,
-        "emails": [],
-        "phones": [],
-        "website": None,
-        "tags": [],
-        "address_line1": None,
-        "city": None,
-        "state": None,
-        "postal_code": None,
-        "billing_method": None,
-        "payment_terms": None,
-        "notes": [],
-        "contacts": [],
-        "rows": [],
-    }
-
-
-def _vendor_sheet_rows(workbook: Any) -> tuple[dict[int, str], list[Any], int] | None:
-    """Return the header map and data rows from the Vendors sheet."""
+def _vendor_sheet_rows(workbook: Any) -> tuple[dict[int, str], Any, int] | None:
+    """Stream data rows from the Vendors sheet within workbook limits."""
     sheets = list(workbook.worksheets)
-    preferred = [sheet for sheet in sheets if sheet.title.strip().casefold() == "vendors"]
-    for sheet in preferred or sheets:
-        rows = list(sheet.iter_rows(values_only=True))
-        for index, row in enumerate(rows):
-            header = _vendor_header(row)
+    if len(sheets) > _MAX_WORKBOOK_SHEETS:
+        raise ValidationException(
+            message_key="companies.errors.import_workbook_invalid",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+    for sheet in sheets:
+        max_row = getattr(sheet, "max_row", None)
+        max_column = getattr(sheet, "max_column", None)
+        row_too_large = isinstance(max_row, int) and max_row > _MAX_VENDOR_ROWS
+        column_too_large = isinstance(max_column, int) and max_column > _MAX_VENDOR_COLUMNS
+        if row_too_large or column_too_large:
+            raise ValidationException(
+                message_key="companies.errors.import_workbook_invalid",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+    preferred = next(
+        (sheet for sheet in sheets if str(sheet.title).strip().casefold() == "vendors"),
+        None,
+    )
+    for sheet in [preferred] if preferred is not None else sheets:
+        row_iter = sheet.iter_rows(
+            max_row=_MAX_VENDOR_ROWS,
+            max_col=_MAX_VENDOR_COLUMNS,
+            values_only=True,
+        )
+        for index, row in enumerate(row_iter, start=1):
+            if index > _MAX_HEADER_ROWS:
+                break
+            header: dict[int, str] = {}
+            for column, cell in enumerate(row or ()):
+                key = re.sub(r"\s+", " ", _cell_text(cell).casefold().replace("*", "")).strip()
+                field_name = _VENDOR_HEADERS.get(key)
+                if field_name and field_name not in header.values():
+                    header[column] = field_name
             fields = set(header.values())
             if "company_name" in fields and "service" in fields:
-                return header, rows[index + 1 :], index + 2
+                return header, row_iter, index + 1
     return None
-
-
-def _vendor_header(row: Any) -> dict[int, str]:
-    """Map worksheet columns whose titles match the vendor template."""
-    header: dict[int, str] = {}
-    for column, cell in enumerate(row or ()):
-        key = re.sub(r"\s+", " ", _cell_text(cell).casefold().replace("*", "")).strip()
-        field_name = _VENDOR_HEADERS.get(key)
-        if field_name and field_name not in header.values():
-            header[column] = field_name
-    return header
 
 
 def _merge_vendor_row(vendor: dict[str, Any], mapped: dict[str, str], row_number: int) -> None:
@@ -518,17 +615,6 @@ def _merge_vendor_row(vendor: dict[str, Any], mapped: dict[str, str], row_number
     service_tag = _service_tag(mapped.get("service"))
     if service_tag:
         _extend_text(vendor["tags"], [service_tag])
-    _merge_vendor_fields(vendor, mapped)
-    person = mapped.get("contact_person") or ""
-    emails = _emails(mapped.get("contact_email"))
-    phones = _phones(mapped.get("contact_mobile"))
-    if not person and not emails and not phones:
-        return
-    _merge_vendor_contact(vendor, mapped, row_number, service_tag, person, emails, phones)
-
-
-def _merge_vendor_fields(vendor: dict[str, Any], mapped: dict[str, str]) -> None:
-    """Keep the first non-empty company field from the grouped rows."""
     vendor["website"] = vendor["website"] or _website(mapped.get("website"))
     vendor["address_line1"] = vendor["address_line1"] or _clip(mapped.get("address"), 1000)
     vendor["city"] = vendor["city"] or _clip(mapped.get("city"), 100)
@@ -539,18 +625,11 @@ def _merge_vendor_fields(vendor: dict[str, Any], mapped: dict[str, str]) -> None
     note = _clip(mapped.get("notes"), 5000)
     if note:
         _extend_text(vendor["notes"], [note])
-
-
-def _merge_vendor_contact(
-    vendor: dict[str, Any],
-    mapped: dict[str, str],
-    row_number: int,
-    service_tag: str | None,
-    person: str,
-    emails: list[str],
-    phones: list[tuple[str, str]],
-) -> None:
-    """Fold the row's person into the company's contact list."""
+    person = mapped.get("contact_person") or ""
+    emails = _emails(mapped.get("contact_email"))
+    phones = _phones(mapped.get("contact_mobile"))
+    if not person and not emails and not phones:
+        return
     prefix, first_name, last_name = _person_name(person)
     contact = next(
         (
@@ -601,7 +680,7 @@ def _same_vendor_contact(
     known_phones = {number for _, number in contact["phones"]}
     if phones and any(number in known_phones for _, number in phones):
         return True
-    if emails or phones or contact["emails"] or contact["phones"]:
+    if contact["emails"] or contact["phones"]:
         return False
     return (contact["prefix"], contact["first_name"], contact["last_name"]) == (
         prefix,
@@ -620,48 +699,11 @@ def _vendor_tags(*groups: list[str]) -> list[str]:
                 seen.setdefault(cleaned.casefold(), cleaned[:100])
     if "vendor" not in seen:
         seen["vendor"] = "Vendor"
-    return list(seen.values())
-
-
-def _string_list(value: Any) -> list[str]:
-    """Return stripped strings from a list, or an empty list for other values."""
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return []
-
-
-def _linked_contact_ids(raw_contacts: Any) -> tuple[set[str], bool]:
-    """Return contact ids already on the company and whether one is primary."""
-    contacts = coerce_json_list(raw_contacts)
-    linked = {str(item.get("id")) for item in contacts if isinstance(item, dict) and item.get("id")}
-    has_primary = any(bool(item.get("is_primary")) for item in contacts if isinstance(item, dict))
-    return linked, has_primary
-
-
-def _vendor_row_errors(vendor: dict[str, Any], exc: Exception) -> list[dict[str, Any]]:
-    """Build one error entry for every worksheet row of a failed company."""
-    message = _import_error_message(exc)
-    return [
-        {"row": row_number, "company": vendor["name"], "message": message}
-        for row_number in vendor["rows"]
-    ]
-
-
-def _contact_row_error(vendor: dict[str, Any], contact: dict[str, Any], message: str) -> dict:
-    """Build the row error returned when one contact cannot be saved."""
-    return {
-        "row": contact["rows"][0] if contact["rows"] else None,
-        "company": vendor["name"],
-        "message": message,
-    }
-
-
-def _import_error_message(exc: Exception) -> str:
-    """Prefer a message key, then the exception text, for an import row error."""
-    message_key = getattr(exc, "message_key", None)
-    if isinstance(message_key, str) and message_key:
-        return message_key
-    return (str(exc).strip() or exc.__class__.__name__)[:500]
+    values = list(seen.values())
+    if len(values) <= _MAX_VENDOR_TAGS:
+        return values
+    without_vendor = [item for item in values if item.casefold() != "vendor"]
+    return [*without_vendor[: _MAX_VENDOR_TAGS - 1], "Vendor"]
 
 
 def _cell_text(value: Any) -> str:
@@ -691,22 +733,18 @@ def _phones(value: str | None) -> list[tuple[str, str]]:
     phones: list[tuple[str, str]] = []
     seen: set[str] = set()
     for run in re.findall(r"\d{10,15}", value or ""):
-        parsed = _parse_phone_digits(run)
-        if parsed is None or parsed[1] in seen:
+        digits = run[1:] if len(run) == 11 and run.startswith("0") else run
+        if len(digits) == 10:
+            parsed = ("+91", digits)
+        elif len(digits) > 10 and 1 <= len(digits[:-10]) <= 3:
+            parsed = (f"+{digits[:-10]}", digits[-10:])
+        else:
+            continue
+        if parsed[1] in seen:
             continue
         seen.add(parsed[1])
         phones.append(parsed)
     return phones
-
-
-def _parse_phone_digits(run: str) -> tuple[str, str] | None:
-    """Split a digit run into an ISD code and a 10-digit national number."""
-    digits = run[1:] if len(run) == 11 and run.startswith("0") else run
-    if len(digits) == 10:
-        return "+91", digits
-    if len(digits) > 10 and 1 <= len(digits[:-10]) <= 3:
-        return f"+{digits[:-10]}", digits[-10:]
-    return None
 
 
 def _person_name(value: str) -> tuple[str | None, str | None, str | None]:
