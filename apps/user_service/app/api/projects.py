@@ -4,7 +4,17 @@
 from typing import Annotated, Any
 
 import asyncpg
-from fastapi import APIRouter, Body, Depends, Path, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Path,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi import status as http_status
 
 from apps.user_service.app.app_instance import limiter
@@ -93,7 +103,10 @@ from apps.user_service.app.services.contact_unit_documents_service import (
     ContactUnitDocumentsService,
 )
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
-from apps.user_service.app.services.facilities_service import FacilitiesService
+from apps.user_service.app.services.facilities_service import (
+    FacilitiesService,
+    read_bounded_upload,
+)
 from apps.user_service.app.services.inventory_service import InventoryService
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.project_members_service import ProjectMembersService
@@ -2219,6 +2232,60 @@ async def list_floor_inventory(
 # ---------------------------------------------------------------------------
 # Facilities
 # ---------------------------------------------------------------------------
+
+
+@handle_api_exceptions("import facilities")
+@router.post(
+    "/{project_id}/facilities/import",
+    status_code=http_status.HTTP_200_OK,
+    summary="Import facilities from a workbook",
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("20/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="facilities",
+    category="PROJECT_SETUP",
+)
+async def import_facilities(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    file: UploadFile = File(..., description="Facilities template workbook (.xlsx)"),
+):
+    """Import facilities from an uploaded Facilities template workbook."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=PROJECT_SETUP_EDIT,
+    )
+    service = FacilitiesService(db_connection=db_connection, user_context=user_context)
+    data = await service.import_facilities(
+        project_id=project_id,
+        payload=await read_bounded_upload(file),
+        filename=file.filename or "",
+    )
+    _set_audit(
+        request,
+        user_context,
+        project_id=project_id,
+        table="facilities",
+        requested_id=project_id,
+        description=f"Imported facilities for project: {project_id}",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="facilities_imports.success.imported",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
+    )
 
 
 @handle_api_exceptions("create facility")

@@ -5,15 +5,20 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from io import BytesIO
 from typing import Any
+from zipfile import BadZipFile
 
 from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 
 from apps.user_service.app.schemas.enums import (
     CommercialUnitType,
+    FacilityBookingArchetype,
     FacilityLocationType,
+    FacilityRateUnit,
+    FacilityStatus,
     FacilityType,
     Facing,
     GateStatus,
@@ -29,6 +34,7 @@ from apps.user_service.app.schemas.enums import (
     UnitNumberingPattern,
     UnitStatus,
 )
+from apps.user_service.app.services.facility_booking.defaults import suggested_archetype
 
 HEADER_ROW = 3
 DATA_START_ROW = 5
@@ -974,3 +980,541 @@ def _skip_optional_sheet(
                 raw=raw,
             )
         )
+
+
+_FACILITY_SHEET = "Facilities"
+_FACILITY_HEADERS = (
+    ("name", "facility name"),
+    ("facility_type", "facility type"),
+    ("subtype", "sport / sub-type"),
+    ("tower", "tower / block"),
+    ("floor", "floor"),
+    ("indoor_outdoor", "indoor / outdoor"),
+    ("area", "area sq ft"),
+    ("capacity", "capacity persons"),
+    ("status", "status"),
+    ("location_notes", "location notes"),
+    ("parking_slots", "no. of slots"),
+    ("parking_for", "parking for"),
+    ("vehicle_type", "vehicle type"),
+    ("bookable", "can residents book?"),
+    ("booking_type", "booking type"),
+    ("slot_minutes", "slot length min"),
+    ("opens", "opens"),
+    ("closes", "closes"),
+    ("resident_rate", "resident rate"),
+    ("guest_rate", "guest rate"),
+    ("rate_per", "rate per"),
+    ("tax_percent", "gst %"),
+    ("deposit", "deposit"),
+    ("max_people", "max people per booking"),
+    ("advance_days", "book up to days ahead"),
+    ("needs_approval", "needs approval?"),
+    ("free_cancel_hours", "free cancellation until hrs before"),
+    ("late_cancel_percent", "late cancellation charge %"),
+    ("units", "courts / rooms inside"),
+    ("notes", "other rules / notes"),
+)
+_FACILITY_TYPES = {
+    "clubhouse": (FacilityType.RECREATION, None),
+    "sports court": (FacilityType.SPORTS, None),
+    "swimming pool": (FacilityType.RECREATION, None),
+    "gym": (FacilityType.RECREATION, None),
+    "party / event hall": (FacilityType.EVENTS, None),
+    "party event hall": (FacilityType.EVENTS, None),
+    "guest room": (FacilityType.SERVICES, "guest_room"),
+    "parking": (FacilityType.PARKING, None),
+    "garden / lawn": (FacilityType.RECREATION, None),
+    "garden lawn": (FacilityType.RECREATION, None),
+    "kids play area": (FacilityType.RECREATION, None),
+    "other": (FacilityType.RECREATION, None),
+}
+_FACILITY_STATUS = {
+    "active": FacilityStatus.ACTIVE,
+    "inactive": FacilityStatus.INACTIVE,
+    "under construction": FacilityStatus.UNDER_MAINTENANCE,
+    "under maintenance": FacilityStatus.UNDER_MAINTENANCE,
+}
+_PARKING_FOR = {
+    "residents": ParkingUserType.RESIDENT,
+    "resident": ParkingUserType.RESIDENT,
+    "visitors": ParkingUserType.VISITORS,
+    "visitor": ParkingUserType.VISITORS,
+}
+_VEHICLES = {
+    "two-wheeler": ParkingVehicleCategory.TWO_WHEELER,
+    "two wheeler": ParkingVehicleCategory.TWO_WHEELER,
+    "four-wheeler": ParkingVehicleCategory.FOUR_WHEELER,
+    "four wheeler": ParkingVehicleCategory.FOUR_WHEELER,
+    "both": ParkingVehicleCategory.BOTH,
+}
+_BOOKING_TYPES = {
+    "hourly slots": FacilityBookingArchetype.SLOT,
+    "full day": FacilityBookingArchetype.DAY_RANGE,
+    "overnight stay": FacilityBookingArchetype.ROOM,
+}
+_RATE_UNITS = {
+    "hour": FacilityRateUnit.HOUR,
+    "slot": FacilityRateUnit.HOUR,
+    "day": FacilityRateUnit.DAY,
+    "night": FacilityRateUnit.DAY,
+    "booking": FacilityRateUnit.HOUR,
+}
+
+
+class FacilityRowError(Exception):
+    """One Facilities sheet row cannot be imported."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+_NO_VALUES = {"no", "n", "false"}
+
+
+def parse_facilities_template(
+    payload: bytes,
+) -> tuple[list[dict[str, Any]], list[WorkbookRowError], str | None]:
+    """Parse a Facilities_Template workbook into facility rows and row errors."""
+    try:
+        workbook = load_workbook(BytesIO(payload), read_only=True, data_only=False)
+    except (InvalidFileException, BadZipFile, OSError) as exc:
+        raise ValueError("facilities_imports.errors.invalid_workbook") from exc
+    try:
+        if _FACILITY_SHEET not in workbook.sheetnames:
+            return [], [], "facilities_imports.errors.sheet_missing"
+        rows_iter = workbook[_FACILITY_SHEET].iter_rows(values_only=True)
+        columns = _facility_columns(rows_iter)
+        if columns is None:
+            return [], [], "facilities_imports.errors.headers_invalid"
+        parsed_rows, errors = _facility_data_rows(rows_iter, columns)
+        if not parsed_rows and not errors:
+            return [], [], "facilities_imports.errors.empty_workbook"
+        return parsed_rows, errors, None
+    finally:
+        workbook.close()
+
+
+def _facility_columns(rows_iter: Any) -> dict[str, int] | None:
+    """Map template headers onto field names. Missing headers return None."""
+    header = next((cells for index, cells in enumerate(rows_iter, start=1) if index == 2), ())
+    found = _header_index(header)
+    columns: dict[str, int] = {}
+    for field_name, expected in _FACILITY_HEADERS:
+        if expected not in found:
+            return None
+        columns[field_name] = found[expected]
+    return columns
+
+
+def _header_index(header: Any) -> dict[str, int]:
+    """Index normalized header labels by column position."""
+    found: dict[str, int] = {}
+    for index, cell in enumerate(header):
+        label = _cell_text(cell).replace("*", "").replace("₹", "")
+        label = " ".join(label.replace("(", " ").replace(")", " ").split()).casefold()
+        if label:
+            found[label] = index
+    return found
+
+
+def _facility_data_rows(
+    rows_iter: Any, columns: dict[str, int]
+) -> tuple[list[dict[str, Any]], list[WorkbookRowError]]:
+    """Parse data rows, keeping duplicate names as row errors."""
+    parsed_rows: list[dict[str, Any]] = []
+    errors: list[WorkbookRowError] = []
+    seen: set[str] = set()
+    for sheet_row, cells in enumerate(rows_iter, start=3):
+        if sheet_row < 4:
+            continue
+        values = _facility_row_values(cells, columns)
+        raw = {key: _cell_code(value) for key, value in values.items() if _cell_code(value)}
+        if not raw:
+            continue
+        row, error = _facility_row_or_error(sheet_row, values, raw, len(parsed_rows))
+        if error is not None:
+            errors.append(error)
+            continue
+        if row["name"].casefold() in seen:
+            errors.append(_duplicate_name_error(sheet_row, row["name"], raw))
+            continue
+        seen.add(row["name"].casefold())
+        parsed_rows.append(row)
+    return parsed_rows, errors
+
+
+def _facility_row_values(cells: Any, columns: dict[str, int]) -> dict[str, Any]:
+    """Read one data row by header name."""
+    row_cells = tuple(cells)
+    return {
+        name: row_cells[index] if index < len(row_cells) else None
+        for name, index in columns.items()
+    }
+
+
+def _facility_row_or_error(
+    sheet_row: int, values: dict[str, Any], raw: dict[str, str], sort_order: int
+) -> tuple[dict[str, Any] | None, WorkbookRowError | None]:
+    """Parse one row, or return its row error."""
+    try:
+        return _parse_facility_row(sheet_row, values, raw, sort_order=sort_order), None
+    except FacilityRowError as exc:
+        return None, WorkbookRowError(
+            sheet=_FACILITY_SHEET,
+            row_number=sheet_row,
+            code=exc.code,
+            message=exc.message,
+            raw=raw,
+        )
+
+
+def _duplicate_name_error(sheet_row: int, name: str, raw: dict[str, str]) -> WorkbookRowError:
+    """Build the error for a facility name repeated earlier in the sheet."""
+    return WorkbookRowError(
+        sheet=_FACILITY_SHEET,
+        row_number=sheet_row,
+        code="duplicate_name",
+        message=f"Facility name '{name}' is already used on an earlier row.",
+        raw=raw,
+    )
+
+
+def _parse_facility_row(
+    sheet_row: int, values: dict[str, Any], raw: dict[str, str], *, sort_order: int
+) -> dict[str, Any]:
+    """Map one Facilities data row onto facility and booking fields."""
+    name, facility_type, default_subtype, status, indoor, is_bookable = _facility_choices(values)
+    subtype_text = _cell_text(values.get("subtype")) or None
+    parking_slots, parking_user, parking_vehicle = _parking_cells(values, facility_type)
+    subtype = subtype_text or default_subtype
+    if facility_type == FacilityType.PARKING:
+        subtype = None
+    return {
+        "sheet_row": sheet_row,
+        "raw": raw,
+        "name": name,
+        "facility_type": facility_type,
+        "facility_subtype": subtype,
+        "parking_subtype_hint": subtype_text,
+        "tower_name": _cell_text(values.get("tower")) or None,
+        "floor_level": _cell_text(values.get("floor")) or None,
+        "indoor": indoor,
+        "area_sqft": _facility_number(
+            values.get("area"), field_name="Area (sq ft)", minimum=0, whole=False
+        ),
+        "capacity_persons": _event_capacity(values, facility_type),
+        "status": status,
+        "location_notes": _cell_text(values.get("location_notes")) or None,
+        "parking_slots": parking_slots,
+        "parking_user_type": parking_user,
+        "parking_vehicle_category": parking_vehicle,
+        "is_bookable": is_bookable,
+        "sort_order": sort_order,
+        **_booking_cells(values, facility_type, is_bookable),
+    }
+
+
+def _facility_choices(
+    values: dict[str, Any],
+) -> tuple[str, FacilityType, str | None, FacilityStatus, bool | None, bool]:
+    """Read the required facility choice columns."""
+    name = _cell_text(values.get("name"))
+    if not name:
+        raise FacilityRowError("name_required", "Facility Name is required.")
+    mapped = _FACILITY_TYPES.get(_cell_text(values.get("facility_type")).casefold())
+    if mapped is None:
+        raise FacilityRowError(
+            "facility_type_invalid",
+            "Facility Type is required and must be one of the template choices.",
+        )
+    facility_type, default_subtype = mapped
+    status = _FACILITY_STATUS.get(_cell_text(values.get("status")).casefold())
+    if status is None:
+        raise FacilityRowError(
+            "status_invalid", "Status must be Active, Inactive, or Under Construction."
+        )
+    return (
+        name,
+        facility_type,
+        default_subtype,
+        status,
+        _indoor_flag(values),
+        _required_yes_no(
+            _cell_text(values.get("bookable")).casefold(),
+            "Can Residents Book? must be Yes or No.",
+        ),
+    )
+
+
+def _indoor_flag(values: dict[str, Any]) -> bool | None:
+    """Read Indoor / Outdoor. Blank stays unset."""
+    label = _cell_text(values.get("indoor_outdoor")).casefold()
+    if not label:
+        return None
+    indoor = {"indoor": True, "outdoor": False}.get(label)
+    if indoor is None:
+        raise FacilityRowError(
+            "indoor_outdoor_invalid", "Indoor / Outdoor must be Indoor or Outdoor."
+        )
+    return indoor
+
+
+def _required_yes_no(label: str, message: str) -> bool:
+    """Read a required Yes or No cell."""
+    if label in YES_VALUES:
+        return True
+    if label in _NO_VALUES:
+        return False
+    raise FacilityRowError("field_required", message)
+
+
+def _parking_cells(
+    values: dict[str, Any], facility_type: FacilityType
+) -> tuple[int | None, Any, Any]:
+    """Read parking slots, audience, and vehicle type for a parking row."""
+    if facility_type != FacilityType.PARKING:
+        return None, None, None
+    parking_slots = _facility_number(
+        values.get("parking_slots"), field_name="No. of Slots", minimum=1
+    )
+    if parking_slots is None:
+        raise FacilityRowError(
+            "parking_slots_required", "No. of Slots is required for a parking facility."
+        )
+    parking_user = _PARKING_FOR.get(_cell_text(values.get("parking_for")).casefold())
+    if parking_user is None:
+        raise FacilityRowError(
+            "choice_invalid", "Parking For only supports Residents and Visitors."
+        )
+    parking_vehicle = _VEHICLES.get(_cell_text(values.get("vehicle_type")).casefold())
+    if parking_vehicle is None:
+        raise FacilityRowError(
+            "choice_invalid", "Vehicle Type must be Two-wheeler, Four-wheeler, or Both."
+        )
+    return parking_slots, parking_user, parking_vehicle
+
+
+def _event_capacity(values: dict[str, Any], facility_type: FacilityType) -> int | None:
+    """Read capacity, which is required for a party or event hall."""
+    minimum = 0
+    if facility_type == FacilityType.EVENTS:
+        minimum = 1
+    capacity = _facility_number(
+        values.get("capacity"), field_name="Capacity (persons)", minimum=minimum
+    )
+    if facility_type == FacilityType.EVENTS and capacity is None:
+        raise FacilityRowError(
+            "capacity_required", "Capacity (persons) is required for Party / Event Hall."
+        )
+    return capacity
+
+
+def _blank_booking() -> dict[str, Any]:
+    """Return booking fields for a row residents cannot book."""
+    return {
+        "booking_archetype": None,
+        "slot_minutes": None,
+        "opens_min": None,
+        "closes_min": None,
+        "resident_rate": None,
+        "guest_rate": None,
+        "rate_unit": None,
+        "tax_percent": None,
+        "deposit": None,
+        "max_people": None,
+        "advance_booking_days": None,
+        "requires_approval": None,
+        "free_cancel_hours": None,
+        "late_cancel_percent": None,
+        "unit_names": [],
+        "notes": None,
+    }
+
+
+def _booking_cells(
+    values: dict[str, Any], facility_type: FacilityType, is_bookable: bool
+) -> dict[str, Any]:
+    """Read booking columns when residents can book this facility."""
+    if not is_bookable:
+        return _blank_booking()
+    if facility_type == FacilityType.PARKING:
+        raise FacilityRowError(
+            "parking_not_bookable", "Parking facilities cannot be booked by residents."
+        )
+    archetype = _booking_archetype(values, facility_type)
+    opens_min, closes_min = _booking_hours(values)
+    rate_label = _cell_text(values.get("rate_per"))
+    rate_unit = _RATE_UNITS.get(rate_label.casefold()) if rate_label else None
+    people_max = 10000
+    if archetype == FacilityBookingArchetype.SLOT:
+        people_max = 100
+    booking = {
+        "booking_archetype": archetype,
+        "slot_minutes": _facility_number(
+            values.get("slot_minutes"), field_name="Slot Length (min)", minimum=5, maximum=1440
+        ),
+        "opens_min": opens_min,
+        "closes_min": closes_min,
+        "resident_rate": _facility_number(
+            values.get("resident_rate"), field_name="Resident Rate", minimum=0
+        ),
+        "guest_rate": _facility_number(
+            values.get("guest_rate"), field_name="Guest Rate", minimum=0
+        ),
+        "rate_unit": rate_unit,
+        "tax_percent": _facility_number(
+            values.get("tax_percent"), field_name="GST %", minimum=0, maximum=100
+        ),
+        "deposit": _facility_number(values.get("deposit"), field_name="Deposit", minimum=0),
+        "max_people": _facility_number(
+            values.get("max_people"),
+            field_name="Max People per Booking",
+            minimum=1,
+            maximum=people_max,
+        ),
+        "advance_booking_days": _facility_number(
+            values.get("advance_days"),
+            field_name="Book Up To (days ahead)",
+            minimum=0,
+            maximum=365,
+        ),
+        "requires_approval": _optional_yes_no(
+            _cell_text(values.get("needs_approval")).casefold(),
+            "Needs Approval? must be Yes or No.",
+        ),
+        "free_cancel_hours": _facility_number(
+            values.get("free_cancel_hours"),
+            field_name="Free Cancellation Until (hrs before)",
+            minimum=0,
+            maximum=24 * 365,
+        ),
+        "late_cancel_percent": _facility_number(
+            values.get("late_cancel_percent"),
+            field_name="Late Cancellation Charge %",
+            minimum=0,
+            maximum=100,
+        ),
+        "unit_names": _booking_units(values),
+        "notes": _booking_notes(values),
+    }
+    if rate_label and rate_unit is None:
+        raise FacilityRowError(
+            "choice_invalid", "Rate Per must be Hour, Slot, Day, Night, or Booking."
+        )
+    return booking
+
+
+def _booking_archetype(values: dict[str, Any], facility_type: FacilityType) -> Any:
+    """Read Booking Type, or use the facility type's default archetype."""
+    label = _cell_text(values.get("booking_type"))
+    if not label:
+        return suggested_archetype(facility_type.value)
+    archetype = _BOOKING_TYPES.get(label.casefold())
+    if archetype is None:
+        raise FacilityRowError(
+            "booking_type_invalid",
+            "Booking Type must be Hourly slots, Full day, or Overnight stay.",
+        )
+    return archetype
+
+
+def _booking_hours(values: dict[str, Any]) -> tuple[int | None, int | None]:
+    """Read Opens and Closes. Both must be filled or both left blank."""
+    opens_min = _facility_minutes(values.get("opens"), field_name="Opens")
+    closes_min = _facility_minutes(values.get("closes"), field_name="Closes")
+    if (opens_min is None) != (closes_min is None):
+        raise FacilityRowError(
+            "hours_incomplete", "Opens and Closes must both be filled, or both left blank."
+        )
+    if opens_min is not None and closes_min is not None and closes_min <= opens_min:
+        raise FacilityRowError("hours_invalid", "Closes must be after Opens on the same day.")
+    return opens_min, closes_min
+
+
+def _booking_notes(values: dict[str, Any]) -> str | None:
+    """Read Other Rules / Notes."""
+    notes = _cell_text(values.get("notes")) or None
+    if notes and len(notes) > 2000:
+        raise FacilityRowError(
+            "notes_too_long", "Other Rules / Notes must be 2000 characters or fewer."
+        )
+    return notes
+
+
+def _booking_units(values: dict[str, Any]) -> list[str]:
+    """Read the comma-separated court or room names."""
+    unit_names = [
+        part.strip() for part in _cell_text(values.get("units")).split(",") if part.strip()
+    ]
+    folded = {name.casefold() for name in unit_names}
+    if len(unit_names) > 50 or len(folded) != len(unit_names):
+        raise FacilityRowError(
+            "invalid_units", "Courts / Rooms Inside must be unique and no more than 50."
+        )
+    if any(len(unit_name) > 120 for unit_name in unit_names):
+        raise FacilityRowError(
+            "unit_name_too_long", "Each court or room name must be 120 characters or fewer."
+        )
+    return unit_names
+
+
+def _optional_yes_no(label: str, message: str) -> bool | None:
+    """Read an optional Yes or No cell. Blank stays unset."""
+    if not label:
+        return None
+    if label in YES_VALUES:
+        return True
+    if label in _NO_VALUES:
+        return False
+    raise FacilityRowError("yes_no_invalid", message)
+
+
+def _facility_number(
+    value: object,
+    *,
+    field_name: str,
+    minimum: float,
+    maximum: float | None = None,
+    whole: bool = True,
+) -> int | float | None:
+    """Read a numeric Facilities cell. Blank stays unset."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, (bool, datetime, time)):
+        raise FacilityRowError("number_invalid", f"{field_name} must be a number.")
+    try:
+        if isinstance(value, (int, float)):
+            text = value
+        else:
+            text = _cell_code(value).replace(",", "").replace("₹", "")
+        number = float(text)
+    except ValueError as exc:
+        raise FacilityRowError("number_invalid", f"{field_name} must be a number.") from exc
+    if number < minimum or (maximum is not None and number > maximum):
+        raise FacilityRowError("number_out_of_range", f"{field_name} is out of range.")
+    if whole and not number.is_integer():
+        raise FacilityRowError("whole_number_required", f"{field_name} must be a whole number.")
+    return int(number) if whole else number
+
+
+def _facility_minutes(value: object, *, field_name: str) -> int | None:
+    """Read a time cell as minutes from midnight."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, datetime):
+        return value.hour * 60 + value.minute
+    if isinstance(value, time):
+        return value.hour * 60 + value.minute
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= float(value) < 1:
+        return int(round(float(value) * 24 * 60)) % (24 * 60)
+    text = _cell_text(value).upper().replace(".", "")
+    for pattern in ("%I:%M %p", "%I:%M%p", "%H:%M", "%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(text, pattern)
+        except ValueError:
+            continue
+        return parsed.hour * 60 + parsed.minute
+    raise FacilityRowError("time_invalid", f"{field_name} must be a time such as 6:00 AM.")

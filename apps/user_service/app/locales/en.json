@@ -668,6 +668,21 @@
       "errors_retrieved": "Projects import errors retrieved successfully."
     }
   },
+  "facilities_imports": {
+    "errors": {
+      "xlsx_required": "Facilities import requires an xlsx workbook.",
+      "invalid_file_url": "The file URL is invalid or not allowed.",
+      "empty_file": "The workbook download was empty.",
+      "file_too_large": "The workbook is larger than the 20 MB import limit.",
+      "invalid_workbook": "The file is not a readable xlsx workbook.",
+      "sheet_missing": "The workbook must contain a Facilities sheet.",
+      "headers_invalid": "The Facilities headers do not match the template. Do not rename, delete, or reorder columns.",
+      "empty_workbook": "The Facilities sheet has no facility rows to import."
+    },
+    "success": {
+      "imported": "Facilities imported successfully."
+    }
+  },
   "entity_lists": {
     "errors": {
       "list_not_found": "The list you are trying to access does not exist or has been deleted.",
