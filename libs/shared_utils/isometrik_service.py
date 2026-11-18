@@ -175,16 +175,27 @@ def _media_base_url() -> str:
 
 
 def _is_allowed_media_url(url: str, media_base: str) -> bool:
-    """True when ``url`` is http(s) on the configured media host and path."""
-    parsed = urlsplit(url)
-    allowed = urlsplit(media_base)
+    """True when ``url`` is http(s) on the configured media host and path.
+
+    Malformed ports and hosts are rejected. ``urlsplit`` raises ``ValueError``
+    for those, and that must not abort profile provisioning.
+    """
+    try:
+        parsed = urlsplit(url)
+        allowed = urlsplit(media_base)
+        parsed_port = parsed.port
+        allowed_port = allowed.port
+        parsed_host = (parsed.hostname or "").lower()
+        allowed_host = (allowed.hostname or "").lower()
+    except ValueError:
+        return False
     if parsed.scheme not in {"http", "https"} or parsed.scheme != allowed.scheme:
         return False
     if parsed.username or parsed.password:
         return False
-    if (parsed.hostname or "").lower() != (allowed.hostname or "").lower():
+    if parsed_host != allowed_host:
         return False
-    if parsed.port != allowed.port:
+    if parsed_port != allowed_port:
         return False
     allowed_path = allowed.path.rstrip("/")
     if not allowed_path:

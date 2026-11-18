@@ -184,6 +184,7 @@ def test_public_profile_image_url_builds_absolute_url(monkeypatch) -> None:
         "https://cdn.example.com/a.jpg"
     )
     assert public_profile_image_url("https://cdn.example.com.evil.com/a.jpg") is None
+    assert public_profile_image_url("https://cdn.example.com:bad/a.jpg") is None
     assert public_profile_image_url("https://169.254.169.254/latest/meta-data") is None
     assert public_profile_image_url("http://cdn.example.com/a.jpg") is None
     assert public_profile_image_url("  ") is None
