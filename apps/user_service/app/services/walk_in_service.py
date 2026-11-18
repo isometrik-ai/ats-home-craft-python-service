@@ -643,6 +643,19 @@ class WalkInService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
+    @staticmethod
+    def _raise_visit_unit_update_missed(*, entry: dict[str, Any]) -> None:
+        """Map a zero-row approve/reject update to the reason it did not apply."""
+        if walk_in_awaiting_is_expired(entry.get("requested_at")):
+            raise ValidationException(
+                message_key="walk_in.errors.awaiting_expired",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        raise ValidationException(
+            message_key="walk_in.errors.visit_unit_not_awaiting",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
     async def _get_entry_or_raise(
         self,
         *,
@@ -1170,10 +1183,7 @@ class WalkInService:
             approved_by_contact_id=contact_id,
         )
         if not updated:
-            raise ValidationException(
-                message_key="walk_in.errors.visit_unit_not_awaiting",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+            self._raise_visit_unit_update_missed(entry=entry)
         await self.repo.insert_event(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
@@ -1242,10 +1252,7 @@ class WalkInService:
             rejection_reason=body.rejection_reason,
         )
         if not updated:
-            raise ValidationException(
-                message_key="walk_in.errors.visit_unit_not_awaiting",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+            self._raise_visit_unit_update_missed(entry=entry)
         await self.repo.insert_event(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,

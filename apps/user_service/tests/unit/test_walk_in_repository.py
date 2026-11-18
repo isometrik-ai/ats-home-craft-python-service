@@ -350,6 +350,7 @@ async def test_update_visit_unit_status():
     query = conn.fetchrow_calls[0][0]
     assert "::walk_in_visit_unit_status" in query
     assert "approved_by_contact_id" in query
+    assert "e.requested_at > NOW() - INTERVAL '24 hours'" in query
 
     conn.row = None
     assert (
