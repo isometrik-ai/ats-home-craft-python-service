@@ -7,7 +7,7 @@ project-local datetime. Behavior mirrors the Clubhouse reference engine (golden 
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
 from apps.user_service.app.schemas.enums import (
@@ -533,10 +533,52 @@ def _validate_slot_player_limit(
         issues.add("max_players_exceeded", f"Max {slot_setup.max_players} players per slot.")
 
 
-def _validate_slot(
+def _prefix_new_issues(issues: _Issues, start: int, day: date) -> None:
+    """Stamp issues recorded since ``start`` with the calendar day they refer to."""
+    prefix = f"{day.isoformat()}: "
+    issues.items[start:] = [
+        ValidationIssue(code=item.code, message=prefix + item.message)
+        for item in issues.items[start:]
+    ]
+
+
+def _validate_later_day_bounds(ctx: AvailabilityContext, day: date, issues: _Issues) -> None:
+    """Advance-window and blackout checks for dates after the range start."""
+    facility = ctx.facility
+    if not within_advance_window(facility, day, ctx.now):
+        issues.add(
+            "outside_advance_window",
+            f"Bookings open {facility.policies.advance_booking_days} days in advance.",
+        )
+    if is_blackout(facility, day):
+        issues.add("blackout_date", "Facility is closed on this date.")
+
+
+def _validate_each_window_day(
+    ctx: AvailabilityContext,
+    draft: BookingDraft,
+    issues: _Issues,
+    day_hours: DayHours,
+    validate_one: Callable[[AvailabilityContext, BookingDraft, _Issues, DayHours], None],
+) -> None:
+    """Run a one-day validator for every date a repeated daily window occupies."""
+    dates = each_date(draft.local_date, draft.end_local_date)
+    if len(dates) <= 1:
+        validate_one(ctx, draft, issues, day_hours)
+        return
+    for day in dates:
+        before = len(issues.items)
+        if day != dates[0]:
+            _validate_later_day_bounds(ctx, day, issues)
+        day_draft = replace(draft, local_date=day, end_local_date=day)
+        validate_one(ctx, day_draft, issues, hours_for(ctx.facility, day))
+        _prefix_new_issues(issues, before, day)
+
+
+def _validate_slot_day(
     ctx: AvailabilityContext, draft: BookingDraft, issues: _Issues, day_hours: DayHours
 ) -> None:
-    """Validation rules for court/slot archetype."""
+    """Time, alignment and conflict rules for one court day."""
     facility = ctx.facility
     if not draft.unit_id:
         issues.add("unit_required", "Select a court.")
@@ -551,13 +593,20 @@ def _validate_slot(
         slot_blocks_for(facility, draft.local_date),
         ctx.active,
     )
-    _validate_slot_player_limit(facility, draft, issues)
 
 
-def _validate_tee(
+def _validate_slot(
     ctx: AvailabilityContext, draft: BookingDraft, issues: _Issues, day_hours: DayHours
 ) -> None:
-    """Validation rules for tee-time archetype."""
+    """Validation rules for court/slot archetype."""
+    _validate_each_window_day(ctx, draft, issues, day_hours, _validate_slot_day)
+    _validate_slot_player_limit(ctx.facility, draft, issues)
+
+
+def _validate_tee_day(
+    ctx: AvailabilityContext, draft: BookingDraft, issues: _Issues, day_hours: DayHours
+) -> None:
+    """Time, block and capacity rules for one tee-time day."""
     facility = ctx.facility
     maintenance = maintenance_for(facility, draft.local_date)
     blocks = slot_blocks_for(facility, draft.local_date)
@@ -593,15 +642,22 @@ def _validate_tee(
         )
 
 
+def _validate_tee(
+    ctx: AvailabilityContext, draft: BookingDraft, issues: _Issues, day_hours: DayHours
+) -> None:
+    """Validation rules for tee-time archetype."""
+    _validate_each_window_day(ctx, draft, issues, day_hours, _validate_tee_day)
+
+
 def _max_event_participants(facility: FacilitySnapshot) -> int | None:
     """Configured attendee cap for event archetypes."""
     return facility.setup.event.max_participants if facility.setup.event is not None else None
 
 
-def _validate_duration(
+def _validate_duration_day(
     ctx: AvailabilityContext, draft: BookingDraft, issues: _Issues, day_hours: DayHours
 ) -> None:
-    """Validation rules for flexible-duration event archetype."""
+    """Time, block and occupancy rules for one duration-booking day."""
     facility = ctx.facility
     maintenance = maintenance_for(facility, draft.local_date)
     blocks = slot_blocks_for(facility, draft.local_date)
@@ -630,9 +686,14 @@ def _validate_duration(
     busy = _busy_intervals(facility, ctx.active, draft.local_date, ctx.host_name_of)
     if any(_overlaps(start_min, end_min, busy_start, busy_end) for busy_start, busy_end, _ in busy):
         issues.add("facility_busy", f"{facility.name} is busy around this time (incl. buffer).")
-    max_people = _max_event_participants(facility)
-    if max_people is not None and len(draft.participants) + 1 > max_people:
-        issues.add("max_participants_exceeded", f"Max {max_people} attendees per booking.")
+
+
+def _validate_duration(
+    ctx: AvailabilityContext, draft: BookingDraft, issues: _Issues, day_hours: DayHours
+) -> None:
+    """Validation rules for flexible-duration event archetype."""
+    _validate_each_window_day(ctx, draft, issues, day_hours, _validate_duration_day)
+    _validate_event_participants(ctx.facility, draft, issues)
 
 
 def _room_block_overlaps(

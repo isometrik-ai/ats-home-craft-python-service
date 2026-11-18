@@ -191,21 +191,63 @@ def _included_quote() -> PriceQuote:
     )
 
 
+def _window_pricing(
+    facility: FacilitySnapshot, draft: BookingDraft
+) -> list[tuple[date, float, TimeBand | None]]:
+    """Combined multiplier for the same clock window on every booked date.
+
+    Availability holds ``start_min``–``end_min`` on each inclusive date, so the
+    quote has to price that window once per day (weekend, holiday, and band).
+    """
+    days = each_date(draft.local_date, draft.end_local_date) or [draft.local_date]
+    return [(day, *_mult_factor(facility, draft.start_min, day)) for day in days]
+
+
+def _multiplier_suffix(
+    facility: FacilitySnapshot, priced: list[tuple[date, float, TimeBand | None]]
+) -> str:
+    """Detail suffix for one shared multiplier, or each day's multiplier."""
+    if len({factor for _, factor, _ in priced}) <= 1:
+        day, factor, band = priced[0]
+        return _factor_suffix(facility, factor, band, day)
+    rendered = ", ".join(f"×{factor:.2f}" for _, factor, _ in priced)
+    return f" ({rendered})"
+
+
+def _hourly_rental_line(
+    facility: FacilitySnapshot,
+    draft: BookingDraft,
+    money: _Money,
+    *,
+    hour_rate: int,
+    mins: int,
+) -> PriceLine:
+    """Rental line for a daily time window repeated across the booked dates."""
+    priced = _window_pricing(facility, draft)
+    amount = ts_round(sum(hour_rate * (mins / 60) * factor for _, factor, _ in priced))
+    rate = f"{money(hour_rate)}/hr{_rate_basis_note(facility, money)}"
+    if len(priced) == 1:
+        quantity = fmt_hours(mins)
+    else:
+        quantity = f"{len(priced)} {_day_word(len(priced))} × {fmt_hours(mins)}/day"
+    return PriceLine(
+        label=_rental_label(facility, HOURLY_RATE),
+        detail=_qty_at_rate(quantity, rate) + _multiplier_suffix(facility, priced),
+        amount=amount,
+    )
+
+
 def _slot_lines(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) -> list[PriceLine]:
     """Price lines for fixed slot (court) bookings."""
     _, guests, _ = party_of(draft)
-    mins = draft.end_min - draft.start_min
-    factor, band = _mult_factor(facility, draft.start_min, draft.local_date)
     hour_rate = ts_round(effective_hour_rate(facility))
-    detail = _qty_at_rate(
-        fmt_hours(mins), f"{money(hour_rate)}/hr{_rate_basis_note(facility, money)}"
-    )
-    detail += _factor_suffix(facility, factor, band, draft.local_date)
     lines = [
-        PriceLine(
-            label=_rental_label(facility, HOURLY_RATE),
-            detail=detail,
-            amount=ts_round(hour_rate * (mins / 60) * factor),
+        _hourly_rental_line(
+            facility,
+            draft,
+            money,
+            hour_rate=hour_rate,
+            mins=draft.end_min - draft.start_min,
         )
     ]
     guest_line = _guest_fee_line(facility, guests, money)
@@ -218,25 +260,32 @@ def _tee_lines(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) -
     """Price lines for tee-time (per-player) bookings."""
     pricing = facility.pricing
     _, guests, players = party_of(draft)
-    factor, band = _mult_factor(facility, draft.start_min, draft.local_date)
+    priced = _window_pricing(facility, draft)
+    factor_sum = sum(factor for _, factor, _ in priced)
+    day_note = ""
+    if len(priced) > 1:
+        day_note = f" · {len(priced)} {_day_word(len(priced))}"
+    suffix = _multiplier_suffix(facility, priced)
     lines: list[PriceLine] = []
     resident_players = players - guests
     if resident_players > 0:
-        detail = f"{money(pricing.resident_rate)}/player"
-        detail += _factor_suffix(facility, factor, band, draft.local_date)
         lines.append(
             PriceLine(
                 label=f"Green fee — residents × {resident_players}",
-                detail=detail,
-                amount=ts_round(pricing.resident_rate * resident_players * factor),
+                detail=f"{money(pricing.resident_rate)}/player{day_note}{suffix}",
+                amount=ts_round(pricing.resident_rate * resident_players * factor_sum),
             )
         )
     if guests > 0:
+        if len(priced) == 1:
+            guest_detail = f"{money(pricing.guest_rate)}/player (×{priced[0][1]:.2f})"
+        else:
+            guest_detail = f"{money(pricing.guest_rate)}/player{day_note}{suffix}"
         lines.append(
             PriceLine(
                 label=f"Green fee — guests × {guests}",
-                detail=f"{money(pricing.guest_rate)}/player (×{factor:.2f})",
-                amount=ts_round(pricing.guest_rate * guests * factor),
+                detail=guest_detail,
+                amount=ts_round(pricing.guest_rate * guests * factor_sum),
             )
         )
     return lines
@@ -248,18 +297,14 @@ def _duration_lines(
     """Price lines for flexible-duration event bookings."""
     pricing = facility.pricing
     _, guests, _ = party_of(draft)
-    mins = draft.end_min - draft.start_min
-    factor, band = _mult_factor(facility, draft.start_min, draft.local_date)
     hour_rate = ts_round(effective_hour_rate(facility))
-    detail = _qty_at_rate(
-        fmt_hours(mins), f"{money(hour_rate)}/hr{_rate_basis_note(facility, money)}"
-    )
-    detail += _factor_suffix(facility, factor, band, draft.local_date)
     lines = [
-        PriceLine(
-            label=_rental_label(facility, HOURLY_RATE),
-            detail=detail,
-            amount=ts_round(hour_rate * (mins / 60) * factor),
+        _hourly_rental_line(
+            facility,
+            draft,
+            money,
+            hour_rate=hour_rate,
+            mins=draft.end_min - draft.start_min,
         )
     ]
     if pricing.cleaning_fee > 0:

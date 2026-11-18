@@ -538,3 +538,107 @@ def test_day_slots_leave_buffer_between_sessions():
         back_to_back,
     )
     assert "misaligned_slot" in rejected.codes
+
+
+def _open_court(**overrides) -> FacilitySnapshot:
+    """Slot court open 6am–10pm with a wide advance window."""
+    defaults = default_booking_config(FacilityBookingArchetype.SLOT)
+    facility = _slot_facility(
+        hours=[DayHours(open=6 * 60, close=22 * 60, closed=False) for _ in range(7)],
+        policies=defaults.policies.model_copy(
+            update={"weekly_cap": 0, "buffer_minutes": 0, "advance_booking_days": 14}
+        ),
+    )
+    return replace(facility, **overrides) if overrides else facility
+
+
+def _court_draft(**overrides) -> BookingDraft:
+    """Two-day 3pm–4pm court draft."""
+    base = BookingDraft(
+        facility_id="fac-1",
+        unit_id="unit-1",
+        local_date=date(2026, 11, 16),
+        end_local_date=date(2026, 11, 17),
+        start_min=15 * 60,
+        end_min=16 * 60,
+        host_contact_id="host-1",
+        participants=[],
+    )
+    return replace(base, **overrides)
+
+
+def test_multi_day_slot_is_valid_when_every_day_is_free():
+    """A repeated court window is accepted when each day in the range is open."""
+    now = datetime(2026, 11, 16, 9, 0, 0)
+    result = availability.validate_draft(
+        availability.AvailabilityContext(facility=_open_court(), active=[], now=now),
+        _court_draft(),
+    )
+    assert result.ok
+
+
+def test_multi_day_slot_rejects_a_booked_later_day():
+    """Day two of a court range is checked for conflicts, not only the start date."""
+    existing = EngineReservation(
+        id="res-2",
+        facility_id="fac-1",
+        unit_id="unit-1",
+        local_date=date(2026, 11, 17),
+        end_local_date=date(2026, 11, 17),
+        start_min=15 * 60,
+        end_min=16 * 60,
+        host_contact_id="other",
+        status="confirmed",
+        participants=[],
+        host_name="Other",
+    )
+    result = availability.validate_draft(
+        availability.AvailabilityContext(
+            facility=_open_court(),
+            active=[existing],
+            now=datetime(2026, 11, 16, 9, 0, 0),
+        ),
+        _court_draft(),
+    )
+    assert "unit_booked" in result.codes
+    assert any("2026-11-17" in issue.message for issue in result.errors)
+
+
+def test_multi_day_slot_rejects_blackout_and_closed_later_days():
+    """Later dates inherit blackout, closure, and advance-window rules."""
+    hours = [DayHours(open=6 * 60, close=22 * 60, closed=False) for _ in range(7)]
+    hours[0] = DayHours(open=6 * 60, close=22 * 60, closed=True)
+    closed_sunday = _open_court(hours=hours)
+    sunday = availability.validate_draft(
+        availability.AvailabilityContext(
+            facility=closed_sunday,
+            active=[],
+            now=datetime(2026, 11, 14, 9, 0, 0),
+        ),
+        _court_draft(local_date=date(2026, 11, 14), end_local_date=date(2026, 11, 15)),
+    )
+    assert "closed_day" in sunday.codes
+
+    blackout = _open_court(closures={date(2026, 11, 17): "Holiday shutdown"})
+    blocked = availability.validate_draft(
+        availability.AvailabilityContext(
+            facility=blackout,
+            active=[],
+            now=datetime(2026, 11, 16, 9, 0, 0),
+        ),
+        _court_draft(),
+    )
+    assert "blackout_date" in blocked.codes
+
+    short_window = _open_court(
+        policies=_open_court().policies.model_copy(update={"advance_booking_days": 0})
+    )
+    too_far = availability.validate_draft(
+        availability.AvailabilityContext(
+            facility=short_window,
+            active=[],
+            now=datetime(2026, 11, 16, 9, 0, 0),
+        ),
+        _court_draft(),
+    )
+    assert "outside_advance_window" in too_far.codes
