@@ -289,6 +289,7 @@ def test_create_user_profile_data_with_verification_pref():
 @pytest.mark.asyncio
 async def test_update_isometrik_user_if_needed_success(monkeypatch):
     svc = _service()
+    synced = AsyncMock()
     monkeypatch.setattr(
         "apps.user_service.app.services.user_service.parse_json_field",
         lambda x: {},
@@ -298,12 +299,12 @@ async def test_update_isometrik_user_if_needed_success(monkeypatch):
         lambda x: {"licenseKey": "k", "appSecret": "s"},
     )
     monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.login_to_isometrik",
-        AsyncMock(return_value={"userToken": "tok"}),
+        "apps.user_service.app.services.user_service.public_profile_image_url",
+        lambda path: f"https://cdn.example.com/{path}",
     )
     monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.update_isometrik_user",
-        AsyncMock(),
+        "apps.user_service.app.services.user_service.sync_isometrik_user_profile",
+        synced,
     )
     body = UpdateUserProfileRequest(first_name="New", avatar_url="pic.png")
     await svc._update_isometrik_user_if_needed(
@@ -312,13 +313,85 @@ async def test_update_isometrik_user_if_needed_success(monkeypatch):
         body,
         updated_profile={"first_name": "New", "last_name": "Name"},
     )
+    synced.assert_awaited_once()
+    assert synced.await_args.kwargs["user_identifier"] == MEMBER_ID
+    assert synced.await_args.kwargs["user_name"] == "New Name"
+    assert synced.await_args.kwargs["user_profile_image_url"] == "https://cdn.example.com/pic.png"
+
+
+@pytest.mark.asyncio
+async def test_update_isometrik_user_if_needed_uses_resident_contact(monkeypatch):
+    """Marketplace chat identity is the contact id, and the contact photo is updated."""
+    svc = _service()
+    contact_id = "990e8400-e29b-41d4-a716-446655440099"
+    updates: list[dict] = []
+
+    class _ContactsRepo:
+        def __init__(self, _db) -> None:
+            return None
+
+        async def is_active_contact_user_for_organization(self, **_kwargs):
+            return contact_id, "iso-resident"
+
+        async def update_contact(self, **kwargs):
+            updates.append(kwargs)
+            return kwargs
+
+    synced = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.ContactsRepository",
+        _ContactsRepo,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.parse_json_field",
+        lambda x: {},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.get_isometrik_data_from_settings",
+        lambda x: {"licenseKey": "k", "appSecret": "s", "userSecret": "u"},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.public_profile_image_url",
+        lambda path: f"https://cdn.example.com/{path}",
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.sync_isometrik_user_profile",
+        synced,
+    )
+
+    body = UpdateUserProfileRequest(first_name="Rahul", avatar_url="contacts/rahul.jpg")
+    await svc._update_isometrik_user_if_needed(
+        MEMBER_ID,
+        ORG_ID,
+        body,
+        updated_profile={"first_name": "Rahul", "last_name": "S"},
+    )
+
+    synced.assert_awaited_once()
+    assert synced.await_args.kwargs["user_identifier"] == contact_id
+    assert synced.await_args.kwargs["user_name"] == "Rahul S"
+    assert (
+        synced.await_args.kwargs["user_profile_image_url"]
+        == "https://cdn.example.com/contacts/rahul.jpg"
+    )
+    assert updates[0]["contact_id"] == contact_id
+    assert updates[0]["update_data"]["profile_photo_url"] == "contacts/rahul.jpg"
+    assert updates[0]["update_data"]["first_name"] == "Rahul"
 
 
 @pytest.mark.asyncio
 async def test_update_isometrik_user_if_needed_swallows_errors(monkeypatch):
     svc = _service()
     monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.login_to_isometrik",
+        "apps.user_service.app.services.user_service.parse_json_field",
+        lambda x: {},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.get_isometrik_data_from_settings",
+        lambda x: {"licenseKey": "k", "appSecret": "s"},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.user_service.sync_isometrik_user_profile",
         AsyncMock(side_effect=RuntimeError("iso down")),
     )
     body = UpdateUserProfileRequest(first_name="New")

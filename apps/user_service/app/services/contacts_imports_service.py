@@ -771,6 +771,7 @@ class ContactsImportService:
                     first_name=model.first_name,
                     last_name=model.last_name,
                     prefix=model.prefix,
+                    profile_photo_url=model.profile_photo_url,
                 )
                 identity_results[row_number] = (
                     user_id,

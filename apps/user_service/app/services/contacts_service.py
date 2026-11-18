@@ -132,6 +132,8 @@ from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
     login_to_isometrik,
+    public_profile_image_url,
+    sync_isometrik_user_profile,
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -515,6 +517,31 @@ class ContactsService:
                 return str(value)
         return None
 
+    async def _refresh_existing_isometrik_profile(
+        self,
+        *,
+        contact_id: str,
+        isometrik_credentials: dict[str, Any],
+        user_name: str | None,
+        profile_image_url: str | None,
+    ) -> None:
+        """Push the current name and photo onto a chat user that already exists."""
+        if not user_name and not profile_image_url:
+            return
+        try:
+            await sync_isometrik_user_profile(
+                user_identifier=contact_id,
+                isometrik_credentials=isometrik_credentials,
+                user_name=user_name,
+                user_profile_image_url=profile_image_url,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh Isometrik profile for contact_id=%s error=%s",
+                contact_id,
+                exc,
+            )
+
     async def _create_or_reuse_isometrik_user(
         self,
         *,
@@ -522,9 +549,17 @@ class ContactsService:
         isometrik_payload: dict[str, Any],
         isometrik_credentials: dict[str, Any],
         existing_isometrik_user_id: str | None = None,
+        user_name: str | None = None,
+        profile_image_url: str | None = None,
     ) -> str:
         """Create an Isometrik chat user or reuse one that already exists."""
         if existing_isometrik_user_id:
+            await self._refresh_existing_isometrik_profile(
+                contact_id=contact_id,
+                isometrik_credentials=isometrik_credentials,
+                user_name=user_name,
+                profile_image_url=profile_image_url,
+            )
             return existing_isometrik_user_id
 
         try:
@@ -638,6 +673,7 @@ class ContactsService:
         email: str | None = None,
         password: str | None = None,
         existing_isometrik_user_id: str | None = None,
+        profile_photo_url: str | None = None,
     ) -> tuple[str, str, str | None, dict[str, Any] | None]:
         """Create/reuse Supabase auth user and create Isometrik user for a contact.
 
@@ -717,6 +753,8 @@ class ContactsService:
 
         org_settings = parse_json_field(organization.get("settings"))
         isometrik_credentials = get_isometrik_data_from_settings(org_settings)
+        user_name = " ".join(part for part in (first_name, last_name) if part).strip() or None
+        profile_image_url = public_profile_image_url(profile_photo_url)
         isometrik_payload: dict[str, Any] = {
             "user_id": contact_id,
             "organization_id": org_id,
@@ -726,11 +764,15 @@ class ContactsService:
         }
         if email_norm:
             isometrik_payload["email"] = email_norm
+        if profile_image_url:
+            isometrik_payload["avatar_url"] = profile_image_url
         isometrik_user_id = await self._create_or_reuse_isometrik_user(
             contact_id=contact_id,
             isometrik_payload=isometrik_payload,
             isometrik_credentials=isometrik_credentials,
             existing_isometrik_user_id=existing_isometrik_user_id,
+            user_name=user_name,
+            profile_image_url=profile_image_url,
         )
         return user_id, isometrik_user_id, created_password, reused_auth_user
 
@@ -1083,6 +1125,7 @@ class ContactsService:
         prefix: str | None,
         phone: str | None = None,
         password: str | None = None,
+        profile_photo_url: str | None = None,
     ) -> tuple[str, str, str | None, dict[str, Any] | None]:
         """Provision (or reuse) auth identity for a contact.
 
@@ -1097,6 +1140,7 @@ class ContactsService:
             last_name=last_name,
             prefix=prefix,
             password=password,
+            profile_photo_url=profile_photo_url,
         )
 
     def _maybe_send_contact_creation_email(
@@ -1428,6 +1472,7 @@ class ContactsService:
             first_name=body.first_name,
             last_name=body.last_name,
             prefix=body.prefix,
+            profile_photo_url=body.profile_photo_url,
         )
 
         list_payload_inputs: dict[str, list[dict[str, Any]]] = {
@@ -1990,6 +2035,10 @@ class ContactsService:
             if body_attr not in fields_set:
                 continue
             value = getattr(body, body_attr, None)
+            if body_attr == "profile_photo_url":
+                cleaned_photo = value.strip() if isinstance(value, str) else ""
+                update_data[column_name] = cleaned_photo or None
+                continue
             if value is not None:
                 update_data[column_name] = value.value if hasattr(value, "value") else value
 
@@ -2052,6 +2101,115 @@ class ContactsService:
             default=str,
         ):
             update_data["custom_fields"] = merged
+
+    @staticmethod
+    def _row_text(row: dict[str, Any], key: str) -> str:
+        """Trimmed string value from a contact row."""
+        return str(row.get(key) or "").strip()
+
+    def _chat_fields_changed(
+        self, previous: dict[str, Any], updated: dict[str, Any]
+    ) -> tuple[bool, bool]:
+        """Whether the contact name or photo differs after the update."""
+        name_changed = self._row_text(previous, "first_name") != self._row_text(
+            updated, "first_name"
+        )
+        if self._row_text(previous, "last_name") != self._row_text(updated, "last_name"):
+            name_changed = True
+        photo_changed = self._row_text(previous, "profile_photo_url") != self._row_text(
+            updated, "profile_photo_url"
+        )
+        return name_changed, photo_changed
+
+    def _contact_isometrik_payload(
+        self, previous: dict[str, Any], updated: dict[str, Any]
+    ) -> tuple[str | None, str | None] | None:
+        """Name and photo to push, when this contact has a chat user and something changed."""
+        has_chat_user = previous.get("isometrik_user_id") or updated.get("isometrik_user_id")
+        if not has_chat_user:
+            return None
+        name_changed, photo_changed = self._chat_fields_changed(previous, updated)
+        user_name = self._contact_display_name(updated) if name_changed else None
+        image_url = self._chat_image_update(updated, photo_changed)
+        if user_name is None and image_url is None:
+            return None
+        return user_name, image_url
+
+    def _chat_image_update(self, updated: dict[str, Any], photo_changed: bool) -> str | None:
+        """Image to send when the photo changed.
+
+        An empty string clears the Isometrik avatar. ``None`` means the photo
+        was not changed, or the new value is not a safe media URL.
+        """
+        if not photo_changed:
+            return None
+        raw = updated.get("profile_photo_url")
+        if not str(raw or "").strip():
+            return ""
+        return public_profile_image_url(raw)
+
+    def _contact_display_name(self, updated: dict[str, Any]) -> str | None:
+        """First and last name joined for the Isometrik display name."""
+        full_name = " ".join(
+            part
+            for part in (
+                self._row_text(updated, "first_name"),
+                self._row_text(updated, "last_name"),
+            )
+            if part
+        )
+        return full_name or None
+
+    async def _push_contact_isometrik_profile(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+        user_name: str | None,
+        image_url: str | None,
+    ) -> None:
+        """Login as the contact and patch the Isometrik chat profile."""
+        organization = await self.org_repo.get_organization_by_id(organization_id)
+        if not organization:
+            return
+        credentials = get_isometrik_data_from_settings(
+            parse_json_field(organization.get("settings"))
+        )
+        if not credentials:
+            return
+        await sync_isometrik_user_profile(
+            user_identifier=contact_id,
+            isometrik_credentials=credentials,
+            user_name=user_name,
+            user_profile_image_url=image_url,
+        )
+
+    async def _sync_isometrik_profile_after_contact_update(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+        previous: dict[str, Any],
+        updated: dict[str, Any],
+    ) -> None:
+        """Push a contact name or photo change to that resident's Isometrik chat user."""
+        payload = self._contact_isometrik_payload(previous, updated)
+        if payload is None:
+            return
+        user_name, image_url = payload
+        try:
+            await self._push_contact_isometrik_profile(
+                contact_id=contact_id,
+                organization_id=organization_id,
+                user_name=user_name,
+                image_url=image_url,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to update Isometrik user after contact update: contact_id=%s error=%s",
+                contact_id,
+                exc,
+            )
 
     async def update_contact(
         self,
@@ -2202,6 +2360,12 @@ class ContactsService:
             # Keep audit snapshots accurate without extra DB reads:
             # the delta application query returns the post-update `companies[]` snapshot.
             new_snapshot["companies"] = coerce_json_list(delta_result.get("companies"))
+        await self._sync_isometrik_profile_after_contact_update(
+            contact_id=contact_id,
+            organization_id=org_id,
+            previous=current,
+            updated=new_snapshot,
+        )
         update_response: dict[str, Any] = {
             "ok": True,
             "old_data": self._normalize_contact_audit_snapshot(current),
@@ -3025,6 +3189,7 @@ class ContactsService:
             prefix=current.get("prefix"),
             password=password,
             existing_isometrik_user_id=existing_isometrik_user_id,
+            profile_photo_url=current.get("profile_photo_url"),
         )
         update_data: dict[str, Any] = {}
         if user_id and str(current.get("user_id") or "") != user_id:
