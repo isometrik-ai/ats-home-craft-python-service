@@ -841,6 +841,77 @@ async def test_update_contact_syncs_name_and_photo_to_isometrik(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_contact_clears_isometrik_photo(monkeypatch):
+    """Removing a contact photo clears the Isometrik avatar instead of leaving it."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        first_name="Rahul",
+        last_name="S",
+        profile_photo_url="contacts/rahul.jpg",
+        isometrik_user_id="iso-1",
+    )
+    repo = _FakeContactsRepo(
+        contact_for_update=current,
+        updated_row={"profile_photo_url": None},
+    )
+    svc = _service(contacts_repo=repo)
+    synced = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.sync_isometrik_user_profile",
+        synced,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"licenseKey": "k", "appSecret": "s", "userSecret": "u"},
+    )
+
+    await svc.update_contact(
+        contact_id=CONTACT_ID,
+        body=UpdateContactRequest(profile_photo_url=""),
+    )
+
+    synced.assert_awaited_once()
+    assert repo.last_update_kwargs["update_data"]["profile_photo_url"] is None
+    assert synced.await_args.kwargs["user_profile_image_url"] == ""
+    assert synced.await_args.kwargs["user_name"] is None
+
+
+@pytest.mark.asyncio
+async def test_update_contact_null_photo_clears_isometrik_photo(monkeypatch):
+    """An explicit null profile photo clears the stored value and the chat avatar."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        first_name="Rahul",
+        last_name="S",
+        profile_photo_url="contacts/rahul.jpg",
+        isometrik_user_id="iso-1",
+    )
+    repo = _FakeContactsRepo(
+        contact_for_update=current,
+        updated_row={"profile_photo_url": None},
+    )
+    svc = _service(contacts_repo=repo)
+    synced = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.sync_isometrik_user_profile",
+        synced,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"licenseKey": "k", "appSecret": "s", "userSecret": "u"},
+    )
+
+    await svc.update_contact(
+        contact_id=CONTACT_ID,
+        body=UpdateContactRequest(profile_photo_url=None),
+    )
+
+    synced.assert_awaited_once()
+    assert repo.last_update_kwargs["update_data"]["profile_photo_url"] is None
+    assert synced.await_args.kwargs["user_profile_image_url"] == ""
+
+
+@pytest.mark.asyncio
 async def test_update_contact_not_found():
     """Update contact raises when contact is missing."""
     svc = _service(contacts_repo=_FakeContactsRepo(contact_for_update=None))

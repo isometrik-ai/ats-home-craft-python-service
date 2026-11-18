@@ -6,6 +6,7 @@ Handles creation of Isometrik applications.
 import time
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import jwt
@@ -167,21 +168,48 @@ def get_isometrik_data_from_settings(
     return organization_settings.get("isometrik")
 
 
+def _media_base_url() -> str:
+    """Configured public media host, without a trailing slash."""
+    media = getattr(getattr(shared_settings, "cloudflare_r2", None), "media_url", None)
+    return str(media or "").strip().rstrip("/")
+
+
+def _is_allowed_media_url(url: str, media_base: str) -> bool:
+    """True when ``url`` is http(s) on the configured media host and path."""
+    parsed = urlsplit(url)
+    allowed = urlsplit(media_base)
+    if parsed.scheme not in {"http", "https"} or parsed.scheme != allowed.scheme:
+        return False
+    if parsed.username or parsed.password:
+        return False
+    if (parsed.hostname or "").lower() != (allowed.hostname or "").lower():
+        return False
+    if parsed.port != allowed.port:
+        return False
+    allowed_path = allowed.path.rstrip("/")
+    if not allowed_path:
+        return True
+    path = parsed.path or ""
+    return path == allowed_path or path.startswith(f"{allowed_path}/")
+
+
 def public_profile_image_url(path: str | None) -> str | None:
     """Turn a stored profile image into an absolute URL Isometrik can fetch.
 
-    Storage keys are prefixed with the public media host. Values that are
-    already http(s) URLs are returned unchanged.
+    Storage keys are prefixed with the public media host. Absolute URLs are
+    accepted only when they already point at that host. Anything else is
+    dropped so Isometrik is not asked to fetch an arbitrary address.
     """
     if path is None:
         return None
     cleaned = str(path).strip()
     if not cleaned:
         return None
-    if cleaned.startswith(("http://", "https://")):
-        return cleaned
-    media = getattr(getattr(shared_settings, "cloudflare_r2", None), "media_url", None)
-    base = str(media or "").rstrip("/")
+    base = _media_base_url()
+    if "://" in cleaned or cleaned.startswith("//"):
+        if base and _is_allowed_media_url(cleaned, base):
+            return cleaned
+        return None
     if not base:
         return None
     return f"{base}/{cleaned.lstrip('/')}"
@@ -372,7 +400,8 @@ async def update_isometrik_user(
         isometrik_credentials (dict[str, Any]): Isometrik credentials from settings
             Should contain: userToken, licenseKey, appSecret
         user_name (str | None): Updated user name (optional)
-        user_profile_image_url (str | None): Updated user profile image URL (optional)
+        user_profile_image_url (str | None): Updated profile image URL.
+            An empty string clears the image. ``None`` leaves it unchanged.
 
     Returns:
         dict[str, Any]: Response from Isometrik API containing updated user details
@@ -423,7 +452,7 @@ async def sync_isometrik_user_profile(
     ``user_identifier`` is the value stored as Isometrik ``userIdentifier``
     (contact id for residents, member id or auth user id for staff).
     """
-    if not user_name and not user_profile_image_url:
+    if user_name is None and user_profile_image_url is None:
         return {}
 
     login_response = await login_to_isometrik(

@@ -166,7 +166,7 @@ async def test_create_isometrik_user_custom_avatar(monkeypatch) -> None:
 
 
 def test_public_profile_image_url_builds_absolute_url(monkeypatch) -> None:
-    """Storage keys become public URLs and absolute URLs stay unchanged."""
+    """Storage keys and the configured media host become public URLs."""
     monkeypatch.setattr(
         isometrik_service,
         "shared_settings",
@@ -183,6 +183,9 @@ def test_public_profile_image_url_builds_absolute_url(monkeypatch) -> None:
     assert public_profile_image_url("https://cdn.example.com/a.jpg") == (
         "https://cdn.example.com/a.jpg"
     )
+    assert public_profile_image_url("https://cdn.example.com.evil.com/a.jpg") is None
+    assert public_profile_image_url("https://169.254.169.254/latest/meta-data") is None
+    assert public_profile_image_url("http://cdn.example.com/a.jpg") is None
     assert public_profile_image_url("  ") is None
     assert public_profile_image_url(None) is None
 
@@ -346,6 +349,25 @@ async def test_update_isometrik_user(monkeypatch) -> None:
     assert result == {"updated": True}
     assert calls["json"]["userName"] == "Jane Doe"
     assert calls["headers"]["userToken"] == "tok"
+
+
+@pytest.mark.asyncio
+async def test_update_isometrik_user_clears_profile_image(monkeypatch) -> None:
+    """An empty profile image URL is sent so Isometrik clears the avatar."""
+    calls: dict = {}
+    monkeypatch.setattr(isometrik_service, "shared_settings", _DummySharedSettings())
+    monkeypatch.setattr(
+        isometrik_service.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: _DummyPatchAsyncClient(calls),
+    )
+
+    await update_isometrik_user(
+        {"userToken": "tok", "licenseKey": "lk", "appSecret": "as"},
+        user_profile_image_url="",
+    )
+
+    assert calls["json"]["userProfileImageUrl"] == ""
 
 
 def test_create_isometrik_token_missing_config(monkeypatch) -> None:

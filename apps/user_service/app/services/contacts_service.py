@@ -2035,6 +2035,10 @@ class ContactsService:
             if body_attr not in fields_set:
                 continue
             value = getattr(body, body_attr, None)
+            if body_attr == "profile_photo_url":
+                cleaned_photo = value.strip() if isinstance(value, str) else ""
+                update_data[column_name] = cleaned_photo or None
+                continue
             if value is not None:
                 update_data[column_name] = value.value if hasattr(value, "value") else value
 
@@ -2126,12 +2130,23 @@ class ContactsService:
             return None
         name_changed, photo_changed = self._chat_fields_changed(previous, updated)
         user_name = self._contact_display_name(updated) if name_changed else None
-        image_url = None
-        if photo_changed:
-            image_url = public_profile_image_url(updated.get("profile_photo_url"))
-        if user_name or image_url:
-            return user_name, image_url
-        return None
+        image_url = self._chat_image_update(updated, photo_changed)
+        if user_name is None and image_url is None:
+            return None
+        return user_name, image_url
+
+    def _chat_image_update(self, updated: dict[str, Any], photo_changed: bool) -> str | None:
+        """Image to send when the photo changed.
+
+        An empty string clears the Isometrik avatar. ``None`` means the photo
+        was not changed, or the new value is not a safe media URL.
+        """
+        if not photo_changed:
+            return None
+        raw = updated.get("profile_photo_url")
+        if not str(raw or "").strip():
+            return ""
+        return public_profile_image_url(raw)
 
     def _contact_display_name(self, updated: dict[str, Any]) -> str | None:
         """First and last name joined for the Isometrik display name."""

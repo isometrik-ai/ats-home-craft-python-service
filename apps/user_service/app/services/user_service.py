@@ -1801,8 +1801,8 @@ class UserService:  # pylint: disable=too-many-public-methods
             contact_update["first_name"] = body.first_name
         if body.last_name is not None:
             contact_update["last_name"] = body.last_name
-        if body.avatar_url:
-            contact_update["profile_photo_url"] = body.avatar_url
+        if body.avatar_url is not None:
+            contact_update["profile_photo_url"] = body.avatar_url.strip() or None
         if not contact_update:
             return
         db = getattr(self.organization_member_repository, "db_connection", None)
@@ -1819,14 +1819,24 @@ class UserService:  # pylint: disable=too-many-public-methods
         body: UpdateUserProfileRequest,
         updated_profile: UserProfileData | dict[str, Any] | None,
     ) -> tuple[str | None, str | None] | None:
-        """Name and public photo to send to Isometrik, or None when nothing changed."""
+        """Name and public photo to send to Isometrik, or None when nothing changed.
+
+        An empty string image clears the chat avatar. ``None`` leaves it unchanged.
+        """
         user_name = self._changed_chat_name(body, updated_profile)
-        image_url = None
-        if body.avatar_url is not None:
-            image_url = public_profile_image_url(body.avatar_url)
-        if user_name or image_url:
-            return user_name, image_url
-        return None
+        image_url = self._chat_image_from_avatar(body)
+        if user_name is None and image_url is None:
+            return None
+        return user_name, image_url
+
+    @staticmethod
+    def _chat_image_from_avatar(body: UpdateUserProfileRequest) -> str | None:
+        """Public avatar URL, empty string to clear, or None when the avatar is unchanged."""
+        if body.avatar_url is None:
+            return None
+        if not body.avatar_url.strip():
+            return ""
+        return public_profile_image_url(body.avatar_url)
 
     def _changed_chat_name(
         self,
