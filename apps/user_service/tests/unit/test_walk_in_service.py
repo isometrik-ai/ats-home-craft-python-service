@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -54,7 +54,7 @@ def _entry_row(**overrides: Any) -> dict[str, Any]:
         "flats_count": 1,
         "approved_flats_count": 0,
         "requested_by_user_id": "staff-user",
-        "requested_at": now,
+        "requested_at": datetime.now(timezone.utc),
         "entered_at": None,
         "exited_at": None,
         "created_at": now,
@@ -476,6 +476,42 @@ async def test_list_project_walk_ins():
     assert items[0]["status"] == WalkInStatus.AWAITING.value
     assert items[0]["visitor_photo_paths"] == ["org/photo.jpg"]
     service.setup_service.ensure_project.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_list_project_walk_ins_expires_stale_awaiting():
+    """Awaiting visits older than 24 hours are returned as expired."""
+    repo = _FakeWalkInRepo()
+    repo.entry = _entry_row(
+        requested_at=datetime.now(timezone.utc) - timedelta(hours=25),
+    )
+    service = _service(repo=repo)
+
+    items = await service.list_project_walk_ins(
+        project_id=PROJECT_ID,
+        query=WalkInListQuery(),
+    )
+
+    assert items[0]["status"] == "expired"
+
+
+@pytest.mark.asyncio
+async def test_approve_visit_unit_rejects_stale_awaiting():
+    """Residents cannot approve a request that has been awaiting for 24 hours."""
+    repo = _FakeWalkInRepo()
+    repo.entry = _entry_row(
+        requested_at=datetime.now(timezone.utc) - timedelta(hours=25),
+    )
+    service = _service(repo=repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.approve_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+        )
+
+    assert exc_info.value.message_key == "walk_in.errors.awaiting_expired"
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.utils.common_utils import serialize_jsonb_param
+from apps.user_service.app.utils.walk_in_expiry import awaiting_expiry_interval_sql
 
 
 class WalkInRepository(BaseRepository):
@@ -307,8 +308,9 @@ class WalkInRepository(BaseRepository):
         on_date: date | None = None,
     ) -> list[dict[str, Any]]:
         """List walk-in entries for a project."""
+        awaiting_ttl = awaiting_expiry_interval_sql()
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               e.*,
               (
@@ -325,6 +327,10 @@ class WalkInRepository(BaseRepository):
             WHERE e.organization_id = $1::uuid
               AND e.project_id = $2::uuid
               AND ($3::walk_in_status IS NULL OR e.status = $3::walk_in_status)
+              AND (
+                $3::walk_in_status IS DISTINCT FROM 'awaiting'::walk_in_status
+                OR e.requested_at > NOW() - {awaiting_ttl}
+              )
               AND (
                 $4::date IS NULL
                 OR e.requested_at >= $4::date
@@ -668,8 +674,9 @@ class WalkInRepository(BaseRepository):
         unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """List visit units pending action for flats the contact occupies."""
+        awaiting_ttl = awaiting_expiry_interval_sql()
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               vu.id::text AS visit_unit_id,
               vu.walk_in_entry_id::text AS walk_in_entry_id,
@@ -701,6 +708,10 @@ class WalkInRepository(BaseRepository):
              AND u.organization_id = vu.organization_id
             WHERE vu.organization_id = $1::uuid
               AND ($2::walk_in_visit_unit_status IS NULL OR vu.status = $2::walk_in_visit_unit_status)
+              AND (
+                $2::walk_in_visit_unit_status IS DISTINCT FROM 'awaiting'::walk_in_visit_unit_status
+                OR e.requested_at > NOW() - {awaiting_ttl}
+              )
               AND ($4::uuid IS NULL OR vu.unit_id = $4::uuid)
               AND EXISTS (
                 SELECT 1
