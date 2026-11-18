@@ -103,7 +103,10 @@ from apps.user_service.app.services.contact_unit_documents_service import (
     ContactUnitDocumentsService,
 )
 from apps.user_service.app.services.contact_units_service import ContactUnitsService
-from apps.user_service.app.services.facilities_service import FacilitiesService
+from apps.user_service.app.services.facilities_service import (
+    FacilitiesService,
+    read_bounded_upload,
+)
 from apps.user_service.app.services.inventory_service import InventoryService
 from apps.user_service.app.services.passes_service import PassesService
 from apps.user_service.app.services.project_members_service import ProjectMembersService
@@ -2264,7 +2267,7 @@ async def import_facilities(
     service = FacilitiesService(db_connection=db_connection, user_context=user_context)
     data = await service.import_facilities(
         project_id=project_id,
-        payload=await file.read(),
+        payload=await read_bounded_upload(file),
         filename=file.filename or "",
     )
     _set_audit(

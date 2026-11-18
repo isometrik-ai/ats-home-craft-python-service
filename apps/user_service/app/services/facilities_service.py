@@ -124,6 +124,36 @@ def _row_has_booking_overrides(row: dict[str, Any]) -> bool:
     return bool(row["notes"])
 
 
+async def read_bounded_upload(upload: Any, *, max_bytes: int = _MAX_WORKBOOK_BYTES) -> bytes:
+    """Read an upload in chunks and reject it once it exceeds max_bytes."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        if total + len(chunk) > max_bytes:
+            raise ValidationException(
+                message_key="facilities_imports.errors.file_too_large",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        chunks.append(chunk)
+        total += len(chunk)
+
+
+def _unique_unit_names(names: list[str]) -> list[str]:
+    """Drop blank-normalized duplicate court or room names, keeping sheet order."""
+    desired: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        desired.append(name)
+    return desired
+
+
 async def _sync_imported_units(
     booking: FacilityBookingConfigService,
     *,
@@ -132,42 +162,40 @@ async def _sync_imported_units(
     names: list[str],
     units: list[dict[str, Any]],
 ) -> None:
-    """Rename the default unit and create the remaining court or room names."""
-    if not names:
+    """Match sheet names to existing units, rename the spare ones, and create the rest."""
+    desired = _unique_unit_names(names)
+    if not desired:
         return
-    pending = names
-    start = 0
-    if units:
-        await _align_first_imported_unit(
-            booking, project_id=project_id, facility_id=facility_id, names=names, units=units
-        )
-        pending = names[1:]
-        start = 1
-    for index, unit_name in enumerate(pending, start=start):
+    wanted = {name.casefold() for name in desired}
+    spare = [unit for unit in units if str(unit.get("name") or "").casefold() not in wanted]
+    next_sort = len(units)
+    for index, name in enumerate(desired):
+        if _unit_named(units, name):
+            continue
+        if spare:
+            unit = spare.pop(0)
+            await booking.update_unit(
+                project_id=project_id,
+                facility_id=facility_id,
+                unit_id=str(unit["id"]),
+                body=UpdateBookingUnitRequest(name=name, sort_order=index),
+            )
+            continue
         await booking.create_unit(
             project_id=project_id,
             facility_id=facility_id,
-            body=CreateBookingUnitRequest(name=unit_name, sort_order=index),
+            body=CreateBookingUnitRequest(name=name, sort_order=next_sort),
         )
+        next_sort += 1
 
 
-async def _align_first_imported_unit(
-    booking: FacilityBookingConfigService,
-    *,
-    project_id: str,
-    facility_id: str,
-    names: list[str],
-    units: list[dict[str, Any]],
-) -> None:
-    """Rename the facility's first booking unit when the sheet name differs."""
-    if str(units[0].get("name") or "") == names[0]:
-        return
-    await booking.update_unit(
-        project_id=project_id,
-        facility_id=facility_id,
-        unit_id=str(units[0]["id"]),
-        body=UpdateBookingUnitRequest(name=names[0], sort_order=0),
-    )
+def _unit_named(units: list[dict[str, Any]], name: str) -> bool:
+    """Return whether a booking unit already uses this name."""
+    key = name.casefold()
+    for unit in units:
+        if str(unit.get("name") or "").casefold() == key:
+            return True
+    return False
 
 
 def _booking_pricing(defaults: Any, row: dict[str, Any]) -> Any:
@@ -805,7 +833,7 @@ class FacilitiesService:
             body=UpdateFacilityRequest(**body.model_dump()),
         )
         if row["is_bookable"]:
-            await self._apply_imported_booking(project_id, facility_id, row, sync_units=False)
+            await self._apply_imported_booking(project_id, facility_id, row)
 
     async def _existing_facilities(self, *, project_id: str) -> dict[str, str]:
         """Map existing facility names to their ids."""
@@ -898,14 +926,9 @@ class FacilitiesService:
         return CreateFacilityRequest(**payload)
 
     async def _apply_imported_booking(
-        self,
-        project_id: str,
-        facility_id: str,
-        row: dict[str, Any],
-        *,
-        sync_units: bool = True,
+        self, project_id: str, facility_id: str, row: dict[str, Any]
     ) -> None:
-        """Write booking columns and, for a new facility, its court or room names."""
+        """Write booking columns and reconcile court or room names for this row."""
         booking = FacilityBookingConfigService(
             db_connection=self.db_connection, user_context=self.user_context
         )
@@ -916,14 +939,13 @@ class FacilitiesService:
                 facility_id=facility_id,
                 body=self._booking_update(row, version=int(workspace["config"]["version"])),
             )
-        if sync_units:
-            await _sync_imported_units(
-                booking,
-                project_id=project_id,
-                facility_id=facility_id,
-                names=list(row["unit_names"]),
-                units=list(workspace.get("units") or []),
-            )
+        await _sync_imported_units(
+            booking,
+            project_id=project_id,
+            facility_id=facility_id,
+            names=list(row["unit_names"]),
+            units=list(workspace.get("units") or []),
+        )
 
     @staticmethod
     def _match_tower(

@@ -679,3 +679,54 @@ async def test_import_rejects_a_non_xlsx_upload():
         )
 
     assert exc.value.message_key == "facilities_imports.errors.xlsx_required"
+
+
+class _ChunkedUpload:
+    """Upload that returns one chunk per read."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = list(chunks)
+
+    async def read(self, _size: int) -> bytes:
+        if not self.chunks:
+            return b""
+        return self.chunks.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_read_bounded_upload_stops_before_keeping_an_oversized_body():
+    """A chunk past 20 MB is rejected and not appended to the payload."""
+    from apps.user_service.app.services.facilities_service import read_bounded_upload
+
+    upload = _ChunkedUpload([b"a" * (20 * 1024 * 1024), b"extra"])
+
+    with pytest.raises(ValidationException) as exc:
+        await read_bounded_upload(upload)
+
+    assert exc.value.message_key == "facilities_imports.errors.file_too_large"
+
+
+@pytest.mark.asyncio
+async def test_sync_imported_units_renames_spare_units_without_duplicating():
+    """A re-import renames an unmatched unit and does not create a name that already exists."""
+    from apps.user_service.app.services.facilities_service import _sync_imported_units
+
+    booking = MagicMock()
+    booking.update_unit = AsyncMock()
+    booking.create_unit = AsyncMock()
+
+    await _sync_imported_units(
+        booking,
+        project_id=PROJECT_ID,
+        facility_id=FACILITY_ID,
+        names=["Court A", "Court C"],
+        units=[
+            {"id": "unit-1", "name": "Court A"},
+            {"id": "unit-2", "name": "Court B"},
+        ],
+    )
+
+    booking.create_unit.assert_not_awaited()
+    renamed = booking.update_unit.await_args.kwargs
+    assert renamed["unit_id"] == "unit-2"
+    assert renamed["body"].name == "Court C"
