@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -54,7 +54,7 @@ def _entry_row(**overrides: Any) -> dict[str, Any]:
         "flats_count": 1,
         "approved_flats_count": 0,
         "requested_by_user_id": "staff-user",
-        "requested_at": now,
+        "requested_at": datetime.now(timezone.utc),
         "entered_at": None,
         "exited_at": None,
         "created_at": now,
@@ -479,6 +479,42 @@ async def test_list_project_walk_ins():
 
 
 @pytest.mark.asyncio
+async def test_list_project_walk_ins_expires_stale_awaiting():
+    """Awaiting visits older than 24 hours are returned as expired."""
+    repo = _FakeWalkInRepo()
+    repo.entry = _entry_row(
+        requested_at=datetime.now(timezone.utc) - timedelta(hours=25),
+    )
+    service = _service(repo=repo)
+
+    items = await service.list_project_walk_ins(
+        project_id=PROJECT_ID,
+        query=WalkInListQuery(),
+    )
+
+    assert items[0]["status"] == "expired"
+
+
+@pytest.mark.asyncio
+async def test_approve_visit_unit_rejects_stale_awaiting():
+    """Residents cannot approve a request that has been awaiting for 24 hours."""
+    repo = _FakeWalkInRepo()
+    repo.entry = _entry_row(
+        requested_at=datetime.now(timezone.utc) - timedelta(hours=25),
+    )
+    service = _service(repo=repo)
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.approve_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+        )
+
+    assert exc_info.value.message_key == "walk_in.errors.awaiting_expired"
+
+
+@pytest.mark.asyncio
 async def test_list_resident_visit_units():
     """Resident list maps repository rows to API items."""
     repo = _FakeWalkInRepo()
@@ -720,12 +756,43 @@ async def test_approve_visit_unit_update_conflict():
     repo.update_visit_unit_status = AsyncMock(return_value=None)  # type: ignore[method-assign]
     service = _service(repo=repo)
 
-    with pytest.raises(ValidationException):
+    with pytest.raises(ValidationException) as exc_info:
         await service.approve_visit_unit(
             contact_id=CONTACT_ID,
             walk_in_entry_id=ENTRY_ID,
             visit_unit_id=VISIT_UNIT_ID,
         )
+
+    assert exc_info.value.message_key == "walk_in.errors.visit_unit_not_awaiting"
+
+
+@pytest.mark.asyncio
+async def test_approve_visit_unit_update_miss_after_expiry(monkeypatch):
+    """A write that loses the race at the 24-hour mark is reported as expired."""
+    repo = _FakeWalkInRepo()
+    repo.update_visit_unit_status = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    service = _service(repo=repo)
+    checks = {"count": 0}
+
+    def _expires_on_second_check(requested_at, *, now=None):
+        del requested_at, now
+        checks["count"] += 1
+        return checks["count"] > 1
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.walk_in_service.walk_in_awaiting_is_expired",
+        _expires_on_second_check,
+    )
+
+    with pytest.raises(ValidationException) as exc_info:
+        await service.approve_visit_unit(
+            contact_id=CONTACT_ID,
+            walk_in_entry_id=ENTRY_ID,
+            visit_unit_id=VISIT_UNIT_ID,
+        )
+
+    assert exc_info.value.message_key == "walk_in.errors.awaiting_expired"
+    repo.update_visit_unit_status.assert_awaited_once()
 
 
 @pytest.mark.asyncio

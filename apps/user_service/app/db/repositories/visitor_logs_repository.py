@@ -18,6 +18,7 @@ from apps.user_service.app.schemas.enums import (
     WalkInEventType,
     WalkInStatus,
 )
+from apps.user_service.app.utils.walk_in_expiry import awaiting_expiry_interval_sql
 
 # Filter-only type for visitor logs union; not stored on passes.pass_type.
 WALK_IN_LOG_TYPE = "walk_in"
@@ -581,6 +582,8 @@ TRIM(
         wi_entered = WalkInStatus.ENTERED.value
         wi_exited = WalkInStatus.EXITED.value
         wi_cancelled = WalkInStatus.CANCELLED.value
+        expired = VisitorLogVisitStatus.EXPIRED.value
+        awaiting_ttl = awaiting_expiry_interval_sql()
         return f"""
             SELECT
               'walk_in'::text AS source,
@@ -629,12 +632,14 @@ TRIM(
               guard_om.last_name AS guard_last_name,
               NULL::text AS guard_name_fallback,
               '{PassAccessStatus.GRANTED.value}'::text AS access_status,
-              CASE w.status::text
-                WHEN '{wi_awaiting}' THEN '{awaiting}'
-                WHEN '{wi_approved}' THEN '{approved}'
-                WHEN '{wi_entered}' THEN '{inside}'
-                WHEN '{wi_exited}' THEN '{exited}'
-                WHEN '{wi_cancelled}' THEN '{cancelled}'
+              CASE
+                WHEN w.status::text = '{wi_awaiting}'
+                     AND w.requested_at <= NOW() - {awaiting_ttl} THEN '{expired}'
+                WHEN w.status::text = '{wi_awaiting}' THEN '{awaiting}'
+                WHEN w.status::text = '{wi_approved}' THEN '{approved}'
+                WHEN w.status::text = '{wi_entered}' THEN '{inside}'
+                WHEN w.status::text = '{wi_exited}' THEN '{exited}'
+                WHEN w.status::text = '{wi_cancelled}' THEN '{cancelled}'
                 ELSE '{approved}'
               END AS visit_status,
               NULL::text AS pass_code,

@@ -7,6 +7,7 @@ from typing import Any
 
 from apps.user_service.app.db.repositories.base_repository import BaseRepository
 from apps.user_service.app.utils.common_utils import serialize_jsonb_param
+from apps.user_service.app.utils.walk_in_expiry import awaiting_expiry_interval_sql
 
 
 class WalkInRepository(BaseRepository):
@@ -307,8 +308,9 @@ class WalkInRepository(BaseRepository):
         on_date: date | None = None,
     ) -> list[dict[str, Any]]:
         """List walk-in entries for a project."""
+        awaiting_ttl = awaiting_expiry_interval_sql()
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               e.*,
               (
@@ -325,6 +327,10 @@ class WalkInRepository(BaseRepository):
             WHERE e.organization_id = $1::uuid
               AND e.project_id = $2::uuid
               AND ($3::walk_in_status IS NULL OR e.status = $3::walk_in_status)
+              AND (
+                $3::walk_in_status IS DISTINCT FROM 'awaiting'::walk_in_status
+                OR e.requested_at > NOW() - {awaiting_ttl}
+              )
               AND (
                 $4::date IS NULL
                 OR e.requested_at >= $4::date
@@ -518,10 +524,15 @@ class WalkInRepository(BaseRepository):
         rejected_by_contact_id: str | None = None,
         rejection_reason: str | None = None,
     ) -> dict[str, Any] | None:
-        """Update a visit unit after resident approve/reject."""
+        """Update a visit unit after resident approve/reject.
+
+        The awaiting-window predicate is part of the UPDATE so a request that
+        expires between the application check and this write is not actioned.
+        """
         now = datetime.now(timezone.utc)
+        awaiting_ttl = awaiting_expiry_interval_sql()
         row = await self.db_connection.fetchrow(
-            """
+            f"""
             UPDATE walk_in_visit_units
             SET status = $4::walk_in_visit_unit_status,
                 approved_by_contact_id = CASE
@@ -549,6 +560,13 @@ class WalkInRepository(BaseRepository):
               AND walk_in_entry_id = $2::uuid
               AND id = $3::uuid
               AND status = 'awaiting'::walk_in_visit_unit_status
+              AND EXISTS (
+                SELECT 1
+                FROM walk_in_entries e
+                WHERE e.organization_id = walk_in_visit_units.organization_id
+                  AND e.id = walk_in_visit_units.walk_in_entry_id
+                  AND e.requested_at > NOW() - {awaiting_ttl}
+              )
             RETURNING *
             """,
             organization_id,
@@ -668,8 +686,9 @@ class WalkInRepository(BaseRepository):
         unit_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """List visit units pending action for flats the contact occupies."""
+        awaiting_ttl = awaiting_expiry_interval_sql()
         rows = await self.db_connection.fetch(
-            """
+            f"""
             SELECT
               vu.id::text AS visit_unit_id,
               vu.walk_in_entry_id::text AS walk_in_entry_id,
@@ -701,6 +720,10 @@ class WalkInRepository(BaseRepository):
              AND u.organization_id = vu.organization_id
             WHERE vu.organization_id = $1::uuid
               AND ($2::walk_in_visit_unit_status IS NULL OR vu.status = $2::walk_in_visit_unit_status)
+              AND (
+                $2::walk_in_visit_unit_status IS DISTINCT FROM 'awaiting'::walk_in_visit_unit_status
+                OR e.requested_at > NOW() - {awaiting_ttl}
+              )
               AND ($4::uuid IS NULL OR vu.unit_id = $4::uuid)
               AND EXISTS (
                 SELECT 1

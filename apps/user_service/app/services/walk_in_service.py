@@ -41,6 +41,11 @@ from apps.user_service.app.services.push_notification_dispatch import (
 )
 from apps.user_service.app.utils.app_access_guard import ensure_resident_unit_not_held
 from apps.user_service.app.utils.common_utils import UserContext, format_iso_datetime
+from apps.user_service.app.utils.walk_in_expiry import (
+    effective_walk_in_header_status,
+    effective_walk_in_visit_unit_status,
+    walk_in_awaiting_is_expired,
+)
 from libs.shared_utils.http_exceptions import (
     NotFoundException,
     ValidationException,
@@ -479,7 +484,11 @@ class WalkInService:
         ).model_dump()
 
     @staticmethod
-    def _serialize_visit_unit(row: dict[str, Any]) -> dict[str, Any]:
+    def _serialize_visit_unit(
+        row: dict[str, Any],
+        *,
+        requested_at: Any = None,
+    ) -> dict[str, Any]:
         """Map a visit unit row to API fields."""
         return WalkInVisitUnitResponse(
             id=str(row["id"]),
@@ -488,7 +497,7 @@ class WalkInService:
             tower_name=row.get("tower_name"),
             unit_code=row.get("unit_code"),
             unit_label=row.get("unit_label"),
-            status=str(row.get("status")),
+            status=effective_walk_in_visit_unit_status(row.get("status"), requested_at),
             rejection_reason=row.get("rejection_reason"),
             approved_at=format_iso_datetime(row.get("approved_at")),
             rejected_at=format_iso_datetime(row.get("rejected_at")),
@@ -521,7 +530,7 @@ class WalkInService:
             visitor_last_name=row.get("visitor_last_name"),
             visitor_phone_isd_code=row["visitor_phone_isd_code"],
             visitor_phone_number=row["visitor_phone_number"],
-            status=str(row["status"]),
+            status=effective_walk_in_header_status(row.get("status"), row.get("requested_at")),
             flats_count=int(row["flats_count"]),
             approved_flats_count=int(row.get("approved_flats_count") or 0),
             primary_unit_label=row.get("primary_unit_label"),
@@ -616,6 +625,37 @@ class WalkInService:
         ]
         return [item.model_dump() for item in milestones]
 
+    @staticmethod
+    def _ensure_visit_unit_can_be_actioned(
+        *,
+        entry: dict[str, Any],
+        visit_unit: dict[str, Any],
+    ) -> None:
+        """Block approve/reject once the awaiting window has closed or the flat already moved."""
+        if str(visit_unit.get("status")) != WalkInVisitUnitStatus.AWAITING.value:
+            raise ValidationException(
+                message_key="walk_in.errors.visit_unit_not_awaiting",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if walk_in_awaiting_is_expired(entry.get("requested_at")):
+            raise ValidationException(
+                message_key="walk_in.errors.awaiting_expired",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+    @staticmethod
+    def _raise_visit_unit_update_missed(*, entry: dict[str, Any]) -> None:
+        """Map a zero-row approve/reject update to the reason it did not apply."""
+        if walk_in_awaiting_is_expired(entry.get("requested_at")):
+            raise ValidationException(
+                message_key="walk_in.errors.awaiting_expired",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        raise ValidationException(
+            message_key="walk_in.errors.visit_unit_not_awaiting",
+            custom_code=CustomStatusCode.VALIDATION_ERROR,
+        )
+
     async def _get_entry_or_raise(
         self,
         *,
@@ -684,7 +724,10 @@ class WalkInService:
         detail = WalkInDetailResponse(
             **summary,
             vehicle_photo_paths=list(row.get("vehicle_photo_paths") or []),
-            visit_units=[self._serialize_visit_unit(unit) for unit in enriched_visit_units],
+            visit_units=[
+                self._serialize_visit_unit(unit, requested_at=row.get("requested_at"))
+                for unit in enriched_visit_units
+            ],
             events=serialized_events,
             milestones=self._derive_milestones(row=row, events=enriched_events),
             requested_by=await self._resolve_requested_by(row.get("requested_by_user_id")),
@@ -896,6 +939,13 @@ class WalkInService:
             project_id=project_id,
         )
         status = str(row.get("status"))
+        if status == WalkInStatus.AWAITING.value and walk_in_awaiting_is_expired(
+            row.get("requested_at")
+        ):
+            raise ValidationException(
+                message_key="walk_in.errors.awaiting_expired",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
         if status not in _ENTER_ALLOWED_HEADER_STATUSES:
             raise ValidationException(
                 message_key="walk_in.errors.invalid_status_transition",
@@ -1003,7 +1053,10 @@ class WalkInService:
                     tower_name=row.get("tower_name"),
                     unit_code=row.get("unit_code"),
                     unit_label=row.get("unit_label"),
-                    status=str(row.get("status")),
+                    status=effective_walk_in_visit_unit_status(
+                        row.get("status"),
+                        row.get("requested_at"),
+                    ),
                     visitor_first_name=row["visitor_first_name"],
                     visitor_last_name=row.get("visitor_last_name"),
                     visitor_phone_isd_code=row["visitor_phone_isd_code"],
@@ -1110,11 +1163,8 @@ class WalkInService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         resolved_visit_unit_id = str(visit_unit["id"])
-        if str(visit_unit.get("status")) != WalkInVisitUnitStatus.AWAITING.value:
-            raise ValidationException(
-                message_key="walk_in.errors.visit_unit_not_awaiting",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+        entry = await self._get_entry_or_raise(walk_in_entry_id=walk_in_entry_id)
+        self._ensure_visit_unit_can_be_actioned(entry=entry, visit_unit=visit_unit)
         if not await self.repo.resident_can_act_on_unit(
             organization_id=org_id,
             contact_id=contact_id,
@@ -1133,10 +1183,7 @@ class WalkInService:
             approved_by_contact_id=contact_id,
         )
         if not updated:
-            raise ValidationException(
-                message_key="walk_in.errors.visit_unit_not_awaiting",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+            self._raise_visit_unit_update_missed(entry=entry)
         await self.repo.insert_event(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
@@ -1184,11 +1231,8 @@ class WalkInService:
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
         resolved_visit_unit_id = str(visit_unit["id"])
-        if str(visit_unit.get("status")) != WalkInVisitUnitStatus.AWAITING.value:
-            raise ValidationException(
-                message_key="walk_in.errors.visit_unit_not_awaiting",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+        entry = await self._get_entry_or_raise(walk_in_entry_id=walk_in_entry_id)
+        self._ensure_visit_unit_can_be_actioned(entry=entry, visit_unit=visit_unit)
         if not await self.repo.resident_can_act_on_unit(
             organization_id=org_id,
             contact_id=contact_id,
@@ -1208,10 +1252,7 @@ class WalkInService:
             rejection_reason=body.rejection_reason,
         )
         if not updated:
-            raise ValidationException(
-                message_key="walk_in.errors.visit_unit_not_awaiting",
-                custom_code=CustomStatusCode.VALIDATION_ERROR,
-            )
+            self._raise_visit_unit_update_missed(entry=entry)
         await self.repo.insert_event(
             organization_id=org_id,
             walk_in_entry_id=walk_in_entry_id,
