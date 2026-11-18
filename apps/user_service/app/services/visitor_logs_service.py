@@ -46,10 +46,6 @@ from apps.user_service.app.utils.common_utils import UserContext, format_iso_dat
 from apps.user_service.app.utils.pass_event_actor_labels import (
     enrich_pass_event_actor_labels,
 )
-from apps.user_service.app.utils.walk_in_expiry import (
-    WALK_IN_EXPIRED_STATUS,
-    walk_in_awaiting_is_expired,
-)
 from libs.shared_utils.http_exceptions import NotFoundException, ValidationException
 from libs.shared_utils.status_codes import CustomStatusCode
 
@@ -536,20 +532,8 @@ class VisitorLogsService:
         return VisitorLogVisitStatus.APPROVED.value
 
     @staticmethod
-    def _walk_in_visit_status(
-        *,
-        status: str | None,
-        requested_at: Any = None,
-    ) -> str:
-        """Map walk-in header status to unified visit_status.
-
-        Awaiting requests with no resident action expire 24 hours after requested_at.
-        """
-        raw = str(status or "")
-        if raw == WALK_IN_EXPIRED_STATUS or (
-            raw == WalkInStatus.AWAITING.value and walk_in_awaiting_is_expired(requested_at)
-        ):
-            return VisitorLogVisitStatus.EXPIRED.value
+    def _walk_in_visit_status(*, status: str | None) -> str:
+        """Map walk-in header status to unified visit_status."""
         mapping = {
             WalkInStatus.AWAITING.value: VisitorLogVisitStatus.AWAITING_APPROVAL.value,
             WalkInStatus.APPROVED.value: VisitorLogVisitStatus.APPROVED.value,
@@ -557,7 +541,7 @@ class VisitorLogsService:
             WalkInStatus.EXITED.value: VisitorLogVisitStatus.EXITED.value,
             WalkInStatus.CANCELLED.value: VisitorLogVisitStatus.CANCELLED.value,
         }
-        return mapping.get(raw, VisitorLogVisitStatus.APPROVED.value)
+        return mapping.get(str(status or ""), VisitorLogVisitStatus.APPROVED.value)
 
     def _detail_summary_fields(self, *, detail: dict[str, Any]) -> dict[str, Any]:
         """Derive list-aligned summary fields for a pass or walk-in detail payload."""
@@ -1144,10 +1128,7 @@ class VisitorLogsService:
                 visitor_photo_urls=image_fields["visitor_photo_urls"],
                 vehicle_photo_urls=image_fields["vehicle_photo_urls"],
                 image_urls=image_fields["image_urls"],
-                visit_status=self._walk_in_visit_status(
-                    status=str(detail.get("status") or ""),
-                    requested_at=detail.get("requested_at"),
-                ),
+                visit_status=self._walk_in_visit_status(status=str(detail.get("status") or "")),
             )
 
         raise NotFoundException(

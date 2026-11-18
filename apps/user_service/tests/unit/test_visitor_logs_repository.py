@@ -65,7 +65,6 @@ async def test_list_logs_date_range_bounds():
     assert "COALESCE(ci.occurred_at, p.valid_from) < $3" in count_query
     assert "COALESCE(w.entered_at, w.requested_at) >= $2" in count_query
     assert "COALESCE(w.entered_at, w.requested_at) < $3" in count_query
-    assert "w.requested_at <= NOW() - INTERVAL '24 hours'" in count_query
     assert "UNION ALL" in count_query
     assert count_args[0] == "org-1"
     assert count_args[1] == start_at

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -621,25 +621,10 @@ def test_pass_visit_status_expired_without_check_in():
 
 
 def test_walk_in_visit_status_maps_awaiting():
-    """A fresh walk-in awaiting maps to awaiting_approval visit_status."""
+    """Walk-in awaiting maps to awaiting_approval visit_status."""
     assert (
-        VisitorLogsService._walk_in_visit_status(
-            status=WalkInStatus.AWAITING.value,
-            requested_at=datetime.now(timezone.utc),
-        )
+        VisitorLogsService._walk_in_visit_status(status=WalkInStatus.AWAITING.value)
         == VisitorLogVisitStatus.AWAITING_APPROVAL.value
-    )
-
-
-def test_walk_in_visit_status_expires_stale_awaiting():
-    """Awaiting walk-ins with no action become expired after 24 hours."""
-    requested_at = datetime.now(timezone.utc) - timedelta(hours=25)
-    assert (
-        VisitorLogsService._walk_in_visit_status(
-            status=WalkInStatus.AWAITING.value,
-            requested_at=requested_at,
-        )
-        == VisitorLogVisitStatus.EXPIRED.value
     )
 
 

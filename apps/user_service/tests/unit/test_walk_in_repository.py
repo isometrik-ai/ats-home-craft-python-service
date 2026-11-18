@@ -274,7 +274,6 @@ async def test_list_entries():
     assert rows[0]["primary_unit_label"] == "A-101"
     query, args = conn.fetch_calls[0]
     assert "::walk_in_status" in query
-    assert "e.requested_at > NOW() - INTERVAL '24 hours'" in query
     assert args[2] == "awaiting"
     assert args[3] == date(2026, 7, 28)
 
@@ -479,7 +478,6 @@ async def test_list_resident_visit_units():
     assert rows[0]["visit_unit_id"] == VISIT_UNIT_ID
     query, args = conn.fetch_calls[0]
     assert "::walk_in_visit_unit_status" in query
-    assert "e.requested_at > NOW() - INTERVAL '24 hours'" in query
     assert args[1] == "awaiting"
     assert "contact_type" not in query
     assert args[2] == CONTACT_ID
