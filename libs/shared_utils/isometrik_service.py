@@ -167,6 +167,26 @@ def get_isometrik_data_from_settings(
     return organization_settings.get("isometrik")
 
 
+def public_profile_image_url(path: str | None) -> str | None:
+    """Turn a stored profile image into an absolute URL Isometrik can fetch.
+
+    Storage keys are prefixed with the public media host. Values that are
+    already http(s) URLs are returned unchanged.
+    """
+    if path is None:
+        return None
+    cleaned = str(path).strip()
+    if not cleaned:
+        return None
+    if cleaned.startswith(("http://", "https://")):
+        return cleaned
+    media = getattr(getattr(shared_settings, "cloudflare_r2", None), "media_url", None)
+    base = str(media or "").rstrip("/")
+    if not base:
+        return None
+    return f"{base}/{cleaned.lstrip('/')}"
+
+
 async def create_isometrik_application(
     organization_name: str, product_types: list[str] | None = None, plan: str = "basic"
 ) -> dict[str, Any]:
@@ -389,6 +409,36 @@ async def update_isometrik_user(
 
     except Exception as e:
         _handle_isometrik_error(e, "updating Isometrik user", response)
+
+
+async def sync_isometrik_user_profile(
+    *,
+    user_identifier: str,
+    isometrik_credentials: dict[str, Any],
+    user_name: str | None = None,
+    user_profile_image_url: str | None = None,
+) -> dict[str, Any]:
+    """Login as a chat user and patch the display name and profile image.
+
+    ``user_identifier`` is the value stored as Isometrik ``userIdentifier``
+    (contact id for residents, member id or auth user id for staff).
+    """
+    if not user_name and not user_profile_image_url:
+        return {}
+
+    login_response = await login_to_isometrik(
+        user_id=user_identifier,
+        isometrik_credentials=isometrik_credentials,
+    )
+    return await update_isometrik_user(
+        isometrik_credentials={
+            "userToken": login_response.get("userToken", ""),
+            "licenseKey": isometrik_credentials.get("licenseKey", ""),
+            "appSecret": isometrik_credentials.get("appSecret", ""),
+        },
+        user_name=user_name,
+        user_profile_image_url=user_profile_image_url,
+    )
 
 
 async def create_isometrik_ai_agent(

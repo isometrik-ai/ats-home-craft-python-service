@@ -1052,6 +1052,7 @@ class CompaniesService:
             first_name=create_contact.first_name,
             last_name=create_contact.last_name,
             prefix=create_contact.prefix,
+            profile_photo_url=create_contact.profile_photo_url,
         )
         return email_norm, user_id, isometrik_user_id, created_password
 

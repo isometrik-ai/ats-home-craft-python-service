@@ -10,6 +10,7 @@ from typing import Any
 import asyncpg
 from supabase import AsyncClient
 
+from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
 from apps.user_service.app.db.repositories.organization_member_repository import (
     OrganizationMemberRepository,
 )
@@ -52,7 +53,6 @@ from apps.user_service.app.utils.user_utils import (
     get_isometrik_details,
     update_supabase_user_email,
 )
-from libs.shared_config.app_settings import shared_settings
 from libs.shared_db.supabase_db.auth_repository import (
     get_user_by_id,
     update_metadata,
@@ -67,8 +67,8 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.isometrik_service import (
     get_isometrik_data_from_settings,
-    login_to_isometrik,
-    update_isometrik_user,
+    public_profile_image_url,
+    sync_isometrik_user_profile,
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.session_context_cache import (
@@ -1722,78 +1722,249 @@ class UserService:  # pylint: disable=too-many-public-methods
             return stripped or None
         return None
 
+    @staticmethod
+    def _profile_text(profile: Any, key: str) -> str:
+        """Read a profile field from a dict or model."""
+        if profile is None:
+            return ""
+        value = profile.get(key) if isinstance(profile, dict) else getattr(profile, key, None)
+        return str(value).strip() if value else ""
+
+    async def _resident_contact_id(self, user_id: str, organization_id: str) -> str | None:
+        """Active contact id for this auth user, used as the marketplace chat identity."""
+        db = getattr(self.organization_member_repository, "db_connection", None)
+        if db is None:
+            return None
+        contact_id, _ = await ContactsRepository(db).is_active_contact_user_for_organization(
+            user_id=user_id,
+            organization_id=organization_id,
+        )
+        return contact_id
+
+    async def _staff_member_id(self, user_id: str, organization_id: str) -> str | None:
+        """Org member id when this user is staff. Invited staff chat as this id."""
+        member_lookup = getattr(
+            self.organization_member_repository, "get_member_id_by_user_id", None
+        )
+        if member_lookup is None:
+            return None
+        return await member_lookup(user_id, organization_id)
+
+    async def _chat_user_identifiers(self, user_id: str, organization_id: str | None) -> list[str]:
+        """Isometrik userIdentifier values that should follow this profile."""
+        if not organization_id:
+            return [user_id] if user_id else []
+        contact_id = await self._resident_contact_id(user_id, organization_id)
+        member_id = await self._staff_member_id(user_id, organization_id)
+        return self._ordered_chat_identifiers(user_id, contact_id, member_id)
+
+    @staticmethod
+    def _ordered_chat_identifiers(
+        user_id: str,
+        contact_id: str | None,
+        member_id: str | None,
+    ) -> list[str]:
+        """Contact id, then staff member id, then auth id for org creators."""
+        identifiers: list[str] = []
+        if contact_id:
+            identifiers.append(contact_id)
+        if member_id and member_id not in identifiers:
+            identifiers.append(member_id)
+        if UserService._include_auth_chat_id(user_id, contact_id, member_id, identifiers):
+            identifiers.append(user_id)
+        return identifiers
+
+    @staticmethod
+    def _include_auth_chat_id(
+        user_id: str,
+        contact_id: str | None,
+        member_id: str | None,
+        identifiers: list[str],
+    ) -> bool:
+        """Auth user id is the chat key for creators, not for resident-only contacts."""
+        if not user_id or user_id in identifiers:
+            return False
+        if contact_id and not member_id:
+            return False
+        return True
+
+    async def _mirror_profile_onto_contact(
+        self,
+        *,
+        contact_id: str,
+        organization_id: str,
+        body: UpdateUserProfileRequest,
+    ) -> None:
+        """Copy name and photo onto the resident contact used by marketplace chat."""
+        contact_update: dict[str, Any] = {}
+        if body.first_name is not None:
+            contact_update["first_name"] = body.first_name
+        if body.last_name is not None:
+            contact_update["last_name"] = body.last_name
+        if body.avatar_url:
+            contact_update["profile_photo_url"] = body.avatar_url
+        if not contact_update:
+            return
+        db = getattr(self.organization_member_repository, "db_connection", None)
+        if db is None:
+            return
+        await ContactsRepository(db).update_contact(
+            contact_id=contact_id,
+            organization_id=organization_id,
+            update_data=contact_update,
+        )
+
+    def _chat_name_and_image(
+        self,
+        body: UpdateUserProfileRequest,
+        updated_profile: UserProfileData | dict[str, Any] | None,
+    ) -> tuple[str | None, str | None] | None:
+        """Name and public photo to send to Isometrik, or None when nothing changed."""
+        user_name = self._changed_chat_name(body, updated_profile)
+        image_url = None
+        if body.avatar_url is not None:
+            image_url = public_profile_image_url(body.avatar_url)
+        if user_name or image_url:
+            return user_name, image_url
+        return None
+
+    def _changed_chat_name(
+        self,
+        body: UpdateUserProfileRequest,
+        updated_profile: UserProfileData | dict[str, Any] | None,
+    ) -> str | None:
+        """Full name when the profile request changed first or last name."""
+        if body.first_name is None and body.last_name is None:
+            return None
+        return (
+            build_full_name(
+                self._profile_text(updated_profile, "first_name"),
+                self._profile_text(updated_profile, "last_name"),
+            ).strip()
+            or None
+        )
+
+    async def _isometrik_credentials_for_org(self, organization_id: str) -> dict[str, Any] | None:
+        """Org Isometrik application credentials, when chat is configured."""
+        organization = await self.organization_repository.get_organization_by_id(organization_id)
+        if not organization:
+            return None
+        return get_isometrik_data_from_settings(parse_json_field(organization.get("settings")))
+
+    async def _copy_contact_profile(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        body: UpdateUserProfileRequest,
+    ) -> None:
+        """Best-effort copy of the saved profile onto the resident contact."""
+        contact_id = await self._resident_contact_id(user_id, organization_id)
+        if not contact_id:
+            return
+        try:
+            await self._mirror_profile_onto_contact(
+                contact_id=contact_id,
+                organization_id=organization_id,
+                body=body,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to copy profile onto contact: user_id=%s contact_id=%s error=%s",
+                user_id,
+                contact_id,
+                exc,
+            )
+
+    async def _sync_one_chat_user(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        identifier: str,
+        user_name: str | None,
+        image_url: str | None,
+        isometrik_credentials: dict[str, Any],
+    ) -> None:
+        """Update one Isometrik chat user. A failure does not stop the others."""
+        try:
+            await sync_isometrik_user_profile(
+                user_identifier=identifier,
+                isometrik_credentials=isometrik_credentials,
+                user_name=user_name,
+                user_profile_image_url=image_url,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to update Isometrik user: user_id=%s identifier=%s "
+                "organization_id=%s error=%s",
+                user_id,
+                identifier,
+                organization_id,
+                exc,
+            )
+
+    async def _push_profile_to_chat_users(
+        self,
+        *,
+        user_id: str,
+        organization_id: str,
+        body: UpdateUserProfileRequest,
+        user_name: str | None,
+        image_url: str | None,
+        isometrik_credentials: dict[str, Any],
+    ) -> None:
+        """Copy the profile onto the resident contact and each linked chat user."""
+        await self._copy_contact_profile(
+            user_id=user_id,
+            organization_id=organization_id,
+            body=body,
+        )
+        identifiers = await self._chat_user_identifiers(user_id, organization_id)
+        for identifier in identifiers:
+            await self._sync_one_chat_user(
+                user_id=user_id,
+                organization_id=organization_id,
+                identifier=identifier,
+                user_name=user_name,
+                image_url=image_url,
+                isometrik_credentials=isometrik_credentials,
+            )
+
     async def _update_isometrik_user_if_needed(
         self,
         user_id: str,
         organization_id: str | None,
         body: UpdateUserProfileRequest,
-        updated_profile: UserProfileData,
+        updated_profile: UserProfileData | dict[str, Any] | None,
     ) -> None:
-        """Update Isometrik user if name or profile image changed.
+        """Update Isometrik chat users when name or profile image changed.
 
-        This method is designed to be non-blocking - if Isometrik update fails,
-        it logs the error but does not propagate the exception to avoid breaking
-        the main user profile update flow.
-
-        Args:
-            user_id: User ID
-            organization_id: Optional organization ID
-            body: Update profile request body
-            updated_profile: Updated user profile data (contains complete current state)
+        Marketplace chat uses the resident contact's Isometrik user, not the
+        auth user id. Staff chat users are keyed by member id or auth user id.
+        Failures are logged and do not fail the profile update.
         """
-        name_updated = body.first_name is not None or body.last_name is not None
-        avatar_updated = body.avatar_url is not None
-
-        if not name_updated and not avatar_updated:
+        changes = self._chat_name_and_image(body, updated_profile)
+        if changes is None or not organization_id:
             return
-
+        user_name, image_url = changes
         try:
-            # Get organization settings
-            organization = await self.organization_repository.get_organization_by_id(
-                organization_id
-            )
-
-            org_settings = parse_json_field(organization.get("settings"))
-            isometrik_credentials = get_isometrik_data_from_settings(org_settings)
-
-            # Login to Isometrik to get userToken
-            login_response = await login_to_isometrik(
+            isometrik_credentials = await self._isometrik_credentials_for_org(organization_id)
+            if not isometrik_credentials:
+                return
+            await self._push_profile_to_chat_users(
                 user_id=user_id,
+                organization_id=organization_id,
+                body=body,
+                user_name=user_name,
+                image_url=image_url,
                 isometrik_credentials=isometrik_credentials,
             )
-
-            # Prepare credentials with userToken
-            isometrik_update_credentials = {
-                "userToken": login_response.get("userToken", ""),
-                "licenseKey": isometrik_credentials.get("licenseKey", ""),
-                "appSecret": isometrik_credentials.get("appSecret", ""),
-            }
-
-            # Build user name from updated profile
-            user_name = None
-            if name_updated:
-                first_name = updated_profile.get("first_name", "")
-                last_name = updated_profile.get("last_name", "")
-                user_name = build_full_name(first_name, last_name).strip() or None
-
-            # Get avatar URL from updated profile or request body
-            user_profile_image_url = None
-            if avatar_updated:
-                user_profile_image_url = (
-                    f"{shared_settings.cloudflare_r2.media_url}/{body.avatar_url}"
-                )
-
-            # Update Isometrik user
-            await update_isometrik_user(
-                isometrik_credentials=isometrik_update_credentials,
-                user_name=user_name,
-                user_profile_image_url=user_profile_image_url,
-            )
-        except Exception as e:
+        except Exception as exc:
             logger.error(
                 "Failed to update Isometrik user: user_id=%s, organization_id=%s, error=%s",
                 user_id,
                 organization_id,
-                str(e),
+                str(exc),
                 exc_info=True,
             )

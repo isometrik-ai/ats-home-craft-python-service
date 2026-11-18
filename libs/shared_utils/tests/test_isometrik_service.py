@@ -23,6 +23,7 @@ from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
     login_to_isometrik,
+    public_profile_image_url,
     update_isometrik_user,
 )
 
@@ -162,6 +163,28 @@ async def test_create_isometrik_user_custom_avatar(monkeypatch) -> None:
     assert calls["json"]["userName"] == "Jane Smith"
     assert calls["json"]["userIdentifier"] == "user-2"
     assert calls["json"]["userProfileImageUrl"] == "https://example.com/custom-avatar.jpg"
+
+
+def test_public_profile_image_url_builds_absolute_url(monkeypatch) -> None:
+    """Storage keys become public URLs and absolute URLs stay unchanged."""
+    monkeypatch.setattr(
+        isometrik_service,
+        "shared_settings",
+        type(
+            "Settings",
+            (),
+            {"cloudflare_r2": type("R2", (), {"media_url": "https://cdn.example.com/"})()},
+        )(),
+    )
+
+    assert public_profile_image_url("contacts/rahul.jpg") == (
+        "https://cdn.example.com/contacts/rahul.jpg"
+    )
+    assert public_profile_image_url("https://cdn.example.com/a.jpg") == (
+        "https://cdn.example.com/a.jpg"
+    )
+    assert public_profile_image_url("  ") is None
+    assert public_profile_image_url(None) is None
 
 
 def test_create_isometrik_token(monkeypatch) -> None:

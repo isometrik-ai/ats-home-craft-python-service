@@ -798,6 +798,49 @@ async def test_update_contact_scalar_fields(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_contact_syncs_name_and_photo_to_isometrik(monkeypatch):
+    """Contact profile edits update the resident Isometrik chat user."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(
+        first_name="Raj",
+        last_name="S",
+        profile_photo_url=None,
+        isometrik_user_id="iso-1",
+    )
+    repo = _FakeContactsRepo(
+        contact_for_update=current,
+        updated_row={"first_name": "Rahul", "profile_photo_url": "contacts/rahul.jpg"},
+    )
+    svc = _service(contacts_repo=repo)
+    synced = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.sync_isometrik_user_profile",
+        synced,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.get_isometrik_data_from_settings",
+        lambda _settings: {"licenseKey": "k", "appSecret": "s", "userSecret": "u"},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.public_profile_image_url",
+        lambda path: f"https://cdn.example.com/{path}",
+    )
+
+    await svc.update_contact(
+        contact_id=CONTACT_ID,
+        body=UpdateContactRequest(first_name="Rahul", profile_photo_url="contacts/rahul.jpg"),
+    )
+
+    synced.assert_awaited_once()
+    assert synced.await_args.kwargs["user_identifier"] == CONTACT_ID
+    assert synced.await_args.kwargs["user_name"] == "Rahul S"
+    assert (
+        synced.await_args.kwargs["user_profile_image_url"]
+        == "https://cdn.example.com/contacts/rahul.jpg"
+    )
+
+
+@pytest.mark.asyncio
 async def test_update_contact_not_found():
     """Update contact raises when contact is missing."""
     svc = _service(contacts_repo=_FakeContactsRepo(contact_for_update=None))
@@ -2802,6 +2845,54 @@ async def test_provision_contact_auth_identity_creates_user(
     assert user_id == "auth-new"
     assert iso_id == "iso-new"
     assert password == "Secret@123"
+
+
+@pytest.mark.asyncio
+@patch(
+    "apps.user_service.app.services.contacts_service.UserRepository",
+)
+@patch(
+    "apps.user_service.app.services.contacts_service.create_user",
+    new_callable=AsyncMock,
+)
+@patch(
+    "apps.user_service.app.services.contacts_service.create_isometrik_user",
+    new_callable=AsyncMock,
+)
+async def test_provision_contact_sends_profile_image(
+    mock_create_iso: AsyncMock,
+    mock_create_user: AsyncMock,
+    mock_user_repo_cls: MagicMock,
+    monkeypatch,
+):
+    """New resident chat users are created with a public profile image."""
+    mock_user_repo_cls.return_value.get_auth_users_by_phone_or_email = AsyncMock(return_value=[])
+    mock_create_user.return_value = {"id": "auth-new"}
+    mock_create_iso.return_value = {"userId": "iso-new"}
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.public_profile_image_url",
+        lambda path: f"https://cdn.example.com/{path}",
+    )
+    svc = ContactsService(
+        db_connection=MagicMock(),
+        user_context=_ctx(),
+        supabase_client=MagicMock(),
+    )
+    svc.org_repo = _FakeOrgRepo(organization={"id": ORG_ID, "settings": "{}"})  # type: ignore[assignment]
+
+    await svc._provision_contact_auth_identity(
+        contact_id=CONTACT_ID,
+        phone="+919876543210",
+        email="rahul@example.com",
+        first_name="Rahul",
+        last_name="S",
+        prefix=None,
+        profile_photo_url="contacts/rahul.jpg",
+    )
+
+    payload = mock_create_iso.await_args.kwargs["user"]
+    assert payload["user_id"] == CONTACT_ID
+    assert payload["avatar_url"] == "https://cdn.example.com/contacts/rahul.jpg"
 
 
 @pytest.mark.asyncio
