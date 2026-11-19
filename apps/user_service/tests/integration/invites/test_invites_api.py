@@ -109,6 +109,49 @@ async def test_create_invitation(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_check_invite_availability(monkeypatch, client):
+    """Availability check returns which invite credentials are already used."""
+
+    async def fake_check_permissions(
+        current_user, db_connection, permission_codes, organization_id=None
+    ):
+        del current_user, db_connection, permission_codes, organization_id
+        return UserContext(
+            user_id="u1", email="u1@example.com", organization_id="org-1", user_type="admin"
+        )
+
+    async def fake_check(self, organization_id, email=None, phone_number=None, phone_isd_code=None):
+        del self
+        assert organization_id == "org-123"
+        assert email == "invitee@example.com"
+        assert phone_number == "9876543210"
+        assert phone_isd_code == "+91"
+        return {"email_exists": False, "phone_exists": True}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.api.invites.check_permissions",
+        fake_check_permissions,
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.invite_service.InviteService.check_invite_availability",
+        fake_check,
+    )
+
+    res = await client.get(
+        "/v1/invite/org-123/availability",
+        params={
+            "email": "invitee@example.com",
+            "phone_number": "9876543210",
+            "phone_isd_code": "+91",
+        },
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["email_exists"] is False
+    assert body["data"]["phone_exists"] is True
+    assert body["message"] == "Invite credential availability checked successfully."
+
+
+@pytest.mark.asyncio
 async def test_get_organization_invitations(monkeypatch, client):
     """List invitations for an organization."""
 

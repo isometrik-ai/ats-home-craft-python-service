@@ -830,21 +830,15 @@ class InviteService:
         has_password = bool(existing_auth_user and existing_auth_user.get("encrypted_password"))
         return {"is_existing_user": existing_auth_user is not None, "has_password": has_password}
 
-    async def create_invitation(
-        self, organization_id: str, body: InviteCreateRequest
-    ) -> dict[str, Any]:
-        """Create a new organization invitation."""
-        # pylint: disable=too-complex
-        # Validate organization ID format
+    async def _require_organization(self, organization_id: str) -> dict[str, Any]:
+        """Confirm the caller belongs to this organization and that it exists."""
         validate_uuid_format(organization_id, "organization ID")
-
-        if not self.user_context.organization_id == organization_id:
+        if self.user_context.organization_id != organization_id:
             raise ForbiddenException(
                 message_key="errors.forbidden",
                 custom_code=CustomStatusCode.FORBIDDEN,
             )
 
-        # Get organization details when needed for validation and email
         organization_data = await self.organization_repository.get_organization_by_id(
             organization_id
         )
@@ -853,6 +847,84 @@ class InviteService:
                 message_key="invitations.errors.organization_not_found",
                 custom_code=CustomStatusCode.NOT_FOUND,
             )
+        return organization_data
+
+    @staticmethod
+    def _pending_invite_is_active(pending_invite: dict[str, Any] | None) -> bool:
+        """True when a pending invite row exists and has not expired."""
+        if not pending_invite:
+            return False
+        expires_at = pending_invite.get("expires_at")
+        return bool(expires_at and expires_at > datetime.now(timezone.utc))
+
+    async def _email_taken_for_invite(self, organization_id: str, email: str) -> bool:
+        """True when this organization already has the email on a member or live invite."""
+        if await self.invite_repository.check_user_membership(organization_id, email):
+            return True
+        pending_invite = await self.invite_repository.check_existing_invite(
+            organization_id, email, status=InviteStatus.PENDING.value
+        )
+        return self._pending_invite_is_active(pending_invite)
+
+    async def _phone_taken_for_invite(
+        self, organization_id: str, phone_number: str, phone_isd_code: str
+    ) -> bool:
+        """True when this organization already has the phone on a member or live invite."""
+        if await self.invite_repository.check_member_phone(
+            organization_id, phone_number, phone_isd_code
+        ):
+            return True
+        return await self.invite_repository.check_pending_invite_phone(
+            organization_id, phone_number, phone_isd_code
+        )
+
+    async def check_invite_availability(
+        self,
+        organization_id: str,
+        email: str | None = None,
+        phone_number: str | None = None,
+        phone_isd_code: str | None = None,
+    ) -> dict[str, bool | None]:
+        """Report whether an email or phone is already used in this organization.
+
+        An email or phone that exists only outside this organization is not taken.
+        Expired pending invites are not taken.
+        """
+        await self._require_organization(organization_id)
+
+        email_value = email.strip() if email else None
+        phone_value = phone_number.strip() if phone_number else None
+        isd_value = phone_isd_code.strip() if phone_isd_code else None
+        has_phone_part = bool(phone_value or isd_value)
+        if not email_value and not has_phone_part:
+            raise BadRequestException(
+                message_key="invitations.errors.availability_credential_required",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+        if bool(phone_value) != bool(isd_value):
+            raise BadRequestException(
+                message_key="invitations.errors.phone_requires_isd_code",
+                custom_code=CustomStatusCode.BAD_REQUEST,
+            )
+
+        email_exists = None
+        if email_value:
+            email_exists = await self._email_taken_for_invite(organization_id, email_value)
+
+        phone_exists = None
+        if phone_value and isd_value:
+            phone_exists = await self._phone_taken_for_invite(
+                organization_id, phone_value, isd_value
+            )
+
+        return {"email_exists": email_exists, "phone_exists": phone_exists}
+
+    async def create_invitation(
+        self, organization_id: str, body: InviteCreateRequest
+    ) -> dict[str, Any]:
+        """Create a new organization invitation."""
+        # pylint: disable=too-complex
+        organization_data = await self._require_organization(organization_id)
         # Check organization capacity
         # await self.validate_organization_subscription(organization_data)
 
@@ -869,11 +941,21 @@ class InviteService:
         pending_invite = await self.invite_repository.check_existing_invite(
             organization_id, body.email, status=InviteStatus.PENDING.value
         )
-        if pending_invite:
-            expires_at_val = pending_invite.get("expires_at")
-            if expires_at_val and expires_at_val > datetime.now(timezone.utc):
+        if self._pending_invite_is_active(pending_invite):
+            raise ConflictException(
+                message_key="invitations.errors.pending_invitation_exists",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+
+        phone_value = body.phone_number.strip() if body.phone_number else ""
+        isd_value = body.phone_isd_code.strip() if body.phone_isd_code else ""
+        if phone_value and isd_value:
+            phone_taken = await self._phone_taken_for_invite(
+                organization_id, phone_value, isd_value
+            )
+            if phone_taken:
                 raise ConflictException(
-                    message_key="invitations.errors.pending_invitation_exists",
+                    message_key="invitations.errors.phone_number_already_exists",
                     custom_code=CustomStatusCode.CONFLICT,
                 )
 

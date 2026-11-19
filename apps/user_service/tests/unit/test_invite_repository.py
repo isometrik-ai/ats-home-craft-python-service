@@ -156,6 +156,29 @@ async def test_check_user_membership():
 
 
 @pytest.mark.asyncio
+async def test_check_member_phone_and_pending_invite_phone():
+    """Phone checks query members and unexpired pending invite metadata."""
+    conn = _FakeConn()
+    conn.val = True
+    repo = InviteRepository(db_connection=conn)
+
+    assert await repo.check_member_phone("org1", "9876543210", "+91") is True
+    member_query, member_args = conn.fetchval_calls[0]
+    assert "organization_members" in member_query
+    assert "regexp_replace" in member_query
+    assert member_args[1] == "9876543210"
+    assert member_args[2] == "+91"
+
+    conn.val = False
+    assert await repo.check_pending_invite_phone("org1", "9876543210", "+91") is False
+    invite_query, invite_args = conn.fetchval_calls[1]
+    assert "organization_invites" in invite_query
+    assert "metadata->>'phone_number'" in invite_query
+    assert invite_args[1] == InviteStatus.PENDING.value
+    assert invite_args[2] == "9876543210"
+
+
+@pytest.mark.asyncio
 async def test_update_invite_status_not_found_raises():
     """Missing invite raises NotFoundException."""
     conn = _FakeConn()

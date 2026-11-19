@@ -6,6 +6,7 @@ All endpoints include proper authentication, validation, and database operations
 import asyncpg
 from fastapi import APIRouter, Body, Depends, Path, Query, Request
 from fastapi import status as http_status
+from pydantic import EmailStr
 from supabase import AsyncClient
 
 # Schema imports
@@ -20,6 +21,7 @@ from apps.user_service.app.dependencies.supabase import supabase_anon, supabase_
 from apps.user_service.app.schemas.invites import (
     InviteAcceptBySettingPasswordRequest,
     InviteAcceptResponse,
+    InviteAvailabilityResponse,
     InviteCreateRequest,
     InviteListResponse,
     InviteResponse,
@@ -161,6 +163,62 @@ async def accept_and_set_password_invitation(
         custom_code=CustomStatusCode.ACCEPTED,
         status_code=http_status.HTTP_202_ACCEPTED,
         data=outcome.response,
+    )
+
+
+@handle_api_exceptions("check invite credential availability")
+@router.get(
+    "/{organization_id}/availability",
+    response_model=InviteAvailabilityResponse,
+    description=(
+        "Check whether an email or phone number is already used in this organization "
+        "by an active member or an unexpired pending invite. Does not create an invite."
+    ),
+    summary="Check invite email or phone availability",
+    status_code=http_status.HTTP_200_OK,
+    responses={
+        http_status.HTTP_200_OK: {
+            "model": InviteAvailabilityResponse,
+            "description": "Availability checked successfully",
+        },
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Email or phone was not provided"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_404_NOT_FOUND: {"description": "Organization not found"},
+    },
+)
+@limiter.limit("100/minute")
+async def check_invite_availability(
+    organization_id: str,
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    email: EmailStr | None = Query(None, description="Email address to check"),
+    phone_number: str | None = Query(None, description="Phone number without ISD code"),
+    phone_isd_code: str | None = Query(None, description="Phone ISD code, for example +91"),
+):
+    """Check whether invite credentials are already used in this organization."""
+    user_context = await check_permissions(
+        current_user=current_user,
+        db_connection=db_connection,
+        permission_codes=SETTINGS_USERS_MANAGE,
+        organization_id=organization_id,
+    )
+    invite_service = InviteService(user_context=user_context, db_connection=db_connection)
+    result = await invite_service.check_invite_availability(
+        organization_id,
+        email=str(email) if email else None,
+        phone_number=phone_number,
+        phone_isd_code=phone_isd_code,
+    )
+    return success_response(
+        request=request,
+        message_key="invitations.success.availability_checked",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=InviteAvailabilityResponse(
+            email_exists=result["email_exists"],
+            phone_exists=result["phone_exists"],
+        ),
     )
 
 

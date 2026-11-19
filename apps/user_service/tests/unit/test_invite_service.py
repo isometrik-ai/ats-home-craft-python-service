@@ -470,6 +470,97 @@ async def test_create_invitation_renews_expired(monkeypatch):
     assert result["invite_id"] == "old-inv"
 
 
+def _availability_service() -> InviteService:
+    """Service whose organization exists and whose credential lookups default to free."""
+    service = _invite_service(ctx=_ctx())
+    service.organization_repository.get_organization_by_id = AsyncMock(
+        return_value={"id": ORG_ID, "name": "Acme"}
+    )
+    service.invite_repository.check_user_membership = AsyncMock(return_value=False)
+    service.invite_repository.check_existing_invite = AsyncMock(return_value=None)
+    service.invite_repository.check_member_phone = AsyncMock(return_value=False)
+    service.invite_repository.check_pending_invite_phone = AsyncMock(return_value=False)
+    return service
+
+
+@pytest.mark.asyncio
+async def test_check_invite_availability_requires_a_credential():
+    """Availability check rejects a request with neither email nor phone."""
+    service = _availability_service()
+    with pytest.raises(BadRequestException):
+        await service.check_invite_availability(ORG_ID)
+
+
+@pytest.mark.asyncio
+async def test_check_invite_availability_requires_isd_with_phone():
+    """Phone availability requires both the number and the ISD code."""
+    service = _availability_service()
+    with pytest.raises(BadRequestException):
+        await service.check_invite_availability(ORG_ID, phone_number="9876543210")
+
+
+@pytest.mark.asyncio
+async def test_check_invite_availability_email_member():
+    """An active member email is reported as taken."""
+    service = _availability_service()
+    service.invite_repository.check_user_membership = AsyncMock(return_value=True)
+
+    result = await service.check_invite_availability(ORG_ID, email="invitee@example.com")
+
+    assert result == {"email_exists": True, "phone_exists": None}
+
+
+@pytest.mark.asyncio
+async def test_check_invite_availability_ignores_expired_pending_email():
+    """An expired pending invite does not make the email taken."""
+    service = _availability_service()
+    service.invite_repository.check_existing_invite = AsyncMock(
+        return_value={
+            "id": "old-inv",
+            "expires_at": datetime.now(timezone.utc) - timedelta(days=1),
+        }
+    )
+
+    result = await service.check_invite_availability(ORG_ID, email="invitee@example.com")
+
+    assert result["email_exists"] is False
+
+
+@pytest.mark.asyncio
+async def test_check_invite_availability_phone_on_pending_invite():
+    """An unexpired pending invite makes the phone taken."""
+    service = _availability_service()
+    service.invite_repository.check_pending_invite_phone = AsyncMock(return_value=True)
+
+    result = await service.check_invite_availability(
+        ORG_ID, phone_number="9876543210", phone_isd_code="+91"
+    )
+
+    assert result == {"email_exists": None, "phone_exists": True}
+    service.invite_repository.check_member_phone.assert_awaited_once_with(
+        ORG_ID, "9876543210", "+91"
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_invitation_rejects_taken_phone():
+    """Create rejects a phone already used by a member of this organization."""
+    service = _availability_service()
+    service.invite_repository.check_member_phone = AsyncMock(return_value=True)
+    body = InviteCreateRequest(
+        email="invitee@example.com",
+        first_name="Jane",
+        role_id=UUID(ROLE_ID),
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.create_invitation(ORG_ID, body)
+
+    assert exc_info.value.message_key == "invitations.errors.phone_number_already_exists"
+
+
 @pytest.mark.asyncio
 async def test_validate_invite_link_new_user():
     """Validate link reports non-existing user without password."""

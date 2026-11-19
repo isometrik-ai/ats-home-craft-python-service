@@ -215,6 +215,57 @@ class InviteRepository:
         exists = await self.db_connection.fetchval(query, organization_id, email, deleted_status)
         return bool(exists)
 
+    async def check_member_phone(
+        self, organization_id: str, phone_number: str, phone_isd_code: str
+    ) -> bool:
+        """True when a non-deleted member in this organization already has this phone."""
+        query = """
+            SELECT EXISTS(
+                SELECT 1
+                FROM organization_members
+                WHERE organization_id = $1
+                    AND regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g')
+                        = regexp_replace($2, '[^0-9]', '', 'g')
+                    AND regexp_replace(COALESCE(phone_isd_code, ''), '[^0-9]', '', 'g')
+                        = regexp_replace($3, '[^0-9]', '', 'g')
+                    AND status != $4
+            )
+        """
+        exists = await self.db_connection.fetchval(
+            query,
+            organization_id,
+            phone_number,
+            phone_isd_code,
+            OrganizationMemberStatus.DELETED.value,
+        )
+        return bool(exists)
+
+    async def check_pending_invite_phone(
+        self, organization_id: str, phone_number: str, phone_isd_code: str
+    ) -> bool:
+        """True when an unexpired pending invite in this organization already has this phone."""
+        query = """
+            SELECT EXISTS(
+                SELECT 1
+                FROM organization_invites
+                WHERE organization_id = $1
+                    AND status = $2
+                    AND expires_at > NOW()
+                    AND regexp_replace(COALESCE(metadata->>'phone_number', ''), '[^0-9]', '', 'g')
+                        = regexp_replace($3, '[^0-9]', '', 'g')
+                    AND regexp_replace(COALESCE(metadata->>'phone_isd_code', ''), '[^0-9]', '', 'g')
+                        = regexp_replace($4, '[^0-9]', '', 'g')
+            )
+        """
+        exists = await self.db_connection.fetchval(
+            query,
+            organization_id,
+            InviteStatus.PENDING.value,
+            phone_number,
+            phone_isd_code,
+        )
+        return bool(exists)
+
     # UPDATE OPERATIONS
     async def update_invite_status(
         self, invite_id: str, status: str, accepted_by: str | None = None

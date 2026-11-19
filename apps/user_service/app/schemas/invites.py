@@ -169,6 +169,34 @@ class InviteCreateRequest(BaseModel):
     )
 
 
+class InviteAvailabilityResponse(BaseModel):
+    """Whether an email or phone is already used in this organization."""
+
+    email_exists: bool | None = Field(
+        None,
+        description=(
+            "True when this email belongs to an active member or an unexpired pending "
+            "invite. Omitted when email was not checked."
+        ),
+    )
+    phone_exists: bool | None = Field(
+        None,
+        description=(
+            "True when this phone number and ISD code belong to an active member or an "
+            "unexpired pending invite. Omitted when phone was not checked."
+        ),
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "email_exists": False,
+                "phone_exists": True,
+            }
+        }
+    )
+
+
 class InviteAcceptBySettingPasswordRequest(BaseModel):
     """Request model for invitation acceptance operations."""
 
