@@ -186,9 +186,41 @@ async def test_billing_notifications() -> None:
         total=900,
         due_date="2026-10-01",
     )
-    extra = svc.dispatcher.send_to_contact.await_args.kwargs["data"]
-    assert extra["invoice_id"] == "inv-1"
-    assert svc.dispatcher.send_to_contact.await_args.kwargs["entity"] is None
+    payload = svc.dispatcher.send_to_contact.await_args.kwargs
+    assert payload["data"]["invoice_id"] == "inv-1"
+    assert payload["data"]["reservation_id"] is None
+    assert payload["data"]["reservation_ids"] == []
+    assert payload["entity"] is None
+
+    svc.dispatcher.send_to_contact.reset_mock()
+    await svc.invoice_generated(
+        contact_id=CONTACT,
+        invoice_id="inv-1",
+        number="INV-1",
+        total=900,
+        due_date="2026-10-01",
+        reservation_ids=[RESERVATION, RESERVATION, "44444444-4444-4444-4444-444444444444"],
+    )
+    payload = svc.dispatcher.send_to_contact.await_args.kwargs
+    assert payload["data"]["reservation_id"] == RESERVATION
+    assert payload["data"]["reservation_ids"] == [
+        RESERVATION,
+        "44444444-4444-4444-4444-444444444444",
+    ]
+    assert payload["entity"] == {"id": RESERVATION, "type": "facility_reservation"}
+
+    svc.dispatcher.send_to_contact.reset_mock()
+    await svc.payment_received(
+        contact_id=CONTACT,
+        invoice_id="inv-1",
+        number="INV-1",
+        method="wallet",
+        reservation_ids=[RESERVATION],
+    )
+    payload = svc.dispatcher.send_to_contact.await_args.kwargs
+    assert payload["data"]["reservation_id"] == RESERVATION
+    assert payload["data"]["invoice_id"] == "inv-1"
+    assert payload["entity"]["id"] == RESERVATION
 
     svc.dispatcher.send_to_contact.reset_mock()
     await svc.payment_received(

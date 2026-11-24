@@ -58,6 +58,23 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.status_codes import CustomStatusCode
 
 
+def reservation_ids_from_lines(lines: Any) -> list[str]:
+    """Unique booking ids stored on invoice or ledger lines, in first-seen order."""
+    if not isinstance(lines, list):
+        return []
+    ids: list[str] = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        raw = line.get("reservation_id")
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if value and value not in ids:
+            ids.append(value)
+    return ids
+
+
 class FacilityBookingBillingService:
     """Wallet and invoice workflows for facility bookings."""
 
@@ -368,6 +385,7 @@ class FacilityBookingBillingService:
                 number=invoice["number"],
                 total=total,
                 due_date=due.isoformat(),
+                reservation_ids=reservation_ids_from_lines(contact_entries),
             )
             created += 1
             amount += total
@@ -480,6 +498,7 @@ class FacilityBookingBillingService:
             invoice_id=invoice_id,
             number=str(invoice["number"]),
             method=method,
+            reservation_ids=reservation_ids_from_lines(invoice.get("lines")),
         )
         return self._serialize_invoice({**paid, "contact_name": invoice.get("contact_name")})
 
