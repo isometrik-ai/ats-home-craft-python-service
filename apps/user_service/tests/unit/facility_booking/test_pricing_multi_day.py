@@ -172,6 +172,101 @@ def test_duration_and_tee_quotes_repeat_the_daily_window():
     assert tee.lines[1].detail == "₹800/player · 2 days (×1.25, ×1.00)"
 
 
+def test_monthly_partial_day_charges_eight_hour_rate_with_evening_surge():
+    """Club House: ₹6,000/month is ₹750/hr, then the evening band, not ₹25/hr."""
+    band = TimeBand(
+        id="evening",
+        label="Evening surge",
+        from_min=19 * 60,
+        to_min=21 * 60,
+        multiplier=1.25,
+        weekdays=None,
+    )
+    facility = _facility(
+        FacilityBookingArchetype.DAY_RANGE,
+        name="Club House",
+        pricing=_pricing(
+            resident_rate=6000,
+            hourly_rate=None,
+            unit_label=FacilityRateUnit.MONTH,
+            weekend_multiplier=1,
+            holiday_multiplier=1,
+            guest_flat_fee=2000,
+            tax_percent=18,
+            bands=[band],
+            min_billable_hours=2,
+        ),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(
+            local_date=date(2026, 11, 26),
+            end_local_date=date(2026, 11, 26),
+            start_min=20 * 60,
+            end_min=22 * 60,
+        ),
+    )
+    rental = quote.lines[0]
+    assert rental.label == "Club House Rental — Hourly Rate"
+    assert rental.detail == "2 hrs at ₹750/hr (×1.25)"
+    assert rental.amount == 1875
+    assert quote.lines[1].amount == 338
+    assert quote.total == 2213
+    assert quote.due_now == 0
+    assert quote.due_later == 2213
+
+
+def test_explicit_hourly_rate_overrides_the_monthly_list_rate():
+    """A saved member hourly rate is charged as entered."""
+    facility = _facility(
+        FacilityBookingArchetype.DAY_RANGE,
+        pricing=_pricing(
+            resident_rate=6000,
+            hourly_rate=500,
+            unit_label=FacilityRateUnit.MONTH,
+            weekend_multiplier=1,
+            tax_percent=0,
+            min_billable_hours=0,
+        ),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(
+            local_date=date(2026, 11, 26),
+            end_local_date=date(2026, 11, 26),
+            start_min=20 * 60,
+            end_min=22 * 60,
+        ),
+    )
+    assert quote.lines[0].detail == "2 hrs at ₹500/hr"
+    assert quote.lines[0].amount == 1000
+
+
+def test_monthly_full_day_still_uses_the_thirty_day_rate():
+    """A full-day booking bills the monthly rate across 30 days."""
+    facility = _facility(
+        FacilityBookingArchetype.DAY_RANGE,
+        pricing=_pricing(
+            resident_rate=6000,
+            unit_label=FacilityRateUnit.MONTH,
+            weekend_multiplier=1,
+            tax_percent=0,
+            min_billable_hours=0,
+        ),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(
+            local_date=date(2026, 11, 26),
+            end_local_date=date(2026, 11, 26),
+            start_min=6 * 60,
+            end_min=22 * 60,
+        ),
+    )
+    assert quote.lines[0].amount == 200
+    assert "₹200/day" in (quote.lines[0].detail or "")
+
+
 def test_over_cap_range_is_not_priced_from_a_truncated_prefix():
     """A span longer than each_date's cap is not billed as the first 400 days."""
     start = date(2026, 11, 15)
