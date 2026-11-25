@@ -187,6 +187,128 @@ async def test_create_rating_stores_aspect_scores_and_media():
     ]
 
 
+@pytest.mark.asyncio
+async def test_update_rating_replaces_aspects_and_media():
+    svc = _rating_service(linked=True)
+    svc.repo.update_rating = AsyncMock(
+        return_value={
+            "id": "rating-1",
+            "stars": 5.0,
+            "comment": "Excellent service",
+            "traits": [],
+            "aspects": [
+                {"aspect": "punctuality", "stars": Decimal("5.0")},
+                {"aspect": "behavior", "stars": Decimal("4.0")},
+            ],
+            "media": [
+                {
+                    "media_type": "video",
+                    "file_path": "daily-help/ratings/clip.mp4",
+                    "file_name": "clip.mp4",
+                    "mime_type": "video/mp4",
+                    "file_size_bytes": 2048,
+                    "sort_order": 1,
+                }
+            ],
+            "created_at": datetime(2024, 5, 1, tzinfo=timezone.utc),
+            "updated_at": datetime(2024, 5, 2, tzinfo=timezone.utc),
+        }
+    )
+
+    rating = await svc.update_rating(
+        contact_id="contact-1",
+        unit_id="unit-1",
+        profile_id="profile-1",
+        body=UpdateDailyHelpRatingRequest(
+            stars=Decimal("5.0"),
+            comment="  Excellent service  ",
+            aspects=[
+                {"aspect": "punctuality", "stars": Decimal("5.0")},
+                {"aspect": "behavior", "stars": Decimal("4.0")},
+            ],
+            media=[
+                {
+                    "media_type": "video",
+                    "file_path": "daily-help/ratings/clip.mp4",
+                    "file_name": "clip.mp4",
+                    "mime_type": "VIDEO/MP4",
+                    "file_size_bytes": 2048,
+                    "sort_order": 1,
+                }
+            ],
+        ),
+    )
+
+    payload = svc.repo.update_rating.await_args.kwargs
+    assert payload["comment"] == "Excellent service"
+    assert payload["aspects"][1]["aspect"] == "behavior"
+    assert payload["media"][0]["mime_type"] == "video/mp4"
+    assert rating.experience_label == "great"
+    assert rating.aspects[0].aspect == "punctuality"
+    assert rating.aspects[0].stars == 5.0
+    assert rating.media[0].media_type == "video"
+    assert rating.media[0].file_path == "daily-help/ratings/clip.mp4"
+    assert "id" not in rating.media[0].model_dump()
+
+
+def test_rating_request_accepts_photo_and_video_mime_types():
+    photo = CreateDailyHelpRatingRequest(
+        stars=Decimal("4.0"),
+        media=[{"media_type": "photo", "file_path": "ratings/a.heic", "mime_type": "image/heic"}],
+    )
+    video = CreateDailyHelpRatingRequest(
+        stars=Decimal("4.0"),
+        media=[
+            {
+                "media_type": "video",
+                "file_path": "ratings/a.mov",
+                "mime_type": "video/quicktime",
+            }
+        ],
+    )
+    assert photo.media[0].mime_type == "image/heic"
+    assert video.media[0].mime_type == "video/quicktime"
+    assert photo.stars == Decimal("4.0")
+
+
+def test_rating_request_rejects_invalid_experience_fields():
+    invalid_bodies = [
+        {"stars": Decimal("0")},
+        {"stars": Decimal("5.5")},
+        {"stars": Decimal("5.0"), "aspects": [{"aspect": "craftsmanship", "stars": 5}]},
+        {
+            "stars": Decimal("5.0"),
+            "aspects": [{"aspect": "punctuality", "stars": Decimal("0.4")}],
+        },
+        {
+            "stars": Decimal("5.0"),
+            "aspects": [{"aspect": "punctuality", "stars": Decimal("5.0")}] * 5,
+        },
+        {
+            "stars": Decimal("5.0"),
+            "media": [
+                {"media_type": "photo", "file_path": f"ratings/{index}.jpg"} for index in range(6)
+            ],
+        },
+        {"stars": Decimal("5.0"), "media": [{"media_type": "photo", "file_path": "   "}]},
+        {"stars": Decimal("5.0"), "media": [{"media_type": "audio", "file_path": "ratings/a.mp3"}]},
+        {
+            "stars": Decimal("5.0"),
+            "media": [
+                {"media_type": "photo", "file_path": "ratings/a.jpg", "mime_type": "video/mp4"}
+            ],
+        },
+        {
+            "stars": Decimal("5.0"),
+            "media": [{"media_type": "photo", "file_path": "ratings/a.jpg", "file_size_bytes": 0}],
+        },
+        {"stars": Decimal("5.0"), "unknown": "nope"},
+    ]
+    for body in invalid_bodies:
+        with pytest.raises(ValidationError):
+            CreateDailyHelpRatingRequest(**body)
+
+
 def test_experience_label_matches_star_row():
     assert _experience_label(1) == "terrible"
     assert _experience_label(2) == "bad"

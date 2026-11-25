@@ -95,6 +95,35 @@ def _coerce_jsonb_mapping(value: Any) -> dict[str, Any]:
         return {}
 
 
+def _normalize_rating_media(value: Any) -> list[dict[str, Any]]:
+    """Normalize the daily_help_ratings.media jsonb array."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        value = json.loads(stripped)
+    if not isinstance(value, list):
+        return []
+    media: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        file_size = item.get("file_size_bytes")
+        media.append(
+            {
+                "media_type": str(item.get("media_type") or ""),
+                "file_path": str(item.get("file_path") or ""),
+                "file_name": item.get("file_name"),
+                "mime_type": item.get("mime_type"),
+                "file_size_bytes": int(file_size) if file_size is not None else None,
+                "sort_order": int(item.get("sort_order") or 0),
+            }
+        )
+    return media
+
+
 class DailyHelpRepository(BaseRepository):
     """Database operations for daily help registry tables."""
 
@@ -928,7 +957,7 @@ class DailyHelpRepository(BaseRepository):
         aspects: list[dict[str, Any]] | None = None,
         media: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Insert a rating with trait tags, quality scores, and photo or video rows."""
+        """Insert a rating with trait tags, quality scores, and a media jsonb array."""
         async with self.db_connection.transaction():
             row = await self.db_connection.fetchrow(
                 """
@@ -939,12 +968,13 @@ class DailyHelpRepository(BaseRepository):
                     unit_id,
                     rated_by_contact_id,
                     stars,
-                    comment
+                    comment,
+                    media
                 )
                 VALUES (
-                    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7
+                    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8::jsonb
                 )
-                RETURNING id::text AS id, stars, comment, created_at
+                RETURNING id::text AS id, stars, comment, media, created_at
                 """,
                 organization_id,
                 project_id,
@@ -953,14 +983,15 @@ class DailyHelpRepository(BaseRepository):
                 rated_by_contact_id,
                 stars,
                 comment,
+                json.dumps(media or []),
             )
             rating = dict(row)
+            rating["media"] = _normalize_rating_media(rating.get("media"))
             await self._replace_rating_children(
                 organization_id=organization_id,
                 rating_id=str(rating["id"]),
                 traits=traits or [],
                 aspects=aspects or [],
-                media=media or [],
             )
             rating.update(
                 await self._load_rating_children(
@@ -985,6 +1016,7 @@ class DailyHelpRepository(BaseRepository):
                 id::text AS id,
                 stars,
                 comment,
+                media,
                 created_at,
                 updated_at
             FROM daily_help_ratings
@@ -1002,6 +1034,7 @@ class DailyHelpRepository(BaseRepository):
         if not row:
             return None
         rating = dict(row)
+        rating["media"] = _normalize_rating_media(rating.get("media"))
         rating.update(
             await self._load_rating_children(
                 organization_id=organization_id,
@@ -1030,12 +1063,13 @@ class DailyHelpRepository(BaseRepository):
                 UPDATE daily_help_ratings
                 SET stars = $5,
                     comment = $6,
+                    media = $7::jsonb,
                     updated_at = now()
                 WHERE organization_id = $1::uuid
                   AND daily_help_profile_id = $2::uuid
                   AND unit_id = $3::uuid
                   AND rated_by_contact_id = $4::uuid
-                RETURNING id::text AS id, stars, comment, created_at, updated_at
+                RETURNING id::text AS id, stars, comment, media, created_at, updated_at
                 """,
                 organization_id,
                 profile_id,
@@ -1043,16 +1077,17 @@ class DailyHelpRepository(BaseRepository):
                 rated_by_contact_id,
                 stars,
                 comment,
+                json.dumps(media or []),
             )
             if not row:
                 return None
             rating = dict(row)
+            rating["media"] = _normalize_rating_media(rating.get("media"))
             await self._replace_rating_children(
                 organization_id=organization_id,
                 rating_id=str(rating["id"]),
                 traits=traits or [],
                 aspects=aspects or [],
-                media=media or [],
             )
             rating.update(
                 await self._load_rating_children(
@@ -1150,52 +1185,6 @@ class DailyHelpRepository(BaseRepository):
             )
         return aspects_by_rating
 
-    async def list_rating_media_batch(
-        self,
-        *,
-        organization_id: str,
-        rating_ids: list[str],
-    ) -> dict[str, list[dict[str, Any]]]:
-        """List photos and videos for many ratings."""
-        unique_ids = [rating_id for rating_id in dict.fromkeys(rating_ids) if rating_id]
-        if not unique_ids:
-            return {}
-        rows = await self.db_connection.fetch(
-            """
-            SELECT
-              id::text AS id,
-              daily_help_rating_id::text AS rating_id,
-              media_type::text AS media_type,
-              file_path,
-              file_name,
-              mime_type,
-              file_size_bytes,
-              sort_order
-            FROM daily_help_rating_media
-            WHERE organization_id = $1::uuid
-              AND daily_help_rating_id = ANY($2::uuid[])
-            ORDER BY daily_help_rating_id, sort_order, created_at, id
-            """,
-            organization_id,
-            unique_ids,
-        )
-        media_by_rating: dict[str, list[dict[str, Any]]] = {
-            rating_id: [] for rating_id in unique_ids
-        }
-        for row in rows:
-            media_by_rating[str(row["rating_id"])].append(
-                {
-                    "id": str(row["id"]),
-                    "media_type": str(row["media_type"]),
-                    "file_path": str(row["file_path"]),
-                    "file_name": row.get("file_name"),
-                    "mime_type": row.get("mime_type"),
-                    "file_size_bytes": row.get("file_size_bytes"),
-                    "sort_order": int(row.get("sort_order") or 0),
-                }
-            )
-        return media_by_rating
-
     async def _replace_rating_children(
         self,
         *,
@@ -1203,9 +1192,8 @@ class DailyHelpRepository(BaseRepository):
         rating_id: str,
         traits: list[str],
         aspects: list[dict[str, Any]],
-        media: list[dict[str, Any]],
     ) -> None:
-        """Replace trait tags, quality scores, and media for one rating."""
+        """Replace trait tags and quality scores for one rating."""
         await self.db_connection.execute(
             """
             DELETE FROM daily_help_rating_traits
@@ -1252,54 +1240,13 @@ class DailyHelpRepository(BaseRepository):
                 [(organization_id, rating_id, item["aspect"], item["stars"]) for item in aspects],
             )
 
-        await self.db_connection.execute(
-            """
-            DELETE FROM daily_help_rating_media
-            WHERE organization_id = $1::uuid
-              AND daily_help_rating_id = $2::uuid
-            """,
-            organization_id,
-            rating_id,
-        )
-        if media:
-            await self.db_connection.executemany(
-                """
-                INSERT INTO daily_help_rating_media (
-                    organization_id,
-                    daily_help_rating_id,
-                    media_type,
-                    file_path,
-                    file_name,
-                    mime_type,
-                    file_size_bytes,
-                    sort_order
-                )
-                VALUES (
-                    $1::uuid, $2::uuid, $3::daily_help_rating_media_type, $4, $5, $6, $7, $8
-                )
-                """,
-                [
-                    (
-                        organization_id,
-                        rating_id,
-                        item["media_type"],
-                        item["file_path"],
-                        item.get("file_name"),
-                        item.get("mime_type"),
-                        item.get("file_size_bytes"),
-                        item.get("sort_order") or 0,
-                    )
-                    for item in media
-                ],
-            )
-
     async def _load_rating_children(
         self,
         *,
         organization_id: str,
         rating_id: str,
     ) -> dict[str, Any]:
-        """Load traits, quality scores, and media for one rating."""
+        """Load traits and quality scores for one rating."""
         traits = await self.list_rating_traits(
             organization_id=organization_id,
             rating_id=rating_id,
@@ -1308,14 +1255,9 @@ class DailyHelpRepository(BaseRepository):
             organization_id=organization_id,
             rating_ids=[rating_id],
         )
-        media = await self.list_rating_media_batch(
-            organization_id=organization_id,
-            rating_ids=[rating_id],
-        )
         return {
             "traits": traits,
             "aspects": aspects.get(rating_id, []),
-            "media": media.get(rating_id, []),
         }
 
     _WRITTEN_REVIEW_FILTER = """
@@ -1330,6 +1272,7 @@ class DailyHelpRepository(BaseRepository):
               r.rated_by_contact_id::text AS rated_by_contact_id,
               r.stars,
               r.comment,
+              r.media,
               r.created_at,
               r.updated_at,
               u.code AS unit_code,
@@ -1376,7 +1319,7 @@ class DailyHelpRepository(BaseRepository):
         organization_id: str,
         ratings: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Attach trait tags, quality scores, and media to rating/review rows."""
+        """Attach trait tags and quality scores, and normalize the media column."""
         if not ratings:
             return []
         rating_ids = [str(rating["id"]) for rating in ratings]
@@ -1388,15 +1331,11 @@ class DailyHelpRepository(BaseRepository):
             organization_id=organization_id,
             rating_ids=rating_ids,
         )
-        media_by_rating = await self.list_rating_media_batch(
-            organization_id=organization_id,
-            rating_ids=rating_ids,
-        )
         for rating in ratings:
             rating_id = str(rating["id"])
             rating["traits"] = traits_by_rating.get(rating_id, [])
             rating["aspects"] = aspects_by_rating.get(rating_id, [])
-            rating["media"] = media_by_rating.get(rating_id, [])
+            rating["media"] = _normalize_rating_media(rating.get("media"))
         return ratings
 
     async def list_ratings_for_profile(

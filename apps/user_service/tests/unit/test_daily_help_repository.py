@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
@@ -10,6 +11,7 @@ import pytest
 from apps.user_service.app.db.repositories.daily_help_repository import (
     DailyHelpRepository,
     _coerce_jsonb_mapping,
+    _normalize_rating_media,
 )
 
 ORG = "11111111-1111-1111-1111-111111111111"
@@ -19,12 +21,11 @@ UNIT = "44444444-4444-4444-4444-444444444444"
 
 
 class _FakeConn:
-    def __init__(self, *, rows=None, row=None, val=0, aspect_rows=None, media_rows=None):
+    def __init__(self, *, rows=None, row=None, val=0, aspect_rows=None):
         self.rows = rows or []
         self.row = row
         self.val = val
         self.aspect_rows = aspect_rows or []
-        self.media_rows = media_rows or []
         self.fetch_calls: list[tuple] = []
         self.fetchrow_calls: list[tuple] = []
         self.fetchval_calls: list[tuple] = []
@@ -35,8 +36,6 @@ class _FakeConn:
         self.fetch_calls.append((query.strip(), args))
         if "daily_help_rating_aspects" in query:
             return self.aspect_rows
-        if "daily_help_rating_media" in query:
-            return self.media_rows
         return self.rows
 
     async def fetchrow(self, query, *args):
@@ -425,6 +424,16 @@ async def test_insert_rating_stores_aspects_and_media():
             "stars": Decimal("5.0"),
             "comment": "Loved it",
             "created_at": "now",
+            "media": [
+                {
+                    "media_type": "photo",
+                    "file_path": "daily-help/ratings/photo-1.jpg",
+                    "file_name": "photo-1.jpg",
+                    "mime_type": "image/jpeg",
+                    "file_size_bytes": 1200,
+                    "sort_order": 0,
+                }
+            ],
         },
         rows=[{"trait": "very_punctual"}],
         aspect_rows=[
@@ -432,18 +441,6 @@ async def test_insert_rating_stores_aspects_and_media():
                 "rating_id": "rating-1",
                 "aspect": "punctuality",
                 "stars": Decimal("5.0"),
-            }
-        ],
-        media_rows=[
-            {
-                "rating_id": "rating-1",
-                "id": "media-1",
-                "media_type": "photo",
-                "file_path": "daily-help/ratings/photo-1.jpg",
-                "file_name": "photo-1.jpg",
-                "mime_type": "image/jpeg",
-                "file_size_bytes": 1200,
-                "sort_order": 0,
             }
         ],
     )
@@ -472,17 +469,102 @@ async def test_insert_rating_stores_aspects_and_media():
     )
 
     assert rating["aspects"][0]["aspect"] == "punctuality"
-    assert rating["media"][0]["id"] == "media-1"
+    assert rating["media"][0]["media_type"] == "photo"
+    assert rating["media"][0]["file_path"] == "daily-help/ratings/photo-1.jpg"
     assert rating["traits"] == ["very_punctual"]
     aspect_inserts = [
         call for call in conn.executemany_calls if "daily_help_rating_aspects" in call[0]
     ]
-    media_inserts = [
-        call for call in conn.executemany_calls if "daily_help_rating_media" in call[0]
-    ]
     assert aspect_inserts[0][1] == [(ORG, "rating-1", "punctuality", Decimal("5.0"))]
-    assert media_inserts[0][1][0][2] == "photo"
-    assert any("DELETE FROM daily_help_rating_media" in call[0] for call in conn.execute_calls)
+    insert_sql, insert_args = conn.fetchrow_calls[0]
+    assert "media" in insert_sql
+    assert json.loads(insert_args[-1])[0]["media_type"] == "photo"
+
+
+def test_normalize_rating_media_success_and_invalid_values():
+    stored = json.dumps(
+        [
+            {
+                "media_type": "photo",
+                "file_path": "ratings/a.jpg",
+                "file_name": "a.jpg",
+                "mime_type": "image/jpeg",
+                "file_size_bytes": "1200",
+                "sort_order": "2",
+            },
+            "not-an-object",
+        ]
+    )
+    media = _normalize_rating_media(stored)
+    assert media == [
+        {
+            "media_type": "photo",
+            "file_path": "ratings/a.jpg",
+            "file_name": "a.jpg",
+            "mime_type": "image/jpeg",
+            "file_size_bytes": 1200,
+            "sort_order": 2,
+        }
+    ]
+    assert _normalize_rating_media(None) == []
+    assert _normalize_rating_media("") == []
+    assert _normalize_rating_media({"media_type": "photo"}) == []
+    assert _normalize_rating_media([]) == []
+
+
+@pytest.mark.asyncio
+async def test_update_rating_writes_media_and_returns_none_when_missing():
+    conn = _FakeConn(row=None)
+    repo = DailyHelpRepository(db_connection=conn)
+    missing = await repo.update_rating(
+        organization_id=ORG,
+        profile_id=PROFILE,
+        unit_id=UNIT,
+        rated_by_contact_id="contact-1",
+        stars=Decimal("1.0"),
+        comment=None,
+        aspects=[],
+        media=[],
+    )
+    assert missing is None
+    update_sql, update_args = conn.fetchrow_calls[0]
+    assert "media = $7::jsonb" in update_sql
+    assert update_args[-1] == "[]"
+
+    conn.row = {
+        "id": "rating-1",
+        "stars": Decimal("1.0"),
+        "comment": None,
+        "media": [
+            {
+                "media_type": "photo",
+                "file_path": "ratings/bad.jpg",
+                "file_name": None,
+                "mime_type": None,
+                "file_size_bytes": None,
+                "sort_order": 0,
+            }
+        ],
+        "created_at": "now",
+        "updated_at": "now",
+    }
+    conn.rows = []
+    updated = await repo.update_rating(
+        organization_id=ORG,
+        profile_id=PROFILE,
+        unit_id=UNIT,
+        rated_by_contact_id="contact-1",
+        stars=Decimal("1.0"),
+        comment=None,
+        aspects=[],
+        media=[{"media_type": "photo", "file_path": "ratings/bad.jpg"}],
+    )
+    assert updated is not None
+    assert updated["media"][0]["file_path"] == "ratings/bad.jpg"
+    assert updated["aspects"] == []
+    written = json.loads(conn.fetchrow_calls[-1][1][-1])
+    assert written[0]["file_path"] == "ratings/bad.jpg"
+    assert "DELETE FROM daily_help_rating_aspects" in conn.execute_calls[-1][0]
 
 
 @pytest.mark.asyncio

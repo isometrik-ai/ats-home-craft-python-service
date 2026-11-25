@@ -549,17 +549,18 @@ Partial unique: at most one `photo` typed row may duplicate `profiles.photo_path
 
 ### `daily_help_ratings` (Phase 3)
 
-| Column                      | Type               | Notes                             |
-| --------------------------- | ------------------ | --------------------------------- |
-| `id`                        | uuid PK            |                                   |
-| `organization_id`           | uuid FK            |                                   |
-| `project_id`                | uuid FK            |                                   |
-| `daily_help_profile_id`     | uuid FK            |                                   |
-| `unit_id`                   | uuid FK → units    | Rater's unit context              |
-| `rated_by_contact_id`       | uuid FK → contacts | Resident who submitted the rating |
-| `stars`                     | numeric(2,1)       | 0.5 – 5.0                         |
-| `comment`                   | text               | Optional free text                |
-| `created_at` / `updated_at` | timestamptz        |                                   |
+| Column                      | Type               | Notes                                  |
+| --------------------------- | ------------------ | -------------------------------------- |
+| `id`                        | uuid PK            |                                        |
+| `organization_id`           | uuid FK            |                                        |
+| `project_id`                | uuid FK            |                                        |
+| `daily_help_profile_id`     | uuid FK            |                                        |
+| `unit_id`                   | uuid FK → units    | Rater's unit context                   |
+| `rated_by_contact_id`       | uuid FK → contacts | Resident who submitted the rating      |
+| `stars`                     | numeric(2,1)       | 0.5 – 5.0                              |
+| `comment`                   | text               | Optional free text                     |
+| `media`                     | jsonb              | Photo/video array, default `[]`, max 5 |
+| `created_at` / `updated_at` | timestamptz        |                                        |
 
 **Unique:** `(daily_help_profile_id, unit_id, rated_by_contact_id)` — one rating per resident per unit.
 
@@ -567,8 +568,8 @@ Child table **`daily_help_rating_traits`** stores trait enum values (`very_punct
 `exceptional_service`, `great_attitude`, `good_communication`).
 
 Child table **`daily_help_rating_aspects`** stores one star score per quality
-(`punctuality`, `work_quality`, `behavior`, `communication`). Child table
-**`daily_help_rating_media`** stores up to five photos or videos (`photo`, `video`).
+(`punctuality`, `work_quality`, `behavior`, `communication`). Photos and videos live on
+**`daily_help_ratings.media`** as a jsonb array of up to five items (`photo`, `video`).
 Responses add `experience_label` (`terrible`, `bad`, `okay`, `good`, `great`) from the overall stars.
 
 **Resident API:**

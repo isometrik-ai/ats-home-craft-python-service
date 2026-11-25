@@ -485,11 +485,10 @@ class DailyHelpRatingAspectResponse(BaseModel):
 
 
 class DailyHelpRatingMediaResponse(BaseModel):
-    """Photo or video stored on a rating."""
+    """Photo or video stored on a rating's media array."""
 
     model_config = ConfigDict(extra="ignore")
 
-    id: str
     media_type: str
     file_path: str
     file_name: str | None = None

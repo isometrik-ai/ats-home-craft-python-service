@@ -929,7 +929,6 @@ class DailyHelpService:
             ],
             "media": [
                 {
-                    "id": str(item["id"]),
                     "media_type": str(item["media_type"]),
                     "file_path": str(item["file_path"]),
                     "file_name": item.get("file_name"),
