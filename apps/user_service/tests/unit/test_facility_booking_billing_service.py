@@ -135,6 +135,7 @@ async def test_generate_invoices_groups_by_contact():
     assert inserted["total"] == 500
     svc.ledger_repo.attach_invoice.assert_awaited_once()
     svc.notifier.invoice_generated.assert_awaited_once()
+    assert svc.notifier.invoice_generated.await_args.kwargs["reservation_ids"] == ["r1"]
 
 
 @pytest.mark.asyncio
@@ -146,7 +147,13 @@ async def test_pay_invoice_wallet_posts_payment():
             "contact_id": CONTACT_ID,
             "number": "INV-2026-0003",
             "status": "issued",
-            "lines": [],
+            "lines": [
+                {
+                    "description": "Tennis — booking",
+                    "amount": 200,
+                    "reservation_id": "r1",
+                }
+            ],
             "total": 200,
             "period_label": "September 2026",
             "due_date": date(2026, 10, 24),
@@ -179,6 +186,7 @@ async def test_pay_invoice_wallet_posts_payment():
     assert posted["entry_type"] == "payment"
     assert posted["amount"] == -200
     svc.notifier.payment_received.assert_awaited_once()
+    assert svc.notifier.payment_received.await_args.kwargs["reservation_ids"] == ["r1"]
 
 
 @pytest.mark.asyncio
