@@ -58,13 +58,24 @@ def js_dow(day: date) -> int:
 
 
 def each_date(start: date, end: date) -> list[date]:
-    """Inclusive list of calendar dates from ``start`` through ``end``."""
+    """Inclusive list of calendar dates from ``start`` through ``end``.
+
+    The list stops at ``MAX_DATE_SPAN_DAYS``. Callers that must cover ``end``
+    should reject the draft with ``span_exceeds_cap`` instead of using a prefix.
+    """
     out: list[date] = []
     cur = start
     while cur <= end and len(out) < MAX_DATE_SPAN_DAYS:
         out.append(cur)
         cur += timedelta(days=1)
     return out
+
+
+def span_exceeds_cap(start: date, end: date) -> bool:
+    """True when the inclusive range is longer than ``each_date`` will return."""
+    if end < start:
+        return False
+    return (end - start).days + 1 > MAX_DATE_SPAN_DAYS
 
 
 def local_start(day: date, start_min: int) -> datetime:
