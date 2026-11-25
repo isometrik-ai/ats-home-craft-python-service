@@ -18,6 +18,23 @@ _NOTIFICATION_TYPE = "NOTIFICATION_TYPE_SYSTEM"
 _FEED_TYPE = "facility_booking"
 
 
+def linked_reservation(reservation_ids: list[str] | None) -> tuple[str | None, list[str]]:
+    """Return a tap target and every booking id on an invoice.
+
+    The resident app opens ``data.reservation_id``. An invoice can bundle every
+    pending charge for a contact, so keep the full list and point the tap at
+    the first booking when more than one is present.
+    """
+    ids: list[str] = []
+    for raw in reservation_ids or []:
+        if raw is None:
+            continue
+        value = str(raw).strip()
+        if value and value not in ids:
+            ids.append(value)
+    return (ids[0] if ids else None), ids
+
+
 class FacilityBookingNotificationService:
     """Maps Clubhouse booking notify() events onto Home Craft push + in-app feed."""
 
@@ -266,8 +283,10 @@ class FacilityBookingNotificationService:
         number: str,
         total: int,
         due_date: str,
+        reservation_ids: list[str] | None = None,
     ) -> None:
         """Notify a contact that a new invoice was generated."""
+        reservation_id, ids = linked_reservation(reservation_ids)
         await self._to_contact(
             contact_id=contact_id,
             message_key="notifications.push.facility_booking.invoice_generated",
@@ -276,20 +295,27 @@ class FacilityBookingNotificationService:
                 "amount": fmt_money(total),
                 "due_date": due_date,
             },
-            reservation_id=None,
-            extra={"invoice_id": invoice_id},
+            reservation_id=reservation_id,
+            extra={"invoice_id": invoice_id, "reservation_ids": ids},
         )
 
     async def payment_received(
-        self, *, contact_id: str, invoice_id: str, number: str, method: str
+        self,
+        *,
+        contact_id: str,
+        invoice_id: str,
+        number: str,
+        method: str,
+        reservation_ids: list[str] | None = None,
     ) -> None:
         """Notify a contact that an invoice payment was recorded."""
+        reservation_id, ids = linked_reservation(reservation_ids)
         await self._to_contact(
             contact_id=contact_id,
             message_key="notifications.push.facility_booking.payment_received",
             params={"number": number, "method": method},
-            reservation_id=None,
-            extra={"invoice_id": invoice_id},
+            reservation_id=reservation_id,
+            extra={"invoice_id": invoice_id, "reservation_ids": ids},
         )
 
     async def wallet_updated(self, *, contact_id: str, amount: int, reason: str) -> None:
