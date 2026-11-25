@@ -289,21 +289,14 @@ def test_create_user_profile_data_with_verification_pref():
 @pytest.mark.asyncio
 async def test_update_isometrik_user_if_needed_success(monkeypatch):
     svc = _service()
+    sync = AsyncMock()
     monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.parse_json_field",
-        lambda x: {},
+        "apps.user_service.app.services.user_service.shared_settings.cloudflare_r2.media_url",
+        "https://cdn.example.com",
     )
     monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.get_isometrik_data_from_settings",
-        lambda x: {"licenseKey": "k", "appSecret": "s"},
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.login_to_isometrik",
-        AsyncMock(return_value={"userToken": "tok"}),
-    )
-    monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.update_isometrik_user",
-        AsyncMock(),
+        "apps.user_service.app.services.user_service.sync_isometrik_user_profile",
+        sync,
     )
     body = UpdateUserProfileRequest(first_name="New", avatar_url="pic.png")
     await svc._update_isometrik_user_if_needed(
@@ -312,13 +305,20 @@ async def test_update_isometrik_user_if_needed_success(monkeypatch):
         body,
         updated_profile={"first_name": "New", "last_name": "Name"},
     )
+    kwargs = sync.await_args.kwargs
+    assert kwargs["user_identifiers"] == [MEMBER_ID]
+    assert kwargs["user_name"] == "New Name"
+    assert kwargs["metadata"]["avatar_url"] == "https://cdn.example.com/pic.png"
+    assert kwargs["metadata"]["user_id"] == MEMBER_ID
+    assert kwargs["metadata"]["organization_id"] == ORG_ID
+    assert kwargs["metadata"]["role"] == "member"
 
 
 @pytest.mark.asyncio
 async def test_update_isometrik_user_if_needed_swallows_errors(monkeypatch):
     svc = _service()
     monkeypatch.setattr(
-        "apps.user_service.app.services.user_service.login_to_isometrik",
+        "apps.user_service.app.services.user_service.sync_isometrik_user_profile",
         AsyncMock(side_effect=RuntimeError("iso down")),
     )
     body = UpdateUserProfileRequest(first_name="New")

@@ -318,10 +318,13 @@ async def test_update_isometrik_user(monkeypatch) -> None:
         creds,
         user_name="Jane Doe",
         user_profile_image_url="https://example.com/a.jpg",
+        metadata={"avatar_url": "https://example.com/a.jpg"},
     )
 
     assert result == {"updated": True}
     assert calls["json"]["userName"] == "Jane Doe"
+    assert calls["json"]["userProfileImageUrl"] == "https://example.com/a.jpg"
+    assert calls["json"]["metaData"]["avatar_url"] == "https://example.com/a.jpg"
     assert calls["headers"]["userToken"] == "tok"
 
 

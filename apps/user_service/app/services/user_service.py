@@ -10,6 +10,7 @@ from typing import Any
 import asyncpg
 from supabase import AsyncClient
 
+from apps.user_service.app.db.repositories.contacts_repository import ContactsRepository
 from apps.user_service.app.db.repositories.organization_member_repository import (
     OrganizationMemberRepository,
 )
@@ -22,6 +23,7 @@ from apps.user_service.app.schemas.auth import IsometrikDetails
 from apps.user_service.app.schemas.common import OrganizationBasicDetails
 from apps.user_service.app.schemas.enums import (
     EntityType,
+    IsometrikRole,
     OrganizationMemberRole,
     OrganizationMemberStatus,
 )
@@ -67,8 +69,7 @@ from libs.shared_utils.http_exceptions import (
 )
 from libs.shared_utils.isometrik_service import (
     get_isometrik_data_from_settings,
-    login_to_isometrik,
-    update_isometrik_user,
+    sync_isometrik_user_profile,
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.session_context_cache import (
@@ -1743,51 +1744,47 @@ class UserService:  # pylint: disable=too-many-public-methods
         """
         name_updated = body.first_name is not None or body.last_name is not None
         avatar_updated = body.avatar_url is not None
-
         if not name_updated and not avatar_updated:
+            return
+        if not organization_id:
             return
 
         try:
-            # Get organization settings
+            identifiers, role = await self._chat_account(
+                user_id, organization_id, body, updated_profile
+            )
+            image_url = self._public_avatar_url(body.avatar_url)
             organization = await self.organization_repository.get_organization_by_id(
                 organization_id
             )
-
-            org_settings = parse_json_field(organization.get("settings"))
-            isometrik_credentials = get_isometrik_data_from_settings(org_settings)
-
-            # Login to Isometrik to get userToken
-            login_response = await login_to_isometrik(
-                user_id=user_id,
-                isometrik_credentials=isometrik_credentials,
-            )
-
-            # Prepare credentials with userToken
-            isometrik_update_credentials = {
-                "userToken": login_response.get("userToken", ""),
-                "licenseKey": isometrik_credentials.get("licenseKey", ""),
-                "appSecret": isometrik_credentials.get("appSecret", ""),
-            }
-
-            # Build user name from updated profile
+            if not organization:
+                return
+            profile = updated_profile or {}
             user_name = None
             if name_updated:
-                first_name = updated_profile.get("first_name", "")
-                last_name = updated_profile.get("last_name", "")
-                user_name = build_full_name(first_name, last_name).strip() or None
-
-            # Get avatar URL from updated profile or request body
-            user_profile_image_url = None
-            if avatar_updated:
-                user_profile_image_url = (
-                    f"{shared_settings.cloudflare_r2.media_url}/{body.avatar_url}"
+                user_name = (
+                    build_full_name(
+                        profile.get("first_name") or "",
+                        profile.get("last_name") or "",
+                    ).strip()
+                    or None
                 )
-
-            # Update Isometrik user
-            await update_isometrik_user(
-                isometrik_credentials=isometrik_update_credentials,
+            metadata = None
+            if image_url is not None:
+                metadata = {
+                    "user_id": identifiers[0],
+                    "role": role,
+                    "organization_id": organization_id,
+                    "avatar_url": image_url,
+                }
+            await sync_isometrik_user_profile(
+                user_identifiers=identifiers,
+                isometrik_credentials=get_isometrik_data_from_settings(
+                    parse_json_field(organization.get("settings"))
+                ),
                 user_name=user_name,
-                user_profile_image_url=user_profile_image_url,
+                user_profile_image_url=image_url,
+                metadata=metadata,
             )
         except Exception as e:
             logger.error(
@@ -1797,3 +1794,80 @@ class UserService:  # pylint: disable=too-many-public-methods
                 str(e),
                 exc_info=True,
             )
+
+    @staticmethod
+    def _public_avatar_url(avatar_url: str | None) -> str | None:
+        """Absolute photo URL for Isometrik. Empty string clears the photo."""
+        if avatar_url is None:
+            return None
+        cleaned = avatar_url.strip()
+        if not cleaned:
+            return ""
+        if cleaned.startswith(("http://", "https://")):
+            return cleaned
+        base = shared_settings.cloudflare_r2.media_url.rstrip("/")
+        return f"{base}/{cleaned.lstrip('/')}"
+
+    async def _chat_account(
+        self,
+        user_id: str,
+        organization_id: str,
+        body: UpdateUserProfileRequest,
+        updated_profile: dict[str, Any] | None,
+    ) -> tuple[list[str], str]:
+        """Chat login ids and metadata role. Residents use their contact id."""
+        db = getattr(self.organization_member_repository, "db_connection", None)
+        contact_id = None
+        if db is not None:
+            contact_id, _ = await ContactsRepository(db).is_active_contact_user_for_organization(
+                user_id=user_id,
+                organization_id=organization_id,
+            )
+        if contact_id and db is not None:
+            await self._copy_profile_to_contact(db, contact_id, organization_id, body)
+            return [contact_id], IsometrikRole.CLIENT.value
+        return await self._staff_chat_account(user_id, organization_id, updated_profile)
+
+    async def _copy_profile_to_contact(
+        self,
+        db: Any,
+        contact_id: str,
+        organization_id: str,
+        body: UpdateUserProfileRequest,
+    ) -> None:
+        """Copy a changed name or photo onto the resident contact."""
+        contact_update: dict[str, Any] = {}
+        if body.first_name is not None:
+            contact_update["first_name"] = body.first_name
+        if body.last_name is not None:
+            contact_update["last_name"] = body.last_name
+        if body.avatar_url is not None:
+            contact_update["profile_photo_url"] = body.avatar_url.strip() or None
+        if not contact_update:
+            return
+        await ContactsRepository(db).update_contact(
+            contact_id=contact_id,
+            organization_id=organization_id,
+            update_data=contact_update,
+        )
+
+    async def _staff_chat_account(
+        self,
+        user_id: str,
+        organization_id: str,
+        updated_profile: dict[str, Any] | None,
+    ) -> tuple[list[str], str]:
+        """Staff chat login: auth user id, then member id when that user has no contact."""
+        identifiers = [user_id]
+        getter = getattr(self.organization_member_repository, "get_member_id_by_user_id", None)
+        if getter is not None:
+            member_id = await getter(user_id=user_id, organization_id=organization_id)
+            if member_id and str(member_id) not in identifiers:
+                identifiers.append(str(member_id))
+        member_role = str((updated_profile or {}).get("member_role") or "").lower()
+        role = (
+            IsometrikRole.OWNER.value
+            if member_role == OrganizationMemberRole.OWNER.value
+            else IsometrikRole.MEMBER.value
+        )
+        return identifiers, role
