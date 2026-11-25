@@ -559,6 +559,7 @@ Partial unique: at most one `photo` typed row may duplicate `profiles.photo_path
 | `rated_by_contact_id`       | uuid FK → contacts | Resident who submitted the rating      |
 | `stars`                     | numeric(2,1)       | 0.5 – 5.0                              |
 | `comment`                   | text               | Optional free text                     |
+| `aspects`                   | jsonb              | Quality scores, default `[]`, max 4    |
 | `media`                     | jsonb              | Photo/video array, default `[]`, max 5 |
 | `created_at` / `updated_at` | timestamptz        |                                        |
 
@@ -567,9 +568,8 @@ Partial unique: at most one `photo` typed row may duplicate `profiles.photo_path
 Child table **`daily_help_rating_traits`** stores trait enum values (`very_punctual`, `quite_regular`,
 `exceptional_service`, `great_attitude`, `good_communication`).
 
-Child table **`daily_help_rating_aspects`** stores one star score per quality
-(`punctuality`, `work_quality`, `behavior`, `communication`). Photos and videos live on
-**`daily_help_ratings.media`** as a jsonb array of up to five items (`photo`, `video`).
+Quality scores (`punctuality`, `work_quality`, `behavior`, `communication`) live on
+**`daily_help_ratings.aspects`**. Photos and videos live on **`daily_help_ratings.media`**.
 Responses add `experience_label` (`terrible`, `bad`, `okay`, `good`, `great`) from the overall stars.
 
 **Resident API:**

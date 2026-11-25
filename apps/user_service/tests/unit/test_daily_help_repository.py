@@ -382,7 +382,7 @@ async def test_ratings():
     assert summary["star_distribution"]["5"] == 2
     assert summary["category_averages"]["punctuality"] == 4.5
     assert summary["trait_counts"]["punctual"] == 1
-    assert any("daily_help_rating_aspects" in query for query, _args in conn.fetchrow_calls)
+    assert any("jsonb_array_elements" in query for query, _args in conn.fetchrow_calls)
 
     conn.row = {
         "rating_count": 1,
@@ -434,15 +434,9 @@ async def test_insert_rating_stores_aspects_and_media():
                     "sort_order": 0,
                 }
             ],
+            "aspects": [{"aspect": "punctuality", "stars": 5.0}],
         },
         rows=[{"trait": "very_punctual"}],
-        aspect_rows=[
-            {
-                "rating_id": "rating-1",
-                "aspect": "punctuality",
-                "stars": Decimal("5.0"),
-            }
-        ],
     )
     repo = DailyHelpRepository(db_connection=conn)
 
@@ -472,13 +466,10 @@ async def test_insert_rating_stores_aspects_and_media():
     assert rating["media"][0]["media_type"] == "photo"
     assert rating["media"][0]["file_path"] == "daily-help/ratings/photo-1.jpg"
     assert rating["traits"] == ["very_punctual"]
-    aspect_inserts = [
-        call for call in conn.executemany_calls if "daily_help_rating_aspects" in call[0]
-    ]
-    assert aspect_inserts[0][1] == [(ORG, "rating-1", "punctuality", Decimal("5.0"))]
     insert_sql, insert_args = conn.fetchrow_calls[0]
-    assert "media" in insert_sql
-    assert json.loads(insert_args[-1])[0]["media_type"] == "photo"
+    assert "aspects" in insert_sql
+    assert json.loads(insert_args[-1]) == [{"aspect": "punctuality", "stars": 5.0}]
+    assert json.loads(insert_args[-2])[0]["media_type"] == "photo"
 
 
 def test_normalize_rating_media_success_and_invalid_values():
@@ -562,9 +553,10 @@ async def test_update_rating_writes_media_and_returns_none_when_missing():
     assert updated is not None
     assert updated["media"][0]["file_path"] == "ratings/bad.jpg"
     assert updated["aspects"] == []
-    written = json.loads(conn.fetchrow_calls[-1][1][-1])
-    assert written[0]["file_path"] == "ratings/bad.jpg"
-    assert "DELETE FROM daily_help_rating_aspects" in conn.execute_calls[-1][0]
+    written_args = conn.fetchrow_calls[-1][1]
+    assert json.loads(written_args[-2])[0]["file_path"] == "ratings/bad.jpg"
+    assert json.loads(written_args[-1]) == []
+    assert "DELETE FROM daily_help_rating_traits" in conn.execute_calls[-1][0]
 
 
 @pytest.mark.asyncio

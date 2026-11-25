@@ -124,6 +124,41 @@ def _normalize_rating_media(value: Any) -> list[dict[str, Any]]:
     return media
 
 
+_ASPECT_ORDER = {
+    "punctuality": 1,
+    "work_quality": 2,
+    "behavior": 3,
+    "communication": 4,
+}
+
+
+def _normalize_rating_aspects(value: Any) -> list[dict[str, Any]]:
+    """Normalize the daily_help_ratings.aspects jsonb array."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        value = json.loads(stripped)
+    if not isinstance(value, list):
+        return []
+    aspects: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or item.get("aspect") is None:
+            continue
+        aspects.append({"aspect": str(item["aspect"]), "stars": float(item["stars"])})
+    aspects.sort(key=lambda item: _ASPECT_ORDER.get(item["aspect"], 99))
+    return aspects
+
+
+def _aspects_json(aspects: list[dict[str, Any]]) -> str:
+    """Serialize quality scores for the ratings.aspects column."""
+    return json.dumps(
+        [{"aspect": item["aspect"], "stars": float(item["stars"])} for item in aspects]
+    )
+
+
 class DailyHelpRepository(BaseRepository):
     """Database operations for daily help registry tables."""
 
@@ -969,12 +1004,14 @@ class DailyHelpRepository(BaseRepository):
                     rated_by_contact_id,
                     stars,
                     comment,
-                    media
+                    media,
+                    aspects
                 )
                 VALUES (
-                    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8::jsonb
+                    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+                    $6, $7, $8::jsonb, $9::jsonb
                 )
-                RETURNING id::text AS id, stars, comment, media, created_at
+                RETURNING id::text AS id, stars, comment, media, aspects, created_at
                 """,
                 organization_id,
                 project_id,
@@ -984,14 +1021,15 @@ class DailyHelpRepository(BaseRepository):
                 stars,
                 comment,
                 json.dumps(media or []),
+                _aspects_json(aspects or []),
             )
             rating = dict(row)
             rating["media"] = _normalize_rating_media(rating.get("media"))
+            rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
             await self._replace_rating_children(
                 organization_id=organization_id,
                 rating_id=str(rating["id"]),
                 traits=traits or [],
-                aspects=aspects or [],
             )
             rating.update(
                 await self._load_rating_children(
@@ -1017,6 +1055,7 @@ class DailyHelpRepository(BaseRepository):
                 stars,
                 comment,
                 media,
+                aspects,
                 created_at,
                 updated_at
             FROM daily_help_ratings
@@ -1035,6 +1074,7 @@ class DailyHelpRepository(BaseRepository):
             return None
         rating = dict(row)
         rating["media"] = _normalize_rating_media(rating.get("media"))
+        rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
         rating.update(
             await self._load_rating_children(
                 organization_id=organization_id,
@@ -1064,12 +1104,14 @@ class DailyHelpRepository(BaseRepository):
                 SET stars = $5,
                     comment = $6,
                     media = $7::jsonb,
+                    aspects = $8::jsonb,
                     updated_at = now()
                 WHERE organization_id = $1::uuid
                   AND daily_help_profile_id = $2::uuid
                   AND unit_id = $3::uuid
                   AND rated_by_contact_id = $4::uuid
-                RETURNING id::text AS id, stars, comment, media, created_at, updated_at
+                RETURNING
+                    id::text AS id, stars, comment, media, aspects, created_at, updated_at
                 """,
                 organization_id,
                 profile_id,
@@ -1078,16 +1120,17 @@ class DailyHelpRepository(BaseRepository):
                 stars,
                 comment,
                 json.dumps(media or []),
+                _aspects_json(aspects or []),
             )
             if not row:
                 return None
             rating = dict(row)
             rating["media"] = _normalize_rating_media(rating.get("media"))
+            rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
             await self._replace_rating_children(
                 organization_id=organization_id,
                 rating_id=str(rating["id"]),
                 traits=traits or [],
-                aspects=aspects or [],
             )
             rating.update(
                 await self._load_rating_children(
@@ -1145,55 +1188,14 @@ class DailyHelpRepository(BaseRepository):
             traits_by_rating[str(row["rating_id"])].append(str(row["trait"]))
         return traits_by_rating
 
-    async def list_rating_aspects_batch(
-        self,
-        *,
-        organization_id: str,
-        rating_ids: list[str],
-    ) -> dict[str, list[dict[str, Any]]]:
-        """List quality star scores for many ratings, in form order."""
-        unique_ids = [rating_id for rating_id in dict.fromkeys(rating_ids) if rating_id]
-        if not unique_ids:
-            return {}
-        rows = await self.db_connection.fetch(
-            """
-            SELECT
-              daily_help_rating_id::text AS rating_id,
-              aspect::text AS aspect,
-              stars
-            FROM daily_help_rating_aspects
-            WHERE organization_id = $1::uuid
-              AND daily_help_rating_id = ANY($2::uuid[])
-            ORDER BY daily_help_rating_id,
-              CASE aspect::text
-                WHEN 'punctuality' THEN 1
-                WHEN 'work_quality' THEN 2
-                WHEN 'behavior' THEN 3
-                WHEN 'communication' THEN 4
-                ELSE 5
-              END
-            """,
-            organization_id,
-            unique_ids,
-        )
-        aspects_by_rating: dict[str, list[dict[str, Any]]] = {
-            rating_id: [] for rating_id in unique_ids
-        }
-        for row in rows:
-            aspects_by_rating[str(row["rating_id"])].append(
-                {"aspect": str(row["aspect"]), "stars": row["stars"]}
-            )
-        return aspects_by_rating
-
     async def _replace_rating_children(
         self,
         *,
         organization_id: str,
         rating_id: str,
         traits: list[str],
-        aspects: list[dict[str, Any]],
     ) -> None:
-        """Replace trait tags and quality scores for one rating."""
+        """Replace trait tags for one rating. Quality scores live on the rating row."""
         await self.db_connection.execute(
             """
             DELETE FROM daily_help_rating_traits
@@ -1217,48 +1219,18 @@ class DailyHelpRepository(BaseRepository):
                 [(organization_id, rating_id, trait) for trait in traits],
             )
 
-        await self.db_connection.execute(
-            """
-            DELETE FROM daily_help_rating_aspects
-            WHERE organization_id = $1::uuid
-              AND daily_help_rating_id = $2::uuid
-            """,
-            organization_id,
-            rating_id,
-        )
-        if aspects:
-            await self.db_connection.executemany(
-                """
-                INSERT INTO daily_help_rating_aspects (
-                    organization_id,
-                    daily_help_rating_id,
-                    aspect,
-                    stars
-                )
-                VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_aspect, $4)
-                """,
-                [(organization_id, rating_id, item["aspect"], item["stars"]) for item in aspects],
-            )
-
     async def _load_rating_children(
         self,
         *,
         organization_id: str,
         rating_id: str,
     ) -> dict[str, Any]:
-        """Load traits and quality scores for one rating."""
+        """Load trait tags for one rating."""
         traits = await self.list_rating_traits(
             organization_id=organization_id,
             rating_id=rating_id,
         )
-        aspects = await self.list_rating_aspects_batch(
-            organization_id=organization_id,
-            rating_ids=[rating_id],
-        )
-        return {
-            "traits": traits,
-            "aspects": aspects.get(rating_id, []),
-        }
+        return {"traits": traits}
 
     _WRITTEN_REVIEW_FILTER = """
               AND r.comment IS NOT NULL
@@ -1273,6 +1245,7 @@ class DailyHelpRepository(BaseRepository):
               r.stars,
               r.comment,
               r.media,
+              r.aspects,
               r.created_at,
               r.updated_at,
               u.code AS unit_code,
@@ -1319,7 +1292,7 @@ class DailyHelpRepository(BaseRepository):
         organization_id: str,
         ratings: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Attach trait tags and quality scores, and normalize the media column."""
+        """Attach trait tags and normalize the aspects and media columns."""
         if not ratings:
             return []
         rating_ids = [str(rating["id"]) for rating in ratings]
@@ -1327,14 +1300,10 @@ class DailyHelpRepository(BaseRepository):
             organization_id=organization_id,
             rating_ids=rating_ids,
         )
-        aspects_by_rating = await self.list_rating_aspects_batch(
-            organization_id=organization_id,
-            rating_ids=rating_ids,
-        )
         for rating in ratings:
             rating_id = str(rating["id"])
             rating["traits"] = traits_by_rating.get(rating_id, [])
-            rating["aspects"] = aspects_by_rating.get(rating_id, [])
+            rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
             rating["media"] = _normalize_rating_media(rating.get("media"))
         return ratings
 
@@ -1479,14 +1448,16 @@ class DailyHelpRepository(BaseRepository):
                 AVG(stars)::numeric(3, 2) AS average_stars
               FROM (
                 SELECT
-                  a.aspect::text AS category,
-                  a.stars
-                FROM daily_help_rating_aspects a
-                JOIN daily_help_ratings r
-                  ON r.id = a.daily_help_rating_id
-                 AND r.organization_id = a.organization_id
-                WHERE a.organization_id = $1::uuid
+                  item->>'aspect' AS category,
+                  (item->>'stars')::numeric AS stars
+                FROM daily_help_ratings r
+                CROSS JOIN LATERAL jsonb_array_elements(
+                  COALESCE(r.aspects, '[]'::jsonb)
+                ) AS item
+                WHERE r.organization_id = $1::uuid
                   AND r.daily_help_profile_id = $2::uuid
+                  AND jsonb_typeof(COALESCE(r.aspects, '[]'::jsonb)) = 'array'
+                  AND jsonb_array_length(COALESCE(r.aspects, '[]'::jsonb)) > 0
 
                 UNION ALL
 
@@ -1499,12 +1470,7 @@ class DailyHelpRepository(BaseRepository):
                  AND r.organization_id = rt.organization_id
                 WHERE rt.organization_id = $1::uuid
                   AND r.daily_help_profile_id = $2::uuid
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM daily_help_rating_aspects a
-                    WHERE a.daily_help_rating_id = r.id
-                      AND a.organization_id = r.organization_id
-                  )
+                  AND jsonb_array_length(COALESCE(r.aspects, '[]'::jsonb)) = 0
               ) mapped_scores
               WHERE category IS NOT NULL
               GROUP BY category

@@ -621,7 +621,7 @@ PUT /v1/daily-help/{profile_id}/ratings?unit_id={unit_id}
 ```
 
 Returns the updated rating object, including `experience_label`, `aspects`, and `media`.
-PUT replaces the whole form: omitted `aspects`, `media`, or `traits` clear those rows.
+PUT replaces the whole form: omitted `aspects`, `media`, or `traits` clear those values.
 `404` if no prior rating exists.
 
 **Profile aggregate (all residents):**
