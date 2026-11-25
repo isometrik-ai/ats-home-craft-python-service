@@ -87,13 +87,28 @@ def band_multiplier(facility: FacilitySnapshot, start_min: int, day: date) -> Ti
 
 
 def effective_hour_rate(facility: FacilitySnapshot) -> float:
-    """Resident rate normalized to per-hour regardless of configured unit."""
+    """Resident rate normalized to per-hour regardless of configured unit.
+
+    A monthly list rate is one community month, not 30 billable days. Partial-day
+    bookings charge that rate across an 8-hour day (₹6,000/month → ₹750/hr).
+    The 30-day split is only used for the full-day rate.
+    """
     rate = facility.pricing.resident_rate
-    if facility.pricing.unit_label == FacilityRateUnit.DAY:
+    if facility.pricing.unit_label in (FacilityRateUnit.DAY, FacilityRateUnit.MONTH):
         return rate / HOURS_PER_DAY
-    if facility.pricing.unit_label == FacilityRateUnit.MONTH:
-        return rate / (DAYS_PER_MONTH * HOURS_PER_DAY)
     return rate
+
+
+def quoted_hour_rate(facility: FacilitySnapshot) -> int:
+    """Hourly charge for a partial-day booking.
+
+    An explicit member hourly rate is used as entered. Otherwise the list rate
+    is normalized with :func:`effective_hour_rate`.
+    """
+    explicit = facility.pricing.hourly_rate
+    if explicit is not None:
+        return explicit
+    return ts_round(effective_hour_rate(facility))
 
 
 def effective_day_rate(facility: FacilitySnapshot) -> float:
@@ -242,13 +257,12 @@ def _hourly_rental_line(
 def _slot_lines(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) -> list[PriceLine]:
     """Price lines for fixed slot (court) bookings."""
     _, guests, _ = party_of(draft)
-    hour_rate = ts_round(effective_hour_rate(facility))
     lines = [
         _hourly_rental_line(
             facility,
             draft,
             money,
-            hour_rate=hour_rate,
+            hour_rate=quoted_hour_rate(facility),
             mins=draft.end_min - draft.start_min,
         )
     ]
@@ -299,13 +313,12 @@ def _duration_lines(
     """Price lines for flexible-duration event bookings."""
     pricing = facility.pricing
     _, guests, _ = party_of(draft)
-    hour_rate = ts_round(effective_hour_rate(facility))
     lines = [
         _hourly_rental_line(
             facility,
             draft,
             money,
-            hour_rate=hour_rate,
+            hour_rate=quoted_hour_rate(facility),
             mins=draft.end_min - draft.start_min,
         )
     ]
@@ -370,11 +383,7 @@ def _day_range_lines(
     """Price lines for day-range / venue rental bookings."""
     pricing = facility.pricing
     _, guests, _ = party_of(draft)
-    hourly = (
-        pricing.hourly_rate
-        if pricing.hourly_rate is not None
-        else ts_round(effective_hour_rate(facility))
-    )
+    hourly = quoted_hour_rate(facility)
     day_rate = ts_round(effective_day_rate(facility))
     first_hours = facility.hours[js_dow(draft.local_date)]
     lines: list[PriceLine] = []
