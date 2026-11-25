@@ -293,6 +293,48 @@ def test_month_rate_is_charged_once_for_a_short_booking():
     assert quote.lines[0].amount == 3000
 
 
+def test_month_rate_with_hourly_override_bills_the_booked_hours():
+    """An hourly override on a monthly slot or event replaces the month rate."""
+    pricing_config = _pricing(
+        unit_label=FacilityRateUnit.MONTH,
+        resident_rate=3000,
+        hourly_rate=100,
+        tax_percent=0,
+    )
+    draft = _draft(local_date=date(2026, 11, 24), end_local_date=date(2026, 11, 24))
+    for archetype in (FacilityBookingArchetype.SLOT, FacilityBookingArchetype.DURATION):
+        quote = pricing.quote_booking(_facility(archetype, pricing=pricing_config), draft)
+        assert quote.lines[0].label.endswith("Hourly Rate")
+        assert quote.lines[0].detail == "1 hr at ₹100/hr"
+        assert quote.lines[0].amount == 100
+
+
+def test_month_rate_uses_the_highest_weekend_or_holiday_multiplier():
+    """A month charge takes the highest day multiplier among the dates it covers."""
+    facility = _facility(
+        FacilityBookingArchetype.SLOT,
+        pricing=_pricing(
+            unit_label=FacilityRateUnit.MONTH,
+            resident_rate=3000,
+            tax_percent=0,
+            holidays=[date(2026, 11, 23)],
+        ),
+    )
+    sunday = pricing.quote_booking(
+        facility,
+        _draft(local_date=date(2026, 11, 22), end_local_date=date(2026, 11, 22)),
+    )
+    assert sunday.lines[0].detail == "1 month at ₹3,000/month (×1.25)"
+    assert sunday.lines[0].amount == 3750
+
+    mixed = pricing.quote_booking(
+        facility,
+        _draft(local_date=date(2026, 11, 22), end_local_date=date(2026, 11, 23)),
+    )
+    assert mixed.lines[0].detail == "1 month at ₹3,000/month (×1.50)"
+    assert mixed.lines[0].amount == 4500
+
+
 def test_over_cap_range_is_not_priced_from_a_truncated_prefix():
     """A span longer than each_date's cap is not billed as the first 400 days."""
     start = date(2026, 11, 15)

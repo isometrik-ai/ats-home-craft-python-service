@@ -250,30 +250,43 @@ def _day_rental_line(facility: FacilitySnapshot, draft: BookingDraft, money: _Mo
 
 
 def _month_rental_line(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) -> PriceLine:
-    """One configured month rate per started 30-day block. Hours do not scale it."""
+    """One configured month rate per started 30-day block. Hours do not scale it.
+
+    The highest weekend or holiday multiplier among the covered dates applies to
+    the whole charge, the same multipliers a day-rate quote uses per date.
+    """
     days = each_date(draft.local_date, draft.end_local_date) or [draft.local_date]
     periods = started_months(len(days))
     rate = facility.pricing.resident_rate
+    multiplier = max((day_multiplier(facility, day) for day in days), default=1.0)
     noun = "month" if periods == 1 else "months"
+    detail = _qty_at_rate(f"{periods} {noun}", f"{money(rate)}/month")
+    if multiplier != 1:
+        detail += f" (×{multiplier:.2f})"
     return PriceLine(
         label=_rental_label(facility, MONTHLY_RATE),
-        detail=_qty_at_rate(f"{periods} {noun}", f"{money(rate)}/month"),
-        amount=rate * periods,
+        detail=detail,
+        amount=ts_round(rate * periods * multiplier),
     )
 
 
 def _occupancy_line(
     facility: FacilitySnapshot, draft: BookingDraft, money: _Money, mins: int
 ) -> PriceLine:
-    """Rental for a court slot or timed event, in the unit the facility was given."""
+    """Rental for a court slot or timed event, in the unit the facility was given.
+
+    A day or month rate stays on that period unless an hourly override is set.
+    The override prices the booked hours, for both slots and timed events.
+    """
     unit = facility.pricing.unit_label
-    if unit == FacilityRateUnit.MONTH:
+    override = facility.pricing.hourly_rate
+    if unit == FacilityRateUnit.MONTH and override is None:
         return _month_rental_line(facility, draft, money)
-    if unit == FacilityRateUnit.DAY and facility.pricing.hourly_rate is None:
+    if unit == FacilityRateUnit.DAY and override is None:
         return _day_rental_line(facility, draft, money)
     hour_rate = facility.pricing.resident_rate
-    if unit == FacilityRateUnit.DAY and facility.pricing.hourly_rate is not None:
-        hour_rate = facility.pricing.hourly_rate
+    if unit in (FacilityRateUnit.DAY, FacilityRateUnit.MONTH) and override is not None:
+        hour_rate = override
     return _hourly_rental_line(facility, draft, money, hour_rate=hour_rate, mins=mins)
 
 
