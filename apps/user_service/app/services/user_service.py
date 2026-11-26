@@ -4,6 +4,7 @@ This service handles all business logic related to users, including
 validation, formatting, and orchestration of user operations.
 """
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -26,6 +27,9 @@ from apps.user_service.app.schemas.enums import (
     OrganizationMemberStatus,
 )
 from apps.user_service.app.schemas.users import (
+    ContactAvailabilityConflict,
+    ContactAvailabilityData,
+    ContactChannelAvailability,
     PatchUserRequest,
     PermissionInfo,
     RoleInfo,
@@ -42,6 +46,7 @@ from apps.user_service.app.utils.common_utils import (
     coerce_json_list,
     format_iso_datetime,
     parse_json_field,
+    validate_uuid_format,
 )
 from apps.user_service.app.utils.email_utils import (
     send_org_member_banned_email,
@@ -199,6 +204,71 @@ def _audit_payload_for_member_role_change(
     }
 
 
+def _phone_digits(phone_isd_code: str, phone_number: str) -> str:
+    """Return digits-only ISD + local number."""
+    return re.sub(r"\D", "", f"{phone_isd_code}{phone_number}")
+
+
+def _unchecked_channel() -> ContactChannelAvailability:
+    """Channel result when the caller did not send that contact value."""
+    return ContactChannelAvailability(
+        checked=False,
+        exists_in_auth=False,
+        auth_user_id=None,
+        exists_in_organization=False,
+    )
+
+
+def _checked_channel(
+    *,
+    auth_user_id: str | None,
+    member_found: bool,
+) -> ContactChannelAvailability:
+    """Channel result for a value that was looked up."""
+    return ContactChannelAvailability(
+        checked=True,
+        exists_in_auth=auth_user_id is not None,
+        auth_user_id=auth_user_id,
+        exists_in_organization=member_found,
+    )
+
+
+def _channel_owner_id(
+    channel: ContactChannelAvailability,
+    member_user_id: str | None,
+) -> str | None:
+    """Prefer the organization member id, then the auth user id."""
+    if not channel.checked:
+        return None
+    return member_user_id or channel.auth_user_id
+
+
+def _availability_conflict(
+    *,
+    email: ContactChannelAvailability,
+    phone: ContactChannelAvailability,
+    email_owner_id: str | None,
+    phone_owner_id: str | None,
+) -> ContactAvailabilityConflict | None:
+    """Combine per-channel results. A user mismatch wins over a membership hit."""
+    owners_differ = (
+        email.checked
+        and phone.checked
+        and email_owner_id is not None
+        and phone_owner_id is not None
+        and email_owner_id != phone_owner_id
+    )
+    if owners_differ:
+        return "email_phone_auth_mismatch"
+    if email.exists_in_organization and phone.exists_in_organization:
+        return "email_and_phone_already_member"
+    if email.exists_in_organization:
+        return "email_already_member"
+    if phone.exists_in_organization:
+        return "phone_already_member"
+    return None
+
+
 class UserService:  # pylint: disable=too-many-public-methods
     """Service for user business logic.
 
@@ -226,6 +296,7 @@ class UserService:  # pylint: disable=too-many-public-methods
         )
         self.organization_repository = OrganizationRepository(db_connection=db_connection)
         self.role_repository = RoleRepository(db_connection=db_connection)
+        self.user_repository = UserRepository(db_connection=db_connection)
         self.supabase_client = sb_client
 
     async def get_user_profile_by_id(
@@ -642,6 +713,107 @@ class UserService:  # pylint: disable=too-many-public-methods
             organization_id=organization_id,
             user_id=user_id,
         )
+
+    async def check_contact_availability(
+        self,
+        *,
+        organization_id: str,
+        email: str | None = None,
+        phone_number: str | None = None,
+        phone_isd_code: str | None = None,
+    ) -> ContactAvailabilityData:
+        """Check email, phone, or both against auth.users and this organization's members.
+
+        An existing auth user who is not a member of the organization is available.
+        Email and phone that resolve to two different users are a mismatch.
+        """
+        if not self.user_context.organization_id:
+            raise ValidationException(
+                message_key="organizations.errors.user_not_a_member_of_any_organization",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        if str(organization_id) != str(self.user_context.organization_id):
+            raise ForbiddenException(
+                message_key="errors.forbidden",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+        validate_uuid_format(organization_id, "organization ID")
+
+        email_channel, email_owner_id = await self._email_availability(
+            organization_id=organization_id,
+            email=email,
+        )
+        phone_channel, phone_owner_id = await self._phone_availability(
+            organization_id=organization_id,
+            phone_number=phone_number,
+            phone_isd_code=phone_isd_code,
+        )
+        conflict = _availability_conflict(
+            email=email_channel,
+            phone=phone_channel,
+            email_owner_id=email_owner_id,
+            phone_owner_id=phone_owner_id,
+        )
+        return ContactAvailabilityData(
+            organization_id=organization_id,
+            email=email_channel,
+            phone=phone_channel,
+            available_for_organization=conflict is None,
+            conflict=conflict,
+        )
+
+    async def _email_availability(
+        self,
+        *,
+        organization_id: str,
+        email: str | None,
+    ) -> tuple[ContactChannelAvailability, str | None]:
+        """Look up one email in auth.users, then in organization_members."""
+        if not email:
+            return _unchecked_channel(), None
+
+        normalized_email = email.strip().lower()
+        auth_user_id = await self.user_repository.find_auth_user_id_by_email(normalized_email)
+        (
+            member_found,
+            member_user_id,
+        ) = await self.organization_member_repository.find_active_member_for_email(
+            organization_id,
+            normalized_email,
+            auth_user_id,
+        )
+        channel = _checked_channel(auth_user_id=auth_user_id, member_found=member_found)
+        return channel, _channel_owner_id(channel, member_user_id)
+
+    async def _phone_availability(
+        self,
+        *,
+        organization_id: str,
+        phone_number: str | None,
+        phone_isd_code: str | None,
+    ) -> tuple[ContactChannelAvailability, str | None]:
+        """Look up one phone in auth.users, then in organization_members."""
+        if not phone_number or not phone_isd_code:
+            return _unchecked_channel(), None
+
+        phone_digits = _phone_digits(phone_isd_code, phone_number)
+        if not phone_digits:
+            raise ValidationException(
+                message_key="users.errors.invalid_phone_number",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+
+        auth_user_id = await self.user_repository.find_auth_user_id_by_phone_digits(phone_digits)
+        (
+            member_found,
+            member_user_id,
+        ) = await self.organization_member_repository.find_active_member_for_phone(
+            organization_id,
+            phone_digits,
+            auth_user_id,
+        )
+        channel = _checked_channel(auth_user_id=auth_user_id, member_found=member_found)
+        return channel, _channel_owner_id(channel, member_user_id)
 
     async def get_users_list(
         self,

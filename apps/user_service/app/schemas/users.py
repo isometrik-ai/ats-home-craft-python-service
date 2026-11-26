@@ -5,7 +5,7 @@ These schemas are used for request/response validation and API documentation.
 """
 
 import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
@@ -320,6 +320,84 @@ class PatchUserRequest(BaseModel):
         ):
             raise ValueError("phone_number and phone_isd_code must be provided together.")
         return self
+
+
+ContactAvailabilityConflict = Literal[
+    "email_already_member",
+    "phone_already_member",
+    "email_and_phone_already_member",
+    "email_phone_auth_mismatch",
+]
+
+
+class ContactAvailabilityRequest(BaseModel):
+    """Check whether an email, a phone, or both are already used.
+
+    Send ``email`` alone, ``phone_number`` with ``phone_isd_code`` alone, or all three.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    organization_id: str = Field(..., description="Organization to validate membership against")
+    email: EmailStr | None = Field(default=None, description="Email address to check")
+    phone_number: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=20,
+        description="Phone number without ISD code",
+    )
+    phone_isd_code: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=5,
+        description="Phone ISD code (e.g. '+91')",
+    )
+
+    @model_validator(mode="after")
+    def require_email_or_complete_phone(self) -> "ContactAvailabilityRequest":
+        """Allow email only, phone only, or both. Reject a partial phone pair."""
+        phone_set = self.phone_number is not None or self.phone_isd_code is not None
+        if phone_set and (not self.phone_number or not self.phone_isd_code):
+            raise ValueError("phone_number and phone_isd_code must be provided together.")
+        if self.email is None and not phone_set:
+            raise ValueError("Provide an email, a phone number, or both.")
+        return self
+
+
+class ContactChannelAvailability(BaseModel):
+    """Availability for one contact channel."""
+
+    checked: bool = Field(..., description="True when this channel was included in the request")
+    exists_in_auth: bool = Field(..., description="True when auth.users already has this value")
+    auth_user_id: str | None = Field(
+        default=None, description="auth.users id that owns this value, when one exists"
+    )
+    exists_in_organization: bool = Field(
+        ...,
+        description="True when this value is already a member of the organization",
+    )
+
+
+class ContactAvailabilityData(BaseModel):
+    """Per-channel and combined availability for one organization."""
+
+    organization_id: str
+    email: ContactChannelAvailability
+    phone: ContactChannelAvailability
+    available_for_organization: bool = Field(
+        ...,
+        description=(
+            "True when the supplied contact can be attached to this organization. "
+            "An auth user who is not a member here is available."
+        ),
+    )
+    conflict: ContactAvailabilityConflict | None = Field(
+        default=None,
+        description=(
+            "Why the contact is unavailable. "
+            "email_phone_auth_mismatch means the email and phone belong to different users."
+        ),
+    )
 
 
 class CreateUserRequest(BaseModel):
