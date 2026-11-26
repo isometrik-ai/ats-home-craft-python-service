@@ -322,7 +322,7 @@ class PatchUserRequest(BaseModel):
         return self
 
 
-ContactAvailabilityConflict = Literal[
+StaffAvailabilityConflict = Literal[
     "email_already_member",
     "phone_already_member",
     "email_and_phone_already_member",
@@ -330,31 +330,32 @@ ContactAvailabilityConflict = Literal[
 ]
 
 
-class ContactAvailabilityRequest(BaseModel):
-    """Check whether an email, a phone, or both are already used.
+class StaffAvailabilityRequest(BaseModel):
+    """Check whether a staff user's email, phone, or both are already used.
 
     Send ``email`` alone, ``phone_number`` with ``phone_isd_code`` alone, or all three.
+    This checks organization staff in ``organization_members``. Resident contacts are excluded.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    organization_id: str = Field(..., description="Organization to validate membership against")
-    email: EmailStr | None = Field(default=None, description="Email address to check")
+    organization_id: str = Field(..., description="Organization whose staff users are checked")
+    email: EmailStr | None = Field(default=None, description="Staff user email address to check")
     phone_number: str | None = Field(
         default=None,
         min_length=1,
         max_length=20,
-        description="Phone number without ISD code",
+        description="Staff user phone number without ISD code",
     )
     phone_isd_code: str | None = Field(
         default=None,
         min_length=1,
         max_length=5,
-        description="Phone ISD code (e.g. '+91')",
+        description="Staff user phone ISD code (e.g. '+91')",
     )
 
     @model_validator(mode="after")
-    def require_email_or_complete_phone(self) -> "ContactAvailabilityRequest":
+    def require_email_or_complete_phone(self) -> "StaffAvailabilityRequest":
         """Allow email only, phone only, or both. Reject a partial phone pair."""
         phone_set = self.phone_number is not None or self.phone_isd_code is not None
         if phone_set and (not self.phone_number or not self.phone_isd_code):
@@ -364,37 +365,40 @@ class ContactAvailabilityRequest(BaseModel):
         return self
 
 
-class ContactChannelAvailability(BaseModel):
-    """Availability for one contact channel."""
+class StaffChannelAvailability(BaseModel):
+    """Availability of one email or phone among staff users."""
 
-    checked: bool = Field(..., description="True when this channel was included in the request")
+    checked: bool = Field(..., description="True when this value was included in the request")
     exists_in_auth: bool = Field(..., description="True when auth.users already has this value")
     auth_user_id: str | None = Field(
         default=None, description="auth.users id that owns this value, when one exists"
     )
     exists_in_organization: bool = Field(
         ...,
-        description="True when this value is already a member of the organization",
+        description=(
+            "True when a non-deleted staff user in this organization already has this value"
+        ),
     )
 
 
-class ContactAvailabilityData(BaseModel):
-    """Per-channel and combined availability for one organization."""
+class StaffAvailabilityData(BaseModel):
+    """Per-field and combined staff-user availability for one organization."""
 
     organization_id: str
-    email: ContactChannelAvailability
-    phone: ContactChannelAvailability
+    email: StaffChannelAvailability
+    phone: StaffChannelAvailability
     available_for_organization: bool = Field(
         ...,
         description=(
-            "True when the supplied contact can be attached to this organization. "
-            "An auth user who is not a member here is available."
+            "True when this email or phone can be used for a staff user in this organization. "
+            "An auth user who is not already staff here is available. "
+            "A resident contact with the same email or phone does not block it."
         ),
     )
-    conflict: ContactAvailabilityConflict | None = Field(
+    conflict: StaffAvailabilityConflict | None = Field(
         default=None,
         description=(
-            "Why the contact is unavailable. "
+            "Why the staff user cannot be added. "
             "email_phone_auth_mismatch means the email and phone belong to different users."
         ),
     )

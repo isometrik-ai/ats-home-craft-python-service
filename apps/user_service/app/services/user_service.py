@@ -27,13 +27,13 @@ from apps.user_service.app.schemas.enums import (
     OrganizationMemberStatus,
 )
 from apps.user_service.app.schemas.users import (
-    ContactAvailabilityConflict,
-    ContactAvailabilityData,
-    ContactChannelAvailability,
     PatchUserRequest,
     PermissionInfo,
     RoleInfo,
     RoleInfoWithDescription,
+    StaffAvailabilityConflict,
+    StaffAvailabilityData,
+    StaffChannelAvailability,
     UpdateUserProfileRequest,
     UserListItem,
     UserProfileData,
@@ -209,9 +209,9 @@ def _phone_digits(phone_isd_code: str, phone_number: str) -> str:
     return re.sub(r"\D", "", f"{phone_isd_code}{phone_number}")
 
 
-def _unchecked_channel() -> ContactChannelAvailability:
-    """Channel result when the caller did not send that contact value."""
-    return ContactChannelAvailability(
+def _unchecked_channel() -> StaffChannelAvailability:
+    """Channel result when the caller did not send that staff email or phone."""
+    return StaffChannelAvailability(
         checked=False,
         exists_in_auth=False,
         auth_user_id=None,
@@ -223,9 +223,9 @@ def _checked_channel(
     *,
     auth_user_id: str | None,
     member_found: bool,
-) -> ContactChannelAvailability:
+) -> StaffChannelAvailability:
     """Channel result for a value that was looked up."""
-    return ContactChannelAvailability(
+    return StaffChannelAvailability(
         checked=True,
         exists_in_auth=auth_user_id is not None,
         auth_user_id=auth_user_id,
@@ -234,7 +234,7 @@ def _checked_channel(
 
 
 def _channel_owner_id(
-    channel: ContactChannelAvailability,
+    channel: StaffChannelAvailability,
     member_user_id: str | None,
 ) -> str | None:
     """Prefer the organization member id, then the auth user id."""
@@ -245,11 +245,11 @@ def _channel_owner_id(
 
 def _availability_conflict(
     *,
-    email: ContactChannelAvailability,
-    phone: ContactChannelAvailability,
+    email: StaffChannelAvailability,
+    phone: StaffChannelAvailability,
     email_owner_id: str | None,
     phone_owner_id: str | None,
-) -> ContactAvailabilityConflict | None:
+) -> StaffAvailabilityConflict | None:
     """Combine per-channel results. A user mismatch wins over a membership hit."""
     owners_differ = (
         email.checked
@@ -714,18 +714,19 @@ class UserService:  # pylint: disable=too-many-public-methods
             user_id=user_id,
         )
 
-    async def check_contact_availability(
+    async def check_staff_availability(
         self,
         *,
         organization_id: str,
         email: str | None = None,
         phone_number: str | None = None,
         phone_isd_code: str | None = None,
-    ) -> ContactAvailabilityData:
-        """Check email, phone, or both against auth.users and this organization's members.
+    ) -> StaffAvailabilityData:
+        """Check a staff email, phone, or both against auth.users and organization_members.
 
-        An existing auth user who is not a member of the organization is available.
-        Email and phone that resolve to two different users are a mismatch.
+        Resident contacts are not consulted. An auth user who is not staff in this
+        organization is available. Email and phone that resolve to two different
+        users are a mismatch.
         """
         if not self.user_context.organization_id:
             raise ValidationException(
@@ -754,7 +755,7 @@ class UserService:  # pylint: disable=too-many-public-methods
             email_owner_id=email_owner_id,
             phone_owner_id=phone_owner_id,
         )
-        return ContactAvailabilityData(
+        return StaffAvailabilityData(
             organization_id=organization_id,
             email=email_channel,
             phone=phone_channel,
@@ -767,7 +768,7 @@ class UserService:  # pylint: disable=too-many-public-methods
         *,
         organization_id: str,
         email: str | None,
-    ) -> tuple[ContactChannelAvailability, str | None]:
+    ) -> tuple[StaffChannelAvailability, str | None]:
         """Look up one email in auth.users, then in organization_members."""
         if not email:
             return _unchecked_channel(), None
@@ -791,7 +792,7 @@ class UserService:  # pylint: disable=too-many-public-methods
         organization_id: str,
         phone_number: str | None,
         phone_isd_code: str | None,
-    ) -> tuple[ContactChannelAvailability, str | None]:
+    ) -> tuple[StaffChannelAvailability, str | None]:
         """Look up one phone in auth.users, then in organization_members."""
         if not phone_number or not phone_isd_code:
             return _unchecked_channel(), None

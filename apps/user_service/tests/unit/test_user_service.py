@@ -11,9 +11,9 @@ from pydantic import ValidationError
 
 from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from apps.user_service.app.schemas.users import (
-    ContactAvailabilityRequest,
     PatchUserRequest,
     PermissionInfo,
+    StaffAvailabilityRequest,
     UpdateUserProfileRequest,
 )
 from apps.user_service.app.services.user_service import UserService
@@ -839,7 +839,7 @@ def test_build_verification_metadata_enabled():
 
 
 class _AvailabilityAuth:
-    """Auth lookup fake for contact availability."""
+    """Auth lookup fake for staff user availability."""
 
     def __init__(
         self,
@@ -864,7 +864,7 @@ class _AvailabilityAuth:
 
 
 class _AvailabilityMembers:
-    """Organization member lookup fake for contact availability."""
+    """Organization member lookup fake for staff user availability."""
 
     def __init__(
         self,
@@ -901,40 +901,40 @@ def _availability_service(
     auth: _AvailabilityAuth | None = None,
     members: _AvailabilityMembers | None = None,
 ) -> UserService:
-    """UserService wired to contact-availability fakes."""
+    """UserService wired to staff-availability fakes."""
     svc = _service()
     svc.user_repository = auth or _AvailabilityAuth()
     svc.organization_member_repository = members or _AvailabilityMembers()
     return svc
 
 
-def test_contact_availability_request_accepts_each_case():
+def test_staff_availability_request_accepts_each_case():
     """Email only, phone only, and both together are valid request bodies."""
-    ContactAvailabilityRequest(organization_id=ORG_ID, email="a@b.com")
-    ContactAvailabilityRequest(
+    StaffAvailabilityRequest(organization_id=ORG_ID, email="a@b.com")
+    StaffAvailabilityRequest(
         organization_id=ORG_ID,
         phone_number="9876543210",
         phone_isd_code="+91",
     )
-    ContactAvailabilityRequest(
+    StaffAvailabilityRequest(
         organization_id=ORG_ID,
         email="a@b.com",
         phone_number="9876543210",
         phone_isd_code="+91",
     )
     with pytest.raises(ValidationError):
-        ContactAvailabilityRequest(organization_id=ORG_ID)
+        StaffAvailabilityRequest(organization_id=ORG_ID)
     with pytest.raises(ValidationError):
-        ContactAvailabilityRequest(organization_id=ORG_ID, phone_number="9876543210")
+        StaffAvailabilityRequest(organization_id=ORG_ID, phone_number="9876543210")
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_email_only_is_free():
+async def test_staff_availability_email_only_is_free():
     """An unknown email is available and does not check phone."""
     auth = _AvailabilityAuth()
     svc = _availability_service(auth=auth)
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         email="User@Example.com",
     )
@@ -949,11 +949,11 @@ async def test_contact_availability_email_only_is_free():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_email_exists_in_auth_only():
+async def test_staff_availability_email_exists_in_auth_only():
     """An auth user who is not a member of this organization is available."""
     svc = _availability_service(auth=_AvailabilityAuth(email_user_id=MEMBER_ID))
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         email="member@example.com",
     )
@@ -966,14 +966,14 @@ async def test_contact_availability_email_exists_in_auth_only():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_email_only_already_member():
+async def test_staff_availability_email_only_already_member():
     """Email already mapped to this organization is unavailable."""
     svc = _availability_service(
         auth=_AvailabilityAuth(email_user_id=MEMBER_ID),
         members=_AvailabilityMembers(email_member=(True, MEMBER_ID)),
     )
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         email="member@example.com",
     )
@@ -985,12 +985,12 @@ async def test_contact_availability_email_only_already_member():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_phone_only_is_free():
+async def test_staff_availability_phone_only_is_free():
     """An unknown phone is available and does not check email."""
     auth = _AvailabilityAuth()
     svc = _availability_service(auth=auth)
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         phone_number="98765 43210",
         phone_isd_code="+91",
@@ -1004,14 +1004,14 @@ async def test_contact_availability_phone_only_is_free():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_phone_only_already_member():
+async def test_staff_availability_phone_only_already_member():
     """Phone already mapped to this organization is unavailable."""
     svc = _availability_service(
         auth=_AvailabilityAuth(phone_user_id=MEMBER_ID),
         members=_AvailabilityMembers(phone_member=(True, MEMBER_ID)),
     )
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         phone_number="9876543210",
         phone_isd_code="+91",
@@ -1024,13 +1024,13 @@ async def test_contact_availability_phone_only_already_member():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_both_same_user_not_member():
+async def test_staff_availability_both_same_user_not_member():
     """Email and phone owned by the same auth user can join this organization."""
     svc = _availability_service(
         auth=_AvailabilityAuth(email_user_id=MEMBER_ID, phone_user_id=MEMBER_ID),
     )
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         email="member@example.com",
         phone_number="9876543210",
@@ -1046,7 +1046,7 @@ async def test_contact_availability_both_same_user_not_member():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_both_already_member():
+async def test_staff_availability_both_already_member():
     """The same user already in the organization blocks both channels."""
     svc = _availability_service(
         auth=_AvailabilityAuth(email_user_id=MEMBER_ID, phone_user_id=MEMBER_ID),
@@ -1056,7 +1056,7 @@ async def test_contact_availability_both_already_member():
         ),
     )
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         email="member@example.com",
         phone_number="9876543210",
@@ -1068,14 +1068,14 @@ async def test_contact_availability_both_already_member():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_both_different_users():
+async def test_staff_availability_both_different_users():
     """Email and phone that belong to different users are a mismatch."""
     other_user_id = "990e8400-e29b-41d4-a716-446655440099"
     svc = _availability_service(
         auth=_AvailabilityAuth(email_user_id=MEMBER_ID, phone_user_id=other_user_id),
     )
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         email="member@example.com",
         phone_number="9876543210",
@@ -1089,14 +1089,14 @@ async def test_contact_availability_both_different_users():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_email_taken_phone_free():
+async def test_staff_availability_email_taken_phone_free():
     """A combined check still reports the free phone when only the email is taken."""
     svc = _availability_service(
         auth=_AvailabilityAuth(email_user_id=MEMBER_ID),
         members=_AvailabilityMembers(email_member=(True, MEMBER_ID)),
     )
 
-    result = await svc.check_contact_availability(
+    result = await svc.check_staff_availability(
         organization_id=ORG_ID,
         email="member@example.com",
         phone_number="9876543210",
@@ -1110,22 +1110,22 @@ async def test_contact_availability_email_taken_phone_free():
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_rejects_other_organization():
+async def test_staff_availability_rejects_other_organization():
     """Callers can check only their own organization."""
     svc = _availability_service()
     with pytest.raises(ForbiddenException):
-        await svc.check_contact_availability(
+        await svc.check_staff_availability(
             organization_id="660e8400-e29b-41d4-a716-4466554400ab",
             email="member@example.com",
         )
 
 
 @pytest.mark.asyncio
-async def test_contact_availability_rejects_phone_without_digits():
+async def test_staff_availability_rejects_phone_without_digits():
     """A phone value with no digits is invalid."""
     svc = _availability_service()
     with pytest.raises(ValidationException) as exc:
-        await svc.check_contact_availability(
+        await svc.check_staff_availability(
             organization_id=ORG_ID,
             phone_number="---",
             phone_isd_code="+",

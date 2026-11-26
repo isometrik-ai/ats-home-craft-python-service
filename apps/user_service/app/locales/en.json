@@ -313,7 +313,7 @@
     },
     "success": {
       "member_patched": "Member updated successfully",
-      "contact_availability_checked": "Contact availability checked successfully.",
+      "staff_availability_checked": "Staff user availability checked successfully.",
       "user_banned": "User banned successfully",
       "user_unbanned": "User unbanned successfully",
       "user_profile_updated": "User profile updated successfully",
