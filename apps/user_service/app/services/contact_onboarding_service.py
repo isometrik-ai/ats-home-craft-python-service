@@ -784,7 +784,9 @@ class ContactOnboardingService:
             "contact_id": str(row["contact_id"]),
             "contact_unit_id": str(row["contact_unit_id"]),
             "unit_id": str(row["unit_id"]),
+            "prefix": row.get("prefix"),
             "first_name": row.get("first_name"),
+            "middle_name": row.get("middle_name"),
             "last_name": row.get("last_name"),
             "relationship": row.get("relationship"),
             "contact_type": row.get("contact_type"),
@@ -1055,8 +1057,12 @@ class ContactOnboardingService:
         )
         family_contact_id = str(link["contact_id"])
         contact_update: dict[str, Any] = {}
+        if "prefix" in body.model_fields_set:
+            contact_update["prefix"] = body.prefix
         if body.first_name is not None:
             contact_update["first_name"] = body.first_name
+        if "middle_name" in body.model_fields_set:
+            contact_update["middle_name"] = body.middle_name
         if body.last_name is not None:
             contact_update["last_name"] = body.last_name
 
@@ -1129,7 +1135,9 @@ class ContactOnboardingService:
         create_result = await contacts_service.create_contact(
             CreateContactRequest(
                 portal_access=body.portal_access,
+                prefix=body.prefix,
                 first_name=body.first_name,
+                middle_name=body.middle_name,
                 last_name=body.last_name,
                 gender=body.gender,
                 phones=body.phones,

@@ -718,3 +718,75 @@ class WalkInRepository(BaseRepository):
             unit_id,
         )
         return [dict(row) for row in rows]
+
+    async def expire_stale_awaiting_entries(
+        self,
+        *,
+        cutoff: datetime,
+        ttl_hours: int,
+    ) -> list[str]:
+        """Expire walk-ins still awaiting resident action at or before cutoff.
+
+        Header and still-awaiting flats move to expired, and a system event is
+        appended. Approved, entered, exited, and cancelled visits are left alone.
+        """
+        rows = await self.db_connection.fetch(
+            """
+            WITH due AS (
+                SELECT e.id, e.organization_id
+                FROM walk_in_entries e
+                WHERE e.status = 'awaiting'::walk_in_status
+                  AND e.requested_at <= $1::timestamptz
+            ),
+            expired_entries AS (
+                UPDATE walk_in_entries e
+                SET status = 'expired'::walk_in_status,
+                    updated_at = now()
+                FROM due
+                WHERE e.id = due.id
+                  AND e.organization_id = due.organization_id
+                  AND e.status = 'awaiting'::walk_in_status
+                RETURNING e.id, e.organization_id
+            ),
+            expired_units AS (
+                UPDATE walk_in_visit_units vu
+                SET status = 'expired'::walk_in_visit_unit_status,
+                    updated_at = now()
+                FROM expired_entries ee
+                WHERE vu.walk_in_entry_id = ee.id
+                  AND vu.organization_id = ee.organization_id
+                  AND vu.status = 'awaiting'::walk_in_visit_unit_status
+                RETURNING vu.walk_in_entry_id
+            ),
+            logged AS (
+                INSERT INTO walk_in_events (
+                    organization_id,
+                    walk_in_entry_id,
+                    event_type,
+                    actor_type,
+                    payload
+                )
+                SELECT
+                    ee.organization_id,
+                    ee.id,
+                    'expired'::walk_in_event_type,
+                    'system'::walk_in_actor_type,
+                    jsonb_build_object(
+                        'reason', 'awaiting_timeout',
+                        'ttl_hours', $2::int
+                    )
+                FROM expired_entries ee
+                RETURNING walk_in_entry_id::text AS id
+            )
+            SELECT logged.id
+            FROM logged
+            LEFT JOIN (
+                SELECT walk_in_entry_id
+                FROM expired_units
+                GROUP BY walk_in_entry_id
+            ) units ON units.walk_in_entry_id::text = logged.id
+            """,
+            cutoff,
+            ttl_hours,
+        )
+        return [str(row["id"]) for row in rows]

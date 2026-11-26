@@ -27,6 +27,7 @@ from apps.user_service.app.schemas.marketplace import (
 )
 from apps.user_service.app.services.marketplace_service import (
     MarketplaceService,
+    collection_coordinates,
     cover_path,
     listing_media,
     publish_gaps,
@@ -540,7 +541,51 @@ async def test_get_listing_detail_includes_seller_isometrik_id():
     data = await svc.get_listing(contact_id="seller-1", listing_id="listing-1")
     assert data["seller_contact_id"] == "seller-1"
     assert data["isometrik_id"] == "6abdf6ad9126be00010e596f"
+    assert data["avatar_url"] is None
     assert data["more_from_seller_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_listing_detail_uses_the_tower_pin_when_the_tower_has_one():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_listing = AsyncMock(
+        return_value=_listing(
+            tower_latitude=Decimal("28.4752"),
+            tower_longitude=Decimal("77.5036"),
+            project_latitude=Decimal("28.6666"),
+            project_longitude=Decimal("77.21745"),
+        )
+    )
+    svc.repo.count_other_live = AsyncMock(return_value=0)
+    data = await svc.get_listing(contact_id="seller-1", listing_id="listing-1")
+    assert data["collection_latitude"] == 28.4752
+    assert data["collection_longitude"] == 77.5036
+
+
+@pytest.mark.asyncio
+async def test_listing_detail_uses_the_society_pin_when_the_tower_has_none():
+    svc = _service()
+    svc.repo.expire_due = AsyncMock()
+    svc.repo.get_listing = AsyncMock(
+        return_value=_listing(
+            tower_latitude=None,
+            tower_longitude=None,
+            project_latitude=Decimal("28.6666000"),
+            project_longitude=Decimal("77.2174500"),
+        )
+    )
+    svc.repo.count_other_live = AsyncMock(return_value=0)
+    data = await svc.get_listing(contact_id="seller-1", listing_id="listing-1")
+    assert data["collection_latitude"] == 28.6666
+    assert data["collection_longitude"] == 77.21745
+
+
+def test_collection_coordinates_stay_empty_without_a_pin():
+    assert collection_coordinates({"tower_latitude": None, "tower_longitude": None}) == (
+        None,
+        None,
+    )
 
 
 @pytest.mark.asyncio

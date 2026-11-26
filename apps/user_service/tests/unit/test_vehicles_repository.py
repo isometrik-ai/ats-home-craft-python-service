@@ -71,6 +71,9 @@ async def test_list_details_by_contact_with_unit_filter():
     query, args = _sql_args(conn.fetch)
     assert "FROM vehicles v" in query
     assert "parking_slot_number" in query
+    assert "parking_slot_code" in query
+    assert "parking_facility_tower_code" in query
+    assert "LEFT JOIN towers pt" in query
     assert "unit_code" not in query
     assert "deleted_at IS NULL" in query
     assert args == (ORG_ID, CONTACT_ID, UNIT_ID)
@@ -163,6 +166,8 @@ async def test_get_detail_by_contact():
     query, args = _sql_args(conn.fetchrow)
     assert "unit_code" in query
     assert "parking_slot_number" in query
+    assert "parking_slot_code" in query
+    assert "parking_facility_tower_code" in query
     assert "organization_members approved_by_om" in query
     assert "deleted_at IS NULL" in query
     assert args == (ORG_ID, CONTACT_ID, VEHICLE_ID)
@@ -247,6 +252,27 @@ async def test_update_by_project_with_parking_slot():
     query, _ = _sql_args(conn.fetchrow)
     assert "parking_slot_id = $1::uuid" in query
     assert "project_id = $" in query
+
+
+@pytest.mark.asyncio
+async def test_update_by_project_if_slot_is_null_requires_empty_slot():
+    """Conditional update claims a slot only while parking_slot_id is null."""
+    slot_id = "aa0e8400-e29b-41d4-a716-446655440005"
+    conn = _mock_conn(row=_vehicle_row(parking_slot_id=slot_id))
+    repo = VehiclesRepository(db_connection=conn)
+
+    updated = await repo.update_by_project_if_slot_is_null(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        vehicle_id=VEHICLE_ID,
+        parking_slot_id=slot_id,
+    )
+
+    query, args = _sql_args(conn.fetchrow)
+    assert "parking_slot_id = $1::uuid" in query
+    assert "AND parking_slot_id IS NULL" in query
+    assert args[0] == slot_id
+    assert updated["parking_slot_id"] == slot_id
 
 
 @pytest.mark.asyncio
@@ -401,7 +427,9 @@ async def test_list_by_project_with_search():
     assert "u.unit_label" in query
     assert "facility_parking_slots fps" in query
     assert "facilities pf" in query
+    assert "LEFT JOIN towers pt" in query
     assert "parking_slot_number" in query
+    assert "parking_slot_code" in query
     assert args == (ORG_ID, PROJECT_ID, None, None, None, "%MH01%")
 
 

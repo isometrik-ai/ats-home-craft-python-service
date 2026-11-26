@@ -21,6 +21,7 @@ from apps.user_service.app.db.repositories.parking_slots_repository import (
 from apps.user_service.app.db.repositories.vehicles_repository import VehiclesRepository
 from apps.user_service.app.schemas.contact_onboarding import (
     AdminCreateVehicleRequest,
+    AssignVehicleParkingSlotRequest,
     CreateVehicleRequest,
     ResubmitVehicleRequest,
     ReviewVehicleRequest,
@@ -140,6 +141,7 @@ class VehiclesService:
     _PARKING_ROW_KEYS = (
         "parking_slot_row_id",
         "parking_slot_number",
+        "parking_slot_code",
         "parking_slot_status",
         "parking_facility_id",
         "parking_facility_name",
@@ -147,6 +149,7 @@ class VehiclesService:
         "parking_facility_floor_level",
         "parking_facility_wing",
         "parking_facility_tower_id",
+        "parking_facility_tower_code",
     )
 
     _REVIEWER_ROW_KEYS = (
@@ -260,6 +263,14 @@ class VehiclesService:
         return {
             "id": str(slot_id),
             "slot_number": int(slot_number),
+            "slot_code_label": ParkingAllotmentService._build_slot_code_label(
+                {
+                    "tower_code": row.get("parking_facility_tower_code"),
+                    "floor_level": row.get("parking_facility_floor_level"),
+                    "slot_code": row.get("parking_slot_code"),
+                    "slot_number": slot_number,
+                }
+            ),
             "status": row.get("parking_slot_status") or "assigned",
             "facility": facility,
         }
@@ -894,6 +905,68 @@ class VehiclesService:
             },
         )
         return normalized
+
+    async def assign_parking_slot(
+        self,
+        *,
+        project_id: str,
+        vehicle_id: str,
+        body: AssignVehicleParkingSlotRequest,
+    ) -> dict[str, Any]:
+        """Link a parking slot to an approved vehicle that does not have one."""
+        org_id = self.user_context.organization_id
+        assert org_id
+        vehicle = await self.repo.get_by_project(
+            organization_id=org_id,
+            project_id=project_id,
+            vehicle_id=vehicle_id,
+        )
+        if not vehicle:
+            raise NotFoundException(
+                message_key="contact_onboarding.errors.vehicle_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        if vehicle.get("status") != VehicleStatus.APPROVED.value:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.vehicle_not_approved",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        if vehicle.get("parking_slot_id"):
+            raise ValidationException(
+                message_key="contact_onboarding.errors.vehicle_parking_slot_already_assigned",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        unit_id = str(vehicle.get("unit_id") or "")
+        if not unit_id:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.unit_not_found",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        parking_slot_id = body.parking_slot_id.strip()
+        await self._ensure_parking_slot_for_vehicle_review(
+            project_id=project_id,
+            unit_id=unit_id,
+            _vehicle_id=vehicle_id,
+            vehicle_type=str(vehicle.get("vehicle_type") or ""),
+            parking_slot_id=parking_slot_id,
+        )
+        row = await self.repo.update_by_project_if_slot_is_null(
+            organization_id=org_id,
+            project_id=project_id,
+            vehicle_id=vehicle_id,
+            parking_slot_id=parking_slot_id,
+        )
+        if not row:
+            raise ConflictException(
+                message_key="contact_onboarding.errors.vehicle_parking_slot_already_assigned",
+                custom_code=CustomStatusCode.CONFLICT,
+            )
+        detail = await self.repo.get_detail_by_project(
+            organization_id=org_id,
+            project_id=project_id,
+            vehicle_id=vehicle_id,
+        )
+        return self._serialize_admin_vehicle(detail or row)
 
     async def update_vehicle(
         self,

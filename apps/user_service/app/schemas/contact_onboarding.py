@@ -37,6 +37,14 @@ def _validate_exactly_one_primary_phone(phones: list[Phone]) -> list[Phone]:
     return phones
 
 
+def _blank_to_none(value: str | None) -> str | None:
+    """Treat a missing or whitespace-only string as omitted."""
+    if value is None:
+        return None
+    text = value.strip()
+    return text or None
+
+
 class ContactPropertyProjectSummary(BaseModel):
     """Project display fields embedded on a contact property row."""
 
@@ -392,6 +400,7 @@ class VehicleParkingAllotmentSummary(BaseModel):
 
     id: str
     slot_number: int
+    slot_code_label: str
     status: str
     facility: VehicleParkingFacilitySummary | None = None
 
@@ -499,6 +508,26 @@ class ReviewVehicleRequest(BaseModel):
         return self
 
 
+class AssignVehicleParkingSlotRequest(BaseModel):
+    """Assign a parking slot to an approved vehicle that does not have one."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    parking_slot_id: str = Field(..., min_length=1)
+
+    @field_validator("parking_slot_id")
+    @classmethod
+    def strip_parking_slot_id(cls, parking_slot_id: str) -> str:
+        """Reject a blank slot id."""
+        stripped = parking_slot_id.strip()
+        if not stripped:
+            raise ValidationException(
+                message_key="contact_onboarding.errors.parking_slot_id_required",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        return stripped
+
+
 class DeleteProjectVehicleRequest(BaseModel):
     """Admin removes a project vehicle with a documented reason."""
 
@@ -563,13 +592,21 @@ class CreateHouseholdMemberRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     unit_id: str
+    prefix: str | None = Field(None, max_length=50, description="Optional salutation.")
     first_name: str = Field(..., max_length=100)
+    middle_name: str | None = Field(None, max_length=100)
     last_name: str | None = Field(None, max_length=100)
     gender: Gender | None = None
     phones: list[Phone] = Field(..., min_length=1, max_length=20)
     emails: list[Email] | None = Field(None, max_length=20)
     relationship: ContactUnitRelationship
     portal_access: bool = False
+
+    @field_validator("prefix", "middle_name")
+    @classmethod
+    def omit_blank_name_parts(cls, value: str | None) -> str | None:
+        """Store a blank prefix or middle name as omitted."""
+        return _blank_to_none(value)
 
     @field_validator("phones")
     @classmethod
@@ -583,10 +620,18 @@ class UpdateHouseholdMemberRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    prefix: str | None = Field(None, max_length=50, description="Optional salutation.")
     first_name: str | None = Field(None, max_length=100)
+    middle_name: str | None = Field(None, max_length=100)
     last_name: str | None = Field(None, max_length=100)
     relationship: ContactUnitRelationship | None = None
     portal_access: bool | None = None
+
+    @field_validator("prefix", "middle_name")
+    @classmethod
+    def omit_blank_name_parts(cls, value: str | None) -> str | None:
+        """Store a blank prefix or middle name as omitted."""
+        return _blank_to_none(value)
 
     @model_validator(mode="after")
     def validate_non_empty_patch(self) -> UpdateHouseholdMemberRequest:
@@ -687,7 +732,9 @@ class HouseholdMemberResponse(BaseModel):
     contact_id: str
     contact_unit_id: str
     unit_id: str
+    prefix: str | None = None
     first_name: str | None = None
+    middle_name: str | None = None
     last_name: str | None = None
     relationship: str
     contact_type: str | None = Field(

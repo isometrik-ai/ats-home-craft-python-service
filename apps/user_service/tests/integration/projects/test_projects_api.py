@@ -2265,6 +2265,44 @@ async def test_review_vehicle_request(monkeypatch, client):
 
 
 @pytest.mark.asyncio
+async def test_assign_vehicle_parking_slot(monkeypatch, client):
+    """PATCH vehicles/{id}/parking-slot links a slot to an approved vehicle."""
+
+    _patch_projects_access(monkeypatch)
+
+    async def fake_assign_parking_slot(_self, *, project_id: str, vehicle_id: str, body):
+        del _self
+        assert project_id == PROJECT_ID
+        assert vehicle_id == VEHICLE_ID
+        assert body.parking_slot_id == SLOT_ID
+        return {**_FAKE_VEHICLE, "status": "approved", "parking_slot_id": SLOT_ID}
+
+    monkeypatch.setattr(
+        "apps.user_service.app.services.vehicles_service.VehiclesService.assign_parking_slot",
+        fake_assign_parking_slot,
+    )
+
+    res = await client.patch(
+        f"/v1/projects/{PROJECT_ID}/vehicles/{VEHICLE_ID}/parking-slot",
+        json={"parking_slot_id": SLOT_ID},
+    )
+    body = assert_success(res, 200)
+    assert body["data"]["parking_slot_id"] == SLOT_ID
+    assert body["message"] == "Parking slot assigned to the vehicle successfully."
+
+
+@pytest.mark.asyncio
+async def test_assign_vehicle_parking_slot_requires_slot(client):
+    """PATCH vehicles/{id}/parking-slot rejects a missing slot id."""
+
+    res = await client.patch(
+        f"/v1/projects/{PROJECT_ID}/vehicles/{VEHICLE_ID}/parking-slot",
+        json={},
+    )
+    assert res.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_delete_project_vehicle(monkeypatch, client):
     """DELETE project vehicles removes a vehicle."""
 

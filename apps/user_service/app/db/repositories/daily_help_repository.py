@@ -95,6 +95,70 @@ def _coerce_jsonb_mapping(value: Any) -> dict[str, Any]:
         return {}
 
 
+def _normalize_rating_media(value: Any) -> list[dict[str, Any]]:
+    """Normalize the daily_help_ratings.media jsonb array."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        value = json.loads(stripped)
+    if not isinstance(value, list):
+        return []
+    media: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        file_size = item.get("file_size_bytes")
+        media.append(
+            {
+                "media_type": str(item.get("media_type") or ""),
+                "file_path": str(item.get("file_path") or ""),
+                "file_name": item.get("file_name"),
+                "mime_type": item.get("mime_type"),
+                "file_size_bytes": int(file_size) if file_size is not None else None,
+                "sort_order": int(item.get("sort_order") or 0),
+            }
+        )
+    return media
+
+
+_ASPECT_ORDER = {
+    "punctuality": 1,
+    "work_quality": 2,
+    "behavior": 3,
+    "communication": 4,
+}
+
+
+def _normalize_rating_aspects(value: Any) -> list[dict[str, Any]]:
+    """Normalize the daily_help_ratings.aspects jsonb array."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        value = json.loads(stripped)
+    if not isinstance(value, list):
+        return []
+    aspects: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict) or item.get("aspect") is None:
+            continue
+        aspects.append({"aspect": str(item["aspect"]), "stars": float(item["stars"])})
+    aspects.sort(key=lambda item: _ASPECT_ORDER.get(item["aspect"], 99))
+    return aspects
+
+
+def _aspects_json(aspects: list[dict[str, Any]]) -> str:
+    """Serialize quality scores for the ratings.aspects column."""
+    return json.dumps(
+        [{"aspect": item["aspect"], "stars": float(item["stars"])} for item in aspects]
+    )
+
+
 class DailyHelpRepository(BaseRepository):
     """Database operations for daily help registry tables."""
 
@@ -925,51 +989,55 @@ class DailyHelpRepository(BaseRepository):
         stars: Decimal,
         comment: str | None,
         traits: list[str] | None = None,
+        aspects: list[dict[str, Any]] | None = None,
+        media: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        """Insert a rating and optional trait tags."""
-        row = await self.db_connection.fetchrow(
-            """
-            INSERT INTO daily_help_ratings (
+        """Insert a rating with trait tags, quality scores, and a media jsonb array."""
+        async with self.db_connection.transaction():
+            row = await self.db_connection.fetchrow(
+                """
+                INSERT INTO daily_help_ratings (
+                    organization_id,
+                    project_id,
+                    daily_help_profile_id,
+                    unit_id,
+                    rated_by_contact_id,
+                    stars,
+                    comment,
+                    media,
+                    aspects
+                )
+                VALUES (
+                    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+                    $6, $7, $8::jsonb, $9::jsonb
+                )
+                RETURNING id::text AS id, stars, comment, media, aspects, created_at
+                """,
                 organization_id,
                 project_id,
-                daily_help_profile_id,
+                profile_id,
                 unit_id,
                 rated_by_contact_id,
                 stars,
-                comment
+                comment,
+                json.dumps(media or []),
+                _aspects_json(aspects or []),
             )
-            VALUES (
-                $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7
+            rating = dict(row)
+            rating["media"] = _normalize_rating_media(rating.get("media"))
+            rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
+            await self._replace_rating_children(
+                organization_id=organization_id,
+                rating_id=str(rating["id"]),
+                traits=traits or [],
             )
-            RETURNING id::text AS id, stars, comment, created_at
-            """,
-            organization_id,
-            project_id,
-            profile_id,
-            unit_id,
-            rated_by_contact_id,
-            stars,
-            comment,
-        )
-        rating = dict(row)
-        if traits:
-            await self.db_connection.executemany(
-                """
-                INSERT INTO daily_help_rating_traits (
-                    organization_id,
-                    daily_help_rating_id,
-                    trait
+            rating.update(
+                await self._load_rating_children(
+                    organization_id=organization_id,
+                    rating_id=str(rating["id"]),
                 )
-                VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
-                ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
-                """,
-                [(organization_id, rating["id"], trait) for trait in traits],
             )
-        rating["traits"] = await self.list_rating_traits(
-            organization_id=organization_id,
-            rating_id=str(rating["id"]),
-        )
-        return rating
+            return rating
 
     async def get_rating_by_rater(
         self,
@@ -986,6 +1054,8 @@ class DailyHelpRepository(BaseRepository):
                 id::text AS id,
                 stars,
                 comment,
+                media,
+                aspects,
                 created_at,
                 updated_at
             FROM daily_help_ratings
@@ -1003,9 +1073,13 @@ class DailyHelpRepository(BaseRepository):
         if not row:
             return None
         rating = dict(row)
-        rating["traits"] = await self.list_rating_traits(
-            organization_id=organization_id,
-            rating_id=str(rating["id"]),
+        rating["media"] = _normalize_rating_media(rating.get("media"))
+        rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
+        rating.update(
+            await self._load_rating_children(
+                organization_id=organization_id,
+                rating_id=str(rating["id"]),
+            )
         )
         return rating
 
@@ -1019,20 +1093,25 @@ class DailyHelpRepository(BaseRepository):
         stars: Decimal,
         comment: str | None,
         traits: list[str] | None = None,
+        aspects: list[dict[str, Any]] | None = None,
+        media: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
-        """Update stars, comment, and trait tags for an existing rating."""
+        """Replace stars, comment, traits, quality scores, and media on an existing rating."""
         async with self.db_connection.transaction():
             row = await self.db_connection.fetchrow(
                 """
                 UPDATE daily_help_ratings
                 SET stars = $5,
                     comment = $6,
+                    media = $7::jsonb,
+                    aspects = $8::jsonb,
                     updated_at = now()
                 WHERE organization_id = $1::uuid
                   AND daily_help_profile_id = $2::uuid
                   AND unit_id = $3::uuid
                   AND rated_by_contact_id = $4::uuid
-                RETURNING id::text AS id, stars, comment, created_at, updated_at
+                RETURNING
+                    id::text AS id, stars, comment, media, aspects, created_at, updated_at
                 """,
                 organization_id,
                 profile_id,
@@ -1040,35 +1119,24 @@ class DailyHelpRepository(BaseRepository):
                 rated_by_contact_id,
                 stars,
                 comment,
+                json.dumps(media or []),
+                _aspects_json(aspects or []),
             )
             if not row:
                 return None
             rating = dict(row)
-            await self.db_connection.execute(
-                """
-                DELETE FROM daily_help_rating_traits
-                WHERE organization_id = $1::uuid
-                  AND daily_help_rating_id = $2::uuid
-                """,
-                organization_id,
-                rating["id"],
-            )
-            if traits:
-                await self.db_connection.executemany(
-                    """
-                    INSERT INTO daily_help_rating_traits (
-                        organization_id,
-                        daily_help_rating_id,
-                        trait
-                    )
-                    VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
-                    ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
-                    """,
-                    [(organization_id, rating["id"], trait) for trait in traits],
-                )
-            rating["traits"] = await self.list_rating_traits(
+            rating["media"] = _normalize_rating_media(rating.get("media"))
+            rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
+            await self._replace_rating_children(
                 organization_id=organization_id,
                 rating_id=str(rating["id"]),
+                traits=traits or [],
+            )
+            rating.update(
+                await self._load_rating_children(
+                    organization_id=organization_id,
+                    rating_id=str(rating["id"]),
+                )
             )
             return rating
 
@@ -1120,6 +1188,50 @@ class DailyHelpRepository(BaseRepository):
             traits_by_rating[str(row["rating_id"])].append(str(row["trait"]))
         return traits_by_rating
 
+    async def _replace_rating_children(
+        self,
+        *,
+        organization_id: str,
+        rating_id: str,
+        traits: list[str],
+    ) -> None:
+        """Replace trait tags for one rating. Quality scores live on the rating row."""
+        await self.db_connection.execute(
+            """
+            DELETE FROM daily_help_rating_traits
+            WHERE organization_id = $1::uuid
+              AND daily_help_rating_id = $2::uuid
+            """,
+            organization_id,
+            rating_id,
+        )
+        if traits:
+            await self.db_connection.executemany(
+                """
+                INSERT INTO daily_help_rating_traits (
+                    organization_id,
+                    daily_help_rating_id,
+                    trait
+                )
+                VALUES ($1::uuid, $2::uuid, $3::daily_help_rating_trait)
+                ON CONFLICT (daily_help_rating_id, trait) DO NOTHING
+                """,
+                [(organization_id, rating_id, trait) for trait in traits],
+            )
+
+    async def _load_rating_children(
+        self,
+        *,
+        organization_id: str,
+        rating_id: str,
+    ) -> dict[str, Any]:
+        """Load trait tags for one rating."""
+        traits = await self.list_rating_traits(
+            organization_id=organization_id,
+            rating_id=rating_id,
+        )
+        return {"traits": traits}
+
     _WRITTEN_REVIEW_FILTER = """
               AND r.comment IS NOT NULL
               AND BTRIM(r.comment) <> ''
@@ -1132,6 +1244,8 @@ class DailyHelpRepository(BaseRepository):
               r.rated_by_contact_id::text AS rated_by_contact_id,
               r.stars,
               r.comment,
+              r.media,
+              r.aspects,
               r.created_at,
               r.updated_at,
               u.code AS unit_code,
@@ -1178,15 +1292,19 @@ class DailyHelpRepository(BaseRepository):
         organization_id: str,
         ratings: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Attach trait tags to rating/review rows."""
+        """Attach trait tags and normalize the aspects and media columns."""
         if not ratings:
             return []
+        rating_ids = [str(rating["id"]) for rating in ratings]
         traits_by_rating = await self.list_rating_traits_batch(
             organization_id=organization_id,
-            rating_ids=[str(rating["id"]) for rating in ratings],
+            rating_ids=rating_ids,
         )
         for rating in ratings:
-            rating["traits"] = traits_by_rating.get(str(rating["id"]), [])
+            rating_id = str(rating["id"])
+            rating["traits"] = traits_by_rating.get(rating_id, [])
+            rating["aspects"] = _normalize_rating_aspects(rating.get("aspects"))
+            rating["media"] = _normalize_rating_media(rating.get("media"))
         return ratings
 
     async def list_ratings_for_profile(
@@ -1330,6 +1448,20 @@ class DailyHelpRepository(BaseRepository):
                 AVG(stars)::numeric(3, 2) AS average_stars
               FROM (
                 SELECT
+                  item->>'aspect' AS category,
+                  (item->>'stars')::numeric AS stars
+                FROM daily_help_ratings r
+                CROSS JOIN LATERAL jsonb_array_elements(
+                  COALESCE(r.aspects, '[]'::jsonb)
+                ) AS item
+                WHERE r.organization_id = $1::uuid
+                  AND r.daily_help_profile_id = $2::uuid
+                  AND jsonb_typeof(COALESCE(r.aspects, '[]'::jsonb)) = 'array'
+                  AND jsonb_array_length(COALESCE(r.aspects, '[]'::jsonb)) > 0
+
+                UNION ALL
+
+                SELECT
                   {self._RATING_CATEGORY_CASE} AS category,
                   r.stars
                 FROM daily_help_rating_traits rt
@@ -1338,7 +1470,8 @@ class DailyHelpRepository(BaseRepository):
                  AND r.organization_id = rt.organization_id
                 WHERE rt.organization_id = $1::uuid
                   AND r.daily_help_profile_id = $2::uuid
-              ) mapped_traits
+                  AND jsonb_array_length(COALESCE(r.aspects, '[]'::jsonb)) = 0
+              ) mapped_scores
               WHERE category IS NOT NULL
               GROUP BY category
             ),

@@ -756,6 +756,30 @@ async def test_update_household_member_updates_name():
 
     assert result["first_name"] == "Old"
     svc.contacts_repo.update_contact.assert_awaited_once()
+    update_data = svc.contacts_repo.update_contact.await_args.kwargs["update_data"]
+    assert update_data == {"first_name": "New"}
+
+
+@pytest.mark.asyncio
+async def test_update_household_member_patches_optional_name_parts():
+    """update_household_member writes prefix and middle name, including a clear."""
+    units_repo = _FakeContactUnitsRepo(
+        household_link={"contact_id": "family-1"},
+        household_member=_household_row(prefix="Mr.", middle_name="K"),
+    )
+    svc = _service(contact_units_repo=units_repo)
+    svc.contacts_repo.update_contact = AsyncMock(return_value={"id": "family-1"})
+
+    result = await svc.update_household_member(
+        primary_contact_id="contact-1",
+        contact_unit_id="cu-1",
+        body=UpdateHouseholdMemberRequest(prefix="  ", middle_name="Kumar"),
+    )
+
+    assert result["prefix"] == "Mr."
+    assert result["middle_name"] == "K"
+    update_data = svc.contacts_repo.update_contact.await_args.kwargs["update_data"]
+    assert update_data == {"prefix": None, "middle_name": "Kumar"}
 
 
 @pytest.mark.asyncio
@@ -1041,6 +1065,10 @@ async def test_add_household_member_without_portal(monkeypatch):
     assert result["contact_id"] == "family-1"
     assert result["member_status"] == HouseholdMemberStatus.JOINED.value
     contacts_service.create_contact.assert_awaited_once()
+    created = contacts_service.create_contact.await_args.args[0]
+    assert created.prefix is None
+    assert created.middle_name is None
+    assert created.first_name == "Alex"
 
 
 @pytest.mark.asyncio
@@ -1077,6 +1105,37 @@ async def test_add_household_member_with_portal(monkeypatch):
 
     assert result["invitation_id"] == "inv-1"
     assert result["member_status"] == HouseholdMemberStatus.INVITED.value
+
+
+@pytest.mark.asyncio
+async def test_add_household_member_persists_optional_name_parts(monkeypatch):
+    """Optional prefix and middle name are stored on the family contact."""
+    units_repo = _FakeContactUnitsRepo()
+    units_repo.get_unit_project = AsyncMock(return_value={"project_id": "proj-1"})  # type: ignore[method-assign]
+    units_repo.insert_household_link = AsyncMock(  # type: ignore[method-assign]
+        return_value={"id": "cu-family-1", "contact_id": "family-1"},
+    )
+    svc = _service(contact_units_repo=units_repo)
+    contacts_service = MagicMock()
+    contacts_service.get_contact_details = AsyncMock(return_value={"first_name": "Owner"})
+    contacts_service.create_contact = AsyncMock(
+        return_value={"contact_id": "family-1", "new_data": {"id": "family-1"}},
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contact_onboarding_service.ContactsService",
+        lambda **kwargs: contacts_service,
+    )
+
+    await svc.add_household_member(
+        primary_contact_id="contact-1",
+        body=_household_create_body().model_copy(update={"prefix": "Mr.", "middle_name": "K"}),
+    )
+
+    created = contacts_service.create_contact.await_args.args[0]
+    assert created.prefix == "Mr."
+    assert created.first_name == "Alex"
+    assert created.middle_name == "K"
+    assert created.last_name == "Smith"
 
 
 @pytest.mark.asyncio

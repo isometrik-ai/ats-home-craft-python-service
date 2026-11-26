@@ -278,6 +278,23 @@ class ProjectsService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
+    async def _prepare_community_admin_patch(
+        self, *, patch: dict[str, Any], current: dict[str, Any]
+    ) -> None:
+        """Keep an unchanged community admin and validate a newly selected one."""
+        incoming = patch.get("community_admin_user_id")
+        if not incoming:
+            return
+        incoming_admin_id = str(incoming).strip().lower()
+        current_admin_id = str(current.get("community_admin_user_id") or "").strip().lower()
+        if incoming_admin_id == current_admin_id:
+            # Edit forms resend the current admin. Re-checking org membership
+            # would block unrelated field updates for an admin who is already
+            # assigned, including one whose org membership later changed.
+            patch.pop("community_admin_user_id", None)
+            return
+        await self._ensure_community_admin_is_org_member(user_id=str(incoming))
+
     async def create_project(self, body: CreateProjectRequest) -> dict[str, Any]:
         """Create a project, seed setup steps, and register the creator."""
         org_id = self.user_context.organization_id
@@ -382,10 +399,7 @@ class ProjectsService:
         if "status" in patch and body.status:
             patch["status"] = body.status.value
 
-        if "community_admin_user_id" in patch and patch["community_admin_user_id"]:
-            await self._ensure_community_admin_is_org_member(
-                user_id=str(patch["community_admin_user_id"])
-            )
+        await self._prepare_community_admin_patch(patch=patch, current=current)
 
         try:
             updated = await self.projects_repo.update_project(

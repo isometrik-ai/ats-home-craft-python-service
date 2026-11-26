@@ -209,6 +209,32 @@ class DailyHelpRatingTrait(str, Enum):
     GOOD_COMMUNICATION = "good_communication"
 
 
+class DailyHelpRatingAspect(str, Enum):
+    """Quality row on the share-your-experience form."""
+
+    PUNCTUALITY = "punctuality"
+    WORK_QUALITY = "work_quality"
+    BEHAVIOR = "behavior"
+    COMMUNICATION = "communication"
+
+
+class DailyHelpRatingMediaType(str, Enum):
+    """Photo or video attached to a daily help rating."""
+
+    PHOTO = "photo"
+    VIDEO = "video"
+
+
+class DailyHelpExperienceLabel(str, Enum):
+    """Label under the overall star row: Terrible through Great."""
+
+    TERRIBLE = "terrible"
+    BAD = "bad"
+    OKAY = "okay"
+    GOOD = "good"
+    GREAT = "great"
+
+
 class DailyHelpReviewSort(str, Enum):
     """Sort options for paginated daily help review lists."""
 
@@ -255,6 +281,7 @@ class WalkInStatus(str, Enum):
     ENTERED = "entered"
     EXITED = "exited"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class WalkInVisitUnitStatus(str, Enum):
@@ -263,6 +290,7 @@ class WalkInVisitUnitStatus(str, Enum):
     AWAITING = "awaiting"
     APPROVED = "approved"
     REJECTED = "rejected"
+    EXPIRED = "expired"
 
 
 class WalkInEventType(str, Enum):
@@ -274,6 +302,7 @@ class WalkInEventType(str, Enum):
     ENTERED = "entered"
     EXITED = "exited"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class WalkInActorType(str, Enum):

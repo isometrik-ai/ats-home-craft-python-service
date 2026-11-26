@@ -497,3 +497,24 @@ async def test_list_resident_visit_units_filters_by_unit_id():
     query, args = conn.fetch_calls[0]
     assert "vu.unit_id = $4::uuid" in query
     assert args[3] == UNIT_ID
+
+
+@pytest.mark.asyncio
+async def test_expire_stale_awaiting_entries():
+    """Stale awaiting walk-ins are expired together with their flats and timeline."""
+    cutoff = datetime(2026, 11, 26, 3, 0, tzinfo=timezone.utc)
+    conn = _FakeConn(rows=[{"id": ENTRY_ID}])
+    repo = WalkInRepository(db_connection=conn)
+
+    expired_ids = await repo.expire_stale_awaiting_entries(cutoff=cutoff, ttl_hours=1)
+
+    assert expired_ids == [ENTRY_ID]
+    query, args = conn.fetch_calls[0]
+    assert "e.status = 'awaiting'::walk_in_status" in query
+    assert "e.requested_at <= $1::timestamptz" in query
+    assert "status = 'expired'::walk_in_status" in query
+    assert "status = 'expired'::walk_in_visit_unit_status" in query
+    assert "vu.status = 'awaiting'::walk_in_visit_unit_status" in query
+    assert "'expired'::walk_in_event_type" in query
+    assert "'system'::walk_in_actor_type" in query
+    assert args == (cutoff, 1)

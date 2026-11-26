@@ -14,6 +14,7 @@ from apps.user_service.app.schemas.auth import (
 )
 from apps.user_service.app.schemas.common import NoteItem
 from apps.user_service.app.schemas.contact_onboarding import (
+    AssignVehicleParkingSlotRequest,
     CompleteProfileRequest,
     CreateHouseholdMemberRequest,
     CreateVehicleRequest,
@@ -220,6 +221,14 @@ class TestContactOnboardingSchemaValidators:
                 parking_slot_id="slot-1",
             )
 
+    def test_assign_vehicle_parking_slot_strips_id(self) -> None:
+        request = AssignVehicleParkingSlotRequest(parking_slot_id="  slot-1  ")
+        assert request.parking_slot_id == "slot-1"
+
+    def test_assign_vehicle_parking_slot_rejects_blank_id(self) -> None:
+        with pytest.raises(ValidationException):
+            AssignVehicleParkingSlotRequest(parking_slot_id="   ")
+
     def test_household_member_requires_primary_phone(self) -> None:
         with pytest.raises(ValidationException):
             CreateHouseholdMemberRequest(
@@ -228,6 +237,40 @@ class TestContactOnboardingSchemaValidators:
                 phones=[_phone(primary=False)],
                 relationship=ContactUnitRelationship.CHILD,
             )
+
+    def test_household_member_prefix_and_middle_name_are_optional(self) -> None:
+        request = CreateHouseholdMemberRequest(
+            unit_id="unit-1",
+            first_name="Nitin",
+            last_name="Jangir",
+            phones=[_phone(primary=True)],
+            relationship=ContactUnitRelationship.SPOUSE,
+        )
+        assert request.prefix is None
+        assert request.middle_name is None
+
+        named = CreateHouseholdMemberRequest(
+            unit_id="unit-1",
+            prefix="  Mr.  ",
+            first_name="Nitin",
+            middle_name=" K ",
+            last_name="Jangir",
+            phones=[_phone(primary=True)],
+            relationship=ContactUnitRelationship.SPOUSE,
+        )
+        assert named.prefix == "Mr."
+        assert named.middle_name == "K"
+
+        blank = CreateHouseholdMemberRequest(
+            unit_id="unit-1",
+            prefix="   ",
+            first_name="Nitin",
+            middle_name="",
+            phones=[_phone(primary=True)],
+            relationship=ContactUnitRelationship.CHILD,
+        )
+        assert blank.prefix is None
+        assert blank.middle_name is None
 
     def test_update_household_member_empty_patch(self) -> None:
         with pytest.raises(ValidationException):

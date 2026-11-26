@@ -172,7 +172,9 @@ async def test_add_household_member(monkeypatch, client):
     async def fake_add_household_member(_self, *, primary_contact_id: str, body):
         del _self
         assert primary_contact_id == CONTACT_ID
+        assert body.prefix == "Mr."
         assert body.first_name == "John"
+        assert body.middle_name == "K"
         assert body.relationship.value == "spouse"
         return _FAKE_HOUSEHOLD_MEMBER
 
@@ -186,7 +188,9 @@ async def test_add_household_member(monkeypatch, client):
         "/v1/contact-onboarding/household",
         json={
             "unit_id": "unit-1",
+            "prefix": "Mr.",
             "first_name": "John",
+            "middle_name": "K",
             "last_name": "Doe",
             "relationship": "spouse",
             "phones": [
@@ -260,6 +264,7 @@ _FAKE_VEHICLE_DETAIL = {
     "parking_allotment": {
         "id": "slot-1",
         "slot_number": 12,
+        "slot_code_label": "A-B1-012",
         "status": "assigned",
         "facility": {
             "id": "fac-1",
@@ -430,6 +435,7 @@ async def test_get_vehicle_detail(monkeypatch, client):
     body = assert_success(res, 200)
     assert body["data"]["registration_number"] == "MH12AB1234"
     assert body["data"]["parking_allotment"]["slot_number"] == 12
+    assert body["data"]["parking_allotment"]["slot_code_label"] == "A-B1-012"
     assert body["data"]["unit"]["code"] == "A-101"
 
 

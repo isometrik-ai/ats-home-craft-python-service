@@ -540,6 +540,7 @@ class VisitorLogsService:
             WalkInStatus.ENTERED.value: VisitorLogVisitStatus.INSIDE.value,
             WalkInStatus.EXITED.value: VisitorLogVisitStatus.EXITED.value,
             WalkInStatus.CANCELLED.value: VisitorLogVisitStatus.CANCELLED.value,
+            WalkInStatus.EXPIRED.value: VisitorLogVisitStatus.EXPIRED.value,
         }
         return mapping.get(str(status or ""), VisitorLogVisitStatus.APPROVED.value)
 

@@ -946,6 +946,7 @@ class MarketplaceService:
         age_years = None
         if year is not None:
             age_years = max(0, _now().year - int(year))
+        collection_latitude, collection_longitude = collection_coordinates(row)
         card.update(
             {
                 "status": row["status"],
@@ -969,14 +970,15 @@ class MarketplaceService:
                 "seller_role": row.get("seller_role"),
                 "member_since_year": _year(row.get("seller_role_started_at")),
                 "viewer_is_seller": str(row["seller_contact_id"]) == str(viewer_contact_id),
-                "collection_latitude": _float_or_none(row.get("tower_latitude")),
-                "collection_longitude": _float_or_none(row.get("tower_longitude")),
+                "collection_latitude": collection_latitude,
+                "collection_longitude": collection_longitude,
                 "media": listing_media(row),
                 "more_from_seller_count": others,
                 "removal_note": row.get("removal_note")
                 if str(row["seller_contact_id"]) == str(viewer_contact_id)
                 else None,
                 "isometrik_id": seller_isometrik_id(row),
+                "avatar_url": row.get("seller_photo_url"),
             }
         )
         return card
@@ -1054,3 +1056,16 @@ def _float_or_none(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
+
+
+def collection_coordinates(row: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Pickup pin: the tower when it has both coordinates, otherwise the society."""
+    tower_lat = _float_or_none(row.get("tower_latitude"))
+    tower_lng = _float_or_none(row.get("tower_longitude"))
+    if tower_lat is not None and tower_lng is not None:
+        return tower_lat, tower_lng
+    project_lat = _float_or_none(row.get("project_latitude"))
+    project_lng = _float_or_none(row.get("project_longitude"))
+    if project_lat is not None and project_lng is not None:
+        return project_lat, project_lng
+    return None, None

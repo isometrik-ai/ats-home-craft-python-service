@@ -122,18 +122,23 @@ LEFT JOIN facilities pf
     ON pf.id = fps.facility_id
    AND pf.organization_id = fps.organization_id
    AND pf.project_id = fps.project_id
+LEFT JOIN towers pt
+    ON pt.id = pf.tower_id
+   AND pt.organization_id = pf.organization_id
 """
 
 _VEHICLE_PARKING_SELECT_COLUMNS = """
               fps.id::text AS parking_slot_row_id,
               fps.slot_number AS parking_slot_number,
+              fps.slot_code AS parking_slot_code,
               fps.status::text AS parking_slot_status,
               fps.facility_id::text AS parking_facility_id,
               pf.name AS parking_facility_name,
               pf.location_type::text AS parking_facility_location_type,
               pf.floor_level AS parking_facility_floor_level,
               pf.wing AS parking_facility_wing,
-              pf.tower_id::text AS parking_facility_tower_id
+              pf.tower_id::text AS parking_facility_tower_id,
+              pt.code AS parking_facility_tower_code
 """
 
 _VEHICLE_REVIEWER_JOINS = """
@@ -582,6 +587,39 @@ class VehiclesRepository(BaseRepository):
               {self._VEHICLE_RETURNING_COLUMNS}
             """,
             *values,
+        )
+        return dict(row) if row else None
+
+    async def update_by_project_if_slot_is_null(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        vehicle_id: str,
+        parking_slot_id: str,
+    ) -> dict[str, Any] | None:
+        """Set parking_slot_id only while it is still null.
+
+        A missing row means another request already linked a slot. The caller
+        raises so the surrounding transaction rolls back that request's allotment.
+        """
+        row = await self.db_connection.fetchrow(
+            f"""
+            UPDATE vehicles
+            SET parking_slot_id = $1::uuid,
+                updated_at = now()
+            WHERE organization_id = $2::uuid
+              AND project_id = $3::uuid
+              AND id = $4::uuid
+              AND deleted_at IS NULL
+              AND parking_slot_id IS NULL
+            RETURNING
+              {self._VEHICLE_RETURNING_COLUMNS}
+            """,
+            parking_slot_id,
+            organization_id,
+            project_id,
+            vehicle_id,
         )
         return dict(row) if row else None
 

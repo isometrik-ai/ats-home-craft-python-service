@@ -11,6 +11,7 @@ from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
 from apps.user_service.app.schemas.contact_onboarding import (
+    AssignVehicleParkingSlotRequest,
     DeleteProjectVehicleRequest,
     ReviewVehicleRequest,
     VehicleRequestsExportQuery,
@@ -4167,7 +4168,8 @@ async def remove_project_member(
     description=(
         "Each item includes nested `owner` (unit Owner contact: display name, phone, email, "
         "profile_photo_url), `unit` (code, location_label, property_type, config, floor, "
-        "status), `parking_allotment` (slot number, status, facility) when assigned, and "
+        "status), `parking_allotment` (slot number, slot_code_label, status, "
+        "facility) when assigned, and "
         "`approved_by` / `rejected_by` org-member summaries when reviewed, and "
         "`removed_by` (org member or resident) when soft-removed. "
         "Optional `search` matches registration number or unit code/label. "
@@ -4324,6 +4326,68 @@ async def review_project_vehicle_request(
     return success_response(
         request=request,
         message_key="project_setup.success.vehicle_request_reviewed",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=data,
+    )
+
+
+@handle_api_exceptions("assign vehicle parking slot")
+@router.patch(
+    "/{project_id}/vehicles/{vehicle_id}/parking-slot",
+    status_code=http_status.HTTP_200_OK,
+    summary="Assign a parking slot to an approved vehicle",
+    description=(
+        "Links a parking slot to an approved vehicle that was registered or approved without one. "
+        "If the slot is already allotted to the vehicle's unit, it is linked. If not, the service "
+        "validates the unit's two-wheeler/four-wheeler entitlement, auto-allots the slot when "
+        "allowed, then stores it on the vehicle. Status and the original approval are left "
+        "unchanged."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("100/minute")
+@audit_api_call(
+    action_type="UPDATE",
+    data_classification="internal",
+    compliance_tags=["audit_required"],
+    table_name="vehicles",
+    category="PROJECT_SETUP",
+)
+async def assign_vehicle_parking_slot(
+    request: Request,
+    project_id: str = Path(..., description="Project identifier (UUID string)."),
+    vehicle_id: str = Path(..., description="Vehicle identifier (UUID string)."),
+    db_connection: asyncpg.Connection = Depends(db_uow),
+    current_user: dict = Depends(get_user_from_auth),
+    body: AssignVehicleParkingSlotRequest = Body(...),
+):
+    """Assign a parking slot to an approved vehicle that does not have one."""
+    user_context = await _staff_project_access(
+        request=request,
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=VEHICLE_MANAGEMENT_EDIT,
+    )
+    service = VehiclesService(db_connection=db_connection, user_context=user_context)
+    data = await service.assign_parking_slot(
+        project_id=project_id,
+        vehicle_id=vehicle_id,
+        body=body,
+    )
+    _set_audit(
+        request,
+        user_context,
+        project_id=project_id,
+        table="vehicles",
+        requested_id=vehicle_id,
+        description=f"Assigned parking slot to vehicle: {vehicle_id}",
+        new_data=data,
+    )
+    return success_response(
+        request=request,
+        message_key="project_setup.success.vehicle_parking_slot_assigned",
         custom_code=CustomStatusCode.SUCCESS,
         status_code=http_status.HTTP_200_OK,
         data=data,

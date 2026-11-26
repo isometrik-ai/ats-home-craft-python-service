@@ -66,16 +66,16 @@ ______________________________________________________________________
 
 From [project-setup-flow.md](./project-setup-flow.md) §3 and [resident onboarding](../../../../ats-home-craft-supabase/docs/resident-onboarding-schema.md):
 
-| Need                           | Source                                                                                       |
-| ------------------------------ | -------------------------------------------------------------------------------------------- |
-| Society name                   | `projects.name` (via listing `project_id` / pickup unit)                                     |
-| Tower count in the header      | `count(*)` from `towers` where `project_id` = viewer's project (from `unit_id`)              |
-| Nearby societies               | `projects.latitude`, `projects.longitude`, same `organization_id`, `status = active`, ≤ 5 km |
-| Tower name and collection pin  | `towers.name`, `towers.latitude`, `towers.longitude`                                         |
-| "Closest to me"                | Distance from the viewer's tower coordinates to the listing's `tower_id` coordinates         |
-| Pickup flat dropdown           | Active `contact_units` → `units.code` / `units.unit_label` + `projects.name`                 |
-| Seller role and "Member since" | Active `contact_roles` on that unit (`started_at` year)                                      |
-| Seller display name and photo  | `contacts.first_name`, `last_name`, `profile_photo_url`                                      |
+| Need                           | Source                                                                                                                        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Society name                   | `projects.name` (via listing `project_id` / pickup unit)                                                                      |
+| Tower count in the header      | `count(*)` from `towers` where `project_id` = viewer's project (from `unit_id`)                                               |
+| Nearby societies               | `projects.latitude`, `projects.longitude`, same `organization_id`, `status = active`, ≤ 5 km                                  |
+| Tower name and collection pin  | `towers.name`, `towers.latitude`, `towers.longitude`. When the tower has no pin, `projects.latitude` and `projects.longitude` |
+| "Closest to me"                | Distance from the viewer's tower coordinates to the listing's `tower_id` coordinates                                          |
+| Pickup flat dropdown           | Active `contact_units` → `units.code` / `units.unit_label` + `projects.name`                                                  |
+| Seller role and "Member since" | Active `contact_roles` on that unit (`started_at` year)                                                                       |
+| Seller display name and photo  | `contacts.first_name`, `last_name`, `profile_photo_url`                                                                       |
 
 `units.code` is the flat label the prototype writes as "B-1104" / "1104". Prefer `unit_label` when it is set, otherwise `code`.
 
@@ -408,7 +408,7 @@ ______________________________________________________________________
 - Payments, phone reveal, in-app negotiation
 - Share to community feed
 - Staff **Removed by committee** filter (staff remove uses `removed`)
-- Group by tower, All towers, Sort: tower & unit
+- Group by tower
 - Export API and Settings
 
 ______________________________________________________________________
@@ -442,19 +442,19 @@ Same layering as companies: JWT → `ensure_staff_project_access_optional` → `
 
 ### Tables used
 
-| Table                       | Role for staff                                                                |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| `marketplace_listings`      | Source of truth. List, summary, drawer, and `POST .../remove` update this row |
-| `projects`                  | Society of the pickup unit (already on `listings.project_id`)                 |
-| `towers`                    | Tower name on the card (search + display). Not a filter and not a sort        |
-| `units`                     | Pickup unit label / code                                                      |
-| `contacts`                  | Seller name and photo; remover name when the actor is a resident              |
-| `contact_roles`             | Seller role on the unit (drawer)                                              |
-| `organization_members`      | Remover display name when staff took the listing down                         |
-| `project_permissions`       | Catalog rows for `marketplace_management.*`                                   |
-| `project_role_permissions`  | Grants on default project roles                                               |
-| `marketplace_saved_items`   | **Unused** on staff routes                                                    |
-| `marketplace_sale_feedback` | **Unused** on staff routes                                                    |
+| Table                       | Role for staff                                                                                    |
+| --------------------------- | ------------------------------------------------------------------------------------------------- |
+| `marketplace_listings`      | Source of truth. List, summary, drawer, and `POST .../remove` update this row                     |
+| `projects`                  | Society of the pickup unit (already on `listings.project_id`)                                     |
+| `towers`                    | Tower name on the card. Optional `tower_id` filter. `sort=tower_unit` uses `sort_order` then name |
+| `units`                     | Pickup unit label / code                                                                          |
+| `contacts`                  | Seller name and photo; remover name when the actor is a resident                                  |
+| `contact_roles`             | Seller role on the unit (drawer)                                                                  |
+| `organization_members`      | Remover display name when staff took the listing down                                             |
+| `project_permissions`       | Catalog rows for `marketplace_management.*`                                                       |
+| `project_role_permissions`  | Grants on default project roles                                                                   |
+| `marketplace_saved_items`   | **Unused** on staff routes                                                                        |
+| `marketplace_sale_feedback` | **Unused** on staff routes                                                                        |
 
 No `marketplace_reports` table. There is no Reported tab.
 
@@ -462,18 +462,20 @@ No `marketplace_reports` table. There is no Reported tab.
 
 Prefix: `/v1/marketplace/admin`
 
-| Screen element                                         | API                                                                                      |
-| ------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| Header cards Active / Sold / Past / Removed or deleted | `GET /summary?project_id=` → `active_count`, `sold_count`, `past_count`, `removed_count` |
-| Category filter                                        | `GET /catalog` then `GET /listings?category=`                                            |
-| Search (item, resident, unit, tower)                   | `GET /listings?q=`                                                                       |
-| Society filter                                         | Optional `project_id` on summary, list, detail, and remove                               |
-| Status filter                                          | `GET /listings?status=all\|live\|sold\|past\|removed`                                    |
-| Listings table                                         | `GET /listings?page=&page_size=` — flat, org-wide, `published_at` desc                   |
-| Row click / drawer                                     | `GET /listings/{listing_id}`                                                             |
-| Remove (live only)                                     | `POST /listings/{listing_id}/remove` `{ "removal_note" }`                                |
+| Screen element                                         | API                                                                                           |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| Header cards Active / Sold / Past / Removed or deleted | `GET /summary?project_id=` → `active_count`, `sold_count`, `past_count`, `removed_count`      |
+| Category filter                                        | `GET /catalog` then `GET /listings?category=`                                                 |
+| Search (item, resident, unit, tower)                   | `GET /listings?q=`                                                                            |
+| Society filter                                         | Optional `project_id` on summary, list, detail, and remove                                    |
+| Tower filter                                           | Optional `tower_id` on `GET /summary` and `GET /listings`                                     |
+| Status filter                                          | `GET /listings?status=all\|live\|sold\|past\|removed`                                         |
+| Sort                                                   | `GET /listings?sort=tower_unit\|newest\|oldest\|price_asc\|price_desc` (default `tower_unit`) |
+| Listings table                                         | `GET /listings?page=&page_size=` — flat, org-wide                                             |
+| Row click / drawer                                     | `GET /listings/{listing_id}`                                                                  |
+| Remove (live only)                                     | `POST /listings/{listing_id}/remove` `{ "removal_note" }`                                     |
 
-**Not implemented (hide in client):** Group by tower, All towers, Sort: tower & unit, Export, Settings, Reported tab, Restore, view counts, conversations.
+**Not implemented (hide in client):** Group by tower, Export, Settings, Restore, view counts, conversations.
 
 Status mapping for the mock:
 

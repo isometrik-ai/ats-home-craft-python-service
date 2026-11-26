@@ -114,6 +114,16 @@ class MarketplaceAdminStatus(str, Enum):
     REMOVED = "removed"
 
 
+class MarketplaceAdminSort(str, Enum):
+    """Staff listings table sort."""
+
+    TOWER_UNIT = "tower_unit"
+    NEWEST = "newest"
+    OLDEST = "oldest"
+    PRICE_ASC = "price_asc"
+    PRICE_DESC = "price_desc"
+
+
 class MarketplaceListingAction(str, Enum):
     """Seller actions that share POST /listings/{id}/actions."""
 
