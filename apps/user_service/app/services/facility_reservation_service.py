@@ -739,7 +739,9 @@ class FacilityReservationService:
             paid,
             now,
         )
-        return quote.model_dump(mode="json")
+        payload = quote.model_dump(mode="json")
+        payload["hours_before"] = now.isoformat()
+        return payload
 
     async def cancel(
         self,
