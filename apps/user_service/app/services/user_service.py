@@ -1750,7 +1750,7 @@ class UserService:  # pylint: disable=too-many-public-methods
             return
 
         try:
-            identifiers, role = await self._chat_account(
+            identifier, role = await self._chat_account(
                 user_id, organization_id, body, updated_profile
             )
             image_url = self._public_avatar_url(body.avatar_url)
@@ -1772,13 +1772,13 @@ class UserService:  # pylint: disable=too-many-public-methods
             metadata = None
             if image_url is not None:
                 metadata = {
-                    "user_id": identifiers[0],
+                    "user_id": identifier,
                     "role": role,
                     "organization_id": organization_id,
                     "avatar_url": image_url,
                 }
             await sync_isometrik_user_profile(
-                user_identifiers=identifiers,
+                user_identifier=identifier,
                 isometrik_credentials=get_isometrik_data_from_settings(
                     parse_json_field(organization.get("settings"))
                 ),
@@ -1814,8 +1814,8 @@ class UserService:  # pylint: disable=too-many-public-methods
         organization_id: str,
         body: UpdateUserProfileRequest,
         updated_profile: dict[str, Any] | None,
-    ) -> tuple[list[str], str]:
-        """Chat login ids and metadata role. Residents use their contact id."""
+    ) -> tuple[str, str]:
+        """Chat login id and metadata role. Residents use their contact id."""
         db = getattr(self.organization_member_repository, "db_connection", None)
         contact_id = None
         if db is not None:
@@ -1825,7 +1825,7 @@ class UserService:  # pylint: disable=too-many-public-methods
             )
         if contact_id and db is not None:
             await self._copy_profile_to_contact(db, contact_id, organization_id, body)
-            return [contact_id], IsometrikRole.CLIENT.value
+            return contact_id, IsometrikRole.CLIENT.value
         return await self._staff_chat_account(user_id, organization_id, updated_profile)
 
     async def _copy_profile_to_contact(
@@ -1856,18 +1856,13 @@ class UserService:  # pylint: disable=too-many-public-methods
         user_id: str,
         organization_id: str,
         updated_profile: dict[str, Any] | None,
-    ) -> tuple[list[str], str]:
-        """Staff chat login: auth user id, then member id when that user has no contact."""
-        identifiers = [user_id]
-        getter = getattr(self.organization_member_repository, "get_member_id_by_user_id", None)
-        if getter is not None:
-            member_id = await getter(user_id=user_id, organization_id=organization_id)
-            if member_id and str(member_id) not in identifiers:
-                identifiers.append(str(member_id))
+    ) -> tuple[str, str]:
+        """Staff chat login id is the auth user id."""
+        del organization_id
         member_role = str((updated_profile or {}).get("member_role") or "").lower()
         role = (
             IsometrikRole.OWNER.value
             if member_role == OrganizationMemberRole.OWNER.value
             else IsometrikRole.MEMBER.value
         )
-        return identifiers, role
+        return user_id, role

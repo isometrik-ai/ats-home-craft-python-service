@@ -2270,7 +2270,7 @@ class ContactsService:
                     "avatar_url": image_url,
                 }
             await sync_isometrik_user_profile(
-                user_identifiers=[contact_id],
+                user_identifier=contact_id,
                 isometrik_credentials=get_isometrik_data_from_settings(
                     parse_json_field((organization or {}).get("settings"))
                 ),

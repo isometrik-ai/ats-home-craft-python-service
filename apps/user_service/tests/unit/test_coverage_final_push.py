@@ -306,7 +306,7 @@ async def test_update_isometrik_user_if_needed_success(monkeypatch):
         updated_profile={"first_name": "New", "last_name": "Name"},
     )
     kwargs = sync.await_args.kwargs
-    assert kwargs["user_identifiers"] == [MEMBER_ID]
+    assert kwargs["user_identifier"] == MEMBER_ID
     assert kwargs["user_name"] == "New Name"
     assert kwargs["metadata"]["avatar_url"] == "https://cdn.example.com/pic.png"
     assert kwargs["metadata"]["user_id"] == MEMBER_ID

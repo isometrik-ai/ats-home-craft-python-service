@@ -1845,7 +1845,7 @@ async def test_update_contact_syncs_avatar_into_isometrik_metadata(monkeypatch):
     )
 
     kwargs = sync.await_args.kwargs
-    assert kwargs["user_identifiers"] == [CONTACT_ID]
+    assert kwargs["user_identifier"] == CONTACT_ID
     assert kwargs["user_profile_image_url"] == "https://cdn.example.com/contacts/rahul.jpg"
     assert kwargs["metadata"]["avatar_url"] == "https://cdn.example.com/contacts/rahul.jpg"
     assert kwargs["metadata"]["user_id"] == CONTACT_ID

@@ -399,53 +399,47 @@ async def update_isometrik_user(
 
 async def sync_isometrik_user_profile(
     *,
-    user_identifiers: list[str],
+    user_identifier: str,
     isometrik_credentials: dict[str, Any] | None,
     user_name: str | None = None,
     user_profile_image_url: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> None:
-    """Push name and profile image onto the first Isometrik user that logs in.
+    """Push name and profile image onto one Isometrik user.
 
     ``user_profile_image_url`` of ``""`` clears the photo. The same value is
     sent as ``metaData.avatar_url`` when ``metadata`` includes it. Failures are
     logged and do not propagate.
     """
-    if not isometrik_credentials:
+    if not isometrik_credentials or not user_identifier:
         return
     if user_name is None and user_profile_image_url is None and not metadata:
         return
 
-    last_error: Exception | None = None
-    for identifier in user_identifiers:
-        if not identifier:
-            continue
-        try:
-            login_response = await login_to_isometrik(
-                user_id=identifier,
-                isometrik_credentials=isometrik_credentials,
-            )
-            token = login_response.get("userToken") or ""
-            if not token:
-                continue
-            sent_metadata = None
-            if metadata is not None:
-                sent_metadata = {**metadata, "user_id": str(identifier)}
-            await update_isometrik_user(
-                isometrik_credentials={
-                    "userToken": token,
-                    "licenseKey": isometrik_credentials.get("licenseKey", ""),
-                    "appSecret": isometrik_credentials.get("appSecret", ""),
-                },
-                user_name=user_name,
-                user_profile_image_url=user_profile_image_url,
-                metadata=sent_metadata,
-            )
+    try:
+        login_response = await login_to_isometrik(
+            user_id=user_identifier,
+            isometrik_credentials=isometrik_credentials,
+        )
+        token = login_response.get("userToken") or ""
+        if not token:
+            logger.warning("Isometrik profile sync failed: missing user token")
             return
-        except Exception as exc:  # - best-effort chat sync
-            last_error = exc
-    if last_error is not None:
-        logger.warning("Isometrik profile sync failed: %s", last_error)
+        sent_metadata = None
+        if metadata is not None:
+            sent_metadata = {**metadata, "user_id": str(user_identifier)}
+        await update_isometrik_user(
+            isometrik_credentials={
+                "userToken": token,
+                "licenseKey": isometrik_credentials.get("licenseKey", ""),
+                "appSecret": isometrik_credentials.get("appSecret", ""),
+            },
+            user_name=user_name,
+            user_profile_image_url=user_profile_image_url,
+            metadata=sent_metadata,
+        )
+    except Exception as exc:  # - best-effort chat sync
+        logger.warning("Isometrik profile sync failed: %s", exc)
 
 
 async def create_isometrik_ai_agent(
