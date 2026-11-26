@@ -7,6 +7,7 @@ from __future__ import annotations
 import calendar
 import csv
 import io
+import math
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -51,6 +52,7 @@ from apps.user_service.app.schemas.daily_help import (
     DailyHelpOpenToWorkResponse,
     DailyHelpRatingResponse,
     DailyHelpRatingSummaryResponse,
+    DailyHelpRatingWriteRequest,
     DailyHelpReviewResponse,
     DailyHelpSubmissionListItemResponse,
     DailyHelpSubmissionListQuery,
@@ -98,6 +100,22 @@ from libs.shared_utils.http_exceptions import (
 from libs.shared_utils.status_codes import CustomStatusCode
 
 ATTENDANCE_TIMEZONE = ZoneInfo("Asia/Kolkata")
+
+_EXPERIENCE_LABELS = {
+    1: "terrible",
+    2: "bad",
+    3: "okay",
+    4: "good",
+    5: "great",
+}
+
+
+def _experience_label(stars: float) -> str:
+    """Map a star score to Terrible, Bad, Okay, Good, or Great."""
+    level = math.floor(float(stars) + 0.5)
+    level = max(1, min(5, level))
+    return _EXPERIENCE_LABELS[level]
+
 
 _CATEGORY_PREVIEW_LIMIT = 4
 _NEWLY_ADDED_DAYS = 30
@@ -866,15 +884,74 @@ class DailyHelpService:
         )
 
     @staticmethod
+    def _clean_rating_comment(comment: str | None) -> str | None:
+        """Store a blank written review as null."""
+        if comment is None:
+            return None
+        text = comment.strip()
+        return text or None
+
+    @staticmethod
+    def _rating_write_payload(body: DailyHelpRatingWriteRequest) -> dict[str, Any]:
+        """Normalize the share-your-experience form for persistence."""
+        return {
+            "stars": body.stars,
+            "comment": DailyHelpService._clean_rating_comment(body.comment),
+            "traits": [trait.value for trait in body.traits],
+            "aspects": [
+                {"aspect": item.aspect.value, "stars": item.stars} for item in body.aspects
+            ],
+            "media": [
+                {
+                    "media_type": item.media_type.value,
+                    "file_path": item.file_path,
+                    "file_name": item.file_name,
+                    "mime_type": item.mime_type,
+                    "file_size_bytes": item.file_size_bytes,
+                    "sort_order": item.sort_order,
+                }
+                for item in body.media
+            ],
+        }
+
+    @staticmethod
+    def _rating_detail_fields(row: dict[str, Any]) -> dict[str, Any]:
+        """Shared stars, label, qualities, and media fields for rating responses."""
+        stars = float(row["stars"])
+        return {
+            "stars": stars,
+            "experience_label": _experience_label(stars),
+            "comment": row.get("comment"),
+            "traits": [str(trait) for trait in row.get("traits") or []],
+            "aspects": [
+                {"aspect": str(item["aspect"]), "stars": float(item["stars"])}
+                for item in row.get("aspects") or []
+            ],
+            "media": [
+                {
+                    "media_type": str(item["media_type"]),
+                    "file_path": str(item["file_path"]),
+                    "file_name": item.get("file_name"),
+                    "mime_type": item.get("mime_type"),
+                    "file_size_bytes": (
+                        int(item["file_size_bytes"])
+                        if item.get("file_size_bytes") is not None
+                        else None
+                    ),
+                    "sort_order": int(item.get("sort_order") or 0),
+                }
+                for item in row.get("media") or []
+            ],
+        }
+
+    @staticmethod
     def _serialize_rating(row: dict[str, Any]) -> DailyHelpRatingResponse:
         """Map a rating row to API shape."""
         return DailyHelpRatingResponse(
             id=str(row["id"]),
-            stars=float(row["stars"]),
-            comment=row.get("comment"),
-            traits=[str(trait) for trait in row.get("traits") or []],
             created_at=format_iso_datetime(row.get("created_at")),
             updated_at=format_iso_datetime(row.get("updated_at")),
+            **DailyHelpService._rating_detail_fields(row),
         )
 
     @staticmethod
@@ -885,9 +962,6 @@ class DailyHelpService:
             rated_by_name = rated_by_name.strip() or None
         return DailyHelpReviewResponse(
             id=str(row["id"]),
-            stars=float(row["stars"]),
-            comment=row.get("comment"),
-            traits=[str(trait) for trait in row.get("traits") or []],
             rated_by_contact_id=row.get("rated_by_contact_id"),
             rated_by_name=rated_by_name,
             unit_id=str(row["unit_id"]),
@@ -895,6 +969,7 @@ class DailyHelpService:
             unit_label=row.get("unit_label"),
             created_at=format_iso_datetime(row.get("created_at")),
             updated_at=format_iso_datetime(row.get("updated_at")),
+            **DailyHelpService._rating_detail_fields(row),
         )
 
     @staticmethod
@@ -2917,7 +2992,7 @@ class DailyHelpService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-        traits = [trait.value for trait in body.traits]
+        payload = self._rating_write_payload(body)
         try:
             await self.repo.insert_rating(
                 organization_id=self.organization_id,
@@ -2925,9 +3000,7 @@ class DailyHelpService:
                 profile_id=profile_id,
                 unit_id=unit_id,
                 rated_by_contact_id=contact_id,
-                stars=body.stars,
-                comment=body.comment,
-                traits=traits,
+                **payload,
             )
         except UniqueViolationError as exc:
             raise ConflictException(
@@ -2991,15 +3064,13 @@ class DailyHelpService:
                 custom_code=CustomStatusCode.VALIDATION_ERROR,
             )
 
-        traits = [trait.value for trait in body.traits]
+        payload = self._rating_write_payload(body)
         updated = await self.repo.update_rating(
             organization_id=self.organization_id,
             profile_id=profile_id,
             unit_id=unit_id,
             rated_by_contact_id=contact_id,
-            stars=body.stars,
-            comment=body.comment,
-            traits=traits,
+            **payload,
         )
         if not updated:
             raise NotFoundException(

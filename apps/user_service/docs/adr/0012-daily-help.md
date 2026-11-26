@@ -1,13 +1,13 @@
 # ADR 0012: Daily Help — project registry, household links, gate integration
 
-|                  |                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Status**       | Accepted — implemented in `user_service` (Phases 1–5 core)                                                                                                                                                                                                                                                                                                                                                                    |
-| **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0007](./0007-walk-in-entries.md), [ADR 0008](./0008-push-notifications-grpc.md), [ADR 0009](./0009-contact-roles.md), [ADR 0010](./0010-project-membership.md) (project access)                                                                                                                                                        |
-| **Related docs** | [0012-daily-help-flow.md](../0012-daily-help-flow.md), [0004-passes-validation-flow.md](../0004-passes-validation-flow.md), [0003-passes-flow.md](../0003-passes-flow.md), [0008-push-notifications-flow.md](../0008-push-notifications-flow.md)                                                                                                                                                                              |
-| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`, `20260820120000_daily_help_resident_submission.sql`, `20260923120000_daily_help_rating_trait_communication.sql` (`ats-home-craft-supabase`) |
+|                  |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Status**       | Accepted — implemented in `user_service` (Phases 1–5 core)                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Date**         | 2026-08-11                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Authors**      | Home Craft platform team                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **Depends on**   | [ADR 0003](./0003-visitor-passes.md), [ADR 0004](./0004-pass-validation-gate.md), [ADR 0007](./0007-walk-in-entries.md), [ADR 0008](./0008-push-notifications-grpc.md), [ADR 0009](./0009-contact-roles.md), [ADR 0010](./0010-project-membership.md) (project access)                                                                                                                                                                                                           |
+| **Related docs** | [0012-daily-help-flow.md](../0012-daily-help-flow.md), [0004-passes-validation-flow.md](../0004-passes-validation-flow.md), [0003-passes-flow.md](../0003-passes-flow.md), [0008-push-notifications-flow.md](../0008-push-notifications-flow.md)                                                                                                                                                                                                                                 |
+| **Migrations**   | `20260811120000_daily_help_enums.sql`, `20260811121000_daily_help_tables.sql`, `20260811121500_daily_help_categories.sql`, `20260811122000_passes_daily_help_link.sql`, `20260814160000_daily_help_attendance_absences.sql`, `20260819160000_daily_help_security_submission.sql`, `20260820120000_daily_help_resident_submission.sql`, `20260923120000_daily_help_rating_trait_communication.sql`, `20261116120000_daily_help_rating_experience.sql` (`ats-home-craft-supabase`) |
 
 ______________________________________________________________________
 
@@ -549,22 +549,28 @@ Partial unique: at most one `photo` typed row may duplicate `profiles.photo_path
 
 ### `daily_help_ratings` (Phase 3)
 
-| Column                      | Type               | Notes                             |
-| --------------------------- | ------------------ | --------------------------------- |
-| `id`                        | uuid PK            |                                   |
-| `organization_id`           | uuid FK            |                                   |
-| `project_id`                | uuid FK            |                                   |
-| `daily_help_profile_id`     | uuid FK            |                                   |
-| `unit_id`                   | uuid FK → units    | Rater's unit context              |
-| `rated_by_contact_id`       | uuid FK → contacts | Resident who submitted the rating |
-| `stars`                     | numeric(2,1)       | 0.5 – 5.0                         |
-| `comment`                   | text               | Optional free text                |
-| `created_at` / `updated_at` | timestamptz        |                                   |
+| Column                      | Type               | Notes                                  |
+| --------------------------- | ------------------ | -------------------------------------- |
+| `id`                        | uuid PK            |                                        |
+| `organization_id`           | uuid FK            |                                        |
+| `project_id`                | uuid FK            |                                        |
+| `daily_help_profile_id`     | uuid FK            |                                        |
+| `unit_id`                   | uuid FK → units    | Rater's unit context                   |
+| `rated_by_contact_id`       | uuid FK → contacts | Resident who submitted the rating      |
+| `stars`                     | numeric(2,1)       | 0.5 – 5.0                              |
+| `comment`                   | text               | Optional free text                     |
+| `aspects`                   | jsonb              | Quality scores, default `[]`, max 4    |
+| `media`                     | jsonb              | Photo/video array, default `[]`, max 5 |
+| `created_at` / `updated_at` | timestamptz        |                                        |
 
 **Unique:** `(daily_help_profile_id, unit_id, rated_by_contact_id)` — one rating per resident per unit.
 
 Child table **`daily_help_rating_traits`** stores trait enum values (`very_punctual`, `quite_regular`,
 `exceptional_service`, `great_attitude`, `good_communication`).
+
+Quality scores (`punctuality`, `work_quality`, `behavior`, `communication`) live on
+**`daily_help_ratings.aspects`**. Photos and videos live on **`daily_help_ratings.media`**.
+Responses add `experience_label` (`terrible`, `bad`, `okay`, `good`, `great`) from the overall stars.
 
 **Resident API:**
 

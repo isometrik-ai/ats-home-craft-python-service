@@ -1,9 +1,11 @@
 """Pricing engine: quotes, cancellation fees and reschedule adjustments.
 
-The configured rate is billed in its own unit. An hour rate times the booked
-hours, a day rate once per booked date, and a month rate once per started
-month. A day or month rate is not turned into an hourly price. Amounts are
-whole currency units; rounding mirrors the Clubhouse reference engine.
+Courts and timed events bill the configured rate in its own unit: an hour rate
+times the booked hours, a day rate once per booked date, and a month rate once
+per started month. A venue priced per month still splits that list rate — an
+8-hour day for a partial window, and 30 days for a full day — unless an hourly
+price is set. Amounts are whole currency units; rounding mirrors the Clubhouse
+reference engine.
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from apps.user_service.app.services.facility_booking.availability import (
     reservation_start,
 )
 from apps.user_service.app.services.facility_booking.money import (
+    DAYS_PER_MONTH,
     DEFAULT_CURRENCY_SYMBOL,
     MAX_DATE_SPAN_DAYS,
     each_date,
@@ -50,6 +53,8 @@ from apps.user_service.app.services.facility_booking.types import (
     EngineReservation,
     FacilitySnapshot,
 )
+
+HOURS_PER_DAY = 8
 
 HOURLY_RATE = "Hourly Rate"
 FULL_DAY_RATE = "Full Day Rate"
@@ -109,6 +114,23 @@ def _hour_figure(facility: FacilitySnapshot) -> int:
     if override is not None:
         return override
     return facility.pricing.resident_rate
+
+
+def _quoted_month_hour_rate(facility: FacilitySnapshot) -> int:
+    """Hourly figure for a partial day of a monthly venue.
+
+    An explicit hourly price is used as entered. Otherwise the month rate is
+    spread across an 8-hour day (₹6,000/month → ₹750/hr), not across 30 days.
+    """
+    override = facility.pricing.hourly_rate
+    if override is not None:
+        return override
+    return ts_round(facility.pricing.resident_rate / HOURS_PER_DAY)
+
+
+def _quoted_month_day_rate(facility: FacilitySnapshot) -> int:
+    """Full-day figure for a monthly venue: the month rate split across 30 days."""
+    return ts_round(facility.pricing.resident_rate / DAYS_PER_MONTH)
 
 
 def _mult_factor(
@@ -405,20 +427,29 @@ def _window_is_full_day(facility: FacilitySnapshot, draft: BookingDraft) -> bool
     return draft.start_min <= hours.open and draft.end_min >= hours.close
 
 
-def _venue_day_line(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) -> PriceLine:
-    """Full-day venue charge at the configured day rate, once per booked date."""
+def _venue_day_line(
+    facility: FacilitySnapshot,
+    draft: BookingDraft,
+    money: _Money,
+    *,
+    rate: int | None = None,
+    basis: str = "",
+) -> PriceLine:
+    """Full-day venue charge, once per booked date."""
     pricing = facility.pricing
-    rate = pricing.resident_rate
+    if rate is None:
+        rate = pricing.resident_rate
+    unit = f"{money(rate)}/day{basis}"
     if draft.end_local_date != draft.local_date:
         days = each_date(draft.local_date, draft.end_local_date)
         amount = sum(ts_round(rate * day_multiplier(facility, day)) for day in days)
         weekend_days = sum(1 for day in days if day_multiplier(facility, day) != 1)
-        detail = _qty_at_rate(f"{len(days)} {_day_word(len(days))}", f"{money(rate)}/day")
+        detail = _qty_at_rate(f"{len(days)} {_day_word(len(days))}", unit)
         if weekend_days > 0:
             detail += f" · {weekend_days} weekend/holiday day(s) ×{pricing.weekend_multiplier:g}"
         return PriceLine(label=_rental_label(facility, FULL_DAY_RATE), detail=detail, amount=amount)
     day_mult = day_multiplier(facility, draft.local_date)
-    detail = _qty_at_rate("1 day", f"{money(rate)}/day")
+    detail = _qty_at_rate("1 day", unit)
     if day_mult != 1:
         detail += f" (×{day_mult:g})"
     return PriceLine(
@@ -428,10 +459,16 @@ def _venue_day_line(facility: FacilitySnapshot, draft: BookingDraft, money: _Mon
     )
 
 
-def _venue_hour_line(facility: FacilitySnapshot, draft: BookingDraft, money: _Money) -> PriceLine:
-    """Partial venue window billed at the explicit hourly rate, or an hour basis."""
+def _venue_hour_line(
+    facility: FacilitySnapshot,
+    draft: BookingDraft,
+    money: _Money,
+    *,
+    hour_rate: int | None = None,
+) -> PriceLine:
+    """Partial venue window billed at ``hour_rate`` or the facility's hour figure."""
     pricing = facility.pricing
-    hourly = _hour_figure(facility)
+    hourly = _hour_figure(facility) if hour_rate is None else hour_rate
     if draft.end_local_date != draft.local_date:
         days = each_date(draft.local_date, draft.end_local_date)
         day_mins = draft.end_min - draft.start_min
@@ -469,10 +506,19 @@ def _day_range_lines(
     pricing = facility.pricing
     _, guests, _ = party_of(draft)
     full_day = _window_is_full_day(facility, draft)
-    if pricing.unit_label == FacilityRateUnit.MONTH and not _bills_by_the_hour(
-        facility, full_day=full_day
-    ):
-        rental = _month_rental_line(facility, draft, money)
+    if pricing.unit_label == FacilityRateUnit.MONTH:
+        if full_day:
+            rental = _venue_day_line(
+                facility,
+                draft,
+                money,
+                rate=_quoted_month_day_rate(facility),
+                basis=f" (from {money(pricing.resident_rate)}/month)",
+            )
+        else:
+            rental = _venue_hour_line(
+                facility, draft, money, hour_rate=_quoted_month_hour_rate(facility)
+            )
     elif full_day and not _bills_by_the_hour(facility, full_day=full_day):
         rental = _venue_day_line(facility, draft, money)
     elif not _bills_by_the_hour(facility, full_day=full_day):
