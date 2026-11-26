@@ -636,6 +636,14 @@ def test_walk_in_visit_status_maps_cancelled():
     )
 
 
+def test_walk_in_visit_status_maps_expired():
+    """Walk-in expired maps to expired visit_status."""
+    assert (
+        VisitorLogsService._walk_in_visit_status(status=WalkInStatus.EXPIRED.value)
+        == VisitorLogVisitStatus.EXPIRED.value
+    )
+
+
 def test_pass_visit_status_maps_cancelled():
     """Cancelled passes map to cancelled visit_status."""
     status = VisitorLogsService._pass_visit_status(

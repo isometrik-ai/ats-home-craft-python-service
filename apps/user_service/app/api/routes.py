@@ -96,6 +96,9 @@ from apps.user_service.app.api.visitor_activities_resident import (
     router as visitor_activities_resident_router,
 )
 from apps.user_service.app.api.visitor_logs import router as visitor_logs_router
+from apps.user_service.app.api.walk_ins import (
+    internal_router as walk_ins_internal_router,
+)
 from apps.user_service.app.api.walk_ins import router as walk_ins_router
 from apps.user_service.app.api.walk_ins_owner import router as walk_ins_owner_router
 from apps.user_service.app.api.webhooks import router as webhooks_router
@@ -145,6 +148,7 @@ router.include_router(passes_router)
 router.include_router(visitor_activities_resident_router)
 router.include_router(walk_ins_router)
 router.include_router(walk_ins_owner_router)
+router.include_router(walk_ins_internal_router)
 router.include_router(visitor_logs_router)
 router.include_router(move_events_router)
 router.include_router(custom_fields_router)

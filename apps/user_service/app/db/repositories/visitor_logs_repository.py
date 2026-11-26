@@ -576,11 +576,13 @@ TRIM(
         inside = VisitorLogVisitStatus.INSIDE.value
         exited = VisitorLogVisitStatus.EXITED.value
         cancelled = VisitorLogVisitStatus.CANCELLED.value
+        expired = VisitorLogVisitStatus.EXPIRED.value
         wi_awaiting = WalkInStatus.AWAITING.value
         wi_approved = WalkInStatus.APPROVED.value
         wi_entered = WalkInStatus.ENTERED.value
         wi_exited = WalkInStatus.EXITED.value
         wi_cancelled = WalkInStatus.CANCELLED.value
+        wi_expired = WalkInStatus.EXPIRED.value
         return f"""
             SELECT
               'walk_in'::text AS source,
@@ -635,6 +637,7 @@ TRIM(
                 WHEN '{wi_entered}' THEN '{inside}'
                 WHEN '{wi_exited}' THEN '{exited}'
                 WHEN '{wi_cancelled}' THEN '{cancelled}'
+                WHEN '{wi_expired}' THEN '{expired}'
                 ELSE '{approved}'
               END AS visit_status,
               NULL::text AS pass_code,
