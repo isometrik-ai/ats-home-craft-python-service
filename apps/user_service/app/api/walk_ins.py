@@ -9,6 +9,7 @@ from fastapi import status as http_status
 from apps.user_service.app.app_instance import limiter
 from apps.user_service.app.dependencies.audit_logs.audit_decorator import audit_api_call
 from apps.user_service.app.dependencies.db import db_conn, db_uow
+from apps.user_service.app.jobs.expire_awaiting_walk_ins import expire_awaiting_walk_ins
 from apps.user_service.app.schemas.walk_in import CreateWalkInRequest, WalkInListQuery
 from apps.user_service.app.services.walk_in_service import WalkInService
 from apps.user_service.app.utils.audit_context import set_audit_context
@@ -22,6 +23,7 @@ from libs.shared_utils.response_factory import list_response, success_response
 from libs.shared_utils.status_codes import CustomStatusCode
 
 router = APIRouter(prefix="/projects", tags=["Walk-in"])
+internal_router = APIRouter(prefix="/internal/walk-ins", tags=["Walk-in"])
 
 COMMON_ERROR_RESPONSES: dict[int | str, dict] = {
     401: {"description": "Unauthorized (missing/invalid JWT)."},
@@ -262,4 +264,25 @@ async def exit_walk_in(
         message_key="walk_in.success.exited",
         custom_code=CustomStatusCode.SUCCESS,
         data=data,
+    )
+
+
+@handle_api_exceptions("expire awaiting walk-ins")
+@internal_router.post(
+    "/expire-awaiting",
+    status_code=http_status.HTTP_200_OK,
+    summary="Expire walk-ins awaiting resident action for 1 hour (cron)",
+)
+@limiter.limit("10/minute")
+async def expire_awaiting_walk_ins_internal(
+    request: Request,
+    db_connection: asyncpg.Connection = Depends(db_uow),
+):
+    """Close walk-in requests that stayed awaiting with no resident action."""
+    expired_ids = await expire_awaiting_walk_ins(db_connection)
+    return success_response(
+        request=request,
+        message_key="walk_in.success.expire_awaiting_completed",
+        custom_code=CustomStatusCode.SUCCESS,
+        data={"expired_walk_in_ids": expired_ids, "count": len(expired_ids)},
     )
