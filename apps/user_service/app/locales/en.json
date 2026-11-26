@@ -900,7 +900,8 @@
       "exited": "Visitor marked as exited.",
       "visit_units_retrieved": "Walk-in visit units retrieved successfully.",
       "visit_unit_approved": "Walk-in approved for your flat.",
-      "visit_unit_rejected": "Walk-in rejected for your flat."
+      "visit_unit_rejected": "Walk-in rejected for your flat.",
+      "expire_awaiting_completed": "Awaiting walk-in requests older than 1 hour were expired."
     }
   },
   "visitor_activities": {

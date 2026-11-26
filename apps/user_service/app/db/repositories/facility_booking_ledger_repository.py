@@ -227,6 +227,51 @@ class FacilityBookingLedgerRepository(BaseRepository):
             invoice_id,
         )
 
+    async def no_show_amounts_by_reservation(
+        self,
+        *,
+        organization_id: str,
+        project_id: str,
+        reservation_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Fee/refund posted for no-show on each reservation (from ledger)."""
+        if not reservation_ids:
+            return {}
+        rows = await self.db_connection.fetch(
+            """
+            SELECT
+                reservation_id::text AS reservation_id,
+                COALESCE(
+                    SUM(CASE WHEN entry_type = 'no_show_forfeit' THEN amount ELSE 0 END),
+                    0
+                )::int AS forfeit,
+                COALESCE(
+                    SUM(CASE WHEN entry_type = 'refund' THEN -amount ELSE 0 END),
+                    0
+                )::int AS paid,
+                MAX(posted_at) AS posted_at
+            FROM facility_booking_ledger_entries
+            WHERE organization_id = $1::uuid
+              AND project_id = $2::uuid
+              AND reservation_id = ANY($3::uuid[])
+              AND entry_type IN ('no_show_forfeit', 'refund')
+            GROUP BY reservation_id
+            """,
+            organization_id,
+            project_id,
+            reservation_ids,
+        )
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            forfeit = int(row["forfeit"] or 0)
+            paid = int(row["paid"] or 0)
+            out[str(row["reservation_id"])] = {
+                "fee": forfeit,
+                "refund": max(paid - forfeit, 0),
+                "at": row["posted_at"],
+            }
+        return out
+
     async def list_payments_for_month(
         self, *, organization_id: str, project_id: str, year: int, month: int
     ) -> list[dict[str, Any]]:

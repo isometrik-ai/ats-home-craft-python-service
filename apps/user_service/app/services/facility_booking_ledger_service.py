@@ -87,6 +87,16 @@ class FacilityBookingLedgerService:
         )
         return dict(row)
 
+    async def no_show_amounts_by_reservation(
+        self, *, project_id: str, reservation_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Return stored no-show fee/refund per reservation from ledger posts."""
+        return await self.repo.no_show_amounts_by_reservation(
+            organization_id=self._org_id,
+            project_id=project_id,
+            reservation_ids=reservation_ids,
+        )
+
     async def net_paid_for(self, *, project_id: str, reservation_id: str) -> int:
         """Return net amount paid/charged for a reservation."""
         rows = await self.repo.list_for_reservation(

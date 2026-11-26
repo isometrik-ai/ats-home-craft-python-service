@@ -281,6 +281,7 @@ class WalkInStatus(str, Enum):
     ENTERED = "entered"
     EXITED = "exited"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class WalkInVisitUnitStatus(str, Enum):
@@ -289,6 +290,7 @@ class WalkInVisitUnitStatus(str, Enum):
     AWAITING = "awaiting"
     APPROVED = "approved"
     REJECTED = "rejected"
+    EXPIRED = "expired"
 
 
 class WalkInEventType(str, Enum):
@@ -300,6 +302,7 @@ class WalkInEventType(str, Enum):
     ENTERED = "entered"
     EXITED = "exited"
     CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 class WalkInActorType(str, Enum):

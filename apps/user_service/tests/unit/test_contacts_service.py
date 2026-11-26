@@ -1806,6 +1806,54 @@ async def test_update_contact_work_history_add(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_update_contact_syncs_avatar_into_isometrik_metadata(monkeypatch):
+    """A contact photo change updates the chat user and keeps identity metadata."""
+    _patch_custom_fields(monkeypatch)
+    current = _contact_detail(profile_photo_url=None, first_name="Rahul", last_name="S")
+    repo = _FakeContactsRepo(
+        contact_for_update=current,
+        updated_row={"profile_photo_url": "contacts/rahul.jpg"},
+    )
+    svc = _service(
+        contacts_repo=repo,
+        org_repo=_FakeOrgRepo(
+            organization={
+                "id": ORG_ID,
+                "settings": {
+                    "isometrik_application_details": {
+                        "licenseKey": "lk",
+                        "appSecret": "as",
+                        "userSecret": "us",
+                    }
+                },
+            }
+        ),
+    )
+    sync = AsyncMock()
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.shared_settings.cloudflare_r2.media_url",
+        "https://cdn.example.com",
+    )
+    monkeypatch.setattr(
+        "apps.user_service.app.services.contacts_service.sync_isometrik_user_profile",
+        sync,
+    )
+
+    await svc.update_contact(
+        contact_id=CONTACT_ID,
+        body=UpdateContactRequest(profile_photo_url="contacts/rahul.jpg"),
+    )
+
+    kwargs = sync.await_args.kwargs
+    assert kwargs["user_identifier"] == CONTACT_ID
+    assert kwargs["user_profile_image_url"] == "https://cdn.example.com/contacts/rahul.jpg"
+    assert kwargs["metadata"]["avatar_url"] == "https://cdn.example.com/contacts/rahul.jpg"
+    assert kwargs["metadata"]["user_id"] == CONTACT_ID
+    assert kwargs["metadata"]["role"] == "client"
+    assert kwargs["metadata"]["organization_id"] == ORG_ID
+
+
+@pytest.mark.asyncio
 async def test_update_contact_scalar_profile_fields(monkeypatch):
     """Update contact patches gender, blood group, and communication preferences."""
     _patch_custom_fields(monkeypatch)

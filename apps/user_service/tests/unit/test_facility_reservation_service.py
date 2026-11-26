@@ -67,6 +67,7 @@ def _service() -> FacilityReservationService:
     svc.ledger = MagicMock()
     svc.ledger.net_paid_for = AsyncMock(return_value=0)
     svc.ledger.post = AsyncMock()
+    svc.ledger.no_show_amounts_by_reservation = AsyncMock(return_value={})
     svc.notifier = MagicMock()
     svc.notifier.confirmed = AsyncMock()
     svc.notifier.submitted = AsyncMock()
@@ -113,6 +114,7 @@ def _reservation_row(*, status: str = FacilityReservationStatus.PENDING_APPROVAL
         "rescheduled_to_id": None,
         "reject_reason": None,
         "cancel_info": None,
+        "no_show_info": None,
         "notes": None,
         "booked_by_actor": "resident",
         "created_at": datetime(2026, 9, 24, 10, 0, tzinfo=timezone.utc),
@@ -294,6 +296,62 @@ async def test_mark_no_show_refund_and_forfeit():
 
     assert svc.ledger.post.await_count == 2
     svc.notifier.no_show.assert_awaited_once()
+    update = svc.reservations_repo.update_reservation.await_args.kwargs["update_data"]
+    assert update["no_show_info"]["fee"] == 500
+    assert update["no_show_info"]["refund"] == 500
+    assert update["no_show_info"]["at"]
+
+
+@pytest.mark.asyncio
+async def test_get_reservation_includes_no_show_info():
+    svc = _service()
+    row = _reservation_row(status=FacilityReservationStatus.NO_SHOW.value)
+    row["no_show_info"] = {
+        "fee": 8,
+        "refund": 1,
+        "at": datetime(2026, 10, 13, 8, 45, tzinfo=timezone.utc),
+    }
+    _mock_get_reservation_flow(svc, row)
+
+    data = await svc.get_reservation(project_id=PROJECT_ID, reservation_id=RESERVATION_ID)
+
+    assert data["no_show_info"]["fee"] == 8
+    assert data["no_show_info"]["refund"] == 1
+    assert data["cancel_info"] is None
+    svc.ledger.no_show_amounts_by_reservation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_reservation_hydrates_no_show_info_from_ledger():
+    svc = _service()
+    row = _reservation_row(status=FacilityReservationStatus.NO_SHOW.value)
+    posted_at = datetime(2026, 10, 13, 9, 12, tzinfo=timezone.utc)
+    svc.ledger.no_show_amounts_by_reservation = AsyncMock(
+        return_value={RESERVATION_ID: {"fee": 8, "refund": 1, "at": posted_at}}
+    )
+    _mock_get_reservation_flow(svc, row)
+
+    data = await svc.get_reservation(project_id=PROJECT_ID, reservation_id=RESERVATION_ID)
+
+    assert data["no_show_info"]["fee"] == 8
+    assert data["no_show_info"]["refund"] == 1
+    assert data["no_show_info"]["at"]
+
+
+@pytest.mark.asyncio
+async def test_list_reservations_hydrates_no_show_info_from_quote_when_ledger_empty():
+    svc = _service()
+    row = _reservation_row(status=FacilityReservationStatus.NO_SHOW.value)
+    row["quote"] = {"lines": [], "total": 9, "deposit": 0, "due_now": 9, "due_later": 0}
+    svc.reservations_repo.list_reservations = AsyncMock(return_value=([row], 1))
+    svc.reservations_repo.participants_by_reservation = AsyncMock(return_value={RESERVATION_ID: []})
+
+    items, total = await svc.list_reservations(project_id=PROJECT_ID)
+
+    assert total == 1
+    # 50% of quote.total 9, half-up → fee 5, refund 4
+    assert items[0]["no_show_info"]["fee"] == 5
+    assert items[0]["no_show_info"]["refund"] == 4
 
 
 @pytest.mark.asyncio

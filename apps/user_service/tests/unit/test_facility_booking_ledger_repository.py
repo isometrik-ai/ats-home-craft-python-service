@@ -195,6 +195,31 @@ async def test_attach_invoice_skips_empty_and_updates() -> None:
 
 
 @pytest.mark.asyncio
+async def test_no_show_amounts_by_reservation() -> None:
+    posted_at = "2026-10-13T09:12:00Z"
+    conn = _FakeConn(
+        rows=[{"reservation_id": RESERVATION_ID, "forfeit": 8, "paid": 9, "posted_at": posted_at}]
+    )
+    repo = FacilityBookingLedgerRepository(db_connection=conn)
+
+    amounts = await repo.no_show_amounts_by_reservation(
+        organization_id=ORG_ID,
+        project_id=PROJECT_ID,
+        reservation_ids=[RESERVATION_ID],
+    )
+
+    assert amounts[RESERVATION_ID] == {"fee": 8, "refund": 1, "at": posted_at}
+    query, args = conn.fetch_calls[0]
+    assert "no_show_forfeit" in query
+    assert args == (ORG_ID, PROJECT_ID, [RESERVATION_ID])
+
+    empty = await repo.no_show_amounts_by_reservation(
+        organization_id=ORG_ID, project_id=PROJECT_ID, reservation_ids=[]
+    )
+    assert empty == {}
+
+
+@pytest.mark.asyncio
 async def test_list_payments_for_month() -> None:
     conn = _FakeConn(rows=[{"method": "cash", "amount": 200}])
     repo = FacilityBookingLedgerRepository(db_connection=conn)

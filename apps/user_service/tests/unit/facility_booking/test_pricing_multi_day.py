@@ -172,6 +172,169 @@ def test_duration_and_tee_quotes_repeat_the_daily_window():
     assert tee.lines[1].detail == "₹800/player · 2 days (×1.25, ×1.00)"
 
 
+def test_day_rate_slot_bills_the_day_not_an_eighth_of_it():
+    """A per-day court rate is the price for that date, including a one-hour slot."""
+    facility = _facility(
+        FacilityBookingArchetype.SLOT,
+        pricing=_pricing(
+            unit_label=FacilityRateUnit.DAY,
+            resident_rate=400,
+            guest_flat_fee=500,
+            weekend_multiplier=1.25,
+        ),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(
+            local_date=date(2026, 11, 24),
+            end_local_date=date(2026, 11, 24),
+            start_min=17 * 60 + 55,
+            end_min=18 * 60 + 55,
+        ),
+    )
+    rental = quote.lines[0]
+    assert rental.label == "Badminton Court Rental — Full Day Rate"
+    assert rental.detail == "1 day at ₹400/day"
+    assert rental.amount == 400
+    assert quote.lines[1].amount == 72
+    assert quote.total == 472
+    assert quote.due_now == 472
+
+
+def test_day_rate_ignores_how_many_hours_fall_on_that_day():
+    """Two hours on a per-day court still cost one day rate."""
+    facility = _facility(
+        FacilityBookingArchetype.SLOT,
+        pricing=_pricing(unit_label=FacilityRateUnit.DAY, resident_rate=400, tax_percent=0),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(
+            local_date=date(2026, 11, 24),
+            end_local_date=date(2026, 11, 24),
+            start_min=17 * 60,
+            end_min=19 * 60,
+        ),
+    )
+    assert quote.lines[0].amount == 400
+    assert quote.total == 400
+
+
+def test_day_rate_slot_still_applies_the_weekend_multiplier():
+    """Sunday uses the configured weekend multiplier on the day rate."""
+    facility = _facility(
+        FacilityBookingArchetype.SLOT,
+        pricing=_pricing(unit_label=FacilityRateUnit.DAY, resident_rate=400, tax_percent=0),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(
+            local_date=date(2026, 11, 22),
+            end_local_date=date(2026, 11, 23),
+            start_min=17 * 60,
+            end_min=18 * 60,
+        ),
+    )
+    assert quote.lines[0].amount == 900
+    assert quote.lines[0].detail == "2 days at ₹400/day (×1.25, ×1.00)"
+
+
+def test_explicit_hourly_override_still_bills_a_day_priced_slot_by_the_hour():
+    """An hourly override replaces the day rate for the booked hours."""
+    facility = _facility(
+        FacilityBookingArchetype.SLOT,
+        pricing=_pricing(
+            unit_label=FacilityRateUnit.DAY,
+            resident_rate=400,
+            hourly_rate=80,
+            tax_percent=0,
+        ),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(local_date=date(2026, 11, 24), end_local_date=date(2026, 11, 24)),
+    )
+    assert quote.lines[0].label.endswith("Hourly Rate")
+    assert quote.lines[0].detail == "1 hr at ₹80/hr"
+    assert quote.lines[0].amount == 80
+
+
+def test_partial_day_venue_without_an_hourly_override_uses_the_day_rate():
+    """A day-priced hall is not divided by eight when no hourly price is set."""
+    facility = _facility(
+        FacilityBookingArchetype.DAY_RANGE,
+        pricing=_pricing(unit_label=FacilityRateUnit.DAY, resident_rate=400, tax_percent=0),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(
+            local_date=date(2026, 11, 24),
+            end_local_date=date(2026, 11, 24),
+            start_min=17 * 60,
+            end_min=18 * 60,
+        ),
+    )
+    assert quote.lines[0].detail == "1 day at ₹400/day"
+    assert quote.lines[0].amount == 400
+
+
+def test_month_rate_is_charged_once_for_a_short_booking():
+    """A monthly rate is the booking price, not a slice of an eight-hour day."""
+    facility = _facility(
+        FacilityBookingArchetype.SLOT,
+        pricing=_pricing(unit_label=FacilityRateUnit.MONTH, resident_rate=3000, tax_percent=0),
+    )
+    quote = pricing.quote_booking(
+        facility,
+        _draft(local_date=date(2026, 11, 24), end_local_date=date(2026, 11, 24)),
+    )
+    assert quote.lines[0].label.endswith("Monthly Rate")
+    assert quote.lines[0].detail == "1 month at ₹3,000/month"
+    assert quote.lines[0].amount == 3000
+
+
+def test_month_rate_with_hourly_override_bills_the_booked_hours():
+    """An hourly override on a monthly slot or event replaces the month rate."""
+    pricing_config = _pricing(
+        unit_label=FacilityRateUnit.MONTH,
+        resident_rate=3000,
+        hourly_rate=100,
+        tax_percent=0,
+    )
+    draft = _draft(local_date=date(2026, 11, 24), end_local_date=date(2026, 11, 24))
+    for archetype in (FacilityBookingArchetype.SLOT, FacilityBookingArchetype.DURATION):
+        quote = pricing.quote_booking(_facility(archetype, pricing=pricing_config), draft)
+        assert quote.lines[0].label.endswith("Hourly Rate")
+        assert quote.lines[0].detail == "1 hr at ₹100/hr"
+        assert quote.lines[0].amount == 100
+
+
+def test_month_rate_uses_the_highest_weekend_or_holiday_multiplier():
+    """A month charge takes the highest day multiplier among the dates it covers."""
+    facility = _facility(
+        FacilityBookingArchetype.SLOT,
+        pricing=_pricing(
+            unit_label=FacilityRateUnit.MONTH,
+            resident_rate=3000,
+            tax_percent=0,
+            holidays=[date(2026, 11, 23)],
+        ),
+    )
+    sunday = pricing.quote_booking(
+        facility,
+        _draft(local_date=date(2026, 11, 22), end_local_date=date(2026, 11, 22)),
+    )
+    assert sunday.lines[0].detail == "1 month at ₹3,000/month (×1.25)"
+    assert sunday.lines[0].amount == 3750
+
+    mixed = pricing.quote_booking(
+        facility,
+        _draft(local_date=date(2026, 11, 22), end_local_date=date(2026, 11, 23)),
+    )
+    assert mixed.lines[0].detail == "1 month at ₹3,000/month (×1.50)"
+    assert mixed.lines[0].amount == 4500
+
+
 def test_monthly_partial_day_charges_eight_hour_rate_with_evening_surge():
     """Club House: ₹6,000/month is ₹750/hr, then the evening band, not ₹25/hr."""
     band = TimeBand(

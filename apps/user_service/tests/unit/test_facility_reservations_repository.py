@@ -143,6 +143,7 @@ async def test_get_reservation_decodes_jsonb_and_for_update() -> None:
             "id": RESERVATION_ID,
             "quote": json.dumps({"total": 10}),
             "cancel_info": None,
+            "no_show_info": json.dumps({"fee": 8, "refund": 1}),
         }
     )
     repo = FacilityReservationsRepository(db_connection=conn)
@@ -154,6 +155,7 @@ async def test_get_reservation_decodes_jsonb_and_for_update() -> None:
     )
     assert found is not None
     assert found["quote"] == {"total": 10}
+    assert found["no_show_info"] == {"fee": 8, "refund": 1}
     query, args = conn.fetchrow_calls[0]
     assert "f.photo_paths AS photo_paths" in query
     assert "FOR UPDATE" not in query
