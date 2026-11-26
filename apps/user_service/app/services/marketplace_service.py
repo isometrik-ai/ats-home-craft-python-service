@@ -978,6 +978,7 @@ class MarketplaceService:
                 if str(row["seller_contact_id"]) == str(viewer_contact_id)
                 else None,
                 "isometrik_id": seller_isometrik_id(row),
+                "avatar_url": row.get("seller_photo_url"),
             }
         )
         return card

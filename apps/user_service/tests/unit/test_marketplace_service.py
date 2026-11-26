@@ -541,6 +541,7 @@ async def test_get_listing_detail_includes_seller_isometrik_id():
     data = await svc.get_listing(contact_id="seller-1", listing_id="listing-1")
     assert data["seller_contact_id"] == "seller-1"
     assert data["isometrik_id"] == "6abdf6ad9126be00010e596f"
+    assert data["avatar_url"] is None
     assert data["more_from_seller_count"] == 1
 
 

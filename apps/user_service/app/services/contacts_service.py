@@ -132,6 +132,7 @@ from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
     login_to_isometrik,
+    sync_isometrik_user_profile,
 )
 from libs.shared_utils.logger import get_logger
 from libs.shared_utils.status_codes import CustomStatusCode
@@ -2210,7 +2211,78 @@ class ContactsService:
         }
         if companies_delta is not None:
             update_response["companies_delta"] = companies_delta
+        await self._sync_contact_chat_profile(
+            contact_id=contact_id,
+            previous=current,
+            updated=new_snapshot,
+        )
         return update_response
+
+    async def _sync_contact_chat_profile(
+        self,
+        *,
+        contact_id: str,
+        previous: dict[str, Any],
+        updated: dict[str, Any],
+    ) -> None:
+        """Best-effort update of the contact's Isometrik user after a profile save."""
+        name_changed = previous.get("first_name") != updated.get("first_name") or previous.get(
+            "last_name"
+        ) != updated.get("last_name")
+        photo_changed = previous.get("profile_photo_url") != updated.get("profile_photo_url")
+        if not name_changed and not photo_changed:
+            return
+        user_name = None
+        if name_changed:
+            user_name = (
+                " ".join(
+                    part
+                    for part in (
+                        str(updated.get("first_name") or "").strip(),
+                        str(updated.get("last_name") or "").strip(),
+                    )
+                    if part
+                )
+                or None
+            )
+        image_url = None
+        if photo_changed:
+            cleaned = str(updated.get("profile_photo_url") or "").strip()
+            if not cleaned:
+                image_url = ""
+            elif cleaned.startswith(("http://", "https://")):
+                image_url = cleaned
+            else:
+                base = shared_settings.cloudflare_r2.media_url.rstrip("/")
+                image_url = f"{base}/{cleaned.lstrip('/')}"
+        if user_name is None and image_url is None:
+            return
+        try:
+            organization = await self.org_repo.get_organization_by_id(
+                self.user_context.organization_id
+            )
+            metadata = None
+            if image_url is not None:
+                metadata = {
+                    "user_id": contact_id,
+                    "role": IsometrikRole.CLIENT.value,
+                    "organization_id": str(self.user_context.organization_id),
+                    "avatar_url": image_url,
+                }
+            await sync_isometrik_user_profile(
+                user_identifier=contact_id,
+                isometrik_credentials=get_isometrik_data_from_settings(
+                    parse_json_field((organization or {}).get("settings"))
+                ),
+                user_name=user_name,
+                user_profile_image_url=image_url,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning(
+                "contact_isometrik_profile_sync_failed",
+                extra={"contact_id": contact_id},
+            )
 
     async def apply_companies_update_delta(
         self,

@@ -23,6 +23,7 @@ from libs.shared_utils.isometrik_service import (
     create_isometrik_user,
     get_isometrik_data_from_settings,
     login_to_isometrik,
+    sync_isometrik_user_profile,
     update_isometrik_user,
 )
 
@@ -318,11 +319,91 @@ async def test_update_isometrik_user(monkeypatch) -> None:
         creds,
         user_name="Jane Doe",
         user_profile_image_url="https://example.com/a.jpg",
+        metadata={"avatar_url": "https://example.com/a.jpg"},
     )
 
     assert result == {"updated": True}
     assert calls["json"]["userName"] == "Jane Doe"
+    assert calls["json"]["userProfileImageUrl"] == "https://example.com/a.jpg"
+    assert calls["json"]["metaData"]["avatar_url"] == "https://example.com/a.jpg"
     assert calls["headers"]["userToken"] == "tok"
+
+
+class _DummyLoginAndPatchClient:
+    """Records one login POST and one profile PATCH."""
+
+    def __init__(self, calls: dict) -> None:
+        self._calls = calls
+
+    async def __aenter__(self) -> "_DummyLoginAndPatchClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+    async def post(self, url: str, json: dict, headers: dict) -> _DummyResponse:
+        """Record the authenticate call."""
+        self._calls.setdefault("posts", []).append({"url": url, "json": json, "headers": headers})
+        return _DummyResponse({"userToken": "tok-1"})
+
+    async def patch(self, url: str, json: dict, headers: dict) -> _DummyResponse:
+        """Record the profile update."""
+        self._calls.setdefault("patches", []).append({"url": url, "json": json, "headers": headers})
+        return _DummyResponse({"updated": True})
+
+
+@pytest.mark.asyncio
+async def test_sync_isometrik_user_profile_logs_in_once(monkeypatch) -> None:
+    """A profile sync logs in with one identifier and patches that user."""
+    calls: dict = {}
+    monkeypatch.setattr(isometrik_service, "shared_settings", _DummySharedSettings())
+    monkeypatch.setattr(
+        isometrik_service.httpx,
+        "AsyncClient",
+        lambda *args, **kwargs: _DummyLoginAndPatchClient(calls),
+    )
+
+    await sync_isometrik_user_profile(
+        user_identifier="contact-1",
+        isometrik_credentials={"userSecret": "us", "licenseKey": "lk", "appSecret": "as"},
+        user_name="Rahul S",
+        user_profile_image_url="https://cdn.example.com/contacts/rahul.jpg",
+        metadata={
+            "user_id": "contact-1",
+            "role": "client",
+            "organization_id": "org-1",
+            "avatar_url": "https://cdn.example.com/contacts/rahul.jpg",
+        },
+    )
+
+    assert len(calls["posts"]) == 1
+    assert calls["posts"][0]["json"]["userIdentifier"] == "contact-1"
+    assert len(calls["patches"]) == 1
+    patch = calls["patches"][0]
+    assert patch["headers"]["userToken"] == "tok-1"
+    assert patch["json"]["userName"] == "Rahul S"
+    assert patch["json"]["userProfileImageUrl"] == "https://cdn.example.com/contacts/rahul.jpg"
+    assert patch["json"]["metaData"]["user_id"] == "contact-1"
+    assert patch["json"]["metaData"]["avatar_url"] == "https://cdn.example.com/contacts/rahul.jpg"
+    assert patch["json"]["metaData"]["role"] == "client"
+    assert patch["json"]["metaData"]["organization_id"] == "org-1"
+
+
+@pytest.mark.asyncio
+async def test_sync_isometrik_user_profile_swallows_login_failure(monkeypatch) -> None:
+    """A failed Isometrik login does not raise."""
+
+    async def _fail_login(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("isometrik down")
+
+    monkeypatch.setattr(isometrik_service, "login_to_isometrik", _fail_login)
+
+    await sync_isometrik_user_profile(
+        user_identifier="contact-1",
+        isometrik_credentials={"userSecret": "us", "licenseKey": "lk", "appSecret": "as"},
+        user_name="Rahul S",
+    )
 
 
 def test_create_isometrik_token_missing_config(monkeypatch) -> None:
