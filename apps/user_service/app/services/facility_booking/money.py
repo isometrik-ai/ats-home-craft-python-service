@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 
 DEFAULT_CURRENCY_SYMBOL = "₹"
 MAX_DATE_SPAN_DAYS = 400
+DAYS_PER_MONTH = 30
 
 
 def ts_round(value: float) -> int:
@@ -76,6 +77,13 @@ def span_exceeds_cap(start: date, end: date) -> bool:
     if end < start:
         return False
     return (end - start).days + 1 > MAX_DATE_SPAN_DAYS
+
+
+def started_months(day_count: int) -> int:
+    """How many 30-day blocks ``day_count`` dates cover, at least one."""
+    if day_count < 1:
+        return 1
+    return math.ceil(day_count / DAYS_PER_MONTH)
 
 
 def local_start(day: date, start_min: int) -> datetime:
