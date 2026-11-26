@@ -16,7 +16,7 @@ from apps.user_service.app.schemas.enums import (
     WEEKLY_CAP_COUNTABLE_STATUSES,
 )
 
-RESERVATION_JSONB: frozenset[str] = frozenset({"quote", "cancel_info"})
+RESERVATION_JSONB: frozenset[str] = frozenset({"quote", "cancel_info", "no_show_info"})
 _EVENT_JSONB: frozenset[str] = frozenset({"payload"})
 
 _RESERVATION_CASTS: dict[str, str] = {

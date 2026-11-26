@@ -299,6 +299,14 @@ class CancelInfo(BaseModel):
     by: str | None = None
 
 
+class NoShowInfo(BaseModel):
+    """No-show fee and net refund snapshot."""
+
+    fee: int
+    refund: int
+    at: datetime
+
+
 class ReservationParticipantResponse(BaseModel):
     """Reservation participant response."""
 
@@ -345,6 +353,7 @@ class FacilityReservationResponse(BaseModel):
     rescheduled_to_id: str | None = None
     reject_reason: str | None = None
     cancel_info: CancelInfo | None = None
+    no_show_info: NoShowInfo | None = None
     notes: str | None = None
     booked_by_actor: FacilityReservationActorType
     reschedule_cutoff_hours: int

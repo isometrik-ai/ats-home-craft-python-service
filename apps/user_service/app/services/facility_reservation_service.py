@@ -300,6 +300,50 @@ class FacilityReservationService:
             staff_override=True,
         )
 
+    @staticmethod
+    def _needs_no_show_info(row: dict[str, Any]) -> bool:
+        """True when status is no-show but the snapshot was never persisted."""
+        return str(row.get("status")) == FacilityReservationStatus.NO_SHOW.value and not row.get(
+            "no_show_info"
+        )
+
+    def _no_show_info_from_quote(self, row: dict[str, Any], percent: int) -> dict[str, Any]:
+        """Best-effort fee/refund when ledger posts are missing."""
+        quote = row.get("quote") or {}
+        paid = int(quote.get("total") or 0)
+        forfeit = ts_round((paid * percent) / 100)
+        return {
+            "fee": forfeit,
+            "refund": max(paid - forfeit, 0),
+            "at": row.get("updated_at") or row.get("created_at"),
+        }
+
+    async def _attach_missing_no_show_info(
+        self,
+        *,
+        project_id: str,
+        rows: list[dict[str, Any]],
+        snapshots: dict[str, Any],
+    ) -> None:
+        """Fill no_show_info on historical no-show rows from ledger (or quote)."""
+        missing = [row for row in rows if self._needs_no_show_info(row)]
+        if not missing:
+            return
+        amounts = await self.ledger.no_show_amounts_by_reservation(
+            project_id=project_id,
+            reservation_ids=[str(row["id"]) for row in missing],
+        )
+        for row in missing:
+            info = amounts.get(str(row["id"]))
+            if info:
+                if info.get("at") is None:
+                    info = {**info, "at": row.get("updated_at") or row.get("created_at")}
+                row["no_show_info"] = info
+                continue
+            snapshot = snapshots.get(str(row["facility_id"]))
+            percent = int(snapshot.policies.no_show_fee_percent or 0) if snapshot else 0
+            row["no_show_info"] = self._no_show_info_from_quote(row, percent)
+
     def _serialize_reservation(
         self,
         row: dict[str, Any],
@@ -342,6 +386,7 @@ class FacilityReservationService:
             else None,
             reject_reason=row.get("reject_reason"),
             cancel_info=row.get("cancel_info"),
+            no_show_info=row.get("no_show_info"),
             notes=row.get("notes"),
             booked_by_actor=row.get("booked_by_actor") or _RESIDENT_ACTOR,
             reschedule_cutoff_hours=snapshot.policies.reschedule_cutoff_hours,
@@ -390,6 +435,11 @@ class FacilityReservationService:
             project_id=project_id, facility_id=str(row["facility_id"])
         )
         now = await self.config_service.local_now(project_id)
+        await self._attach_missing_no_show_info(
+            project_id=project_id,
+            rows=[row],
+            snapshots={str(row["facility_id"]): snapshot},
+        )
         return self._serialize_reservation(
             row,
             parts.get(reservation_id, []),
@@ -445,6 +495,11 @@ class FacilityReservationService:
                 snapshots[facility_id_row], _ = await self.availability.load_snapshot(
                     project_id=project_id, facility_id=facility_id_row
                 )
+        await self._attach_missing_no_show_info(
+            project_id=project_id, rows=rows, snapshots=snapshots
+        )
+        for row in rows:
+            facility_id_row = str(row["facility_id"])
             items.append(
                 self._serialize_reservation(
                     row,
@@ -671,6 +726,24 @@ class FacilityReservationService:
     async def mark_no_show(self, *, project_id: str, reservation_id: str) -> dict[str, Any]:
         """Mark a reservation as no-show and apply configured forfeit/refund."""
         paid = await self.ledger.net_paid_for(project_id=project_id, reservation_id=reservation_id)
+        row = await self.reservations_repo.get_reservation(
+            organization_id=self._org_id,
+            project_id=project_id,
+            reservation_id=reservation_id,
+            for_update=True,
+        )
+        if not row:
+            raise NotFoundException(
+                message_key="facility_booking.errors.reservation_not_found",
+                custom_code=CustomStatusCode.NOT_FOUND,
+            )
+        snapshot, _ = await self.availability.load_snapshot(
+            project_id=project_id, facility_id=str(row["facility_id"])
+        )
+        now = datetime.now(timezone.utc)
+        percent = int(snapshot.policies.no_show_fee_percent or 0)
+        forfeit = ts_round((paid * percent) / 100)
+        refund_net = max(paid - forfeit, 0)
         result = await self._transition(
             project_id=project_id,
             reservation_id=reservation_id,
@@ -678,9 +751,14 @@ class FacilityReservationService:
             actor_type=_STAFF_ACTOR,
             message="Marked as no-show.",
             event_type=FacilityReservationEventType.NO_SHOW.value,
+            extra={
+                "no_show_info": {
+                    "fee": forfeit,
+                    "refund": refund_net,
+                    "at": now.isoformat(),
+                }
+            },
         )
-        percent = int(result.get("no_show_fee_percent") or 0)
-        forfeit = ts_round((paid * percent) / 100)
         label = result.get("facility_name") or "Facility"
         host_id = str(result["host_contact_id"])
         if paid > 0:

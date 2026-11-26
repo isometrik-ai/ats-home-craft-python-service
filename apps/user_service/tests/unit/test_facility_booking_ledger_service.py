@@ -50,6 +50,20 @@ async def test_net_paid_sums_charge_types_only():
 
 
 @pytest.mark.asyncio
+async def test_no_show_amounts_by_reservation_delegates():
+    svc = _service()
+    expected = {"r1": {"fee": 8, "refund": 1, "at": datetime(2026, 10, 13, tzinfo=timezone.utc)}}
+    svc.repo.no_show_amounts_by_reservation = AsyncMock(return_value=expected)
+
+    amounts = await svc.no_show_amounts_by_reservation(
+        project_id=PROJECT_ID, reservation_ids=["r1"]
+    )
+
+    assert amounts == expected
+    svc.repo.no_show_amounts_by_reservation.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_raise_charge_posts_manual_charge():
     svc = _service()
     svc.repo.insert = AsyncMock(
