@@ -386,6 +386,9 @@ async def test_cancel_quote_and_resident_cancel():
 
     quote = await svc.cancel_quote(project_id=PROJECT_ID, reservation_id=RESERVATION_ID)
     assert "fee" in quote
+    assert quote["hours_before"] == "2026-09-24T10:00:00"
+    assert "quoted_at" not in quote
+    assert "slot_starts_at" not in quote
 
     _mock_get_reservation_flow(svc, row)
     svc.reservations_repo.update_reservation = AsyncMock(return_value=True)
