@@ -123,7 +123,7 @@ async def get_users_list(
     ),
     summary="Check staff user email and phone availability",
     responses={
-        http_status.HTTP_200_OK: {"description": "Contact availability checked"},
+        http_status.HTTP_200_OK: {"description": "Staff user availability checked"},
         http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
         http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
         http_status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Validation error"},
