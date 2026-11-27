@@ -411,8 +411,12 @@ def weekly_usage(
 
 
 def cap_reached(facility: FacilitySnapshot, usage: int) -> bool:
-    """True when ``usage`` meets or exceeds the facility weekly cap."""
-    return facility.policies.weekly_cap > 0 and usage >= facility.policies.weekly_cap
+    """True when ``usage`` exceeds the facility weekly cap.
+
+    Validation passes a pool that already includes the draft booking, so the
+    cap is only exceeded when usage is strictly greater than the allowed count.
+    """
+    return facility.policies.weekly_cap > 0 and usage > facility.policies.weekly_cap
 
 
 def _draft_as_reservation(draft: BookingDraft) -> EngineReservation:

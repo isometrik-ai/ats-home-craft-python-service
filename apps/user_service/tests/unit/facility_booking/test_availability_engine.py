@@ -177,6 +177,47 @@ def test_room_availability_booked_blocked_and_available():
     assert statuses["room-2"] == "blocked"
 
 
+def test_validate_draft_allows_second_booking_when_weekly_cap_is_two():
+    """Weekly cap of 2 must allow the second booking in the same week."""
+    defaults = default_booking_config(FacilityBookingArchetype.SLOT)
+    facility = _slot_facility(
+        policies=defaults.policies.model_copy(update={"weekly_cap": 2, "advance_booking_days": 14}),
+    )
+    now = datetime(2026, 11, 20, 9, 0, 0)
+    existing = EngineReservation(
+        id="res-1",
+        facility_id="fac-1",
+        unit_id="unit-1",
+        local_date=date(2026, 11, 23),
+        end_local_date=date(2026, 11, 23),
+        start_min=14 * 60 + 40,
+        end_min=15 * 60 + 40,
+        host_contact_id="host-1",
+        status="confirmed",
+        participants=[],
+        host_name="Host",
+    )
+    ctx = availability.AvailabilityContext(
+        facility=facility,
+        active=[existing],
+        now=now,
+        weekly_pool=[existing],
+    )
+    draft = BookingDraft(
+        facility_id="fac-1",
+        unit_id="unit-1",
+        local_date=date(2026, 11, 23),
+        end_local_date=date(2026, 11, 23),
+        start_min=20 * 60 + 5,
+        end_min=21 * 60 + 5,
+        host_contact_id="host-1",
+        participants=[],
+    )
+    result = availability.validate_draft(ctx, draft)
+    codes = {issue.code for issue in result.errors}
+    assert "weekly_cap_reached" not in codes
+
+
 def test_validate_draft_slot_player_limit_and_weekly_cap():
     """Slot validation enforces player cap and weekly usage cap."""
     defaults = default_booking_config(FacilityBookingArchetype.SLOT)
