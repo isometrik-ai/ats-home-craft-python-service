@@ -14,6 +14,7 @@ from apps.user_service.app.dependencies.db import db_conn
 from apps.user_service.app.dependencies.supabase import supabase_service
 from apps.user_service.app.schemas.users import (
     PatchUserRequest,
+    StaffAvailabilityRequest,
     UpdateUserProfileRequest,
     UserListResponse,
 )
@@ -102,6 +103,59 @@ async def get_users_list(
         status_code=http_status.HTTP_200_OK,
         page=page,
         page_size=page_size,
+    )
+
+
+@handle_api_exceptions("check staff user availability")
+@router.post(
+    "/staff-availability",
+    response_model=None,
+    status_code=http_status.HTTP_200_OK,
+    description=(
+        "Check whether a staff user's email, phone number, or both already exist. "
+        "Send email alone, phone_number with phone_isd_code alone, or both. "
+        "Each supplied value is checked in auth.users, then organization_members "
+        "for organization_id. Resident contacts are not checked. "
+        "available_for_organization is true when the staff user can be added here, "
+        "including an auth user who is not staff in this organization. "
+        "conflict is email_already_member, phone_already_member, "
+        "email_and_phone_already_member, or email_phone_auth_mismatch."
+    ),
+    summary="Check staff user email and phone availability",
+    responses={
+        http_status.HTTP_200_OK: {"description": "Staff user availability checked"},
+        http_status.HTTP_400_BAD_REQUEST: {"description": "Bad request"},
+        http_status.HTTP_403_FORBIDDEN: {"description": "Forbidden"},
+        http_status.HTTP_422_UNPROCESSABLE_ENTITY: {"description": "Validation error"},
+        http_status.HTTP_401_UNAUTHORIZED: {"description": "Unauthorized"},
+    },
+)
+@limiter.limit("100/minute")
+async def check_staff_availability(
+    request: Request,
+    body: StaffAvailabilityRequest = Body(...),
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+):
+    """Check a staff user's email, phone, or both in the caller's organization."""
+    user_context = await check_permissions(
+        current_user,
+        db_connection,
+        SETTINGS_USERS_MANAGE,
+    )
+    user_service = UserService(user_context=user_context, db_connection=db_connection)
+    result = await user_service.check_staff_availability(
+        organization_id=body.organization_id,
+        email=str(body.email) if body.email else None,
+        phone_number=body.phone_number,
+        phone_isd_code=body.phone_isd_code,
+    )
+    return success_response(
+        request=request,
+        message_key="users.success.staff_availability_checked",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data=result.model_dump(mode="json"),
     )
 
 

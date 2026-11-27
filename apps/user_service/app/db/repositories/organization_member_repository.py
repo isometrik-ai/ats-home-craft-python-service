@@ -21,6 +21,15 @@ from libs.shared_utils.logger import get_logger
 
 logger = get_logger("organization_member_repository")
 
+
+def _active_member_user_id(row: Any) -> tuple[bool, str | None]:
+    """Return whether a non-deleted membership row exists and its auth user id."""
+    if not row:
+        return False, None
+    member_user_id = row.get("user_id")
+    return True, str(member_user_id) if member_user_id else None
+
+
 ORGANIZATION_MEMBER_JSONB_COLUMNS: frozenset[str] = frozenset({"custom_fields"})
 
 ORGANIZATION_MEMBER_TYPED_UPDATE_FIELDS: dict[str, str] = {
@@ -591,6 +600,65 @@ class OrganizationMemberRepository:
         row = await self.db_connection.fetchrow(query, *params)
 
         return row is not None
+
+    async def find_active_member_for_email(
+        self,
+        organization_id: str,
+        email: str,
+        auth_user_id: str | None = None,
+    ) -> tuple[bool, str | None]:
+        """Find a non-deleted member by email or by the auth user who owns that email."""
+        params: list[Any] = [
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+            email,
+        ]
+        user_match = ""
+        if auth_user_id:
+            user_match = " OR user_id = $4"
+            params.append(auth_user_id)
+        query = f"""
+            SELECT user_id
+            FROM organization_members
+            WHERE organization_id = $1
+              AND status != $2
+              AND (lower(email) = lower($3){user_match})
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, *params)
+        return _active_member_user_id(row)
+
+    async def find_active_member_for_phone(
+        self,
+        organization_id: str,
+        phone_digits: str,
+        auth_user_id: str | None = None,
+    ) -> tuple[bool, str | None]:
+        """Find a non-deleted member by phone digits or by the auth user who owns that phone."""
+        params: list[Any] = [
+            organization_id,
+            OrganizationMemberStatus.DELETED.value,
+            phone_digits,
+        ]
+        user_match = ""
+        if auth_user_id:
+            user_match = " OR user_id = $4"
+            params.append(auth_user_id)
+        query = f"""
+            SELECT user_id
+            FROM organization_members
+            WHERE organization_id = $1
+              AND status != $2
+              AND (
+                regexp_replace(
+                    COALESCE(phone_isd_code, '') || COALESCE(phone_number, ''),
+                    '\\D', '', 'g'
+                ) = $3{user_match}
+              )
+            LIMIT 1
+        """
+        row = await self.db_connection.fetchrow(query, *params)
+        return _active_member_user_id(row)
 
     async def get_users_details_list(
         self,

@@ -13,6 +13,7 @@ from apps.user_service.app.schemas.enums import OrganizationMemberStatus
 from apps.user_service.app.schemas.users import (
     PatchUserRequest,
     PermissionInfo,
+    StaffAvailabilityRequest,
     UpdateUserProfileRequest,
 )
 from apps.user_service.app.services.user_service import UserService
@@ -20,6 +21,7 @@ from apps.user_service.app.utils.common_utils import UserContext
 from libs.shared_utils.http_exceptions import (
     BadRequestException,
     ConflictException,
+    ForbiddenException,
     NotFoundException,
     ValidationException,
 )
@@ -834,3 +836,298 @@ def test_build_verification_metadata_enabled():
     body = UpdateUserProfileRequest(two_fa_enabled=True, verification_method="PHONE")
     metadata = svc._build_verification_metadata(body)
     assert metadata["verification_preference"]["type"] == "PHONE"
+
+
+class _AvailabilityAuth:
+    """Auth lookup fake for staff user availability."""
+
+    def __init__(
+        self,
+        *,
+        email_user_id: str | None = None,
+        phone_user_id: str | None = None,
+    ) -> None:
+        self.email_user_id = email_user_id
+        self.phone_user_id = phone_user_id
+        self.emails: list[str] = []
+        self.phones: list[str] = []
+
+    async def find_auth_user_id_by_email(self, email: str) -> str | None:
+        """Return the configured email owner."""
+        self.emails.append(email)
+        return self.email_user_id
+
+    async def find_auth_user_id_by_phone_digits(self, phone_digits: str) -> str | None:
+        """Return the configured phone owner."""
+        self.phones.append(phone_digits)
+        return self.phone_user_id
+
+
+class _AvailabilityMembers:
+    """Organization member lookup fake for staff user availability."""
+
+    def __init__(
+        self,
+        *,
+        email_member: tuple[bool, str | None] = (False, None),
+        phone_member: tuple[bool, str | None] = (False, None),
+    ) -> None:
+        self.email_member = email_member
+        self.phone_member = phone_member
+
+    async def find_active_member_for_email(
+        self,
+        organization_id: str,
+        email: str,
+        auth_user_id: str | None = None,
+    ) -> tuple[bool, str | None]:
+        """Return the configured email membership."""
+        del organization_id, email, auth_user_id
+        return self.email_member
+
+    async def find_active_member_for_phone(
+        self,
+        organization_id: str,
+        phone_digits: str,
+        auth_user_id: str | None = None,
+    ) -> tuple[bool, str | None]:
+        """Return the configured phone membership."""
+        del organization_id, phone_digits, auth_user_id
+        return self.phone_member
+
+
+def _availability_service(
+    *,
+    auth: _AvailabilityAuth | None = None,
+    members: _AvailabilityMembers | None = None,
+) -> UserService:
+    """UserService wired to staff-availability fakes."""
+    svc = _service()
+    svc.user_repository = auth or _AvailabilityAuth()
+    svc.organization_member_repository = members or _AvailabilityMembers()
+    return svc
+
+
+def test_staff_availability_request_accepts_each_case():
+    """Email only, phone only, and both together are valid request bodies."""
+    StaffAvailabilityRequest(organization_id=ORG_ID, email="a@b.com")
+    StaffAvailabilityRequest(
+        organization_id=ORG_ID,
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+    StaffAvailabilityRequest(
+        organization_id=ORG_ID,
+        email="a@b.com",
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+    with pytest.raises(ValidationError):
+        StaffAvailabilityRequest(organization_id=ORG_ID)
+    with pytest.raises(ValidationError):
+        StaffAvailabilityRequest(organization_id=ORG_ID, phone_number="9876543210")
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_email_only_is_free():
+    """An unknown email is available and does not check phone."""
+    auth = _AvailabilityAuth()
+    svc = _availability_service(auth=auth)
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        email="User@Example.com",
+    )
+
+    assert auth.emails == ["user@example.com"]
+    assert result.available_for_organization is True
+    assert result.conflict is None
+    assert result.email.checked is True
+    assert result.email.exists_in_auth is False
+    assert result.email.exists_in_organization is False
+    assert result.phone.checked is False
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_email_exists_in_auth_only():
+    """An auth user who is not a member of this organization is available."""
+    svc = _availability_service(auth=_AvailabilityAuth(email_user_id=MEMBER_ID))
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        email="member@example.com",
+    )
+
+    assert result.available_for_organization is True
+    assert result.email.exists_in_auth is True
+    assert result.email.auth_user_id == MEMBER_ID
+    assert result.email.exists_in_organization is False
+    assert result.phone.checked is False
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_email_only_already_member():
+    """Email already mapped to this organization is unavailable."""
+    svc = _availability_service(
+        auth=_AvailabilityAuth(email_user_id=MEMBER_ID),
+        members=_AvailabilityMembers(email_member=(True, MEMBER_ID)),
+    )
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        email="member@example.com",
+    )
+
+    assert result.available_for_organization is False
+    assert result.conflict == "email_already_member"
+    assert result.email.exists_in_organization is True
+    assert result.phone.checked is False
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_phone_only_is_free():
+    """An unknown phone is available and does not check email."""
+    auth = _AvailabilityAuth()
+    svc = _availability_service(auth=auth)
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        phone_number="98765 43210",
+        phone_isd_code="+91",
+    )
+
+    assert auth.phones == ["919876543210"]
+    assert result.available_for_organization is True
+    assert result.phone.checked is True
+    assert result.phone.exists_in_auth is False
+    assert result.email.checked is False
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_phone_only_already_member():
+    """Phone already mapped to this organization is unavailable."""
+    svc = _availability_service(
+        auth=_AvailabilityAuth(phone_user_id=MEMBER_ID),
+        members=_AvailabilityMembers(phone_member=(True, MEMBER_ID)),
+    )
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+
+    assert result.available_for_organization is False
+    assert result.conflict == "phone_already_member"
+    assert result.phone.exists_in_organization is True
+    assert result.email.checked is False
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_both_same_user_not_member():
+    """Email and phone owned by the same auth user can join this organization."""
+    svc = _availability_service(
+        auth=_AvailabilityAuth(email_user_id=MEMBER_ID, phone_user_id=MEMBER_ID),
+    )
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        email="member@example.com",
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+
+    assert result.available_for_organization is True
+    assert result.conflict is None
+    assert result.email.checked is True
+    assert result.phone.checked is True
+    assert result.email.auth_user_id == MEMBER_ID
+    assert result.phone.auth_user_id == MEMBER_ID
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_both_already_member():
+    """The same user already in the organization blocks both channels."""
+    svc = _availability_service(
+        auth=_AvailabilityAuth(email_user_id=MEMBER_ID, phone_user_id=MEMBER_ID),
+        members=_AvailabilityMembers(
+            email_member=(True, MEMBER_ID),
+            phone_member=(True, MEMBER_ID),
+        ),
+    )
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        email="member@example.com",
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+
+    assert result.available_for_organization is False
+    assert result.conflict == "email_and_phone_already_member"
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_both_different_users():
+    """Email and phone that belong to different users are a mismatch."""
+    other_user_id = "990e8400-e29b-41d4-a716-446655440099"
+    svc = _availability_service(
+        auth=_AvailabilityAuth(email_user_id=MEMBER_ID, phone_user_id=other_user_id),
+    )
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        email="member@example.com",
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+
+    assert result.available_for_organization is False
+    assert result.conflict == "email_phone_auth_mismatch"
+    assert result.email.exists_in_organization is False
+    assert result.phone.exists_in_organization is False
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_email_taken_phone_free():
+    """A combined check still reports the free phone when only the email is taken."""
+    svc = _availability_service(
+        auth=_AvailabilityAuth(email_user_id=MEMBER_ID),
+        members=_AvailabilityMembers(email_member=(True, MEMBER_ID)),
+    )
+
+    result = await svc.check_staff_availability(
+        organization_id=ORG_ID,
+        email="member@example.com",
+        phone_number="9876543210",
+        phone_isd_code="+91",
+    )
+
+    assert result.conflict == "email_already_member"
+    assert result.email.exists_in_organization is True
+    assert result.phone.checked is True
+    assert result.phone.exists_in_organization is False
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_rejects_other_organization():
+    """Callers can check only their own organization."""
+    svc = _availability_service()
+    with pytest.raises(ForbiddenException):
+        await svc.check_staff_availability(
+            organization_id="660e8400-e29b-41d4-a716-4466554400ab",
+            email="member@example.com",
+        )
+
+
+@pytest.mark.asyncio
+async def test_staff_availability_rejects_phone_without_digits():
+    """A phone value with no digits is invalid."""
+    svc = _availability_service()
+    with pytest.raises(ValidationException) as exc:
+        await svc.check_staff_availability(
+            organization_id=ORG_ID,
+            phone_number="---",
+            phone_isd_code="+",
+        )
+    assert exc.value.message_key == "users.errors.invalid_phone_number"

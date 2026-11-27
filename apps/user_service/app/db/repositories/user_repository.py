@@ -130,6 +130,28 @@ class UserRepository:
 
         return None
 
+    async def find_auth_user_id_by_email(self, email: str) -> str | None:
+        """Return auth.users.id for a case-insensitive email match."""
+        query = """
+            SELECT id
+            FROM auth.users
+            WHERE lower(email) = lower($1)
+            LIMIT 1
+        """
+        user_id = await self.db_connection.fetchval(query, email)
+        return str(user_id) if user_id else None
+
+    async def find_auth_user_id_by_phone_digits(self, phone_digits: str) -> str | None:
+        """Return auth.users.id when the stored phone has the same digits."""
+        query = """
+            SELECT id
+            FROM auth.users
+            WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = $1
+            LIMIT 1
+        """
+        user_id = await self.db_connection.fetchval(query, phone_digits)
+        return str(user_id) if user_id else None
+
     async def get_auth_user_by_phone(self, phone: str) -> dict | None:
         """Get a user from the 'auth.users' table by phone.
 

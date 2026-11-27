@@ -307,11 +307,13 @@
       "cannot_change_organization_creator_role": "Only the organization creator can change this member's role.",
       "phone_number_already_exists": "A user with this phone number already exists.",
       "email_already_exists": "A user with this email already exists.",
+      "invalid_phone_number": "Enter a valid phone number.",
       "push_device_registration_failed": "Push device registration failed. Please try again.",
       "invalid_device_id": "Device identifier is required."
     },
     "success": {
       "member_patched": "Member updated successfully",
+      "staff_availability_checked": "Staff user availability checked successfully.",
       "user_banned": "User banned successfully",
       "user_unbanned": "User unbanned successfully",
       "user_profile_updated": "User profile updated successfully",

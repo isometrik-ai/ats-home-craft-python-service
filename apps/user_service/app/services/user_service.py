@@ -4,6 +4,7 @@ This service handles all business logic related to users, including
 validation, formatting, and orchestration of user operations.
 """
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -32,6 +33,8 @@ from apps.user_service.app.schemas.users import (
     PermissionInfo,
     RoleInfo,
     RoleInfoWithDescription,
+    StaffAvailabilityData,
+    StaffChannelAvailability,
     UpdateUserProfileRequest,
     UserListItem,
     UserProfileData,
@@ -44,6 +47,7 @@ from apps.user_service.app.utils.common_utils import (
     coerce_json_list,
     format_iso_datetime,
     parse_json_field,
+    validate_uuid_format,
 )
 from apps.user_service.app.utils.email_utils import (
     send_org_member_banned_email,
@@ -200,6 +204,46 @@ def _audit_payload_for_member_role_change(
     }
 
 
+def _staff_channel(
+    auth_user_id: str | None,
+    member_found: bool,
+    *,
+    checked: bool = True,
+) -> StaffChannelAvailability:
+    """Build one staff email or phone result. An unchecked value stays empty."""
+    return StaffChannelAvailability(
+        checked=checked,
+        exists_in_auth=auth_user_id is not None,
+        auth_user_id=auth_user_id,
+        exists_in_organization=member_found,
+    )
+
+
+def _staff_conflict(
+    email: StaffChannelAvailability,
+    phone: StaffChannelAvailability,
+    email_owner: str | None,
+    phone_owner: str | None,
+) -> str | None:
+    """Membership blocks a staff user. Different auth owners are a mismatch."""
+    owners_differ = (
+        email.checked
+        and phone.checked
+        and email_owner is not None
+        and phone_owner is not None
+        and email_owner != phone_owner
+    )
+    if owners_differ:
+        return "email_phone_auth_mismatch"
+    if email.exists_in_organization and phone.exists_in_organization:
+        return "email_and_phone_already_member"
+    if email.exists_in_organization:
+        return "email_already_member"
+    if phone.exists_in_organization:
+        return "phone_already_member"
+    return None
+
+
 class UserService:  # pylint: disable=too-many-public-methods
     """Service for user business logic.
 
@@ -227,6 +271,7 @@ class UserService:  # pylint: disable=too-many-public-methods
         )
         self.organization_repository = OrganizationRepository(db_connection=db_connection)
         self.role_repository = RoleRepository(db_connection=db_connection)
+        self.user_repository = UserRepository(db_connection=db_connection)
         self.supabase_client = sb_client
 
     async def get_user_profile_by_id(
@@ -643,6 +688,83 @@ class UserService:  # pylint: disable=too-many-public-methods
             organization_id=organization_id,
             user_id=user_id,
         )
+
+    async def check_staff_availability(
+        self,
+        *,
+        organization_id: str,
+        email: str | None = None,
+        phone_number: str | None = None,
+        phone_isd_code: str | None = None,
+    ) -> StaffAvailabilityData:
+        """Check a staff email, phone, or both against auth.users and organization_members."""
+        self._require_staff_organization(organization_id)
+        email_channel, email_owner = await self._staff_email_channel(organization_id, email)
+        phone_channel, phone_owner = await self._staff_phone_channel(
+            organization_id, phone_number, phone_isd_code
+        )
+        conflict = _staff_conflict(email_channel, phone_channel, email_owner, phone_owner)
+        return StaffAvailabilityData(
+            organization_id=organization_id,
+            email=email_channel,
+            phone=phone_channel,
+            available_for_organization=conflict is None,
+            conflict=conflict,
+        )
+
+    def _require_staff_organization(self, organization_id: str) -> None:
+        """Allow the check only for the caller's organization."""
+        if not self.user_context.organization_id:
+            raise ValidationException(
+                message_key="organizations.errors.user_not_a_member_of_any_organization",
+                custom_code=CustomStatusCode.INVALID_DATA,
+            )
+        if str(organization_id) != str(self.user_context.organization_id):
+            raise ForbiddenException(
+                message_key="errors.forbidden",
+                custom_code=CustomStatusCode.FORBIDDEN,
+            )
+        validate_uuid_format(organization_id, "organization ID")
+
+    async def _staff_email_channel(
+        self, organization_id: str, email: str | None
+    ) -> tuple[StaffChannelAvailability, str | None]:
+        """Look up one staff email in auth.users, then in organization_members."""
+        if not email:
+            return _staff_channel(None, False, checked=False), None
+        normalized = email.strip().lower()
+        auth_user_id = await self.user_repository.find_auth_user_id_by_email(normalized)
+        (
+            found,
+            member_user_id,
+        ) = await self.organization_member_repository.find_active_member_for_email(
+            organization_id, normalized, auth_user_id
+        )
+        return _staff_channel(auth_user_id, found), member_user_id or auth_user_id
+
+    async def _staff_phone_channel(
+        self,
+        organization_id: str,
+        phone_number: str | None,
+        phone_isd_code: str | None,
+    ) -> tuple[StaffChannelAvailability, str | None]:
+        """Look up one staff phone in auth.users, then in organization_members."""
+        if not phone_number or not phone_isd_code:
+            return _staff_channel(None, False, checked=False), None
+        phone_digits = re.sub(r"\D", "", f"{phone_isd_code}{phone_number}")
+        if not phone_digits:
+            raise ValidationException(
+                message_key="users.errors.invalid_phone_number",
+                custom_code=CustomStatusCode.VALIDATION_ERROR,
+            )
+        auth_user_id = await self.user_repository.find_auth_user_id_by_phone_digits(phone_digits)
+        (
+            found,
+            member_user_id,
+        ) = await self.organization_member_repository.find_active_member_for_phone(
+            organization_id, phone_digits, auth_user_id
+        )
+        return _staff_channel(auth_user_id, found), member_user_id or auth_user_id
 
     async def get_users_list(
         self,
