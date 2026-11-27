@@ -8,7 +8,17 @@ Resource-specific endpoints targeting the split tables (`companies`, `contacts`,
 from typing import Any
 
 import asyncpg
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, Path, Query, Request
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    File,
+    Path,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi import status as http_status
 from supabase import AsyncClient
 
@@ -38,6 +48,11 @@ from apps.user_service.app.services.companies_service import CompaniesService
 from apps.user_service.app.services.event_service import EventService
 from apps.user_service.app.services.typesense_index_service import (
     delete_company_background,
+    index_companies_background,
+    index_contacts_background,
+)
+from apps.user_service.app.services.vendor_import import (
+    import_vendors as import_vendor_workbook,
 )
 from apps.user_service.app.utils.common_utils import (
     ensure_staff_project_access_optional,
@@ -204,6 +219,88 @@ async def create_company(
         message_key="companies.success.company_created",
         custom_code=CustomStatusCode.CREATED,
         status_code=http_status.HTTP_201_CREATED,
+    )
+
+
+@handle_api_exceptions("import vendors")
+@router.post(
+    "/import",
+    status_code=http_status.HTTP_200_OK,
+    summary="Import vendors from the Vendors workbook",
+    description=(
+        "Upload the Vendors workbook as form-data field 'file'. Each company is created with "
+        "the existing company flow, or updated when the name already exists. Service / Industry "
+        "values are stored as tags. A contact person is linked when the email or mobile already "
+        "exists, and created when it does not."
+    ),
+    responses=COMMON_ERROR_RESPONSES,
+)
+@limiter.limit("20/minute")
+@audit_api_call(
+    action_type="CREATE",
+    data_classification="pii",
+    compliance_tags=["gdpr", "pii", "soc2_audit", "audit_required"],
+    table_name="companies",
+    category="COMPANY",
+)
+async def import_vendors(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db_connection: asyncpg.Connection = Depends(db_conn),
+    current_user: dict = Depends(get_user_from_auth),
+    sb_client: AsyncClient = Depends(supabase_service),
+    file: UploadFile = File(..., description="Vendors workbook (.xlsx)"),
+    project_id: str | None = OPTIONAL_PROJECT_ID_QUERY,
+):
+    """Import vendor companies and their contacts from an uploaded xlsx file."""
+    user_context = await ensure_staff_project_access_optional(
+        current_user=current_user,
+        db_connection=db_connection,
+        project_id=project_id,
+        permission_codes=COMPANIES_MANAGEMENT_CREATE,
+        request=request,
+    )
+    request.state.audit_table = "companies"
+    request.state.audit_description = "Imported vendors"
+    request.state.audit_risk_level = "high"
+    request.state.audit_user_context = {
+        "user_id": user_context.user_id,
+        "user_email": user_context.email,
+        "organization_id": user_context.organization_id,
+    }
+    service = CompaniesService(
+        db_connection=db_connection,
+        user_context=user_context,
+        supabase_client=sb_client,
+    )
+    content = await file.read(20 * 1024 * 1024 + 1)
+    result = await import_vendor_workbook(
+        service,
+        content=content,
+        filename=file.filename or "",
+        project_id=project_id,
+    )
+    organization_id = str(user_context.organization_id)
+    if result["company_ids"]:
+        background_tasks.add_task(
+            index_companies_background,
+            [(company_id, organization_id) for company_id in result["company_ids"]],
+        )
+    if result["contact_ids"]:
+        background_tasks.add_task(
+            index_contacts_background,
+            [(contact_id, organization_id) for contact_id in result["contact_ids"]],
+        )
+    return success_response(
+        request=request,
+        message_key="companies.success.vendors_imported",
+        custom_code=CustomStatusCode.SUCCESS,
+        status_code=http_status.HTTP_200_OK,
+        data={
+            "created": result["created"],
+            "updated": result["updated"],
+            "errors": result["errors"],
+        },
     )
 
 

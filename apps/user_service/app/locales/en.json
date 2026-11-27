@@ -219,6 +219,7 @@
       "company_not_found": "Company does not exist or has been deleted.",
       "contact_not_found": "One or more contacts do not exist or have been deleted.",
       "contact_creation_failed": "Contact creation failed. Please try again.",
+      "import_workbook_invalid": "The vendor workbook could not be read. Use the Vendors template.",
       "contact_user_already_exists": "A contact for this email already exists in your organization. Please link the existing contact instead of creating a new one.",
       "invalid_contact_association": "Invalid contact association payload. Provide exactly one of `contact_id` or `contact`.",
       "website_not_found": "Website not found.",
@@ -230,6 +231,7 @@
     },
     "success": {
       "company_created": "Company created successfully.",
+      "vendors_imported": "Vendors imported successfully.",
       "companies_retrieved": "Companies retrieved successfully.",
       "company_retrieved": "Company details retrieved successfully.",
       "company_enrichment_requested": "Company enrichment requested successfully.",
